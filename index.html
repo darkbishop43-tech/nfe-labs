@@ -1,13 +1,12 @@
-index.html 
-<!-- NFE Labs v0.6 -->
-<!-- Mission Control Dashboard + Workbench -->
+<!-- NFE Labs v0.7 -->
+<!-- Mission Control Dashboard + Observation Lab + Research Workbench -->
 
 <!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>NFE Labs v0.6</title>
+  <title>NFE Labs v0.7</title>
   <style>
     :root {
       --dark:#111;
@@ -17,6 +16,7 @@ index.html
       --blue:#064b7a;
       --green:#2e7d32;
       --red:#8b0000;
+      --purple:#5b3f8c;
       --muted:#666;
     }
 
@@ -55,7 +55,7 @@ index.html
 
     .stat-grid {
       display:grid;
-      grid-template-columns:repeat(4,1fr);
+      grid-template-columns:repeat(5,1fr);
       gap:14px;
       margin-bottom:20px;
     }
@@ -72,7 +72,7 @@ index.html
     .stat-card h2 { margin:0; font-size:30px; }
     .stat-card p { color:var(--muted); margin:6px 0 0; }
 
-    .project-row, .recent-row {
+    .project-row, .recent-row, .observation-row {
       padding:12px;
       border:1px solid #ddd;
       border-radius:10px;
@@ -81,7 +81,7 @@ index.html
       cursor:pointer;
     }
 
-    .project-row:hover, .recent-row:hover { background:#eee; }
+    .project-row:hover, .recent-row:hover, .observation-row:hover { background:#eee; }
 
     textarea, select, input {
       width:100%;
@@ -112,6 +112,7 @@ index.html
     .gold:hover { background:#d6b13a; }
     .secondary { background:#555; }
     .danger { background:var(--red); }
+    .purple { background:var(--purple); }
 
     pre {
       white-space:pre-wrap;
@@ -152,8 +153,9 @@ index.html
 
     .id-badge { background:var(--green); }
     .project-badge { background:var(--blue); }
+    .obs-badge { background:var(--purple); }
 
-    .ledger-item {
+    .ledger-item, .obs-item {
       background:#f7f7f7;
       border:1px solid #ddd;
       border-radius:10px;
@@ -171,7 +173,7 @@ index.html
       margin-bottom:18px;
     }
 
-    @media(max-width:850px){
+    @media(max-width:900px){
       .dashboard-grid, .grid, .stat-grid { grid-template-columns:1fr; }
       header h1 { font-size:30px; }
     }
@@ -182,7 +184,7 @@ index.html
 
 <header>
   <h1>NFE Labs</h1>
-  <p>Research Workbench • Capture • Test • Compare • Archive</p>
+  <p>Research Workbench • Observe • Test • Compare • Archive</p>
 </header>
 
 <div class="container">
@@ -194,22 +196,11 @@ index.html
     </div>
 
     <div class="stat-grid">
-      <div class="stat-card">
-        <h2 id="totalEntries">0</h2>
-        <p>Total Entries</p>
-      </div>
-      <div class="stat-card">
-        <h2 id="activeProjects">0</h2>
-        <p>Active Projects</p>
-      </div>
-      <div class="stat-card">
-        <h2 id="patternCount">0</h2>
-        <p>Patterns</p>
-      </div>
-      <div class="stat-card">
-        <h2 id="discoveryCount">0</h2>
-        <p>Discoveries</p>
-      </div>
+      <div class="stat-card"><h2 id="totalEntries">0</h2><p>Ledger Entries</p></div>
+      <div class="stat-card"><h2 id="totalObservations">0</h2><p>Observations</p></div>
+      <div class="stat-card"><h2 id="activeProjects">0</h2><p>Active Projects</p></div>
+      <div class="stat-card"><h2 id="patternCount">0</h2><p>Patterns</p></div>
+      <div class="stat-card"><h2 id="discoveryCount">0</h2><p>Discoveries</p></div>
     </div>
 
     <div class="dashboard-grid">
@@ -220,6 +211,7 @@ index.html
 
       <div class="card">
         <h2>Quick Actions</h2>
+        <button onclick="showObservationLab()" class="purple">New Observation</button>
         <button onclick="newWorkbenchTest('creative')" class="gold">New Creative Test</button>
         <button onclick="newWorkbenchTest('advanced')">New Analysis Test</button>
         <button onclick="showWorkbench()">Open Ledger</button>
@@ -227,23 +219,116 @@ index.html
       </div>
 
       <div class="card">
-        <h2>Recent Activity</h2>
+        <h2>Recent Ledger Activity</h2>
         <div id="recentActivity"></div>
       </div>
 
       <div class="card">
-        <h2>Lab Status</h2>
-        <p><strong>Current Build:</strong> v0.6 Mission Control</p>
-        <p><strong>Mode:</strong> Local Research Workbench</p>
-        <p><strong>Storage:</strong> Browser LocalStorage</p>
-        <p class="small">No cloud sync. No backend. No AI API connected yet.</p>
+        <h2>Recent Observations</h2>
+        <div id="recentObservations"></div>
       </div>
+    </div>
+  </div>
+
+  <div id="observationScreen" class="hidden">
+    <div class="top-nav">
+      <button onclick="showDashboard()" class="secondary">← Dashboard</button>
+      <button onclick="showWorkbench()">Open Ledger</button>
+    </div>
+
+    <div class="card">
+      <h2>Observation Lab</h2>
+      <p class="small">Capture research observations before turning them into experiments or ledger tests.</p>
+    </div>
+
+    <div class="card">
+      <h2>New Observation</h2>
+
+      <h3>Project</h3>
+      <select id="obsProject">
+        <option>NFE Framework</option>
+        <option>Sassy</option>
+        <option>Holloway Paradox</option>
+        <option>WoW Campaign</option>
+        <option>Market Testing</option>
+        <option>Other</option>
+      </select>
+
+      <h3>Observation</h3>
+      <textarea id="obsText" placeholder="Example: Models keep inserting personal details unless the prompt clearly restricts them."></textarea>
+
+      <h3>Evidence / Context</h3>
+      <textarea id="obsEvidence" placeholder="Example: Seen in 3 creative tests using workflow-only inputs."></textarea>
+
+      <h3>Status</h3>
+      <select id="obsStatus">
+        <option>Observation Only</option>
+        <option>Needs Test</option>
+        <option>Experiment Candidate</option>
+        <option>Pattern Candidate</option>
+        <option>Rejected / Weak</option>
+        <option>Promoted to Ledger</option>
+      </select>
+
+      <h3>Tags</h3>
+      <input id="obsTags" placeholder="Example: personalization, prompt-drift, creative-mode" />
+
+      <h3>Notes</h3>
+      <textarea id="obsNotes" placeholder="Human notes."></textarea>
+
+      <button onclick="saveObservation()" class="purple">Save Observation</button>
+      <button onclick="clearObservationForm()" class="secondary">Clear</button>
+    </div>
+
+    <div class="card">
+      <h2>Observation Archive</h2>
+
+      <div class="grid">
+        <div>
+          <h3>Search Observations</h3>
+          <input id="obsSearch" placeholder="Search observation, evidence, tags, ID..." oninput="renderObservations()" />
+        </div>
+
+        <div>
+          <h3>Project Filter</h3>
+          <select id="obsProjectFilter" onchange="renderObservations()">
+            <option>All</option>
+            <option>NFE Framework</option>
+            <option>Sassy</option>
+            <option>Holloway Paradox</option>
+            <option>WoW Campaign</option>
+            <option>Market Testing</option>
+            <option>Other</option>
+          </select>
+        </div>
+
+        <div>
+          <h3>Status Filter</h3>
+          <select id="obsStatusFilter" onchange="renderObservations()">
+            <option>All</option>
+            <option>Observation Only</option>
+            <option>Needs Test</option>
+            <option>Experiment Candidate</option>
+            <option>Pattern Candidate</option>
+            <option>Rejected / Weak</option>
+            <option>Promoted to Ledger</option>
+          </select>
+        </div>
+      </div>
+
+      <button onclick="renderObservations()">View Observations</button>
+      <button onclick="downloadObservationsTxt()">Download Observations TXT</button>
+      <button onclick="downloadObservationsJson()">Download Observations JSON</button>
+      <button onclick="deleteAllObservations()" class="danger">Delete All Observations</button>
+
+      <div id="observationArchiveView" style="margin-top:18px;"></div>
     </div>
   </div>
 
   <div id="workbenchScreen" class="hidden">
     <div class="top-nav">
       <button onclick="showDashboard()" class="secondary">← Dashboard</button>
+      <button onclick="showObservationLab()">Observation Lab</button>
       <button onclick="newWorkbenchTest('creative')">Creative Test</button>
       <button onclick="newWorkbenchTest('advanced')">Analysis Test</button>
     </div>
@@ -378,12 +463,18 @@ index.html
 </div>
 
 <script>
-const STORAGE_KEY = "nfe_sandbox_v05_ledger";
+const LEDGER_KEY = "nfe_sandbox_v05_ledger";
+const OBS_KEY = "nfe_labs_v07_observations";
 const PROJECTS = ["NFE Framework","Sassy","Holloway Paradox","WoW Campaign","Market Testing","Other"];
 
 function showDashboard() {
   showOnly("dashboardScreen");
   updateDashboard();
+}
+
+function showObservationLab() {
+  showOnly("observationScreen");
+  renderObservations();
 }
 
 function showWorkbench() {
@@ -392,7 +483,7 @@ function showWorkbench() {
 }
 
 function showOnly(id) {
-  ["dashboardScreen","workbenchScreen"].forEach(screen => {
+  ["dashboardScreen","observationScreen","workbenchScreen"].forEach(screen => {
     document.getElementById(screen).classList.add("hidden");
   });
   document.getElementById(id).classList.remove("hidden");
@@ -400,32 +491,39 @@ function showOnly(id) {
 
 function updateDashboard() {
   const entries = getSavedLedger();
+  const observations = getObservations();
 
   document.getElementById("totalEntries").innerText = entries.length;
+  document.getElementById("totalObservations").innerText = observations.length;
 
-  const active = new Set(entries.map(e => e.project).filter(Boolean));
+  const active = new Set([
+    ...entries.map(e => e.project).filter(Boolean),
+    ...observations.map(o => o.project).filter(Boolean)
+  ]);
   document.getElementById("activeProjects").innerText = active.size;
 
   const patterns = entries.filter(e =>
     e.classification === "Candidate Pattern" || e.classification === "Repeated Pattern"
-  ).length;
+  ).length + observations.filter(o => o.status === "Pattern Candidate").length;
   document.getElementById("patternCount").innerText = patterns;
 
   const discoveries = entries.filter(e => e.classification === "Locked Discovery").length;
   document.getElementById("discoveryCount").innerText = discoveries;
 
-  renderProjectDashboard(entries);
+  renderProjectDashboard(entries, observations);
   renderRecentActivity(entries);
+  renderRecentObservations(observations);
 }
 
-function renderProjectDashboard(entries) {
+function renderProjectDashboard(entries, observations) {
   const box = document.getElementById("projectDashboard");
   box.innerHTML = PROJECTS.map(project => {
-    const count = entries.filter(e => e.project === project).length;
+    const entryCount = entries.filter(e => e.project === project).length;
+    const obsCount = observations.filter(o => o.project === project).length;
     return `
       <div class="project-row" onclick="openProject('${project}')">
         <strong>${project}</strong>
-        <span style="float:right;">${count} entries</span>
+        <span style="float:right;">${entryCount} entries / ${obsCount} obs</span>
       </div>
     `;
   }).join("");
@@ -436,7 +534,7 @@ function renderRecentActivity(entries) {
   const recent = entries.slice(0,10);
 
   if (!recent.length) {
-    box.innerHTML = "<p class='small'>No entries yet.</p>";
+    box.innerHTML = "<p class='small'>No ledger entries yet.</p>";
     return;
   }
 
@@ -450,10 +548,36 @@ function renderRecentActivity(entries) {
   `).join("");
 }
 
+function renderRecentObservations(observations) {
+  const box = document.getElementById("recentObservations");
+  const recent = observations.slice(0,10);
+
+  if (!recent.length) {
+    box.innerHTML = "<p class='small'>No observations yet.</p>";
+    return;
+  }
+
+  box.innerHTML = recent.map(o => `
+    <div class="observation-row" onclick="openObservationProject('${o.project}')">
+      <span class="badge obs-badge">${esc(o.obsId)}</span>
+      <span class="badge project-badge">${esc(o.project)}</span>
+      <strong>${esc(o.status)}</strong>
+      <p class="small">${esc(o.observation).slice(0,120)}${o.observation.length > 120 ? "..." : ""}</p>
+    </div>
+  `).join("");
+}
+
 function openProject(project) {
   showWorkbench();
   document.getElementById("projectFilter").value = project;
   renderSavedLedger();
+  window.scrollTo({ top: document.body.scrollHeight, behavior: "smooth" });
+}
+
+function openObservationProject(project) {
+  showObservationLab();
+  document.getElementById("obsProjectFilter").value = project;
+  renderObservations();
   window.scrollTo({ top: document.body.scrollHeight, behavior: "smooth" });
 }
 
@@ -467,6 +591,174 @@ function focusSearch() {
   showWorkbench();
   setTimeout(() => document.getElementById("ledgerSearch").focus(), 100);
 }
+
+/* OBSERVATION LAB */
+
+function getNextObsId() {
+  const observations = getObservations();
+  let max = 0;
+  observations.forEach(o => {
+    const n = parseInt(String(o.obsId || "").replace("OBS-", ""), 10);
+    if (!isNaN(n) && n > max) max = n;
+  });
+  return "OBS-" + String(max + 1).padStart(4, "0");
+}
+
+function saveObservation() {
+  const project = val("obsProject");
+  const observation = val("obsText");
+  const evidence = val("obsEvidence");
+  const status = val("obsStatus");
+  const tags = val("obsTags").split(",").map(t => t.trim()).filter(Boolean);
+  const notes = val("obsNotes");
+
+  if (!observation) return alert("Write an observation first.");
+
+  const obsId = getNextObsId();
+  const dateCreated = new Date().toLocaleString();
+
+  const observationText = `NFE OBSERVATION
+
+Observation ID:
+${obsId}
+
+Date:
+${dateCreated}
+
+Project:
+${project}
+
+Status:
+${status}
+
+Tags:
+${tags.join(", ") || "None"}
+
+Observation:
+${observation}
+
+Evidence / Context:
+${evidence || "None"}
+
+Notes:
+${notes || "None"}
+
+Promotion Rule:
+Observation only unless supported by repeated testing, ledger comparison, or adversarial review.`;
+
+  const record = {
+    id: Date.now(),
+    obsId,
+    dateCreated,
+    project,
+    observation,
+    evidence,
+    status,
+    tags,
+    notes,
+    observationText
+  };
+
+  const observations = getObservations();
+  observations.unshift(record);
+  localStorage.setItem(OBS_KEY, JSON.stringify(observations, null, 2));
+
+  alert("Observation saved.");
+  clearObservationForm();
+  renderObservations();
+  updateDashboard();
+}
+
+function clearObservationForm() {
+  ["obsText","obsEvidence","obsTags","obsNotes"].forEach(id => document.getElementById(id).value = "");
+}
+
+function renderObservations() {
+  const observations = getObservations();
+  const search = val("obsSearch").toLowerCase();
+  const projectFilter = val("obsProjectFilter");
+  const statusFilter = val("obsStatusFilter");
+  const view = document.getElementById("observationArchiveView");
+
+  let filtered = observations;
+
+  if (projectFilter !== "All") filtered = filtered.filter(o => o.project === projectFilter);
+  if (statusFilter !== "All") filtered = filtered.filter(o => o.status === statusFilter);
+  if (search) filtered = filtered.filter(o => JSON.stringify(o).toLowerCase().includes(search));
+
+  if (!filtered.length) {
+    view.innerHTML = "<p class='small'>No observations match this search/filter.</p>";
+    return;
+  }
+
+  view.innerHTML = `<p class="small">Showing ${filtered.length} of ${observations.length} observations.</p>` +
+    filtered.map(o => `
+      <div class="obs-item">
+        <span class="badge obs-badge">${esc(o.obsId)}</span>
+        <span class="badge project-badge">${esc(o.project)}</span>
+        <span class="badge">${esc(o.status)}</span>
+        <strong>${esc(o.dateCreated)}</strong>
+        <p><strong>Observation:</strong> ${esc(o.observation)}</p>
+        <p><strong>Evidence:</strong> ${esc(o.evidence || "None")}</p>
+        <p><strong>Tags:</strong> ${esc((o.tags || []).join(", ") || "None")}</p>
+        <button onclick="copyObservation('${o.id}')">Copy Observation</button>
+        <button onclick="startAnalysisFromObservation('${o.id}')">Analyze This</button>
+        <button onclick="deleteObservation('${o.id}')" class="danger">Delete</button>
+      </div>
+    `).join("");
+}
+
+function startAnalysisFromObservation(id) {
+  const o = getObservations().find(x => String(x.id) === String(id));
+  if (!o) return alert("Observation not found.");
+
+  showWorkbench();
+  document.getElementById("project").value = o.project;
+  document.getElementById("mode").value = "advanced";
+  document.getElementById("userInput").value = `Analyze this observation:\n\n${o.observation}\n\nEvidence / Context:\n${o.evidence || "None"}`;
+  document.getElementById("tags").value = (o.tags || []).join(", ");
+  document.getElementById("notes").value = `Source Observation: ${o.obsId}`;
+  window.scrollTo({ top: 0, behavior: "smooth" });
+}
+
+function copyObservation(id) {
+  const o = getObservations().find(x => String(x.id) === String(id));
+  if (o) copyRawText(o.observationText, "Observation copied.");
+}
+
+function deleteObservation(id) {
+  if (!confirm("Delete this observation?")) return;
+  const observations = getObservations().filter(o => String(o.id) !== String(id));
+  localStorage.setItem(OBS_KEY, JSON.stringify(observations, null, 2));
+  renderObservations();
+  updateDashboard();
+}
+
+function deleteAllObservations() {
+  if (!confirm("Delete all observations?")) return;
+  localStorage.removeItem(OBS_KEY);
+  renderObservations();
+  updateDashboard();
+}
+
+function getObservations() {
+  try { return JSON.parse(localStorage.getItem(OBS_KEY)) || []; }
+  catch { return []; }
+}
+
+function downloadObservationsTxt() {
+  const observations = getObservations();
+  if (!observations.length) return alert("No observations to download.");
+  downloadFile("nfe-observations.txt", observations.map(o => o.observationText).join("\n\n====================\n\n"), "text/plain");
+}
+
+function downloadObservationsJson() {
+  const observations = getObservations();
+  if (!observations.length) return alert("No observations to download.");
+  downloadFile("nfe-observations.json", JSON.stringify(observations, null, 2), "application/json");
+}
+
+/* LEDGER WORKBENCH */
 
 function buildPrompt() {
   const input = val("userInput");
@@ -775,7 +1067,7 @@ function saveLedgerEntry() {
 
   const entries = getSavedLedger();
   entries.unshift(entry);
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(entries, null, 2));
+  localStorage.setItem(LEDGER_KEY, JSON.stringify(entries, null, 2));
   alert("Ledger entry saved locally.");
   renderSavedLedger();
   updateDashboard();
@@ -827,7 +1119,7 @@ function getNextLedgerId() {
 }
 
 function getSavedLedger() {
-  try { return JSON.parse(localStorage.getItem(STORAGE_KEY)) || []; }
+  try { return JSON.parse(localStorage.getItem(LEDGER_KEY)) || []; }
   catch { return []; }
 }
 
@@ -848,6 +1140,23 @@ function downloadLedgerJson() {
   if (!entries.length) return alert("No saved ledger entries.");
   downloadFile("nfe-ledger.json", JSON.stringify(entries, null, 2), "application/json");
 }
+
+function deleteSingleEntry(id) {
+  if (!confirm("Delete this entry?")) return;
+  const entries = getSavedLedger().filter(e => String(e.id) !== String(id));
+  localStorage.setItem(LEDGER_KEY, JSON.stringify(entries, null, 2));
+  renderSavedLedger();
+  updateDashboard();
+}
+
+function deleteSavedLedger() {
+  if (!confirm("Delete entire saved ledger?")) return;
+  localStorage.removeItem(LEDGER_KEY);
+  renderSavedLedger();
+  updateDashboard();
+}
+
+/* SHARED HELPERS */
 
 function downloadFile(filename, content, type) {
   const blob = new Blob([content], { type });
@@ -893,21 +1202,6 @@ function copyRawText(textToCopy, message) {
       document.body.removeChild(tempBox);
       alert(message);
     });
-}
-
-function deleteSingleEntry(id) {
-  if (!confirm("Delete this entry?")) return;
-  const entries = getSavedLedger().filter(e => String(e.id) !== String(id));
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(entries, null, 2));
-  renderSavedLedger();
-  updateDashboard();
-}
-
-function deleteSavedLedger() {
-  if (!confirm("Delete entire saved ledger?")) return;
-  localStorage.removeItem(STORAGE_KEY);
-  renderSavedLedger();
-  updateDashboard();
 }
 
 function clearAll() {
