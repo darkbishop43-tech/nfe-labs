@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>NFE Market Edge Lab</title>
+<style>
+:root{color-scheme:dark;background:#08111f;color:#e8eef8;font-family:Inter,system-ui,sans-serif}body{margin:0;background:radial-gradient(circle at top,#12233d,#08111f 48%);min-height:100vh}.wrap{max-width:1100px;margin:auto;padding:20px}.top{display:flex;gap:12px;align-items:center;justify-content:space-between;flex-wrap:wrap}.badge{padding:7px 11px;border-radius:999px;background:#17324f;border:1px solid #295477;font-size:12px;font-weight:800}.paper{color:#8ee6ab}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px;margin:18px 0}.card{background:#0d1a2b;border:1px solid #1e3550;border-radius:16px;padding:16px;box-shadow:0 8px 30px #0004}.label{font-size:12px;color:#8fa7c2;text-transform:uppercase;letter-spacing:.08em}.big{font-size:26px;font-weight:800;margin-top:5px}.good{color:#8ee6ab}.bad{color:#ff9b9b}h1{margin:0;font-size:28px}h2{font-size:17px;margin:22px 0 10px}.row{display:grid;grid-template-columns:2fr .8fr .7fr .7fr .7fr;gap:8px;align-items:center;padding:11px;border-bottom:1px solid #18304a;font-size:13px}.row.head{color:#88a2bd;font-weight:700}.q{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.meter{height:7px;background:#1a2e45;border-radius:10px;overflow:hidden;margin-top:6px}.meter span{display:block;height:100%;background:#80d7a2}.muted{color:#7f96ad}.warn{background:#3a2c12;border:1px solid #6f5826;padding:12px;border-radius:12px;color:#f2d28f;margin-top:12px}.ledger{max-height:300px;overflow:auto}.entry{font-family:ui-monospace,monospace;font-size:12px;padding:8px;border-bottom:1px solid #162b42}.empty{padding:18px;color:#7790aa}@media(max-width:700px){.row{grid-template-columns:1.7fr .7fr .7fr}.hideM{display:none}}
+</style>
+</head>
+<body><div class="wrap">
+<div class="top"><div><div class="label">NFE Research Workbench</div><h1>Market Edge Lab</h1></div><div class="badge paper">● PAPER TRADING ONLY</div></div>
+<div class="warn">Experimental research system. No wallet, no private key, no live orders. A detected “edge” is a hypothesis until the evidence ledger proves it survives spread, latency, liquidity and repeated trials.</div>
+<div class="grid">
+<div class="card"><div class="label">BTC/USD</div><div class="big" id="btc">—</div><div class="muted" id="btcmove">60s —</div></div>
+<div class="card"><div class="label">ETH/USD</div><div class="big" id="eth">—</div><div class="muted" id="ethmove">60s —</div></div>
+<div class="card"><div class="label">Paper Balance</div><div class="big" id="bal">$100.00</div><div class="muted">starting capital $100</div></div>
+<div class="card"><div class="label">Realized P&amp;L</div><div class="big" id="pnl">$0.00</div><div class="muted" id="tracked">0 markets tracked</div></div>
+</div>
+<h2>Top detected dislocations</h2>
+<div class="card" id="ops"><div class="empty">Waiting for live data…</div></div>
+<h2>Paper positions</h2>
+<div class="card" id="positions"><div class="empty">No simulated positions yet.</div></div>
+<h2>Evidence ledger</h2>
+<div class="card ledger" id="ledger"><div class="empty">Waiting for evidence…</div></div>
+</div>
+<script>
+const $=id=>document.getElementById(id);const money=v=>Number(v||0).toLocaleString(undefined,{style:'currency',currency:'USD',maximumFractionDigits:2});const pct=v=>(Number(v||0)*100).toFixed(3)+'%';const num=v=>Number(v||0).toFixed(3);
+function render(s){
+ $('btc').textContent=s.crypto?.['BTC-USD']?.price?money(s.crypto['BTC-USD'].price):'—';$('eth').textContent=s.crypto?.['ETH-USD']?.price?money(s.crypto['ETH-USD'].price):'—';$('btcmove').textContent='60s '+pct(s.crypto?.['BTC-USD']?.move60s);$('ethmove').textContent='60s '+pct(s.crypto?.['ETH-USD']?.move60s);$('bal').textContent=money(s.balance);$('pnl').textContent=money(s.realizedPnl);$('pnl').className='big '+(s.realizedPnl>=0?'good':'bad');$('tracked').textContent=(s.markets?.length||0)+' directional markets tracked';
+ const ops=(s.opportunities||[]).slice(0,12);$('ops').innerHTML=ops.length?'<div class="row head"><div>Market</div><div>Score</div><div>Net edge</div><div class="hideM">Ask</div><div class="hideM">60s move</div></div>'+ops.map(o=>`<div class="row"><div class="q" title="${o.question}">${o.question}<div class="meter"><span style="width:${Math.round(o.score*100)}%"></span></div></div><div>${Math.round(o.score*100)}</div><div class="${o.netEdge>0?'good':'bad'}">${pct(o.netEdge)}</div><div class="hideM">${num(o.marketPrice)}</div><div class="hideM">${pct(o.move60s)}</div></div>`).join(''):'<div class="empty">No qualifying directional crypto markets found in the current Polymarket sample.</div>';
+ const ps=(s.positions||[]).slice(0,15);$('positions').innerHTML=ps.length?'<div class="row head"><div>Market</div><div>Status</div><div>P&amp;L</div><div class="hideM">Entry</div><div class="hideM">Stake</div></div>'+ps.map(p=>`<div class="row"><div class="q">${p.question}</div><div>${p.status}</div><div class="${(p.pnl||0)>=0?'good':'bad'}">${p.status==='CLOSED'?money(p.pnl):'—'}</div><div class="hideM">${num(p.entryPrice)}</div><div class="hideM">${money(p.stake)}</div></div>`).join(''):'<div class="empty">No simulated positions yet.</div>';
+ const l=(s.ledger||[]).slice(0,100);$('ledger').innerHTML=l.length?l.map(x=>`<div class="entry"><b>${x.type}</b> · ${x.ts}<br>${x.message||x.question||('marketsTracked' in x?x.marketsTracked+' markets':'')}</div>`).join(''):'<div class="empty">Waiting for evidence…</div>';
+}
+fetch('/api/state').then(r=>r.json()).then(render);const es=new EventSource('/api/stream');es.onmessage=e=>{try{render(JSON.parse(e.data))}catch{}};
+</script></body></html>
