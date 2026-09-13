@@ -1,0 +1,16 @@
+{
+  "name": "nfe-market-edge-lab",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Paper-only BTC/ETH vs Polymarket edge research lab",
+  "type": "module",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js"
+  },
+  "engines": { "node": ">=20" },
+  "dependencies": {
+    "express": "^5.1.0",
+    "ws": "^8.18.3"
+  }
+}
