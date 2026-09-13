@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+<title>NFE Market Edge Lab — Phone V0</title>
+<style>
+:root{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;color:#e9eef7;background:#07111f;color-scheme:dark}
+*{box-sizing:border-box}body{margin:0;background:linear-gradient(180deg,#07111f,#0b1626);min-height:100vh}.wrap{max-width:900px;margin:auto;padding:14px}.top{display:flex;justify-content:space-between;gap:10px;align-items:center}.badge{padding:6px 10px;border:1px solid #36506e;border-radius:999px;font-size:12px}.ok{color:#89f0ad}.warn{color:#ffd67a}.grid{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin:12px 0}.card{background:#101d2d;border:1px solid #213650;border-radius:14px;padding:12px}.big{font-size:22px;font-weight:700}.muted{color:#91a4bb;font-size:12px}.wide{grid-column:1/-1}button{background:#183758;color:#fff;border:1px solid #315c85;border-radius:10px;padding:10px 12px;font-weight:600}.danger{background:#43202a;border-color:#7a3949}.row{display:flex;justify-content:space-between;gap:8px;padding:9px 0;border-bottom:1px solid #20334a;font-size:13px}.row:last-child{border-bottom:0}.signal{font-weight:700}.up{color:#8ef0ae}.down{color:#ff9e9e}.log{max-height:290px;overflow:auto}.small{font-size:11px}.notice{background:#182638;border-left:3px solid #e7b955;padding:10px;border-radius:8px;font-size:12px;margin-top:8px}@media(min-width:700px){.grid{grid-template-columns:repeat(4,1fr)}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="top"><div><div class="muted">NFE-OS RESEARCH LAB</div><h2 style="margin:2px 0">Market Edge Lab</h2></div><div id="status" class="badge warn">STARTING</div></div>
+  <div class="notice">PAPER ONLY — no wallet, no exchange key, no live order submission. This page stores its test ledger in this browser.</div>
+  <div class="grid">
+    <div class="card"><div class="muted">Paper Balance</div><div id="balance" class="big">$100.00</div></div>
+    <div class="card"><div class="muted">Realized P/L</div><div id="pnl" class="big">$0.00</div></div>
+    <div class="card"><div class="muted">BTC</div><div id="btc" class="big">—</div><div id="btcm" class="muted">60s —</div></div>
+    <div class="card"><div class="muted">ETH</div><div id="eth" class="big">—</div><div id="ethm" class="muted">60s —</div></div>
+    <div class="card wide"><div class="top"><div><div class="muted">Testing</div><div class="big"><span id="markets">0</span> markets · <span id="trades">0</span> closed trades</div></div><button id="reset" class="danger">Reset Paper Test</button></div></div>
+    <div class="card wide"><div class="top"><b>Current Opportunities</b><span class="muted">refresh 15s</span></div><div id="opps"><div class="row muted">Waiting for market data…</div></div></div>
+    <div class="card wide"><b>Open Paper Positions</b><div id="positions"><div class="row muted">None</div></div></div>
+    <div class="card wide"><div class="top"><b>Evidence Ledger</b><button id="export">Export JSON</button></div><div id="ledger" class="log"><div class="row muted">Starting evidence collection…</div></div></div>
+  </div>
+</div>
+<script>
+const START=100, ENTRY=.80, EXIT=.20, MAX_STAKE=5, MAX_HOLD=5*60*1000;
+const S=JSON.parse(localStorage.getItem('nfe_market_edge_state')||'null')||{balance:START,pnl:0,trades:0,positions:[],ledger:[]};
+const cryptoState={BTC:{price:null,h:[]},ETH:{price:null,h:[]}};let markets=[];let opps=[];let wsOK=false, polyOK=false;
+const $=id=>document.getElementById(id); const money=n=>'$'+Number(n||0).toFixed(2); const pct=n=>(n*100).toFixed(3)+'%';
+function save(){localStorage.setItem('nfe_market_edge_state',JSON.stringify(S))}
+function rec(type,data={}){S.ledger.unshift({ts:new Date().toISOString(),type,...data});S.ledger=S.ledger.slice(0,1000);save();render()}
+function move(sym){const h=cryptoState[sym].h, cutoff=Date.now()-60000;if(h.length<2)return 0;const first=h.find(x=>x.t>=cutoff)||h[0],last=h[h.length-1];return first.p?(last.p-first.p)/first.p:0}
+function connectPrices(){const ws=new WebSocket('wss://ws-feed.exchange.coinbase.com');ws.onopen=()=>{ws.send(JSON.stringify({type:'subscribe',product_ids:['BTC-USD','ETH-USD'],channels:['ticker']}));wsOK=true;rec('SYSTEM',{message:'Coinbase live ticker connected'})};ws.onmessage=e=>{try{const m=JSON.parse(e.data);if(m.type!=='ticker')return;const s=m.product_id.startsWith('BTC')?'BTC':m.product_id.startsWith('ETH')?'ETH':null;if(!s)return;const p=Number(m.price);cryptoState[s].price=p;cryptoState[s].h.push({t:Date.now(),p});cryptoState[s].h=cryptoState[s].h.filter(x=>x.t>Date.now()-180000);render()}catch{}};ws.onclose=()=>{wsOK=false;setTimeout(connectPrices,2000)};ws.onerror=()=>ws.close()}
+function parsePrices(m){try{const p=typeof m.outcomePrices==='string'?JSON.parse(m.outcomePrices):m.outcomePrices;if(!Array.isArray(p)||p.length<2)return null;return {yes:Number(p[0]),no:Number(p[1])}}catch{return null}}
+function relevant(q){q=q.toLowerCase();const asset=q.includes('bitcoin')||q.includes('btc')?'BTC':q.includes('ethereum')||q.includes('eth')?'ETH':null;if(!asset)return null;const bull=/\b(up|above|higher|rise|gain|over)\b/.test(q);const bear=/\b(down|below|lower|fall|drop|under)\b/.test(q);if(!bull&&!bear)return null;return {asset,bull:bull&&!bear,bear:bear&&!bull}}
+async function refreshMarkets(){try{const r=await fetch('https://gamma-api.polymarket.com/markets?active=true&closed=false&limit=100');if(!r.ok)throw new Error('HTTP '+r.status);const data=await r.json();markets=data.map(m=>({id:String(m.id||m.conditionId||m.slug),q:m.question||m.title||'',slug:m.slug||'',prices:parsePrices(m),volume:Number(m.volumeNum||m.volume||0),liq:Number(m.liquidityNum||m.liquidity||0)})).filter(m=>m.prices&&relevant(m.q));polyOK=true;rec('MARKET_REFRESH',{count:markets.length});evaluate()}catch(e){polyOK=false;rec('ERROR',{source:'Polymarket',message:String(e.message||e)})}}
+function scoreMarket(m){const r=relevant(m.q);if(!r)return null;const mv=move(r.asset);const directional=r.bear?-mv:mv;const fair=Math.max(.02,Math.min(.98,m.prices.yes+directional*18));const edge=fair-m.prices.yes;const score=Math.max(0,Math.min(1,.5+edge*4));return {...m,asset:r.asset,move:mv,fair,edge,score}}
+function evaluate(){opps=markets.map(scoreMarket).filter(Boolean).sort((a,b)=>b.score-a.score);for(const o of opps.slice(0,20)){const existing=S.positions.find(p=>p.marketId===o.id);if(!existing&&o.score>=ENTRY&&o.edge>0&&S.balance>=1){const stake=Math.min(MAX_STAKE,S.balance);const shares=stake/o.prices.yes;S.balance-=stake;S.positions.push({marketId:o.id,q:o.q,asset:o.asset,entry:o.prices.yes,shares,stake,opened:Date.now(),score:o.score});rec('PAPER_ENTRY',{marketId:o.id,question:o.q,asset:o.asset,entry:o.prices.yes,stake,score:o.score,edge:o.edge})}}
+for(const p of [...S.positions]){const o=opps.find(x=>x.id===p.marketId);if(!o)continue;if(o.score<=EXIT||Date.now()-p.opened>=MAX_HOLD){const value=p.shares*o.prices.yes;const pl=value-p.stake;S.balance+=value;S.pnl+=pl;S.trades++;S.positions=S.positions.filter(x=>x!==p);rec('PAPER_EXIT',{marketId:p.marketId,question:p.q,entry:p.entry,exit:o.prices.yes,pnl:pl,heldMs:Date.now()-p.opened})}}save();render()}
+function render(){ $('balance').textContent=money(S.balance);$('pnl').textContent=(S.pnl>=0?'+':'')+money(S.pnl);$('pnl').className='big '+(S.pnl>=0?'up':'down');$('trades').textContent=S.trades;$('markets').textContent=markets.length;for(const s of ['BTC','ETH']){const p=cryptoState[s].price,m=move(s);$(s.toLowerCase()).textContent=p?money(p):'—';$(s.toLowerCase()+'m').textContent='60s '+(m>=0?'+':'')+pct(m);$(s.toLowerCase()+'m').className='muted '+(m>=0?'up':'down')}
+$('status').textContent=wsOK&&polyOK?'LIVE · PAPER ONLY':wsOK?'PRICES LIVE · MARKETS WAITING':'CONNECTING';$('status').className='badge '+(wsOK&&polyOK?'ok':'warn');
+$('opps').innerHTML=(opps.slice(0,8).map(o=>`<div class="row"><div><div>${esc(o.q)}</div><div class="muted">${o.asset} move ${pct(o.move)} · YES ${(o.prices.yes*100).toFixed(1)}¢ · estimated fair ${(o.fair*100).toFixed(1)}¢</div></div><div class="signal ${o.score>=ENTRY?'up':''}">${o.score.toFixed(2)}</div></div>`).join('')||'<div class="row muted">No qualifying directional crypto markets yet.</div>');
+$('positions').innerHTML=(S.positions.map(p=>`<div class="row"><div>${esc(p.q)}<div class="muted">${money(p.stake)} paper stake @ ${(p.entry*100).toFixed(1)}¢</div></div><div class="up">OPEN</div></div>`).join('')||'<div class="row muted">None</div>');
+$('ledger').innerHTML=(S.ledger.slice(0,80).map(x=>`<div class="row small"><div><b>${x.type}</b><div class="muted">${new Date(x.ts).toLocaleTimeString()} ${esc(x.question||x.message||x.source||'')}</div></div><div>${x.pnl==null?'':money(x.pnl)}</div></div>`).join('')||'<div class="row muted">No evidence yet.</div>')}
+function esc(s=''){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
+$('reset').onclick=()=>{if(confirm('Reset the $100 paper test and erase this browser ledger?')){Object.assign(S,{balance:START,pnl:0,trades:0,positions:[],ledger:[]});save();rec('SYSTEM',{message:'Paper test reset'})}};
+$('export').onclick=()=>{const b=new Blob([JSON.stringify({exportedAt:new Date().toISOString(),state:S},null,2)],{type:'application/json'});const a=document.createElement('a');a.href=URL.createObjectURL(b);a.download='nfe-market-edge-ledger.json';a.click();URL.revokeObjectURL(a.href)};
+connectPrices();refreshMarkets();setInterval(()=>{refreshMarkets();evaluate()},15000);setInterval(evaluate,5000);render();
+</script>
+</body>
+</html>
