@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>NFE-OS Market Edge Lab</title>
+<style>
+:root{--bg:#050a12;--panel:#0d1724;--panel2:#111d2c;--line:#223650;--gold:#d6ad5b;--gold2:#f0d28a;--blue:#3e7cf2;--text:#f5f7fb;--muted:#93a7bf;--green:#65e39b;--red:#ff8585}
+*{box-sizing:border-box}body{margin:0;background:radial-gradient(circle at 90% 0,rgba(62,124,242,.15),transparent 30%),radial-gradient(circle at 0 0,rgba(214,173,91,.08),transparent 28%),var(--bg);color:var(--text);font-family:Inter,system-ui,-apple-system,Segoe UI,Roboto,Arial;min-height:100vh}.shell{max-width:1100px;margin:auto;padding:18px 14px 48px}.hero,.card{border:1px solid var(--line);background:linear-gradient(180deg,var(--panel2),var(--panel));border-radius:18px}.hero{padding:20px;display:flex;justify-content:space-between;gap:18px;align-items:center}.brand{display:flex;align-items:center;gap:14px}.mark{width:58px;height:58px;border-radius:16px;border:1px solid rgba(214,173,91,.4);display:grid;place-items:center;font-weight:900;font-size:18px;background:linear-gradient(135deg,#172944,#0b1523);color:var(--gold2);box-shadow:inset 0 0 25px rgba(62,124,242,.16)}.kicker{font-size:11px;letter-spacing:.18em;color:var(--gold2);text-transform:uppercase}.title{font-size:30px;font-weight:900;margin:3px 0}.sub{font-size:13px;color:var(--muted)}.paper{padding:8px 11px;border-radius:999px;border:1px solid rgba(214,173,91,.45);color:var(--gold2);font-size:11px;font-weight:800;white-space:nowrap}.grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-top:12px}.card{padding:15px}.label{font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted)}.value{font-size:26px;font-weight:900;margin-top:6px}.section{margin-top:12px}.section-title{font-size:15px;font-weight:800;margin-bottom:8px}.statusrow{display:flex;align-items:center;gap:10px}.dot{width:10px;height:10px;border-radius:50%;background:#718096}.dot.ok{background:var(--green);box-shadow:0 0 0 5px rgba(101,227,155,.1)}.dot.bad{background:var(--red)}.statusmain{font-weight:900}.muted{color:var(--muted);font-size:12px}.testing{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}.test{background:#0a1421;border:1px solid #1c3048;border-radius:13px;padding:12px}.test b{font-size:20px;display:block}.test span{font-size:11px;color:var(--muted)}.opps{display:grid;grid-template-columns:repeat(2,1fr);gap:9px}.opp{background:#0a1421;border:1px solid #1c3048;border-radius:14px;padding:12px}.q{font-size:13px;font-weight:700;line-height:1.4}.meta{margin-top:8px;font-size:11px;color:var(--muted);display:flex;gap:10px;flex-wrap:wrap}.bar{height:6px;background:#15253a;border-radius:99px;overflow:hidden;margin-top:9px}.fill{height:100%;background:linear-gradient(90deg,var(--blue),var(--gold));width:0}.listrow{padding:9px 0;border-top:1px solid #1a2b40;font-size:12px}.listrow:first-child{border-top:0}.empty{font-size:12px;color:var(--muted)}.footer{text-align:center;color:#62758a;font-size:10px;margin-top:20px}.good{color:var(--green)}.bad{color:var(--red)}
+@media(max-width:760px){.hero{align-items:flex-start}.grid{grid-template-columns:repeat(2,1fr)}.testing{grid-template-columns:repeat(2,1fr)}.opps{grid-template-columns:1fr}.title{font-size:26px}}
+@media(max-width:440px){.shell{padding:10px 9px 34px}.hero{padding:14px}.mark{width:48px;height:48px}.paper{font-size:10px}.card{padding:12px}.value{font-size:21px}}
+</style>
+</head>
+<body>
+<div class="shell">
+  <div class="hero">
+    <div class="brand">
+      <div class="mark">NFE</div>
+      <div><div class="kicker">NFE-OS Research Lab · Cloud Collector</div><div class="title">Market Edge Lab</div><div class="sub">Automated paper research · no wallet · no live order submission</div></div>
+    </div>
+    <div class="paper">PAPER ONLY</div>
+  </div>
+
+  <div class="grid">
+    <div class="card"><div class="label">Paper Balance</div><div id="bal" class="value">—</div></div>
+    <div class="card"><div class="label">Realized P/L</div><div id="pnl" class="value">—</div></div>
+    <div class="card"><div class="label">BTC</div><div id="btc" class="value">—</div></div>
+    <div class="card"><div class="label">ETH</div><div id="eth" class="value">—</div></div>
+  </div>
+
+  <div class="card section">
+    <div class="section-title">Cloud Status</div>
+    <div class="statusrow"><div id="statusDot" class="dot"></div><div><div id="collectorStatus" class="statusmain">Checking…</div><div id="lastRun" class="muted">Last cloud run: —</div></div></div>
+  </div>
+
+  <div class="card section">
+    <div class="section-title">Testing</div>
+    <div class="testing">
+      <div class="test"><b id="eligible">0</b><span>eligible</span></div>
+      <div class="test"><b id="rejected">0</b><span>rejected / stale</span></div>
+      <div class="test"><b id="examined">0</b><span>examined</span></div>
+      <div class="test"><b id="closed">0</b><span>closed trades</span></div>
+    </div>
+  </div>
+
+  <div class="section"><div class="section-title">Current Opportunities</div><div id="opps" class="opps"></div></div>
+  <div class="card section"><div class="section-title">Open Paper Positions</div><div id="positions" class="empty">None</div></div>
+  <div class="card section"><div class="section-title">Recent Evidence</div><div id="evidence" class="empty">Waiting for collector evidence…</div></div>
+  <div class="footer">NFE-OS · “What did the obvious answer miss?” · Research dashboard only</div>
+</div>
+<script>
+const API='https://market-edge-lab.darkbishop43.workers.dev/api/state';
+const el=id=>document.getElementById(id);
+const money=n=>Number.isFinite(Number(n))?'$'+Number(n).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2}):'—';
+const pct=n=>(Number(n)*100).toFixed(3)+'%';
+const cents=n=>(Number(n)*100).toFixed(1)+'¢';
+function esc(s){return String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));}
+function count(state,key,alt){if(Number.isFinite(Number(state[key])))return Number(state[key]); if(state.testing&&Number.isFinite(Number(state.testing[key])))return Number(state.testing[key]); if(alt&&Array.isArray(state[alt]))return state[alt].length; return 0;}
+async function load(){
+  try{
+    const r=await fetch(API,{cache:'no-store'}); if(!r.ok) throw new Error('HTTP '+r.status); const s=await r.json();
+    el('bal').textContent=money(s.balance??s.paperBalance??100);
+    const p=Number(s.realizedPnl??s.realizedPL??s.pnl??0); el('pnl').textContent=(p>=0?'+':'')+money(p); el('pnl').className='value '+(p>0?'good':p<0?'bad':'');
+    el('btc').textContent=money(s.btc?.price??s.prices?.BTC??s.btcPrice);
+    el('eth').textContent=money(s.eth?.price??s.prices?.ETH??s.ethPrice);
+    const d=s.lastRunAt?new Date(s.lastRunAt):null; const valid=d&&!isNaN(d); el('lastRun').textContent='Last cloud run: '+(valid?d.toLocaleString():'—');
+    el('collectorStatus').textContent=valid?'LIVE · PAPER ONLY':'NO RECENT RUN'; el('statusDot').className='dot '+(valid?'ok':'bad');
+    el('eligible').textContent=count(s,'eligible','opportunities'); el('rejected').textContent=count(s,'rejected'); el('examined').textContent=count(s,'examined'); el('closed').textContent=count(s,'closedTrades','trades');
+    const arr=s.opportunities||s.currentOpportunities||[]; el('opps').innerHTML=arr.length?arr.map(o=>{const score=Number(o.score??0); return `<div class="opp"><div class="q">${esc(o.question??o.title??o.slug??'Opportunity')}</div><div class="meta"><span>${esc((o.asset||'').toUpperCase())} move ${pct(o.move??o.directionalMove??0)}</span><span>YES ${cents(o.yesPrice??o.price??0)}</span><span>score ${score.toFixed(2)}</span></div><div class="bar"><div class="fill" style="width:${Math.max(0,Math.min(100,score*100))}%"></div></div></div>`}).join(''):'<div class="card empty">No eligible opportunities in the latest run.</div>';
+    const pos=s.positions||s.openPositions||[]; el('positions').innerHTML=pos.length?pos.map(x=>`<div class="listrow">${esc(x.question??x.slug??'Position')} · stake ${money(x.stake??0)}</div>`).join(''):'None';
+    const ev=s.evidence||s.ledger||[]; el('evidence').innerHTML=ev.length?ev.slice(-8).reverse().map(x=>`<div class="listrow">${esc(x.message??x.type??JSON.stringify(x))}</div>`).join(''):'Waiting for collector evidence…';
+  }catch(e){el('collectorStatus').textContent='DISPLAY LOAD ERROR';el('statusDot').className='dot bad';el('lastRun').textContent='Collector data could not be read by this page.';}
+}
+load(); setInterval(load,30000);
+</script>
+</body>
+</html>
