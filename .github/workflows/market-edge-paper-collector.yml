@@ -1,0 +1,32 @@
+name: Market Edge Paper Collector
+
+on:
+  schedule:
+    - cron: '*/5 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: market-edge-paper-collector
+  cancel-in-progress: false
+
+jobs:
+  collect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - name: Run paper collector
+        shell: bash
+        run: |
+          set -euo pipefail
+          URL="https://market-edge-lab.darkbishop43.workers.dev/api/run"
+          echo "Calling Market Edge Lab paper collector..."
+          RESPONSE="$(curl --fail --show-error --silent \
+            --retry 2 --retry-delay 5 \
+            --connect-timeout 15 --max-time 90 \
+            "$URL")"
+          echo "$RESPONSE" | jq '{mode, status, collector, lastRunAt, balance, realizedPnl, trades, eligibleCount, rejectedCount, seenCount}'
+          echo "$RESPONSE" | jq -e '.mode == "PAPER_ONLY" and (.lastRunAt != null)' >/dev/null
+          echo "Paper collector run completed successfully."
