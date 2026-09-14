@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>NFE-OS Market Edge Lab</title>
+<style>
+:root{--bg:#050a12;--panel:#0c1624;--panel2:#101d2d;--line:#1f3551;--gold:#d6ad5b;--gold2:#f0d28a;--blue:#2f6ee5;--text:#f5f7fb;--muted:#93a7bf;--green:#65e39b;--red:#ff8585;--shadow:0 18px 60px rgba(0,0,0,.35)}
+*{box-sizing:border-box}
+html{background:var(--bg)}
+body{margin:0;font-family:Inter,ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Arial;background:
+radial-gradient(circle at 85% -10%,rgba(47,110,229,.18),transparent 35%),
+radial-gradient(circle at 5% 5%,rgba(214,173,91,.10),transparent 30%),
+var(--bg);color:var(--text);min-height:100vh}
+.shell{max-width:1180px;margin:auto;padding:22px 16px 56px}
+.hero{display:grid;grid-template-columns:190px 1fr;gap:24px;align-items:center;padding:20px 22px;border:1px solid rgba(214,173,91,.28);background:linear-gradient(135deg,rgba(18,27,39,.95),rgba(8,16,28,.96));border-radius:24px;box-shadow:var(--shadow);position:relative;overflow:hidden}
+.hero:after{content:"";position:absolute;inset:auto -80px -120px auto;width:300px;height:300px;border-radius:50%;background:radial-gradient(circle,rgba(47,110,229,.18),transparent 70%)}
+.logo{width:100%;border-radius:18px;display:block;box-shadow:0 12px 35px rgba(0,0,0,.35)}
+.kicker{font-size:12px;letter-spacing:.18em;color:var(--gold2);text-transform:uppercase}
+h1{font-size:clamp(28px,5vw,48px);line-height:1;margin:8px 0 10px}
+.sub{color:var(--muted);font-size:14px;max-width:730px}
+.badges{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px}
+.badge{font-size:11px;padding:7px 10px;border-radius:999px;border:1px solid var(--line);color:#c8d7e8;background:#0a1320}
+.badge.paper{border-color:rgba(214,173,91,.45);color:var(--gold2)}
+.grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-top:16px}
+.card{background:linear-gradient(180deg,var(--panel2),var(--panel));border:1px solid var(--line);border-radius:18px;padding:16px;box-shadow:0 8px 24px rgba(0,0,0,.15)}
+.metric .label{font-size:11px;text-transform:uppercase;letter-spacing:.1em;color:var(--muted)}
+.metric .value{font-size:28px;font-weight:800;margin-top:5px}
+.metric .tiny{font-size:11px;color:var(--muted);margin-top:4px}
+.section{margin-top:14px}
+.section-head{display:flex;justify-content:space-between;gap:12px;align-items:center;margin-bottom:10px}
+.section-title{font-size:16px;font-weight:750}
+.status{display:flex;align-items:center;gap:10px}
+.dot{width:10px;height:10px;border-radius:50%;background:#75869b;box-shadow:0 0 0 5px rgba(117,134,155,.08)}
+.dot.ok{background:var(--green);box-shadow:0 0 0 5px rgba(101,227,155,.10)}
+.dot.bad{background:var(--red);box-shadow:0 0 0 5px rgba(255,133,133,.10)}
+.status-main{font-weight:800}
+.status-sub{color:var(--muted);font-size:12px}
+.testing{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
+.testbox{padding:12px;border-radius:14px;background:#0a1422;border:1px solid #1a2c43}
+.testbox b{font-size:20px;display:block}
+.testbox span{font-size:11px;color:var(--muted)}
+.opps{display:grid;grid-template-columns:repeat(2,1fr);gap:10px}
+.opp{border:1px solid #1f3551;background:#0a1422;border-radius:15px;padding:13px}
+.opp-top{display:flex;justify-content:space-between;gap:10px;align-items:flex-start}
+.q{font-size:13px;font-weight:650;line-height:1.35}
+.asset{font-size:10px;padding:5px 7px;border-radius:999px;background:#13243a;color:#b8c9dc;white-space:nowrap}
+.meta{display:flex;gap:12px;flex-wrap:wrap;margin-top:9px;color:var(--muted);font-size:11px}
+.bar{height:6px;border-radius:99px;background:#16263a;margin-top:10px;overflow:hidden}
+.fill{height:100%;background:linear-gradient(90deg,var(--blue),var(--gold));width:0}
+.listrow{padding:10px 0;border-top:1px solid #1a2d44;font-size:12px}
+.listrow:first-child{border-top:0}
+.empty{color:var(--muted);font-size:12px;padding:6px 0}
+.footer{margin-top:22px;color:#65788f;font-size:11px;text-align:center}
+.gold{color:var(--gold2)} .green{color:var(--green)} .red{color:var(--red)}
+@media(max-width:780px){.hero{grid-template-columns:1fr;text-align:center}.logo{max-width:260px;margin:auto}.badges{justify-content:center}.grid{grid-template-columns:repeat(2,1fr)}.opps{grid-template-columns:1fr}.testing{grid-template-columns:repeat(2,1fr)}}
+@media(max-width:430px){.shell{padding:12px 10px 36px}.hero{padding:16px}.grid{gap:8px}.card{padding:13px}.metric .value{font-size:22px}}
+</style>
+</head>
+<body>
+<div class="shell">
+  <section class="hero">
+    <img class="logo" alt="NFE-OS" src="data:image/webp;base64,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">
+    <div>
+      <div class="kicker">NFE-OS Research Lab</div>
+      <h1>Market Edge Lab</h1>
+      <div class="sub">Live paper-trading research dashboard. Automated cloud collection, BTC/ETH market monitoring, opportunity scoring, and evidence tracking — with no wallet and no live order submission.</div>
+      <div class="badges">
+        <span class="badge paper">PAPER ONLY</span>
+        <span class="badge">GitHub Scheduler</span>
+        <span class="badge">Cloudflare KV</span>
+        <span class="badge">BTC + ETH</span>
+      </div>
+    </div>
+  </section>
+
+  <section class="grid">
+    <div class="card metric"><div class="label">Paper Balance</div><div class="value" id="bal">—</div><div class="tiny">Starting bank $100</div></div>
+    <div class="card metric"><div class="label">Realized P/L</div><div class="value" id="pnl">—</div><div class="tiny" id="trades">0 closed trades</div></div>
+    <div class="card metric"><div class="label">Bitcoin</div><div class="value" id="btc">—</div><div class="tiny" id="btcm">—</div></div>
+    <div class="card metric"><div class="label">Ethereum</div><div class="value" id="eth">—</div><div class="tiny" id="ethm">—</div></div>
+  </section>
+
+  <section class="card section">
+    <div class="section-head">
+      <div class="section-title">Collector Status</div>
+      <div class="badge" id="ageBadge">checking…</div>
+    </div>
+    <div class="status"><div class="dot" id="dot"></div><div><div class="status-main" id="status">Connecting…</div><div class="status-sub" id="run">Waiting for state</div></div></div>
+  </section>
+
+  <section class="card section">
+    <div class="section-head"><div class="section-title">Test Coverage</div><div class="status-sub">current cloud snapshot</div></div>
+    <div class="testing">
+      <div class="testbox"><b id="eligible">0</b><span>eligible markets</span></div>
+      <div class="testbox"><b id="rejected">0</b><span>rejected/stale</span></div>
+      <div class="testbox"><b id="seen">0</b><span>markets examined</span></div>
+      <div class="testbox"><b id="closed">0</b><span>closed paper trades</span></div>
+    </div>
+  </section>
+
+  <section class="card section">
+    <div class="section-head"><div class="section-title">Current Opportunities</div><div class="status-sub">highest score first</div></div>
+    <div class="opps" id="opps"><div class="empty">Loading opportunities…</div></div>
+  </section>
+
+  <section class="card section">
+    <div class="section-head"><div class="section-title">Open Paper Positions</div><div class="status-sub" id="positionCount">0 open</div></div>
+    <div id="pos"><div class="empty">None</div></div>
+  </section>
+
+  <section class="card section">
+    <div class="section-head"><div class="section-title">Recent Evidence</div><div class="status-sub">latest collector records</div></div>
+    <div id="log"><div class="empty">Loading evidence…</div></div>
+  </section>
+
+  <div class="footer">NFE-OS · “What did the obvious answer miss?” · Research dashboard only</div>
+</div>
+<script>
+const ENDPOINT='https://market-edge-lab.darkbishop43.workers.dev/api/state';
+const money=n=>'$'+Number(n||0).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2});
+const pct=n=>{const v=Number(n||0)*100;return (v>=0?'+':'')+v.toFixed(3)+'%'};
+const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+function ageText(ts){if(!ts)return 'no run yet';const sec=Math.max(0,Math.floor((Date.now()-new Date(ts).getTime())/1000));if(sec<60)return sec+'s ago';const m=Math.floor(sec/60);if(m<60)return m+'m ago';return Math.floor(m/60)+'h '+(m%60)+'m ago'}
+function moveClass(v){return Number(v||0)>=0?'green':'red'}
+async function load(){
+ try{
+  const r=await fetch(ENDPOINT+'?x='+Date.now(),{cache:'no-store'});
+  if(!r.ok)throw new Error('HTTP '+r.status);
+  const s=await r.json();
+  bal.textContent=money(s.balance);
+  pnl.textContent=(Number(s.realizedPnl)>=0?'+':'')+money(s.realizedPnl);
+  pnl.className='value '+(Number(s.realizedPnl)>=0?'green':'red');
+  trades.textContent=(s.trades||0)+' closed trades';
+  btc.textContent=s.prices?.BTC?money(s.prices.BTC):'—';
+  eth.textContent=s.prices?.ETH?money(s.prices.ETH):'—';
+  btcm.textContent='Last move '+pct(s.moves?.BTC); btcm.className='tiny '+moveClass(s.moves?.BTC);
+  ethm.textContent='Last move '+pct(s.moves?.ETH); ethm.className='tiny '+moveClass(s.moves?.ETH);
+  const ok=s.status==='LIVE_PAPER_ONLY';
+  status.textContent=ok?'LIVE · PAPER ONLY':(s.status||'UNKNOWN');
+  dot.className='dot '+(ok?'ok':'bad');
+  run.textContent='Last cloud run: '+(s.lastRunAt?new Date(s.lastRunAt).toLocaleString():'not yet');
+  ageBadge.textContent=ageText(s.lastRunAt);
+  eligible.textContent=s.eligibleCount||0; rejected.textContent=s.rejectedCount||0; seen.textContent=s.seenCount||0; closed.textContent=s.trades||0;
+  const opportunities=(s.opportunities||[]).slice(0,8);
+  opps.innerHTML=opportunities.length?opportunities.map(o=>`<div class="opp"><div class="opp-top"><div class="q">${esc(o.question)}</div><div class="asset">${esc(o.asset)}</div></div><div class="meta"><span>YES <b>${(Number(o.yes)*100).toFixed(1)}¢</b></span><span>Move <b class="${moveClass(o.move)}">${pct(o.move)}</b></span><span>Score <b class="gold">${Number(o.score).toFixed(2)}</b></span></div><div class="bar"><div class="fill" style="width:${Math.max(0,Math.min(100,Number(o.score)*100))}%"></div></div></div>`).join(''):'<div class="empty">No eligible opportunities right now.</div>';
+  const positions=s.positions||[]; positionCount.textContent=positions.length+' open';
+  pos.innerHTML=positions.length?positions.map(p=>`<div class="listrow"><b>${esc(p.asset)} · ${esc(p.question)}</b><div class="status-sub">${money(p.stake)} paper stake @ ${(Number(p.entry)*100).toFixed(1)}¢ · entry score ${Number(p.entryScore||0).toFixed(2)}</div></div>`).join(''):'<div class="empty">No open paper positions.</div>';
+  const ledger=(s.ledger||[]).slice(0,12);
+  log.innerHTML=ledger.length?ledger.map(x=>`<div class="listrow"><b>${esc(x.type)}</b><div class="status-sub">${new Date(x.ts).toLocaleString()}${x.question?' · '+esc(x.question):''}${x.message?' · '+esc(x.message):''}</div></div>`).join(''):'<div class="empty">No evidence yet.</div>';
+ }catch(e){
+  status.textContent='DASHBOARD LOAD ERROR';dot.className='dot bad';run.textContent=String(e);ageBadge.textContent='offline';
+ }
+}
+load(); setInterval(load,30000); setInterval(()=>{fetch(ENDPOINT+'?x='+Date.now(),{cache:'no-store'}).then(r=>r.json()).then(s=>ageBadge.textContent=ageText(s.lastRunAt)).catch(()=>{})},15000);
+</script>
+</body></html>
