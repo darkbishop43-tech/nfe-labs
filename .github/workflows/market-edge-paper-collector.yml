@@ -2,7 +2,11 @@ name: Market Edge Paper Collector
 
 on:
   schedule:
-    - cron: '*/5 * * * *'
+    # GitHub scheduled events can be delayed. Instead of trusting a fresh
+    # workflow launch every five minutes, start a guarded runner every three
+    # hours and keep that runner calling the paper collector every five minutes.
+    # Forty iterations cover ~3h15m, giving the next scheduled run overlap time.
+    - cron: '7 */3 * * *'
   workflow_dispatch:
 
 permissions:
@@ -15,18 +19,34 @@ concurrency:
 jobs:
   collect:
     runs-on: ubuntu-latest
-    timeout-minutes: 4
+    timeout-minutes: 205
     steps:
-      - name: Run paper collector
+      - name: Maintain five-minute paper collector cadence
         shell: bash
         run: |
           set -euo pipefail
           URL="https://market-edge-lab.darkbishop43.workers.dev/api/run"
-          echo "Calling Market Edge Lab paper collector..."
-          RESPONSE="$(curl --fail --show-error --silent \
-            --retry 2 --retry-delay 5 \
-            --connect-timeout 15 --max-time 90 \
-            "$URL")"
-          echo "$RESPONSE" | jq '{mode, status, collector, lastRunAt, balance, realizedPnl, trades, eligibleCount, rejectedCount, seenCount}'
-          echo "$RESPONSE" | jq -e '.mode == "PAPER_ONLY" and (.lastRunAt != null)' >/dev/null
-          echo "Paper collector run completed successfully."
+          ITERATIONS=40
+          INTERVAL_SECONDS=300
+
+          echo "Starting guarded Market Edge paper collector window."
+          echo "Paper only. No wallet, keys, signing, or live order submission."
+
+          for i in $(seq 1 "$ITERATIONS"); do
+            STARTED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+            echo "[$STARTED_AT] Collector call $i/$ITERATIONS"
+
+            RESPONSE="$(curl --fail --show-error --silent \
+              --retry 2 --retry-delay 5 \
+              --connect-timeout 15 --max-time 90 \
+              "$URL")"
+
+            echo "$RESPONSE" | jq '{mode, status, collector, lastRunAt, balance, realizedPnl, trades, eligibleCount, rejectedCount, seenCount}'
+            echo "$RESPONSE" | jq -e '.mode == "PAPER_ONLY" and (.lastRunAt != null)' >/dev/null
+
+            if [ "$i" -lt "$ITERATIONS" ]; then
+              sleep "$INTERVAL_SECONDS"
+            fi
+          done
+
+          echo "Guarded collector window completed successfully."
