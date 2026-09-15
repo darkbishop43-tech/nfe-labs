@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>NFE-OS Market Edge Lab</title>
+<style>
+:root{--bg:#050a11;--p:#0d1724;--p2:#111e2d;--line:#243a55;--gold:#d8b15e;--gold2:#f3d58a;--blue:#3479e8;--text:#f5f7fb;--muted:#91a6be;--green:#67e49b;--red:#ff8585;--shadow:0 14px 38px #0007}
+*{box-sizing:border-box}body{margin:0;background:radial-gradient(circle at 80% 0,#0d2440 0,transparent 35%),radial-gradient(circle at 0 0,#2f261308 0,transparent 25%),var(--bg);color:var(--text);font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial;min-height:100vh}.w{max-width:1080px;margin:auto;padding:16px 12px 48px}.hero,.card,.opp{background:linear-gradient(180deg,var(--p2),var(--p));border:1px solid var(--line);border-radius:16px}.hero{padding:14px 18px;display:flex;align-items:center;justify-content:space-between;gap:15px}.brand{display:flex;align-items:center;gap:14px}.logo{width:140px;height:78px;object-fit:contain;border-radius:10px}.k{font-size:10px;letter-spacing:.16em;text-transform:uppercase;color:var(--gold)}h1{font-size:28px;margin:3px 0}.sub,.m{font-size:12px;color:var(--muted)}.actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:flex-end}.pill,.btn{border:1px solid #725f34;color:var(--gold2);background:#0b1421;border-radius:999px;padding:8px 11px;font-size:11px;font-weight:800}.btn{cursor:pointer}.btn:hover{border-color:var(--gold2);background:#121e2c}.grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-top:11px}.card{padding:14px}.label{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.08em}.val{font-size:24px;font-weight:850;margin-top:5px}.section{margin-top:11px}.status{display:flex;align-items:center;gap:10px}.dot{width:10px;height:10px;border-radius:50%;background:var(--green);box-shadow:0 0 0 5px #67e49b18}.badDot{background:var(--red);box-shadow:none}.tests{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}.test{background:#09131f;border:1px solid #1d3149;border-radius:12px;padding:10px}.test b{display:block;font-size:20px}.opps{display:grid;grid-template-columns:repeat(2,1fr);gap:8px}.opp{padding:11px}.q{font-size:13px;font-weight:700;line-height:1.35}.meta{font-size:11px;color:var(--muted);margin-top:7px;display:flex;gap:9px;flex-wrap:wrap}.bar{height:5px;background:#18293d;border-radius:9px;overflow:hidden;margin-top:8px}.fill{height:100%;background:linear-gradient(90deg,var(--blue),var(--gold))}.row{font-size:12px;padding:9px 0;border-top:1px solid #1b2d42}.row:first-child{border-top:0}.trade{display:grid;grid-template-columns:1fr auto;gap:10px;align-items:center;cursor:pointer;padding:11px 9px;border-top:1px solid #1b2d42;border-radius:9px}.trade:first-child{border-top:0}.trade:hover{background:#122033}.trade-title{font-size:12px;font-weight:700;line-height:1.35}.trade-meta{font-size:11px;color:var(--muted);margin-top:4px}.pnl{font-size:13px;font-weight:850;white-space:nowrap}.good{color:var(--green)}.bad{color:var(--red)}.empty{font-size:12px;color:var(--muted)}.footer{text-align:center;color:#62778e;font-size:10px;margin-top:18px}.modal{position:fixed;inset:0;background:#02060bd9;display:none;align-items:center;justify-content:center;padding:16px;z-index:50}.modal.open{display:flex}.dialog{width:min(720px,100%);max-height:88vh;overflow:auto;background:linear-gradient(180deg,#132033,#0b1522);border:1px solid #36506f;border-radius:18px;box-shadow:var(--shadow);padding:18px}.dialog-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}.close{background:#0a1320;border:1px solid #314761;color:#fff;border-radius:9px;padding:7px 10px;cursor:pointer}.detail-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin-top:14px}.detail{background:#08121e;border:1px solid #1e334b;border-radius:11px;padding:10px}.detail span{display:block;font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em}.detail b{display:block;margin-top:4px;font-size:13px;word-break:break-word}.question{margin-top:12px;font-size:14px;line-height:1.45;font-weight:700}.note{margin-top:12px;border-left:3px solid var(--gold);padding:8px 10px;background:#0a1421;color:var(--muted);font-size:11px;line-height:1.45}
+@media(max-width:720px){.grid,.tests{grid-template-columns:repeat(2,1fr)}.opps{grid-template-columns:1fr}.logo{width:100px;height:58px}h1{font-size:23px}.hero{align-items:flex-start}.detail-grid{grid-template-columns:1fr}}@media(max-width:460px){.brand{gap:8px}.logo{width:78px;height:48px}.k{font-size:8px}.sub{font-size:10px}.pill,.btn{font-size:9px;padding:6px 8px}.val{font-size:20px}.hero{padding:12px}.trade{grid-template-columns:1fr}.pnl{justify-self:start}}
+</style>
+</head>
+<body>
+<div class="w">
+  <div class="hero">
+    <div class="brand">
+      <img class="logo" alt="NFE-OS" src="https://raw.githubusercontent.com/darkbishop43-tech/nfe-labs/main/market-edge-lab/public/nfe-os-logo-market-edge.webp">
+      <div><div class="k">NFE-OS Research Lab · Cloud Collector</div><h1>Market Edge Lab</h1><div class="sub">Automated paper research · no wallet · no live order submission</div></div>
+    </div>
+    <div class="actions"><button id="exportBtn" class="btn" type="button">EXPORT EVIDENCE</button><div class="pill">PAPER ONLY</div></div>
+  </div>
+
+  <div class="grid">
+    <div class="card"><div class="label">Paper Balance</div><div id="bal" class="val">—</div></div>
+    <div class="card"><div class="label">Realized P/L</div><div id="pnl" class="val">—</div></div>
+    <div class="card"><div class="label">BTC</div><div id="btc" class="val">—</div></div>
+    <div class="card"><div class="label">ETH</div><div id="eth" class="val">—</div></div>
+  </div>
+
+  <div class="card section"><b>Cloud Status</b><div class="status" style="margin-top:9px"><span id="dot" class="dot"></span><div><div id="cloud"><b>Checking…</b></div><div id="run" class="m">Last cloud run: —</div></div></div></div>
+
+  <div class="card section"><b>Testing</b><div class="tests" style="margin-top:9px">
+    <div class="test"><b id="eligible">0</b><span class="m">eligible</span></div>
+    <div class="test"><b id="rejected">0</b><span class="m">rejected / stale</span></div>
+    <div class="test"><b id="examined">0</b><span class="m">examined</span></div>
+    <div class="test"><b id="closed">0</b><span class="m">closed trades</span></div>
+  </div></div>
+
+  <div class="section"><b>Current Opportunities</b><div id="opps" class="opps" style="margin-top:9px"></div></div>
+  <div class="card section"><b>Open Paper Positions</b><div id="pos" class="m" style="margin-top:8px">None</div></div>
+  <div class="card section"><b>Closed Paper Trades</b><div class="m" style="margin-top:4px">Tap a trade to inspect the recorded evidence.</div><div id="trades" style="margin-top:8px"></div></div>
+  <div class="card section"><b>Recent Evidence</b><div id="log" class="m" style="margin-top:8px">Waiting…</div></div>
+  <div class="footer">NFE-OS · WHAT DID THE OBVIOUS ANSWER MISS? · PAPER RESEARCH ONLY</div>
+</div>
+
+<div id="modal" class="modal" role="dialog" aria-modal="true" aria-labelledby="modalTitle"><div class="dialog"><div class="dialog-head"><div><div class="k">Trade Evidence Record</div><h2 id="modalTitle" style="margin:4px 0 0">Paper Trade</h2></div><button id="closeBtn" class="close" type="button">CLOSE</button></div><div id="modalBody"></div></div></div>
+
+<script>
+const API='https://market-edge-lab.darkbishop43.workers.dev/api/state';
+const E=id=>document.getElementById(id);
+const money=n=>'$'+Number(n||0).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2});
+const pct=n=>(Number(n||0)*100).toFixed(3)+'%';
+const cent=n=>(Number(n||0)*100).toFixed(1)+'¢';
+const esc=s=>String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
+let lastState=null;
+function time(v){if(!v)return '—';const d=new Date(v);return isNaN(d)?'—':d.toLocaleString();}
+function duration(ms){ms=Number(ms||0);if(!ms)return '—';const sec=Math.round(ms/1000);if(sec<60)return sec+' sec';const min=Math.floor(sec/60),s=sec%60;return min+'m '+s+'s';}
+function entryFor(exit,ledger){const et=Date.parse(exit.ts||0);return (ledger||[]).filter(x=>x.type==='PAPER_ENTRY'&&x.marketId===exit.marketId&&Date.parse(x.ts||0)<=et).sort((a,b)=>Date.parse(b.ts)-Date.parse(a.ts))[0]||null;}
+function detail(label,value){return `<div class="detail"><span>${esc(label)}</span><b>${esc(value)}</b></div>`;}
+function openTrade(exit){const ledger=lastState?.ledger||[],entry=entryFor(exit,ledger),p=Number(exit.pnl||0);E('modalTitle').textContent='Paper Trade · '+(p>=0?'Gain':'Loss');E('modalBody').innerHTML=`<div class="question">${esc(exit.question||entry?.question||'Unknown market')}</div><div class="detail-grid">${detail('Asset',entry?.asset||'—')}${detail('Stake',money(exit.stake??entry?.stake??0))}${detail('Entry time',time(entry?.ts))}${detail('Exit time',time(exit.ts))}${detail('Entry YES',cent(exit.entry??entry?.entry??0))}${detail('Exit YES',cent(exit.exit??0))}${detail('Entry score',entry?.score!=null?Number(entry.score).toFixed(3):'—')}${detail('Entry edge',entry?.edge!=null?pct(entry.edge):'—')}${detail('Held',duration(exit.heldMs))}${detail('Exit reason',exit.reason||'—')}${detail('Realized P/L',(p>=0?'+':'')+money(p))}${detail('Market ID',exit.marketId||'—')}</div><div class="note">This panel shows only evidence the collector actually recorded. It does not invent missing market conditions. BTC/ETH price-at-entry and price-at-exit were not stored inside individual trade records in this version, so those values are intentionally not reconstructed here.</div>`;E('modal').classList.add('open');}
+function exportEvidence(){if(!lastState)return;const payload={exportedAt:new Date().toISOString(),source:'NFE-OS Market Edge Lab',mode:lastState.mode||'PAPER_ONLY',state:lastState};const blob=new Blob([JSON.stringify(payload,null,2)],{type:'application/json'}),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download='nfe-market-edge-evidence-'+new Date().toISOString().replace(/[:.]/g,'-')+'.json';document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);}
+async function load(){try{let r=await fetch(API+'?t='+Date.now(),{cache:'no-store'});if(!r.ok)throw Error(r.status);let s=await r.json();lastState=s;let p=Number(s.realizedPnl||0);E('bal').textContent=money(s.balance);E('pnl').textContent=(p>=0?'+':'')+money(p);E('pnl').className='val '+(p<0?'bad':p>0?'good':'');E('btc').textContent=money(s.prices?.BTC);E('eth').textContent=money(s.prices?.ETH);let d=s.lastRunAt?new Date(s.lastRunAt):null,live=d&&!isNaN(d);E('cloud').innerHTML='<b>'+(s.status==='LIVE_PAPER_ONLY'?'LIVE · PAPER ONLY':esc(s.status||'UNKNOWN'))+'</b>';E('dot').className='dot '+(s.status==='LIVE_PAPER_ONLY'?'':'badDot');E('run').textContent='Last cloud run: '+(live?d.toLocaleString():'—');E('eligible').textContent=s.eligibleCount||0;E('rejected').textContent=s.rejectedCount||0;E('examined').textContent=s.seenCount||0;E('closed').textContent=s.trades||0;
+let a=s.opportunities||[];E('opps').innerHTML=a.length?a.slice(0,10).map(o=>`<div class="opp"><div class="q">${esc(o.question)}</div><div class="meta"><span>${esc(o.asset)} move ${pct(o.move)}</span><span>YES ${cent(o.yes)}</span><span>score ${Number(o.score||0).toFixed(2)}</span></div><div class="bar"><div class="fill" style="width:${Math.max(0,Math.min(100,Number(o.score||0)*100))}%"></div></div></div>`).join(''):'<div class="m">None</div>';
+let ps=s.positions||[];E('pos').innerHTML=ps.length?ps.map(x=>`<div class="row">${esc(x.question)} · ${money(x.stake)} @ ${cent(x.entry)}</div>`).join(''):'None';
+let l=s.ledger||[],exits=l.filter(x=>x.type==='PAPER_EXIT');E('trades').innerHTML=exits.length?exits.map((x,i)=>{let pp=Number(x.pnl||0);return `<div class="trade" data-exit-index="${i}"><div><div class="trade-title">${esc(x.question||'Paper trade')}</div><div class="trade-meta">${time(x.ts)} · entry ${cent(x.entry)} → exit ${cent(x.exit)} · ${duration(x.heldMs)} · ${esc(x.reason||'exit')}</div></div><div class="pnl ${pp>=0?'good':'bad'}">${pp>=0?'+':''}${money(pp)}</div></div>`}).join(''):'<div class="empty">No closed trades yet.</div>';[...E('trades').querySelectorAll('[data-exit-index]')].forEach(n=>n.onclick=()=>openTrade(exits[Number(n.dataset.exitIndex)]));
+E('log').innerHTML=l.length?l.slice(0,12).map(x=>`<div class="row">${time(x.ts)} · ${esc(x.type)}${x.pnl!=null?' · P/L '+money(x.pnl):''}</div>`).join(''):'Waiting…';
+}catch(e){E('cloud').innerHTML='<b>DISPLAY LOAD ERROR</b>';E('dot').className='dot badDot';E('run').textContent='Collector data could not be read by this page.';}}
+E('exportBtn').onclick=exportEvidence;E('closeBtn').onclick=()=>E('modal').classList.remove('open');E('modal').onclick=e=>{if(e.target===E('modal'))E('modal').classList.remove('open')};document.addEventListener('keydown',e=>{if(e.key==='Escape')E('modal').classList.remove('open')});load();setInterval(load,30000);
+</script>
+</body></html>
