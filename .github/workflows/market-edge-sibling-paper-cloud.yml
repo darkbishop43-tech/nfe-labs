@@ -1,0 +1,49 @@
+name: Market Edge Sibling Paper Cloud
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/market-edge-sibling-paper-cloud.yml'
+  schedule:
+    - cron: '23 */4 * * *'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: market-edge-sibling-paper-cloud
+  cancel-in-progress: false
+
+jobs:
+  paper-research:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    steps:
+      - name: Checkout isolated sibling branch
+        uses: actions/checkout@v4
+        with:
+          ref: market-edge-sibling-build
+          fetch-depth: 0
+
+      - name: Configure evidence commits
+        run: |
+          git config user.name "nfe-market-edge-bot"
+          git config user.email "actions@users.noreply.github.com"
+
+      - name: Guarded five-minute sibling paper loop
+        shell: bash
+        run: |
+          for i in $(seq 1 65); do
+            echo "Sibling paper cycle $i at $(date -u +%FT%TZ)"
+            if node market-edge-lab/siblings/cloud-runner.mjs; then
+              git add market-edge-lab/siblings/state/*.json 2>/dev/null || true
+              if ! git diff --cached --quiet; then
+                git commit -m "Record sibling paper evidence"
+                git push origin HEAD:market-edge-sibling-build
+              fi
+            else
+              echo "Cycle failed; preserving existing state and continuing."
+            fi
+            sleep 300
+          done
