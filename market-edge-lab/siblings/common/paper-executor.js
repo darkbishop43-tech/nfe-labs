@@ -1,14 +1,17 @@
-// Browser-local paper executor for isolated sibling labs. PAPER ONLY.
+// Isolated sibling paper execution bridge. PAPER ONLY.
+// Prefers autonomous GitHub Actions cloud state; falls back to browser-local execution if cloud state is unavailable.
 (()=>{
   const MAX_STAKE=5,MAX_OPEN=6,MAX_HOLD_MS=5*60*1000,COOLDOWN_MS=5*60*1000;
   const actionLabel=()=>C.key==='payne_method'?'PULL TRIGGER':'ENTER';
   const nowIso=()=>new Date().toISOString();
+  const cloudUrl=()=>`https://raw.githubusercontent.com/darkbishop43-tech/nfe-labs/market-edge-sibling-build/market-edge-lab/siblings/state/${encodeURIComponent(C.key)}.json?t=${Date.now()}`;
+  async function syncCloud(){try{const r=await fetch(cloudUrl(),{cache:'no-store'});if(!r.ok)return false;const s=await r.json();if(!s||s.mode!=='PAPER_ONLY'||s.lab!==C.key)return false;local=s;window.SIBLING_CLOUD_ACTIVE=true;saveLocal();render();const c=E('cloud');if(c)c.innerHTML='<b class="good">LIVE SHARED MARKET FEED · CLOUD PAPER EXECUTOR · PAPER ONLY</b>';return true}catch{return false}}
   function lastExitFor(k){return(local.ledger||[]).slice().reverse().find(x=>x.type==='PAPER_EXIT'&&x.oppKey===k)}
   function decisionFor(o,os){try{return C.analyze?C.analyze(o,os):{label:'WATCH'}}catch{return{label:'WATCH'}}}
   function currentForPosition(p,os){return os.find(o=>oppKey(o)===p.oppKey)||null}
   function closePosition(p,o,reason){const exit=o?price(o):p.entry;if(!(exit>0)||!(p.entry>0))return false;const heldMs=Date.now()-Date.parse(p.entryTs||p.ts),shares=p.stake/p.entry,exitValue=shares*exit,pnl=exitValue-p.stake;local.balance+=exitValue;local.realizedPnl+=pnl;local.trades=(local.trades||0)+1;local.ledger=local.ledger||[];local.ledger.push({type:'PAPER_EXIT',lab:C.key,ts:nowIso(),entryTs:p.entryTs||p.ts,oppKey:p.oppKey,marketId:p.marketId,question:p.question,asset:p.asset,side:p.side,positionOutcome:p.positionOutcome,stake:p.stake,entry:p.entry,exit,score:p.score,edge:p.edge,heldMs,reason,pnl});local.positions=(local.positions||[]).filter(x=>x!==p);return true}
   function openPosition(o,d){const entry=price(o);if(!(entry>0)||entry>=1)return false;const stake=Math.min(MAX_STAKE,local.balance);if(stake<=0)return false;const key=oppKey(o),ts=nowIso(),p={oppKey:key,marketId:marketId(o),question:question(o),asset:asset(o),side:side(o),positionOutcome:o.positionOutcome||'YES',stake,entry,score:score(o),edge:edge(o),decision:d.label,entryTs:ts,ts};local.balance-=stake;local.positions=local.positions||[];local.positions.push(p);local.ledger=local.ledger||[];local.ledger.push({type:'PAPER_ENTRY',lab:C.key,ts,...p});return true}
   function run(){if(window.SIBLING_CLOUD_ACTIVE||!snapshot)return;const os=opportunities();let changed=false;for(const p of[...(local.positions||[])]){const o=currentForPosition(p,os),held=Date.now()-Date.parse(p.entryTs||p.ts),d=o?decisionFor(o,os):{label:'MISSING'};if(held>=MAX_HOLD_MS)changed=closePosition(p,o,'max_hold')||changed;else if(!o)changed=closePosition(p,null,'market_missing')||changed;else if(d.label!==actionLabel())changed=closePosition(p,o,'decision_exit')||changed}const openKeys=new Set((local.positions||[]).map(p=>p.oppKey)),ranked=os.slice().sort((a,b)=>(score(b)-score(a))||(edge(b)-edge(a)));for(const o of ranked){if((local.positions||[]).length>=MAX_OPEN)break;const key=oppKey(o);if(openKeys.has(key))continue;const d=decisionFor(o,os);if(d.label!==actionLabel())continue;const last=lastExitFor(key);if(last&&Date.now()-Date.parse(last.ts)<COOLDOWN_MS)continue;if(openPosition(o,d)){openKeys.add(key);changed=true}}if(changed){saveLocal();render()}}
-  window.SIBLING_PAPER_EXECUTOR={mode:'PAPER_ONLY',executor:'BROWSER_LOCAL_V2',maxStake:MAX_STAKE,maxOpen:MAX_OPEN,maxHoldMs:MAX_HOLD_MS,action:actionLabel(),run};
-  setTimeout(run,1500);setInterval(run,5000);
+  window.SIBLING_PAPER_EXECUTOR={mode:'PAPER_ONLY',executor:'CLOUD_FIRST_WITH_BROWSER_FALLBACK_V3',maxStake:MAX_STAKE,maxOpen:MAX_OPEN,maxHoldMs:MAX_HOLD_MS,action:actionLabel(),run,syncCloud};
+  syncCloud().then(ok=>{if(!ok)setTimeout(run,1200)});setInterval(syncCloud,15000);setInterval(run,5000);
 })();
