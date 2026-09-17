@@ -9,7 +9,7 @@ on:
     - cron: '23 */4 * * *'
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: market-edge-sibling-paper-cloud
@@ -20,30 +20,22 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 350
     steps:
-      - name: Checkout isolated sibling branch
-        uses: actions/checkout@v4
-        with:
-          ref: market-edge-sibling-build
-          fetch-depth: 0
-
-      - name: Configure evidence commits
-        run: |
-          git config user.name "nfe-market-edge-bot"
-          git config user.email "actions@users.noreply.github.com"
-
-      - name: Guarded five-minute sibling paper loop
+      - name: Guarded five-minute persistent sibling cloud loop
         shell: bash
         run: |
+          set -u
+          ENDPOINT='https://market-edge-siblings.darkbishop43.workers.dev/api/run'
           for i in $(seq 1 65); do
-            echo "Sibling paper cycle $i at $(date -u +%FT%TZ)"
-            if node market-edge-lab/siblings/cloud-runner.mjs; then
-              git add market-edge-lab/siblings/state/*.json 2>/dev/null || true
-              if ! git diff --cached --quiet; then
-                git commit -m "Record sibling paper evidence"
-                git push origin HEAD:market-edge-sibling-build
-              fi
+            echo "Sibling cloud paper cycle $i at $(date -u +%FT%TZ)"
+            HTTP_CODE=$(curl --silent --show-error --output /tmp/sibling-run.json --write-out '%{http_code}' --max-time 60 "$ENDPOINT" || true)
+            cat /tmp/sibling-run.json 2>/dev/null || true
+            echo
+            if [ "$HTTP_CODE" != "200" ]; then
+              echo "Sibling cloud cycle returned HTTP $HTTP_CODE; preserving cloud state and continuing."
+            elif ! grep -q '"nfe_reasoning"' /tmp/sibling-run.json || ! grep -q '"payne_method"' /tmp/sibling-run.json; then
+              echo "Sibling cloud response did not contain both isolated lab states; continuing without claiming success."
             else
-              echo "Cycle failed; preserving existing state and continuing."
+              echo "Sibling persistent cloud executor completed both paper labs."
             fi
             sleep 300
           done
