@@ -1,0 +1,6 @@
+name = "market-edge-siblings"
+main = "worker.js"
+compatibility_date = "2026-09-16"
+
+# KV is intentionally bound in the Cloudflare dashboard as SIBLING_STATE.
+# Keep this Worker isolated from the frozen baseline MARKET_EDGE_STATE namespace.
