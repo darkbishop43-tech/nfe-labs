@@ -7,7 +7,11 @@ compatibility_flags = ["global_fetch_strictly_public"]
 binding = "SIBLING_STATE"
 id = "8a982844801349e8959cda5d3e712e3b"
 
+[triggers]
+crons = ["*/5 * * * *"]
+
 # This is the isolated sibling KV namespace only.
 # Do not bind or modify the frozen baseline MARKET_EDGE_STATE namespace.
 # The compatibility flag allows this sibling Worker to read the baseline's public
 # workers.dev /api/state endpoint without creating a binding to or modifying baseline.
+# Cron runs the sibling PAPER-ONLY executor every 5 minutes; no live orders exist.
