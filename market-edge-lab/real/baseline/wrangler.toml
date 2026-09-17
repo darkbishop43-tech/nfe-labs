@@ -1,0 +1,15 @@
+name = "market-edge-baseline-real"
+main = "src/index.js"
+compatibility_date = "2026-09-17"
+workers_dev = true
+
+[vars]
+EXPERIMENT_NAME = "MARKET EDGE — BASELINE REAL"
+EXECUTION_MODE = "LOCKED"
+LIVE_ORDER_SUBMISSION = "DISABLED"
+MARKET_SCOPE = "BTC_ETH_ONLY"
+
+# SECURITY:
+# Never place Polymarket credentials in this file.
+# Add POLYMARKET_US_KEY_ID and POLYMARKET_US_SECRET only as encrypted
+# Cloudflare Worker secrets after the isolated Worker is created.
