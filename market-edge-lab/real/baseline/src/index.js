@@ -13,6 +13,53 @@ function json(body, status = 200) {
   });
 }
 
+function normalizeSecretKey(raw) {
+  const trimmed = String(raw || "").trim();
+
+  if (!trimmed) {
+    return { ok: false, reason: "EMPTY_SECRET" };
+  }
+
+  if (trimmed.includes("-----BEGIN")) {
+    return { ok: false, reason: "PEM_FORMAT_NOT_EXPECTED" };
+  }
+
+  let value = trimmed;
+  let detected = "BASE64_STANDARD";
+
+  if (/^[A-Za-z0-9_-]+={0,2}$/.test(value) && /[-_]/.test(value)) {
+    detected = "BASE64URL";
+    value = value.replace(/-/g, "+").replace(/_/g, "/");
+  } else if (!/^[A-Za-z0-9+/]+={0,2}$/.test(value)) {
+    return { ok: false, reason: "UNRECOGNIZED_SECRET_ENCODING" };
+  }
+
+  while (value.length % 4 !== 0) value += "=";
+
+  try {
+    const binary = atob(value);
+    const byteLength = binary.length;
+
+    if (byteLength !== 32 && byteLength !== 64) {
+      return {
+        ok: false,
+        reason: "UNEXPECTED_ED25519_KEY_LENGTH",
+        detected,
+        byteLength,
+      };
+    }
+
+    return {
+      ok: true,
+      normalized: value,
+      detected,
+      byteLength,
+    };
+  } catch {
+    return { ok: false, reason: "BASE64_DECODE_FAILED", detected };
+  }
+}
+
 function statusPayload(env) {
   return {
     ok: true,
@@ -32,7 +79,7 @@ function statusPayload(env) {
     accountConnection: "VERIFY_AT_/account",
     accountBalance: "VERIFY_AT_/account",
     evidenceLedger: "NOT_YET_STARTED",
-    buildCheckpoint: "2026-09-17T19:27:00-04:00",
+    buildCheckpoint: "2026-09-17T19:40:00-04:00",
   };
 }
 
@@ -92,10 +139,28 @@ export default {
         }, 503);
       }
 
+      const secret = normalizeSecretKey(env.POLYMARKET_US_SECRET);
+
+      if (!secret.ok) {
+        return json({
+          ok: false,
+          state: "SECRET_FORMAT_INVALID",
+          accountConnection: "NOT_VERIFIED",
+          credentialDiagnostics: {
+            secretFormatReason: secret.reason,
+            detectedEncoding: secret.detected ?? null,
+            decodedByteLength: secret.byteLength ?? null,
+            valuesExposed: false,
+          },
+          fundingAuthorized: false,
+          liveOrderSubmission: "DISABLED",
+        }, 422);
+      }
+
       try {
         const client = new PolymarketUS({
-          keyId: env.POLYMARKET_US_KEY_ID,
-          secretKey: env.POLYMARKET_US_SECRET,
+          keyId: String(env.POLYMARKET_US_KEY_ID).trim(),
+          secretKey: secret.normalized,
         });
 
         const balances = await client.account.balances();
@@ -105,8 +170,9 @@ export default {
           state: "AUTHENTICATED_READ_ONLY",
           accountConnection: "VERIFIED",
           account: safeAccountView(balances),
-          credentials: {
-            installed: true,
+          credentialDiagnostics: {
+            detectedEncoding: secret.detected,
+            decodedByteLength: secret.byteLength,
             valuesExposed: false,
           },
           fundingAuthorized: false,
@@ -114,7 +180,7 @@ export default {
           shadowExperimentStarted: false,
           liveOrderSubmission: "DISABLED",
           note:
-            "This route performs only an authenticated balance read. No order submission is implemented.",
+            "Authenticated balance read only. No order submission is implemented.",
         });
       } catch (error) {
         return json({
@@ -123,8 +189,9 @@ export default {
           accountConnection: "NOT_VERIFIED",
           errorType: error?.name || "Error",
           message: error?.message || "Polymarket US account read failed.",
-          credentials: {
-            installed: true,
+          credentialDiagnostics: {
+            detectedEncoding: secret.detected,
+            decodedByteLength: secret.byteLength,
             valuesExposed: false,
           },
           fundingAuthorized: false,
