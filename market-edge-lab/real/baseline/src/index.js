@@ -1,3 +1,5 @@
+import { PolymarketUS } from "polymarket-us";
+
 const JSON_HEADERS = {
   "content-type": "application/json; charset=utf-8",
   "cache-control": "no-store",
@@ -27,10 +29,26 @@ function statusPayload(env) {
       secretInstalled: Boolean(env.POLYMARKET_US_SECRET),
       valuesExposed: false,
     },
-    accountConnection: "NOT_YET_VERIFIED",
-    accountBalance: "NOT_YET_VERIFIED",
+    accountConnection: "VERIFY_AT_/account",
+    accountBalance: "VERIFY_AT_/account",
     evidenceLedger: "NOT_YET_STARTED",
-    buildCheckpoint: "2026-09-17T01:51:00-04:00",
+    buildCheckpoint: "2026-09-17T19:27:00-04:00",
+  };
+}
+
+function safeAccountView(balances) {
+  return {
+    currentBalance: balances?.currentBalance ?? null,
+    currency: balances?.currency ?? null,
+    buyingPower: balances?.buyingPower ?? null,
+    assetNotional: balances?.assetNotional ?? null,
+    assetAvailable: balances?.assetAvailable ?? null,
+    openOrders: balances?.openOrders ?? null,
+    unsettledFunds: balances?.unsettledFunds ?? null,
+    marginRequirement: balances?.marginRequirement ?? null,
+    pendingWithdrawals: Array.isArray(balances?.pendingWithdrawals)
+      ? balances.pendingWithdrawals.length
+      : null,
   };
 }
 
@@ -42,7 +60,8 @@ export default {
       return json({
         ok: false,
         error: "READ_ONLY_BUILD",
-        message: "Baseline Real currently exposes GET-only validation routes. Live order submission is not implemented.",
+        message:
+          "Baseline Real currently exposes GET-only validation routes. Live order submission is not implemented.",
       }, 405);
     }
 
@@ -50,7 +69,7 @@ export default {
       return json({
         ok: true,
         service: "market-edge-baseline-real",
-        mode: "READ_ONLY_BOOTSTRAP",
+        mode: "READ_ONLY_ACCOUNT_VERIFICATION",
         liveOrderSubmission: "DISABLED",
       });
     }
@@ -60,16 +79,58 @@ export default {
     }
 
     if (url.pathname === "/account") {
-      const credentialsPresent = Boolean(env.POLYMARKET_US_KEY_ID && env.POLYMARKET_US_SECRET);
-      return json({
-        ok: false,
-        state: credentialsPresent ? "AUTH_CONTRACT_NOT_YET_VERIFIED" : "CREDENTIALS_NOT_INSTALLED",
-        balance: "NOT_YET_VERIFIED",
-        liveOrderSubmission: "DISABLED",
-        message: credentialsPresent
-          ? "Credentials are installed server-side, but this build intentionally will not transmit them until the current official Polymarket US authentication contract is verified."
-          : "Install credentials only as encrypted Worker secrets after deployment. Do not place them in GitHub or client-side code.",
-      }, credentialsPresent ? 501 : 503);
+      const credentialsPresent = Boolean(
+        env.POLYMARKET_US_KEY_ID && env.POLYMARKET_US_SECRET,
+      );
+
+      if (!credentialsPresent) {
+        return json({
+          ok: false,
+          state: "CREDENTIALS_NOT_INSTALLED",
+          liveOrderSubmission: "DISABLED",
+          valuesExposed: false,
+        }, 503);
+      }
+
+      try {
+        const client = new PolymarketUS({
+          keyId: env.POLYMARKET_US_KEY_ID,
+          secretKey: env.POLYMARKET_US_SECRET,
+        });
+
+        const balances = await client.account.balances();
+
+        return json({
+          ok: true,
+          state: "AUTHENTICATED_READ_ONLY",
+          accountConnection: "VERIFIED",
+          account: safeAccountView(balances),
+          credentials: {
+            installed: true,
+            valuesExposed: false,
+          },
+          fundingAuthorized: false,
+          expectedFundingUsd: 0,
+          shadowExperimentStarted: false,
+          liveOrderSubmission: "DISABLED",
+          note:
+            "This route performs only an authenticated balance read. No order submission is implemented.",
+        });
+      } catch (error) {
+        return json({
+          ok: false,
+          state: "AUTHENTICATION_OR_ACCOUNT_READ_FAILED",
+          accountConnection: "NOT_VERIFIED",
+          errorType: error?.name || "Error",
+          message: error?.message || "Polymarket US account read failed.",
+          credentials: {
+            installed: true,
+            valuesExposed: false,
+          },
+          fundingAuthorized: false,
+          liveOrderSubmission: "DISABLED",
+        }, 502);
+      }
     }
 
     return json({ ok: false, error: "NOT_FOUND" }, 404);
