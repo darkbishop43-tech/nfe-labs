@@ -16,10 +16,7 @@ function json(body, status = 200) {
 function normalizeSecretKey(raw) {
   const trimmed = String(raw || "").trim();
 
-  if (!trimmed) {
-    return { ok: false, reason: "EMPTY_SECRET" };
-  }
-
+  if (!trimmed) return { ok: false, reason: "EMPTY_SECRET" };
   if (trimmed.includes("-----BEGIN")) {
     return { ok: false, reason: "PEM_FORMAT_NOT_EXPECTED" };
   }
@@ -49,12 +46,7 @@ function normalizeSecretKey(raw) {
       };
     }
 
-    return {
-      ok: true,
-      normalized: value,
-      detected,
-      byteLength,
-    };
+    return { ok: true, normalized: value, detected, byteLength };
   } catch {
     return { ok: false, reason: "BASE64_DECODE_FAILED", detected };
   }
@@ -79,22 +71,29 @@ function statusPayload(env) {
     accountConnection: "VERIFY_AT_/account",
     accountBalance: "VERIFY_AT_/account",
     evidenceLedger: "NOT_YET_STARTED",
-    buildCheckpoint: "2026-09-17T19:40:00-04:00",
+    buildCheckpoint: "2026-09-17T19:42:00-04:00",
   };
 }
 
-function safeAccountView(balances) {
+function safeAccountView(response) {
+  const rows = Array.isArray(response?.balances) ? response.balances : [];
+  const usd =
+    rows.find((row) => String(row?.currency || "").toUpperCase() === "USD") ||
+    rows[0] ||
+    null;
+
   return {
-    currentBalance: balances?.currentBalance ?? null,
-    currency: balances?.currency ?? null,
-    buyingPower: balances?.buyingPower ?? null,
-    assetNotional: balances?.assetNotional ?? null,
-    assetAvailable: balances?.assetAvailable ?? null,
-    openOrders: balances?.openOrders ?? null,
-    unsettledFunds: balances?.unsettledFunds ?? null,
-    marginRequirement: balances?.marginRequirement ?? null,
-    pendingWithdrawals: Array.isArray(balances?.pendingWithdrawals)
-      ? balances.pendingWithdrawals.length
+    balanceRecordCount: rows.length,
+    currentBalance: usd?.currentBalance ?? null,
+    currency: usd?.currency ?? null,
+    buyingPower: usd?.buyingPower ?? null,
+    assetNotional: usd?.assetNotional ?? null,
+    assetAvailable: usd?.assetAvailable ?? null,
+    openOrders: usd?.openOrders ?? null,
+    unsettledFunds: usd?.unsettledFunds ?? null,
+    marginRequirement: usd?.marginRequirement ?? null,
+    pendingWithdrawals: Array.isArray(usd?.pendingWithdrawals)
+      ? usd.pendingWithdrawals.length
       : null,
   };
 }
