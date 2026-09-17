@@ -1,6 +1,9 @@
 name = "market-edge-siblings"
 main = "worker.js"
 compatibility_date = "2026-09-16"
+compatibility_flags = ["global_fetch_strictly_public"]
 
 # KV is intentionally bound in the Cloudflare dashboard as SIBLING_STATE.
 # Keep this Worker isolated from the frozen baseline MARKET_EDGE_STATE namespace.
+# The compatibility flag allows this sibling Worker to read the baseline's public
+# workers.dev /api/state endpoint without creating a binding to or modifying baseline.
