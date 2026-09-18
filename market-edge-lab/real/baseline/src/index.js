@@ -440,7 +440,12 @@ export default {
       return json(proof, status);
     }
 
-    if (url.pathname === "/markets") return json(await marketSnapshot());\n\n    if (url.pathname === "/preview-proof") {\n      const proof = await previewProof(env);\n      return json(proof, proof.ok ? 200 : 422);\n    }
+    if (url.pathname === "/markets") return json(await marketSnapshot());
+
+    if (url.pathname === "/preview-proof") {
+      const proof = await previewProof(env);
+      return json(proof, proof.ok ? 200 : 422);
+    }
 
     return json({ ok: false, error: "NOT_FOUND" }, 404);
   },
