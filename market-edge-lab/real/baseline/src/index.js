@@ -57,8 +57,9 @@ function statusPayload(env) {
     marketScope: env.MARKET_SCOPE || "BTC_ETH_ONLY",
     executionMode: env.EXECUTION_MODE || "LOCKED",
     liveOrderSubmission: "DISABLED",
-    fundingAuthorized: false,
-    expectedFundingUsd: 0,
+    fundingAuthorized: true,
+    expectedFundingUsd: 10,
+    fundingScope: "DEPOSIT_PROOF_ONLY",
     shadowExperimentStarted: false,
     credentials: {
       keyIdInstalled: Boolean(env.POLYMARKET_US_KEY_ID),
@@ -768,7 +769,7 @@ function dashboardHtml() {
   <div class="grid">
     <div class="card"><div class="label">Polymarket Connection</div><div id="conn" class="val">CHECKING…</div><div id="connSub" class="m"></div></div>
     <div class="card"><div class="label">Account State</div><div id="bal" class="val">CHECKING…</div><div id="balSub" class="m"></div></div>
-    <div class="card"><div class="label">Funding Authorization</div><div class="val warn">LOCKED</div><div class="m">$0 deposited · first account-funding proof target $10 after remaining pre-funding gates pass. Real trade stake remains capped at $5.</div></div>
+    <div class="card"><div class="label">Funding Authorization</div><div class="val warn">LOCKED</div><div class="m">$0 deposited · exactly $10 authorized for account-funding proof only. Real trade stake remains capped at $5; live orders remain disabled.</div></div>
     <div class="card"><div class="label">Live Orders</div><div class="val warn">DISABLED</div><div class="m">No live order-submission route is implemented.</div></div>
   </div>
 
@@ -840,7 +841,7 @@ function dashboardHtml() {
       <div class="gate"><span>3. Actual funded balance record</span><strong id="gateBalance">WAITING</strong></div>
       <div class="gate"><span>4. Shadow ledger + real market observation</span><strong id="gateShadow">CHECKING…</strong></div>
       <div class="gate"><span>5. Authenticated order preview without submission</span><strong id="gatePreview">CHECKING…</strong></div>
-      <div class="gate"><span>6. First governed $10 account-funding proof</span><strong>NOT AUTHORIZED</strong></div>
+      <div class="gate"><span>6. First governed $10 account-funding proof</span><strong class="good">AUTHORIZED · DEPOSIT ONLY</strong></div>
     </div>
     <div class="notice">A displayed unfunded state is not withdrawal proof. Funding remains locked until the remaining execution, rules, settlement, recordkeeping, and cash-out gates are independently verified.</div>
   </div>
@@ -862,7 +863,7 @@ function dashboardHtml() {
       <div class="row"><span>First account-funding proof</span><strong>$10</strong></div>
       <div class="row"><span>Maximum Baseline trade stake</span><strong>$5</strong></div>
       <div class="row"><span>Intended first funding method</span><strong>DEBIT CARD</strong></div>
-      <div class="row"><span>Funding authorization</span><strong class="warn">LOCKED</strong></div>
+      <div class="row"><span>Funding authorization</span><strong class="good">$10 · DEPOSIT PROOF ONLY</strong></div>
       <div class="row"><span>Live order submission</span><strong class="warn">DISABLED</strong></div>
     </div>
     </div>
