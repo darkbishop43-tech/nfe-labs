@@ -200,9 +200,9 @@ async function previewProof(env) {
       active: true,
       closed: false,
       ended: false,
-      startTimeMin: now.toISOString(),
-      startTimeMax: horizon.toISOString(),
-      orderBy: ["startTime"],
+      endTimeMin: now.toISOString(),
+      endTimeMax: horizon.toISOString(),
+      orderBy: ["endTime"],
       orderDirection: "asc",
       limit: 100,
     });
