@@ -194,92 +194,55 @@ async function previewProof(env) {
 
   try {
     const publicClient = new PolymarketUS();
-    const searches = await Promise.all([
-      publicClient.search.query({ query: "bitcoin", status: "active", limit: 6 }),
-      publicClient.search.query({ query: "ethereum", status: "active", limit: 6 }),
-    ]);
-    const candidates = searches.flatMap((result) =>
-      (Array.isArray(result?.events) ? result.events : []).flatMap((event) =>
-        (Array.isArray(event?.markets) ? event.markets : [])
-          .filter((market) => market?.active && !market?.closed && market?.slug)
-          .map((market) => ({ market, event }))
-      )
+    const now = new Date();
+    const horizon = new Date(now.getTime() + 3 * 24 * 60 * 60 * 1000);
+    const listed = await publicClient.events.list({
+      active: true,
+      closed: false,
+      ended: false,
+      startTimeMin: now.toISOString(),
+      startTimeMax: horizon.toISOString(),
+      orderBy: ["startTime"],
+      orderDirection: "asc",
+      limit: 100,
+    });
+    const crypto = (Array.isArray(listed?.events) ? listed.events : []).filter((event) => {
+      const hay = [event?.title,event?.slug,event?.description,event?.series?.title,event?.series?.slug,...(event?.tags||[]).flatMap(t=>[t?.label,t?.slug])].filter(Boolean).join(" ").toLowerCase();
+      return /bitcoin|btc|ethereum|eth/.test(hay);
+    });
+    const candidates = crypto.flatMap((event) =>
+      (Array.isArray(event?.markets) ? event.markets : [])
+        .filter((market) => market?.active && !market?.closed && market?.slug)
+        .map((market) => ({ market, event }))
     );
+    if (!candidates.length) return { ok:false,state:"NO_SHORT_HORIZON_BTC_ETH_CANDIDATE",submitted:false,liveOrderSubmission:"DISABLED",fundingAuthorized:false,discovery:{windowHours:72,eventsScanned:(listed?.events||[]).length,cryptoEvents:crypto.length,sensitiveTextExposed:false} };
 
-    if (!candidates.length) {
-      return { ok: false, state: "NO_ACTIVE_BTC_ETH_MARKET_CANDIDATE", submitted: false, liveOrderSubmission: "DISABLED" };
-    }
-
-    let lastState = "PREVIEW_NOT_ACCEPTED";
-    for (const { market, event } of candidates.slice(0, 8)) {
+    const diagnostics=[];
+    for (const { market, event } of candidates.slice(0, 20)) {
       try {
         const bbo = await publicClient.markets.bbo(market.slug);
         const ask = Number(bbo?.bestAsk);
-        if (!Number.isFinite(ask) || ask <= 0) continue;
-
-        // Deliberately tiny dry-run quantity. Preview validates the real API request;
-        // it never creates an order and funding remains locked.
-        const request = {
-          marketSlug: market.slug,
-          intent: "ORDER_INTENT_BUY_LONG",
-          type: "ORDER_TYPE_LIMIT",
-          price: String(bbo.bestAsk),
-          quantity: 1,
-          tif: "TIME_IN_FORCE_IMMEDIATE_OR_CANCEL",
-          manualOrderIndicator: "MANUAL_ORDER_INDICATOR_AUTOMATIC",
-          synchronousExecution: false,
-        };
-        const response = await built.client.orders.preview({ request });
-        const order = response?.order || {};
-        return {
-          ok: true,
-          state: "AUTHENTICATED_ORDER_PREVIEW_ACCEPTED",
-          submitted: false,
-          liveOrderSubmission: "DISABLED",
-          fundingAuthorized: false,
-          preview: {
-            eventTitle: event?.title || null,
-            marketSlug: market.slug,
-            marketTitle: market.title || null,
-            outcome: market.outcome || null,
-            type: order.type || request.type,
-            intent: order.intent || request.intent,
-            tif: order.tif || request.tif,
-            price: order.price ?? request.price,
-            quantity: order.quantity ?? request.quantity,
-            state: order.state || null,
-            manualOrderIndicator: request.manualOrderIndicator,
-          },
-          note: "Polymarket US authenticated preview accepted. No order was created or submitted.",
-        };
-      } catch (error) {
-        lastState = "CANDIDATE_PREVIEW_REJECTED";
-        const raw = String(error?.message || "");
-        const status = Number(error?.status || error?.statusCode || error?.response?.status || 0) || null;
-        const code = String(error?.code || error?.error?.code || "").slice(0, 80) || null;
-        // Whitelist only diagnostic categories; never echo provider text, request headers,
-        // credentials, signatures, or arbitrary response bodies.
-        const lower = raw.toLowerCase();
-        let category = "UNCLASSIFIED_REJECTION";
-        if (lower.includes("balance") || lower.includes("fund")) category = "ACCOUNT_FUNDING_OR_BALANCE";
-        else if (lower.includes("minimum") || lower.includes("quantity") || lower.includes("size")) category = "ORDER_SIZE_OR_MINIMUM";
-        else if (lower.includes("price") || lower.includes("tick")) category = "PRICE_OR_TICK";
-        else if (lower.includes("market") || lower.includes("slug")) category = "MARKET_OR_SLUG";
-        else if (lower.includes("intent") || lower.includes("side")) category = "ORDER_INTENT_OR_SIDE";
-        else if (lower.includes("auth") || status === 401 || status === 403) category = "AUTHORIZATION";
-        return {
-          ok: false,
-          state: lastState,
-          submitted: false,
-          liveOrderSubmission: "DISABLED",
-          fundingAuthorized: false,
-          diagnostic: { category, httpStatus: status, providerCode: code, sensitiveTextExposed: false },
-        };
+        if (!Number.isFinite(ask) || ask <= 0) { diagnostics.push("NO_VALID_ASK"); continue; }
+        const request={marketSlug:market.slug,intent:"ORDER_INTENT_BUY_LONG",type:"ORDER_TYPE_LIMIT",price:String(bbo.bestAsk),quantity:1,tif:"TIME_IN_FORCE_IMMEDIATE_OR_CANCEL",manualOrderIndicator:"MANUAL_ORDER_INDICATOR_AUTOMATIC",synchronousExecution:false};
+        const response=await built.client.orders.preview({request});
+        const order=response?.order||{};
+        return {ok:true,state:"AUTHENTICATED_ORDER_PREVIEW_ACCEPTED",submitted:false,liveOrderSubmission:"DISABLED",fundingAuthorized:false,preview:{eventTitle:event?.title||null,marketSlug:market.slug,marketTitle:market.title||null,outcome:market.outcome||null,type:order.type||request.type,intent:order.intent||request.intent,tif:order.tif||request.tif,price:order.price??request.price,quantity:order.quantity??request.quantity,state:order.state||null,manualOrderIndicator:request.manualOrderIndicator},discovery:{windowHours:72,cryptoEvents:crypto.length,candidates:candidates.length},note:"Polymarket US authenticated preview accepted. No order was created or submitted."};
+      } catch(error) {
+        const raw=String(error?.message||"").toLowerCase();
+        const status=Number(error?.status||error?.statusCode||error?.response?.status||0)||null;
+        let category="UNCLASSIFIED_REJECTION";
+        if(raw.includes("balance")||raw.includes("fund"))category="ACCOUNT_FUNDING_OR_BALANCE";
+        else if(raw.includes("minimum")||raw.includes("quantity")||raw.includes("size"))category="ORDER_SIZE_OR_MINIMUM";
+        else if(raw.includes("price")||raw.includes("tick"))category="PRICE_OR_TICK";
+        else if(raw.includes("market")||raw.includes("slug"))category="MARKET_OR_SLUG";
+        else if(raw.includes("intent")||raw.includes("side"))category="ORDER_INTENT_OR_SIDE";
+        else if(raw.includes("auth")||status===401||status===403)category="AUTHORIZATION";
+        diagnostics.push(category+(status?"_HTTP_"+status:""));
       }
     }
-    return { ok: false, state: lastState, submitted: false, liveOrderSubmission: "DISABLED", fundingAuthorized: false, diagnostic: { category: "NO_PREVIEWABLE_CANDIDATE", sensitiveTextExposed: false } };
+    return {ok:false,state:"SHORT_HORIZON_CANDIDATES_NOT_PREVIEWABLE",submitted:false,liveOrderSubmission:"DISABLED",fundingAuthorized:false,diagnostic:{category:diagnostics[0]||"NO_VALID_BBO",attempted:Math.min(candidates.length,20),sensitiveTextExposed:false},discovery:{windowHours:72,cryptoEvents:crypto.length,candidates:candidates.length}};
   } catch {
-    return { ok: false, state: "PREVIEW_PROOF_FAILED", submitted: false, liveOrderSubmission: "DISABLED", fundingAuthorized: false };
+    return {ok:false,state:"PREVIEW_PROOF_FAILED",submitted:false,liveOrderSubmission:"DISABLED",fundingAuthorized:false};
   }
 }
 
