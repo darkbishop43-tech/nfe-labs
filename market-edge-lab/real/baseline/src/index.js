@@ -798,11 +798,7 @@ async function load(){
   refresh.disabled=true;refresh.textContent='CHECKING…';gatePreview.textContent='CHECKING LIVE PROOF…';gatePreview.className='m';
   try{
     const [ar,sr,mr,pr,moneyr,shr]=await Promise.all([fetch('/account',{cache:'no-store'}),fetch('/status',{cache:'no-store'}),fetch('/markets',{cache:'no-store'}),fetch('/preview-proof',{cache:'no-store'}),fetch('/money-path-proof',{cache:'no-store'}),fetch('/shadow-state',{cache:'no-store'})]);
-    const account=await ar.json(),status=await sr.json(),market=await mr.json(),preview=await pr.json(),money=await moneyr.json();let shadow=await shr.json();
-    if(shadow.status==='READY_NOT_STARTED' && Number(shadow.runs||0)===0){
-      const boot=await fetch('/shadow-run',{cache:'no-store'});
-      shadow=await boot.json();
-    }
+    const account=await ar.json(),status=await sr.json(),market=await mr.json(),preview=await pr.json(),money=await moneyr.json(),shadow=await shr.json();
     const shadowLive=shadow.status==='LIVE_US_SHADOW';
     E('shadowRuntime').textContent=shadow.status||'UNKNOWN';E('shadowRuntime').className=shadowLive?'good':'warn';
     E('shadowStarted').textContent=shadow.startedAt?new Date(shadow.startedAt).toLocaleString():'NOT STARTED';
