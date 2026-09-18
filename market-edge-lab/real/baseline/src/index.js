@@ -252,11 +252,32 @@ async function previewProof(env) {
           },
           note: "Polymarket US authenticated preview accepted. No order was created or submitted.",
         };
-      } catch {
+      } catch (error) {
         lastState = "CANDIDATE_PREVIEW_REJECTED";
+        const raw = String(error?.message || "");
+        const status = Number(error?.status || error?.statusCode || error?.response?.status || 0) || null;
+        const code = String(error?.code || error?.error?.code || "").slice(0, 80) || null;
+        // Whitelist only diagnostic categories; never echo provider text, request headers,
+        // credentials, signatures, or arbitrary response bodies.
+        const lower = raw.toLowerCase();
+        let category = "UNCLASSIFIED_REJECTION";
+        if (lower.includes("balance") || lower.includes("fund")) category = "ACCOUNT_FUNDING_OR_BALANCE";
+        else if (lower.includes("minimum") || lower.includes("quantity") || lower.includes("size")) category = "ORDER_SIZE_OR_MINIMUM";
+        else if (lower.includes("price") || lower.includes("tick")) category = "PRICE_OR_TICK";
+        else if (lower.includes("market") || lower.includes("slug")) category = "MARKET_OR_SLUG";
+        else if (lower.includes("intent") || lower.includes("side")) category = "ORDER_INTENT_OR_SIDE";
+        else if (lower.includes("auth") || status === 401 || status === 403) category = "AUTHORIZATION";
+        return {
+          ok: false,
+          state: lastState,
+          submitted: false,
+          liveOrderSubmission: "DISABLED",
+          fundingAuthorized: false,
+          diagnostic: { category, httpStatus: status, providerCode: code, sensitiveTextExposed: false },
+        };
       }
     }
-    return { ok: false, state: lastState, submitted: false, liveOrderSubmission: "DISABLED", fundingAuthorized: false };
+    return { ok: false, state: lastState, submitted: false, liveOrderSubmission: "DISABLED", fundingAuthorized: false, diagnostic: { category: "NO_PREVIEWABLE_CANDIDATE", sensitiveTextExposed: false } };
   } catch {
     return { ok: false, state: "PREVIEW_PROOF_FAILED", submitted: false, liveOrderSubmission: "DISABLED", fundingAuthorized: false };
   }
