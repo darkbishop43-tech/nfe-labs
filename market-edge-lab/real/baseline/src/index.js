@@ -540,71 +540,64 @@ async function discoverUsShadowMarkets() {
     }
   }
 
-  // Preserve the proven search-embedded market path. ETH discovery work must not
-  // replace this working BTC path; additional ETH sources can be merged beside it.
-  const marketRows = new Map();
-  for (const event of eventMap.values()) {
-    for (const compact of (event?.markets || [])) {
-      if (compact?.slug) marketRows.set(String(compact.slug), { market: compact, event });
-    }
-  }
-
   const candidates = [];
   let seen = 0;
   let rejected = 0;
 
-  for (const { market: compact, event } of marketRows.values()) {
-    seen += 1;
-    if (!compact?.slug || compact?.active === false || compact?.closed === true) {
-      rejected += 1;
-      continue;
-    }
-
-    let market = compact;
-    try {
-      const detail = await client.markets.retrieveBySlug(compact.slug);
-      market = detail?.market || compact;
-    } catch {}
-
-    const text = [event?.title, market?.title, market?.slug, market?.outcome].filter(Boolean).join(" — ");
-    const rel = shadowRelevant(text);
-    if (!rel || market?.active === false || market?.closed === true) {
-      rejected += 1;
-      continue;
-    }
-
-    try {
-      const bboRaw = await client.markets.bbo(market.slug);
-      const bbo = bboRaw?.marketData || bboRaw;
-      let yes = normalizeProbability(bbo?.bestAsk);
-      let bid = normalizeProbability(bbo?.bestBid);
-
-      if (yes === null) {
-        const bookRaw = await client.markets.book(market.slug);
-        const book = bookRaw?.marketData || bookRaw;
-        const offers = Array.isArray(book?.offers) ? book.offers : [];
-        const bids = Array.isArray(book?.bids) ? book.bids : [];
-        yes = normalizeProbability(offers[0]?.px);
-        if (bid === null) bid = normalizeProbability(bids[0]?.px);
-      }
-
-      if (yes === null || yes <= 0.01 || yes >= 0.99) {
+  for (const event of eventMap.values()) {
+    for (const compact of (event?.markets || [])) {
+      seen += 1;
+      if (!compact?.slug || compact?.active === false || compact?.closed === true) {
         rejected += 1;
         continue;
       }
 
-      candidates.push({
-        id: String(market?.id ?? market?.slug),
-        slug: market.slug,
-        question: text,
-        asset: rel.asset,
-        bear: rel.bear,
-        yes,
-        bid,
-        source: "POLYMARKET_US",
-      });
-    } catch {
-      rejected += 1;
+      let market = compact;
+      try {
+        const detail = await client.markets.retrieveBySlug(compact.slug);
+        market = detail?.market || compact;
+      } catch {}
+
+      const text = [event?.title, market?.title, market?.slug, market?.outcome].filter(Boolean).join(" — ");
+      const rel = shadowRelevant(text);
+      if (!rel || market?.active === false || market?.closed === true) {
+        rejected += 1;
+        continue;
+      }
+
+      try {
+        const bboRaw = await client.markets.bbo(market.slug);
+        const bbo = bboRaw?.marketData || bboRaw;
+        let yes = normalizeProbability(bbo?.bestAsk);
+        let bid = normalizeProbability(bbo?.bestBid);
+
+        if (yes === null) {
+          const bookRaw = await client.markets.book(market.slug);
+          const book = bookRaw?.marketData || bookRaw;
+          const offers = Array.isArray(book?.offers) ? book.offers : [];
+          const bids = Array.isArray(book?.bids) ? book.bids : [];
+          yes = normalizeProbability(offers[0]?.px);
+          if (bid === null) bid = normalizeProbability(bids[0]?.px);
+        }
+
+        if (yes === null || yes <= 0.01 || yes >= 0.99) {
+          rejected += 1;
+          continue;
+        }
+
+        candidates.push({
+          id: String(market?.id ?? market?.slug),
+          slug: market.slug,
+          question: text,
+          asset: rel.asset,
+          bear: rel.bear,
+          yes,
+          bid,
+          source: "POLYMARKET_US",
+        });
+      } catch {
+        rejected += 1;
+      }
     }
   }
 
