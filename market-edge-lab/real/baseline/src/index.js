@@ -1383,7 +1383,9 @@ export default {
       let offset = 0;
       let pages = 0;
       let totalRows = 0;
-      while (pages < 10) {
+      // Exhaust the public active-market listing rather than stopping at 1,000 rows.
+      // Hard ceiling prevents an accidental unbounded diagnostic loop.
+      while (pages < 100) {
         let result;
         try {
           result = await client.markets.list({ active: true, closed: false, limit: 100, offset });
