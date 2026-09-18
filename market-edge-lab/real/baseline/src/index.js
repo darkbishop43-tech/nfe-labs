@@ -1323,6 +1323,35 @@ export default {
 
     if (url.pathname === "/markets") return json(await marketSnapshot());
 
+    // Temporary read-only discovery diagnostic. It exposes only public market metadata,
+    // never credentials/account values, and cannot submit an order.
+    if (url.pathname === "/eth-discovery-proof") {
+      const client = new PolymarketUS();
+      const queries = ["ethereum", "ETH", "ether"];
+      const proof = {};
+      for (const query of queries) {
+        try {
+          const result = await client.search.query({ query, status: "active", limit: 50 });
+          const events = Array.isArray(result?.events) ? result.events : [];
+          proof[query] = {
+            eventCount: events.length,
+            embeddedMarketCount: events.reduce((n,e)=>n+(Array.isArray(e?.markets)?e.markets.length:0),0),
+            samples: events.slice(0,5).map(e=>({
+              title:e?.title||null,
+              slug:e?.slug||null,
+              markets:(Array.isArray(e?.markets)?e.markets:[]).slice(0,5).map(m=>({
+                title:m?.title||null,slug:m?.slug||null,outcome:m?.outcome||null,
+                active:m?.active??null,closed:m?.closed??null
+              }))
+            }))
+          };
+        } catch {
+          proof[query] = { error:"PUBLIC_SEARCH_FAILED" };
+        }
+      }
+      return json({ok:true,source:"POLYMARKET_US_PUBLIC_SEARCH",proof,submitted:false,sensitiveValuesExposed:false});
+    }
+
     if (url.pathname === "/price-proof") return json(await livePriceProof(env));
 
     if (url.pathname === "/money-path-proof") return json(await moneyPathProof(env));
