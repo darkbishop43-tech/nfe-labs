@@ -540,60 +540,12 @@ async function discoverUsShadowMarkets() {
     }
   }
 
-  // Search results do not always embed the full active-market set for an event.
-  // Hydrate the searched event slugs through the official markets endpoint, then
-  // merge/dedupe by market slug. This keeps the existing scoring/execution logic
-  // unchanged while preventing ETH markets from being silently missed.
-  const eventBySlug = new Map(
-    [...eventMap.values()]
-      .filter((event) => event?.slug)
-      .map((event) => [String(event.slug), event])
-  );
+  // Preserve the proven search-embedded market path. ETH discovery work must not
+  // replace this working BTC path; additional ETH sources can be merged beside it.
   const marketRows = new Map();
-
-  // Hydrate every searched event first. Search responses are intentionally compact;
-  // event retrieval is the authoritative way to obtain that event's complete market set.
-  // Keep the compact event as fallback so a single failed hydration cannot erase BTC.
-  for (const compactEvent of eventMap.values()) {
-    let event = compactEvent;
-    if (compactEvent?.slug) {
-      try {
-        const detail = await client.events.retrieveBySlug(compactEvent.slug);
-        event = detail?.event || detail || compactEvent;
-        eventBySlug.set(String(compactEvent.slug), event);
-      } catch {}
-    } else if (compactEvent?.id != null) {
-      try {
-        const detail = await client.events.retrieve(compactEvent.id);
-        event = detail?.event || detail || compactEvent;
-      } catch {}
-    }
-    for (const compact of (event?.markets || compactEvent?.markets || [])) {
-      if (compact?.slug) {
-        marketRows.set(String(compact.slug), { market: compact, event });
-      }
-    }
-  }
-
-  const eventSlugs = [...eventBySlug.keys()];
-  if (eventSlugs.length) {
-    try {
-      const listed = await client.markets.list({
-        eventSlug: eventSlugs,
-        active: true,
-        closed: false,
-        orderBy: ["volume"],
-        orderDirection: "desc",
-        limit: 100,
-      });
-      for (const market of (listed?.markets || [])) {
-        if (!market?.slug) continue;
-        const eventSlug = String(market?.eventSlug ?? market?.event?.slug ?? "");
-        const event = eventBySlug.get(eventSlug) || marketRows.get(String(market.slug))?.event || null;
-        marketRows.set(String(market.slug), { market, event });
-      }
-    } catch {
-      // Fall back to the embedded search markets already collected above.
+  for (const event of eventMap.values()) {
+    for (const compact of (event?.markets || [])) {
+      if (compact?.slug) marketRows.set(String(compact.slug), { market: compact, event });
     }
   }
 
