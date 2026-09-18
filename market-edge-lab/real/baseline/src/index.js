@@ -218,9 +218,21 @@ async function previewProof(env) {
     const candidates = searchedMarkets.map(({market,event})=>({market:detailMap.get(market.slug)||market,event}));
     if (!candidates.length) return { ok:false,state:"NO_ACTIVE_US_BTC_ETH_CANDIDATE",submitted:false,liveOrderSubmission:"DISABLED",fundingAuthorized:false,discovery:{searchEvents:eventMap.size,cryptoEvents:crypto.length,candidates:0,sensitiveTextExposed:false} };
 
+    // Search/event payloads can contain compact market objects. Hydrate each candidate
+    // through the official market-by-slug endpoint before asking for BBO/book data.
+    const hydratedCandidates=[];
+    for (const item of candidates.slice(0,20)) {
+      try {
+        const detail=await publicClient.markets.retrieveBySlug(item.market.slug);
+        hydratedCandidates.push({market:detail?.market||item.market,event:item.event});
+      } catch {
+        hydratedCandidates.push(item);
+      }
+    }
+
     const diagnostics=[];
     const marketEvidence=[];
-    for (const { market, event } of candidates.slice(0, 20)) {
+    for (const { market, event } of hydratedCandidates) {
       try {
         const bbo = await publicClient.markets.bbo(market.slug);
         let askValue = bbo?.bestAsk?.value ?? bbo?.bestAsk;
@@ -233,7 +245,7 @@ async function previewProof(env) {
         }
         if (!Number.isFinite(ask) || ask <= 0) {
           const probeBook = await publicClient.markets.book(market.slug).catch(()=>null);
-          marketEvidence.push({slug:market.slug,title:market.title||null,outcome:market.outcome||null,state:probeBook?.state||null,bids:Array.isArray(probeBook?.bids)?probeBook.bids.length:0,offers:Array.isArray(probeBook?.offers)?probeBook.offers.length:0});
+          marketEvidence.push({slug:market.slug,id:market.id??null,title:market.title||null,outcome:market.outcome||null,active:market.active??null,closed:market.closed??null,state:probeBook?.state||null,bids:Array.isArray(probeBook?.bids)?probeBook.bids.length:0,offers:Array.isArray(probeBook?.offers)?probeBook.offers.length:0});
           diagnostics.push("NO_VALID_ASK_OR_BOOK_OFFER");
           continue;
         }
