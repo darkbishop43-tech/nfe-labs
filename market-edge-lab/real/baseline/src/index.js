@@ -188,6 +188,80 @@ async function accountProof(env) {
   }
 }
 
+async function previewProof(env) {
+  const built = await createClient(env);
+  if (!built.ok) return { ok: false, state: built.state, submitted: false, liveOrderSubmission: "DISABLED" };
+
+  try {
+    const publicClient = new PolymarketUS();
+    const searches = await Promise.all([
+      publicClient.search.query({ query: "bitcoin", status: "active", limit: 6 }),
+      publicClient.search.query({ query: "ethereum", status: "active", limit: 6 }),
+    ]);
+    const candidates = searches.flatMap((result) =>
+      (Array.isArray(result?.events) ? result.events : []).flatMap((event) =>
+        (Array.isArray(event?.markets) ? event.markets : [])
+          .filter((market) => market?.active && !market?.closed && market?.slug)
+          .map((market) => ({ market, event }))
+      )
+    );
+
+    if (!candidates.length) {
+      return { ok: false, state: "NO_ACTIVE_BTC_ETH_MARKET_CANDIDATE", submitted: false, liveOrderSubmission: "DISABLED" };
+    }
+
+    let lastState = "PREVIEW_NOT_ACCEPTED";
+    for (const { market, event } of candidates.slice(0, 8)) {
+      try {
+        const bbo = await publicClient.markets.bbo(market.slug);
+        const ask = Number(bbo?.bestAsk);
+        if (!Number.isFinite(ask) || ask <= 0) continue;
+
+        // Deliberately tiny dry-run quantity. Preview validates the real API request;
+        // it never creates an order and funding remains locked.
+        const request = {
+          marketSlug: market.slug,
+          intent: "ORDER_INTENT_BUY_LONG",
+          type: "ORDER_TYPE_LIMIT",
+          price: String(bbo.bestAsk),
+          quantity: 1,
+          tif: "TIME_IN_FORCE_IMMEDIATE_OR_CANCEL",
+          manualOrderIndicator: "MANUAL_ORDER_INDICATOR_AUTOMATIC",
+          synchronousExecution: false,
+        };
+        const response = await built.client.orders.preview({ request });
+        const order = response?.order || {};
+        return {
+          ok: true,
+          state: "AUTHENTICATED_ORDER_PREVIEW_ACCEPTED",
+          submitted: false,
+          liveOrderSubmission: "DISABLED",
+          fundingAuthorized: false,
+          preview: {
+            eventTitle: event?.title || null,
+            marketSlug: market.slug,
+            marketTitle: market.title || null,
+            outcome: market.outcome || null,
+            type: order.type || request.type,
+            intent: order.intent || request.intent,
+            tif: order.tif || request.tif,
+            price: order.price ?? request.price,
+            quantity: order.quantity ?? request.quantity,
+            state: order.state || null,
+            manualOrderIndicator: request.manualOrderIndicator,
+          },
+          note: "Polymarket US authenticated preview accepted. No order was created or submitted.",
+        };
+      } catch {
+        lastState = "CANDIDATE_PREVIEW_REJECTED";
+      }
+    }
+    return { ok: false, state: lastState, submitted: false, liveOrderSubmission: "DISABLED", fundingAuthorized: false };
+  } catch {
+    return { ok: false, state: "PREVIEW_PROOF_FAILED", submitted: false, liveOrderSubmission: "DISABLED", fundingAuthorized: false };
+  }
+}
+
 async function marketSnapshot() {
   const client = new PolymarketUS();
 
@@ -292,7 +366,7 @@ function dashboardHtml() {
       <div class="gate"><span>2. Authenticated read-only account connection</span><strong id="gateAccount">CHECKING…</strong></div>
       <div class="gate"><span>3. Actual funded balance record</span><strong id="gateBalance">WAITING</strong></div>
       <div class="gate"><span>4. Shadow ledger + real market observation</span><strong>NOT STARTED</strong></div>
-      <div class="gate"><span>5. Authenticated order preview without submission</span><strong>NOT ENABLED</strong></div>
+      <div class="gate"><span>5. Authenticated order preview without submission</span><strong id="gatePreview">CHECKING…</strong></div>
       <div class="gate"><span>6. First governed $5 funded test</span><strong>NOT AUTHORIZED</strong></div>
     </div>
     <div class="notice">A displayed unfunded state is not withdrawal proof. Funding remains locked until the remaining execution, rules, settlement, recordkeeping, and cash-out gates are independently verified.</div>
@@ -303,12 +377,12 @@ function dashboardHtml() {
 const E=id=>document.getElementById(id);
 const esc=s=>String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
 async function load(){
-  const conn=E('conn'),connSub=E('connSub'),bal=E('bal'),balSub=E('balSub'),creds=E('creds'),gateAccount=E('gateAccount'),gateBalance=E('gateBalance'),markets=E('markets'),statusDot=E('statusDot'),statusText=E('statusText');
+  const conn=E('conn'),connSub=E('connSub'),bal=E('bal'),balSub=E('balSub'),creds=E('creds'),gateAccount=E('gateAccount'),gateBalance=E('gateBalance'),gatePreview=E('gatePreview'),markets=E('markets'),statusDot=E('statusDot'),statusText=E('statusText');
   try{
-    const [ar,sr,mr]=await Promise.all([fetch('/account',{cache:'no-store'}),fetch('/status',{cache:'no-store'}),fetch('/markets',{cache:'no-store'})]);
-    const account=await ar.json(),status=await sr.json(),market=await mr.json();
+    const [ar,sr,mr,pr]=await Promise.all([fetch('/account',{cache:'no-store'}),fetch('/status',{cache:'no-store'}),fetch('/markets',{cache:'no-store'}),fetch('/preview-proof',{cache:'no-store'})]);
+    const account=await ar.json(),status=await sr.json(),market=await mr.json(),preview=await pr.json();
     creds.textContent=status?.credentials?.keyIdInstalled&&status?.credentials?.secretInstalled?'INSTALLED':'MISSING';
-    creds.className=creds.textContent==='INSTALLED'?'good':'bad';
+    creds.className=creds.textContent==='INSTALLED'?'good':'bad';gatePreview.textContent=preview?.ok&&preview?.submitted===false?'PASS · NO SUBMISSION':(preview?.state||'NOT PROVEN');gatePreview.className=preview?.ok&&preview?.submitted===false?'good':'m';
     if(account.ok&&account.accountConnection==='VERIFIED'){
       conn.textContent='VERIFIED';conn.className='val good';connSub.textContent='Authenticated read-only Polymarket US API connection.';
       gateAccount.textContent='PASS';gateAccount.className='good';statusDot.className='dot';statusText.innerHTML='<b class="good">AUTHENTICATED READ-ONLY · VERIFIED</b>';
@@ -366,7 +440,7 @@ export default {
       return json(proof, status);
     }
 
-    if (url.pathname === "/markets") return json(await marketSnapshot());
+    if (url.pathname === "/markets") return json(await marketSnapshot());\n\n    if (url.pathname === "/preview-proof") {\n      const proof = await previewProof(env);\n      return json(proof, proof.ok ? 200 : 422);\n    }
 
     return json({ ok: false, error: "NOT_FOUND" }, 404);
   },
