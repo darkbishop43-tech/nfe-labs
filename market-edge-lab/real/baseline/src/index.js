@@ -797,6 +797,13 @@ async function maybeRunOneTrade(env) {
 
   // Entry: exactly one governed real order, only from a qualifying Shadow opportunity.
   if (!state.entryOrderId) {
+    if (state.status === "ENTRY_SUBMITTING" || state.status === "BLOCKED_ENTRY_RECONCILIATION") {
+      state.status = "BLOCKED_ENTRY_RECONCILIATION";
+      realTradeLedger(state, "REAL_TEST_BLOCKED", { reason: "ENTRY_RECONCILIATION_REQUIRED" });
+      await saveRealTradeState(env, state);
+      return state;
+    }
+
     const candidate = (shadow?.opportunities || []).find((o) =>
       Number(o?.score) >= REAL_TEST_CONFIG.entryScore &&
       Number(o?.edge) > 0 &&
@@ -830,15 +837,30 @@ async function maybeRunOneTrade(env) {
 
     // Mandatory preview immediately before the one allowed create call.
     await built.client.orders.preview({ request });
-    const created = await built.client.orders.create(request);
 
-    state.entryOrderId = created?.id || null;
+    // Persist a one-way pre-submit latch BEFORE the provider POST. If the worker dies
+    // after the POST but before the response is saved, the next run blocks instead of
+    // risking a duplicate real-money order.
     state.marketSlug = candidate.slug;
     state.question = candidate.question || null;
     state.asset = candidate.asset || null;
     state.entryScore = Number(candidate.score);
-    state.openedAt = now;
-    state.status = "ENTRY_SUBMITTED";
+    state.status = "ENTRY_SUBMITTING";
+    state.entrySubmitStartedAt = now;
+    realTradeLedger(state, "REAL_ENTRY_PRE_SUBMIT_LATCHED", {
+      marketSlug: state.marketSlug,
+      question: state.question,
+      asset: state.asset,
+      score: state.entryScore,
+      maxCashStakeUsd: REAL_TEST_CONFIG.maxStakeUsd,
+    });
+    await saveRealTradeState(env, state);
+
+    const created = await built.client.orders.create(request);
+
+    state.entryOrderId = created?.id || null;
+    state.openedAt = Date.now();
+    state.status = state.entryOrderId ? "ENTRY_SUBMITTED" : "BLOCKED_ENTRY_RECONCILIATION";
     realTradeLedger(state, "REAL_ENTRY_SUBMITTED", {
       orderId: state.entryOrderId,
       marketSlug: state.marketSlug,
@@ -853,6 +875,13 @@ async function maybeRunOneTrade(env) {
 
   // Exit: close the single test position at score <= .20 or after 5 minutes.
   if (!state.exitOrderId) {
+    if (state.status === "EXIT_SUBMITTING" || state.status === "BLOCKED_EXIT_RECONCILIATION") {
+      state.status = "BLOCKED_EXIT_RECONCILIATION";
+      realTradeLedger(state, "REAL_TEST_BLOCKED", { reason: "EXIT_RECONCILIATION_REQUIRED" });
+      await saveRealTradeState(env, state);
+      return state;
+    }
+
     const current = (shadow?.opportunities || []).find((o) => o?.slug === state.marketSlug);
     const age = state.openedAt ? now - Number(state.openedAt) : 0;
     const scoreExit = current && Number(current.score) <= REAL_TEST_CONFIG.exitScore;
@@ -864,6 +893,17 @@ async function maybeRunOneTrade(env) {
       return state;
     }
 
+    state.status = "EXIT_SUBMITTING";
+    state.exitSubmitStartedAt = now;
+    state.exitReason = scoreExit ? "score_exit" : "max_hold";
+    realTradeLedger(state, "REAL_EXIT_PRE_SUBMIT_LATCHED", {
+      marketSlug: state.marketSlug,
+      reason: state.exitReason,
+      heldMs: age,
+      observedExitScore: current ? Number(current.score) : null,
+    });
+    await saveRealTradeState(env, state);
+
     const closed = await built.client.orders.closePosition({
       marketSlug: state.marketSlug,
       manualOrderIndicator: "MANUAL_ORDER_INDICATOR_AUTOMATIC",
@@ -871,10 +911,9 @@ async function maybeRunOneTrade(env) {
     });
 
     state.exitOrderId = closed?.id || null;
-    state.closedAt = now;
-    state.exitReason = scoreExit ? "score_exit" : "max_hold";
-    state.consumed = true;
-    state.status = "ONE_TRADE_COMPLETE";
+    state.closedAt = Date.now();
+    state.consumed = Boolean(state.exitOrderId);
+    state.status = state.exitOrderId ? "ONE_TRADE_COMPLETE" : "BLOCKED_EXIT_RECONCILIATION";
     realTradeLedger(state, "REAL_EXIT_SUBMITTED", {
       orderId: state.exitOrderId,
       marketSlug: state.marketSlug,
@@ -978,7 +1017,7 @@ function dashboardHtml() {
     <div class="card"><div class="label">Polymarket Connection</div><div id="conn" class="val">CHECKING…</div><div id="connSub" class="m"></div></div>
     <div class="card"><div class="label">Account State</div><div id="bal" class="val">CHECKING…</div><div id="balSub" class="m"></div></div>
     <div class="card"><div class="label">Funding Authorization</div><div class="val warn">LOCKED</div><div class="m">$0 deposited · exactly $10 authorized for account-funding proof only. Real trade stake remains capped at $5; live orders remain disabled.</div></div>
-    <div class="card"><div class="label">Live Orders</div><div class="val warn">DISABLED</div><div class="m">One-trade execution controller is implemented but DISARMED. No order can submit while execution remains LOCKED.</div></div>
+    <div class="card"><div class="label">Live Orders</div><div id="liveOrdersState" class="val warn">CHECKING…</div><div id="liveOrdersSub" class="m">One-trade execution controller status loading.</div></div>
   </div>
 
   <div class="card section">
@@ -1086,9 +1125,17 @@ async function load(){
   const conn=E('conn'),connSub=E('connSub'),bal=E('bal'),balSub=E('balSub'),creds=E('creds'),gateAccount=E('gateAccount'),gateBalance=E('gateBalance'),gatePreview=E('gatePreview'),markets=E('markets'),statusDot=E('statusDot'),statusText=E('statusText'),refresh=E('refresh');
   refresh.disabled=true;refresh.textContent='CHECKING…';gatePreview.textContent='CHECKING LIVE PROOF…';gatePreview.className='m';
   try{
-    const [ar,sr,mr,pr,moneyr,shr,pxr]=await Promise.all([fetch('/account',{cache:'no-store'}),fetch('/status',{cache:'no-store'}),fetch('/markets',{cache:'no-store'}),fetch('/preview-proof',{cache:'no-store'}),fetch('/money-path-proof',{cache:'no-store'}),fetch('/shadow-state',{cache:'no-store'}),fetch('/price-proof',{cache:'no-store'})]);
-    const account=await ar.json(),status=await sr.json(),market=await mr.json(),preview=await pr.json(),money=await moneyr.json(),shadow=await shr.json(),prices=await pxr.json();
+    const [ar,sr,mr,pr,moneyr,shr,pxr,rtr]=await Promise.all([fetch('/account',{cache:'no-store'}),fetch('/status',{cache:'no-store'}),fetch('/markets',{cache:'no-store'}),fetch('/preview-proof',{cache:'no-store'}),fetch('/money-path-proof',{cache:'no-store'}),fetch('/shadow-state',{cache:'no-store'}),fetch('/price-proof',{cache:'no-store'}),fetch('/real-trade-state',{cache:'no-store'})]);
+    const account=await ar.json(),status=await sr.json(),market=await mr.json(),preview=await pr.json(),money=await moneyr.json(),shadow=await shr.json(),prices=await pxr.json(),realTrade=await rtr.json();
     const shadowLive=shadow.status==='LIVE_US_SHADOW';
+    const liveOrdersState=E('liveOrdersState'),liveOrdersSub=E('liveOrdersSub');
+    if(realTrade?.armed){
+      liveOrdersState.textContent='ONE-TRADE ARMED';liveOrdersState.className='val good';
+      liveOrdersSub.textContent='Exactly one governed real trade may execute when Baseline score ≥ .80. Max stake $5. Then controller consumes itself.';
+    }else{
+      liveOrdersState.textContent='DISABLED';liveOrdersState.className='val warn';
+      liveOrdersSub.textContent='One-trade execution controller is implemented but DISARMED.';
+    }
     const moneyFmt=n=>Number(n).toLocaleString(undefined,{style:'currency',currency:'USD',maximumFractionDigits:2});
     const pctFmt=n=>(Number(n)>=0?'+':'')+Number(n).toFixed(2)+'%';
     const drawSpark=(id,points,change)=>{
