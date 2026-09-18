@@ -234,11 +234,13 @@ async function previewProof(env) {
     const marketEvidence=[];
     for (const { market, event } of hydratedCandidates) {
       try {
-        const bbo = await publicClient.markets.bbo(market.slug);
+        const bboRaw = await publicClient.markets.bbo(market.slug);
+        const bbo = bboRaw?.marketData || bboRaw;
         let askValue = bbo?.bestAsk?.value ?? bbo?.bestAsk;
         let ask = Number(askValue);
         if (!Number.isFinite(ask) || ask <= 0) {
-          const book = await publicClient.markets.book(market.slug);
+          const bookRaw = await publicClient.markets.book(market.slug);
+          const book = bookRaw?.marketData || bookRaw;
           const offers = Array.isArray(book?.offers) ? book.offers : [];
           askValue = offers[0]?.px?.value ?? offers[0]?.px;
           ask = Number(askValue);
