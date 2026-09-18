@@ -732,11 +732,24 @@ function dashboardHtml() {
       <div class="rows" style="margin-top:8px">
         <div class="row"><span>Credentials</span><strong id="creds">CHECKING…</strong></div>
         <div class="row"><span>Secret exposure</span><strong class="good">NONE</strong></div>
-        <div class="row"><span>Shadow experiment</span><strong>NOT STARTED</strong></div>
+        <div class="row"><span>Shadow experiment</span><strong id="shadowGov">CHECKING…</strong></div>
         <div class="row"><span>Market scope</span><strong>BTC / ETH ONLY</strong></div>
         <div class="row"><span>Execution mode</span><strong>LOCKED</strong></div>
       </div>
     </div>
+  </div>
+
+  <div class="card section">
+    <b>Baseline Real Shadow Runtime</b>
+    <div class="rows" style="margin-top:8px">
+      <div class="row"><span>Status</span><strong id="shadowRuntime">CHECKING…</strong></div>
+      <div class="row"><span>Started</span><strong id="shadowStarted">—</strong></div>
+      <div class="row"><span>Last observation</span><strong id="shadowLast">—</strong></div>
+      <div class="row"><span>Runs</span><strong id="shadowRuns">0</strong></div>
+      <div class="row"><span>US BTC/ETH eligible markets</span><strong id="shadowEligible">0</strong></div>
+      <div class="row"><span>Persistence</span><strong id="shadowPersistence">—</strong></div>
+    </div>
+    <div class="notice">SHADOW ONLY · ENTRY ≥ .80 · EXIT ≤ .20 · MAX HOLD 5 MIN · MAX STAKE $5 · NO REAL ORDER SUBMISSION.</div>
   </div>
 
   <div class="card section">
@@ -745,7 +758,7 @@ function dashboardHtml() {
       <div class="gate"><span>1. Secure API credentials</span><strong class="good">PASS</strong></div>
       <div class="gate"><span>2. Authenticated read-only account connection</span><strong id="gateAccount">CHECKING…</strong></div>
       <div class="gate"><span>3. Actual funded balance record</span><strong id="gateBalance">WAITING</strong></div>
-      <div class="gate"><span>4. Shadow ledger + real market observation</span><strong>NOT STARTED</strong></div>
+      <div class="gate"><span>4. Shadow ledger + real market observation</span><strong id="gateShadow">CHECKING…</strong></div>
       <div class="gate"><span>5. Authenticated order preview without submission</span><strong id="gatePreview">CHECKING…</strong></div>
       <div class="gate"><span>6. First governed $5 funded test</span><strong>NOT AUTHORIZED</strong></div>
     </div>
@@ -784,8 +797,15 @@ async function load(){
   const conn=E('conn'),connSub=E('connSub'),bal=E('bal'),balSub=E('balSub'),creds=E('creds'),gateAccount=E('gateAccount'),gateBalance=E('gateBalance'),gatePreview=E('gatePreview'),markets=E('markets'),statusDot=E('statusDot'),statusText=E('statusText'),refresh=E('refresh');
   refresh.disabled=true;refresh.textContent='CHECKING…';gatePreview.textContent='CHECKING LIVE PROOF…';gatePreview.className='m';
   try{
-    const [ar,sr,mr,pr,moneyr]=await Promise.all([fetch('/account',{cache:'no-store'}),fetch('/status',{cache:'no-store'}),fetch('/markets',{cache:'no-store'}),fetch('/preview-proof',{cache:'no-store'}),fetch('/money-path-proof',{cache:'no-store'})]);
-    const account=await ar.json(),status=await sr.json(),market=await mr.json(),preview=await pr.json(),money=await moneyr.json();
+    const [ar,sr,mr,pr,moneyr,shr]=await Promise.all([fetch('/account',{cache:'no-store'}),fetch('/status',{cache:'no-store'}),fetch('/markets',{cache:'no-store'}),fetch('/preview-proof',{cache:'no-store'}),fetch('/money-path-proof',{cache:'no-store'}),fetch('/shadow-state',{cache:'no-store'})]);
+    const account=await ar.json(),status=await sr.json(),market=await mr.json(),preview=await pr.json(),money=await moneyr.json(),shadow=await shr.json();
+    const shadowLive=shadow.status==='LIVE_US_SHADOW';
+    E('shadowRuntime').textContent=shadow.status||'UNKNOWN';E('shadowRuntime').className=shadowLive?'good':'warn';
+    E('shadowStarted').textContent=shadow.startedAt?new Date(shadow.startedAt).toLocaleString():'NOT STARTED';
+    E('shadowLast').textContent=shadow.lastRunAt?new Date(shadow.lastRunAt).toLocaleString():'—';
+    E('shadowRuns').textContent=String(shadow.runs||0);E('shadowEligible').textContent=String(shadow.eligibleCount||0);E('shadowPersistence').textContent=shadow.persistence||'—';
+    E('shadowGov').textContent=shadowLive?'LIVE':'NOT STARTED';E('shadowGov').className=shadowLive?'good':'';
+    E('gateShadow').textContent=shadowLive?'PASS · LIVE US SHADOW':'NOT STARTED';E('gateShadow').className=shadowLive?'good':'';
     E('moneyDeposit').textContent=money.depositActivity||'NOT PROVEN';E('moneyBuyingPower').textContent=money.buyingPower||'NOT PROVEN';E('moneyClearing').textContent=money.fundsClearing||'NOT PROVEN';E('moneyBalance').textContent=money.fundedBalance||'NOT PROVEN';E('moneyEligible').textContent=money.withdrawalEligibility||'NOT PROVEN';E('moneyWithdrawal').textContent=money.withdrawalActivity||'NOT PROVEN';E('moneyLoop').textContent=money.cashOutLoop||'NOT PROVEN';
     creds.textContent=status?.credentials?.keyIdInstalled&&status?.credentials?.secretInstalled?'INSTALLED':'MISSING';
     creds.className=creds.textContent==='INSTALLED'?'good':'bad';gatePreview.textContent=preview?.ok&&preview?.submitted===false?'PASS · NO SUBMISSION':((preview?.diagnostic?.category||preview?.state||'NOT PROVEN')+(preview?.diagnostic?.httpStatus?' · HTTP '+preview.diagnostic.httpStatus:'')+(!preview?.ok&&preview?.discovery?(' · SEARCH:'+String(preview.discovery.searchEvents??preview.discovery.eventsScanned??'?')+' CRYPTO:'+String(preview.discovery.cryptoEvents??'?')+' CAND:'+String(preview.discovery.candidates??'?')+(Array.isArray(preview.discovery.marketEvidence)&&preview.discovery.marketEvidence.length?' · BOOKS:'+preview.discovery.marketEvidence.map(x=>String(x.state||'?').replace('MARKET_STATE_','')+' B'+x.bids+' O'+x.offers).join(','):'') ):''));gatePreview.className=preview?.ok&&preview?.submitted===false?'good':'m';
