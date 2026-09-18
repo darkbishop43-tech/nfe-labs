@@ -407,7 +407,19 @@ function scoreShadowMarket(market, moves) {
   return { ...market, move, fair, edge, score };
 }
 
-async function loadShadowState() {
+async function loadShadowState(env) {
+  if (env?.BASELINE_REAL_SHADOW_STATE) {
+    try {
+      const raw = await env.BASELINE_REAL_SHADOW_STATE.get("baseline-real-shadow-v1");
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (parsed && typeof parsed === "object") {
+          parsed.persistence = "ISOLATED_KV";
+          return parsed;
+        }
+      }
+    } catch {}
+  }
   const cache = caches.default;
   const hit = await cache.match(shadowCacheRequest());
   if (hit) {
@@ -432,8 +444,13 @@ async function loadShadowState() {
   };
 }
 
-async function saveShadowState(state) {
+async function saveShadowState(env, state) {
   state.updatedAt = new Date().toISOString();
+  if (env?.BASELINE_REAL_SHADOW_STATE) {
+    await env.BASELINE_REAL_SHADOW_STATE.put("baseline-real-shadow-v1", JSON.stringify({ ...state, persistence: "ISOLATED_KV" }));
+    state.persistence = "ISOLATED_KV";
+    return;
+  }
   await caches.default.put(
     shadowCacheRequest(),
     new Response(JSON.stringify(state), {
@@ -529,8 +546,8 @@ async function discoverUsShadowMarkets() {
   return { markets: candidates, seen, rejected };
 }
 
-async function runShadow() {
-  const state = await loadShadowState();
+async function runShadow(env) {
+  const state = await loadShadowState(env);
   const now = Date.now();
 
   try {
@@ -629,7 +646,7 @@ async function runShadow() {
     });
   }
 
-  await saveShadowState(state);
+  await saveShadowState(env, state);
   return state;
 }
 
@@ -802,7 +819,7 @@ E('refresh').addEventListener('click',load);load();
 }
 export default {
   async scheduled(event, env, ctx) {
-    ctx.waitUntil(runShadow());
+    ctx.waitUntil(runShadow(env));
   },
 
   async fetch(request, env) {
@@ -850,11 +867,11 @@ export default {
     }
 
     if (url.pathname === "/shadow-state") {
-      return json(publicShadowView(await loadShadowState()));
+      return json(publicShadowView(await loadShadowState(env)));
     }
 
     if (url.pathname === "/shadow-run") {
-      return json(publicShadowView(await runShadow()));
+      return json(publicShadowView(await runShadow(env)));
     }
 
     return json({ ok: false, error: "NOT_FOUND" }, 404);
