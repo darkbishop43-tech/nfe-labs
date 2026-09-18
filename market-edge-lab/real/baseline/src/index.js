@@ -768,7 +768,7 @@ function dashboardHtml() {
   <div class="grid">
     <div class="card"><div class="label">Polymarket Connection</div><div id="conn" class="val">CHECKING…</div><div id="connSub" class="m"></div></div>
     <div class="card"><div class="label">Account State</div><div id="bal" class="val">CHECKING…</div><div id="balSub" class="m"></div></div>
-    <div class="card"><div class="label">Funding Authorization</div><div class="val warn">LOCKED</div><div class="m">$0 authorized · first governed test target $5 only after remaining gates pass.</div></div>
+    <div class="card"><div class="label">Funding Authorization</div><div class="val warn">LOCKED</div><div class="m">$0 deposited · first account-funding proof target $10 after remaining pre-funding gates pass. Real trade stake remains capped at $5.</div></div>
     <div class="card"><div class="label">Live Orders</div><div class="val warn">DISABLED</div><div class="m">No live order-submission route is implemented.</div></div>
   </div>
 
@@ -840,14 +840,14 @@ function dashboardHtml() {
       <div class="gate"><span>3. Actual funded balance record</span><strong id="gateBalance">WAITING</strong></div>
       <div class="gate"><span>4. Shadow ledger + real market observation</span><strong id="gateShadow">CHECKING…</strong></div>
       <div class="gate"><span>5. Authenticated order preview without submission</span><strong id="gatePreview">CHECKING…</strong></div>
-      <div class="gate"><span>6. First governed $5 funded test</span><strong>NOT AUTHORIZED</strong></div>
+      <div class="gate"><span>6. First governed $10 account-funding proof</span><strong>NOT AUTHORIZED</strong></div>
     </div>
     <div class="notice">A displayed unfunded state is not withdrawal proof. Funding remains locked until the remaining execution, rules, settlement, recordkeeping, and cash-out gates are independently verified.</div>
   </div>
 
   <div class="card section">
     <b>Money Path Proof</b>
-    <div class="actions" style="justify-content:flex-start;margin-top:10px"><a class="btn" href="https://polymarket.us/" target="_blank" rel="noopener noreferrer" style="text-decoration:none">DEPOSIT $5 · OFFICIAL POLYMARKET US</a><a class="btn" href="https://polymarket.us/" target="_blank" rel="noopener noreferrer" style="text-decoration:none">WITHDRAW · OFFICIAL POLYMARKET US</a></div>
+    <div class="actions" style="justify-content:flex-start;margin-top:10px"><a class="btn" href="https://polymarket.us/" target="_blank" rel="noopener noreferrer" style="text-decoration:none">DEPOSIT $10 · OFFICIAL POLYMARKET US</a><a class="btn" href="https://polymarket.us/" target="_blank" rel="noopener noreferrer" style="text-decoration:none">WITHDRAW · OFFICIAL POLYMARKET US</a></div>
     <div class="rows" style="margin-top:8px">
       <div class="row"><span>Deposit activity</span><strong id="moneyDeposit">CHECKING…</strong></div>
       <div class="row"><span>Buying power available</span><strong id="moneyBuyingPower">CHECKING…</strong></div>
@@ -857,10 +857,10 @@ function dashboardHtml() {
       <div class="row"><span>Withdrawal activity</span><strong id="moneyWithdrawal">CHECKING…</strong></div>
       <div class="row"><span>Cash-out loop</span><strong id="moneyLoop">CHECKING…</strong></div>
     </div>
-    <div class="notice"><b>FIRST BANKROLL CONTROL:</b> $5 preferred. $10 is a contingency ceiling only if verified platform mechanics require it. Debit card is the intended first funding method. Buying power is not the same as cleared/withdrawable funds. These controls hand money movement to the official Polymarket US site; Baseline Real never receives bank credentials or initiates deposits/withdrawals.</div>
+    <div class="notice"><b>FIRST BANKROLL CONTROL:</b> $10 first account-funding proof, based on the verified minimum encountered in the Founder’s actual card funding path. This does not raise the Baseline trading rule: maximum stake remains $5. Debit card is the intended first funding method. Buying power is not the same as cleared/withdrawable funds. These controls hand money movement to the official Polymarket US site; Baseline Real never receives bank credentials or initiates deposits/withdrawals.</div>
     <div class="rows" style="margin-top:8px">
-      <div class="row"><span>Preferred first bankroll</span><strong>$5</strong></div>
-      <div class="row"><span>Contingency ceiling</span><strong>$10 · REQUIRES EVIDENCE</strong></div>
+      <div class="row"><span>First account-funding proof</span><strong>$10</strong></div>
+      <div class="row"><span>Maximum Baseline trade stake</span><strong>$5</strong></div>
       <div class="row"><span>Intended first funding method</span><strong>DEBIT CARD</strong></div>
       <div class="row"><span>Funding authorization</span><strong class="warn">LOCKED</strong></div>
       <div class="row"><span>Live order submission</span><strong class="warn">DISABLED</strong></div>
