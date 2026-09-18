@@ -13,3 +13,7 @@ MARKET_SCOPE = "BTC_ETH_ONLY"
 # Never place Polymarket credentials in this file.
 # Add POLYMARKET_US_KEY_ID and POLYMARKET_US_SECRET only as encrypted
 # Cloudflare Worker secrets after the isolated Worker is created.
+
+
+[triggers]
+crons = ["*/5 * * * *"]
