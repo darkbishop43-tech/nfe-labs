@@ -208,7 +208,7 @@ async function previewProof(env) {
     });
     const crypto = (Array.isArray(listed?.events) ? listed.events : []).filter((event) => {
       const hay = [event?.title,event?.slug,event?.description,event?.series?.title,event?.series?.slug,...(event?.tags||[]).flatMap(t=>[t?.label,t?.slug])].filter(Boolean).join(" ").toLowerCase();
-      return /bitcoin|btc|ethereum|eth/.test(hay);
+      return /bitcoin|\bbtc\b|ethereum|\beth\b/.test(hay);
     });
     const eventSlugs = crypto.map((event) => event?.slug).filter(Boolean);
     const marketListed = eventSlugs.length ? await publicClient.markets.list({
