@@ -827,22 +827,23 @@ async function maybeRunOneTrade(env) {
       return state;
     }
 
-    // Safety gate for the first governed trade: do not allow the acceptance test
-    // to fire until live discovery has positively demonstrated BOTH BTC and ETH.
-    // This prevents a silently BTC-only discovery bug from consuming the one-trade test.
-    if (!shadow?.assetCoverageReady) {
-      state.status = "HOLD_ASSET_COVERAGE_NOT_PROVEN";
-      await saveRealTradeState(env, state);
-      return state;
-    }
+    // Per-asset safety gate. BTC and ETH are the only authorized assets, but
+    // an authorized asset that is unavailable on the US venue must not falsely
+    // block another authorized asset whose own live coverage is independently proven.
+    const authorizedAssets = new Set(["BTC", "ETH"]);
+    const coverage = shadow?.assetCoverage || {};
 
-    const candidate = (shadow?.opportunities || []).find((o) =>
-      Number(o?.score) >= REAL_TEST_CONFIG.entryScore &&
-      Number(o?.edge) > 0 &&
-      Number(o?.yes) > 0.01 &&
-      Number(o?.yes) < 0.99 &&
-      o?.slug
-    );
+    const candidate = (shadow?.opportunities || []).find((o) => {
+      const asset = String(o?.asset || "").toUpperCase();
+      const assetCoverageProven = Number(coverage?.[asset]?.eligible || 0) > 0;
+      return authorizedAssets.has(asset) &&
+        assetCoverageProven &&
+        Number(o?.score) >= REAL_TEST_CONFIG.entryScore &&
+        Number(o?.edge) > 0 &&
+        Number(o?.yes) > 0.01 &&
+        Number(o?.yes) < 0.99 &&
+        o?.slug;
+    });
 
     if (!candidate) {
       state.status = "ARMED_WAITING_FOR_ENTRY";
@@ -1245,8 +1246,9 @@ async function load(){
     }
     const opps=Array.isArray(shadow?.opportunities)?shadow.opportunities:[],parts=[];
     const cov=shadow?.assetCoverage||{};
-    const coverageReady=Boolean(shadow?.assetCoverageReady);
-    parts.push('<div class="opp" style="grid-column:1/-1"><div class="oppHead"><div class="q">LIVE ASSET COVERAGE</div><div class="tag '+(coverageReady?'good':'warn')+'">'+(coverageReady?'BTC + ETH PROVEN':'FIRST TRADE HOLD')+'</div></div><div class="meta">BTC: '+Number(cov?.BTC?.eligible||0)+' eligible · '+Number(cov?.BTC?.up||0)+' up · '+Number(cov?.BTC?.down||0)+' down &nbsp; | &nbsp; ETH: '+Number(cov?.ETH?.eligible||0)+' eligible · '+Number(cov?.ETH?.up||0)+' up · '+Number(cov?.ETH?.down||0)+' down'+(coverageReady?'':' · Controller will not submit the first real order until both assets are discovered live.')+'</div></div>');
+    const btcReady=Number(cov?.BTC?.eligible||0)>0;
+    const ethReady=Number(cov?.ETH?.eligible||0)>0;
+    parts.push('<div class="opp" style="grid-column:1/-1"><div class="oppHead"><div class="q">LIVE ASSET COVERAGE</div><div class="tag '+(btcReady||ethReady?'good':'warn')+'">'+(btcReady||ethReady?'PER-ASSET GATE ACTIVE':'NO ASSET COVERAGE')+'</div></div><div class="meta">BTC: '+Number(cov?.BTC?.eligible||0)+' eligible · '+Number(cov?.BTC?.up||0)+' up · '+Number(cov?.BTC?.down||0)+' down · '+(btcReady?'AUTHORIZED / COVERAGE PROVEN':'AUTHORIZED / UNAVAILABLE')+' &nbsp; | &nbsp; ETH: '+Number(cov?.ETH?.eligible||0)+' eligible · '+Number(cov?.ETH?.up||0)+' up · '+Number(cov?.ETH?.down||0)+' down · '+(ethReady?'AUTHORIZED / COVERAGE PROVEN':'AUTHORIZED / CURRENTLY UNAVAILABLE')+' · A real candidate must independently have live coverage and score ≥ .80.</div></div>');
     if(!opps.length){
       parts.push('<div class="opp"><div class="meta">No eligible BTC/ETH opportunities in the current Polymarket US Shadow observation.</div></div>');
     } else {
