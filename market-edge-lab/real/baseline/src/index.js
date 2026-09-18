@@ -258,7 +258,7 @@ async function previewProof(env) {
         diagnostics.push(category+(status?"_HTTP_"+status:""));
       }
     }
-    return {ok:false,state:"SHORT_HORIZON_CANDIDATES_NOT_PREVIEWABLE",submitted:false,liveOrderSubmission:"DISABLED",fundingAuthorized:false,diagnostic:{category:diagnostics[0]||"NO_VALID_BBO",attempted:Math.min(candidates.length,20),allCandidateDiagnostics:[...new Set(diagnostics)].slice(0,6),sensitiveTextExposed:false},discovery:{windowHours:72,cryptoEvents:crypto.length,candidates:candidates.length}};
+    return {ok:false,state:"SHORT_HORIZON_CANDIDATES_NOT_PREVIEWABLE",submitted:false,liveOrderSubmission:"DISABLED",fundingAuthorized:false,diagnostic:{category:diagnostics[0]||"NO_VALID_BBO",attempted:Math.min(candidates.length,20),allCandidateDiagnostics:[...new Set(diagnostics)].slice(0,6),sensitiveTextExposed:false},discovery:{windowHours:72,eventsScanned:(listed?.events||[]).length,cryptoEvents:crypto.length,eventSlugCount:eventSlugs.length,marketsReturned:(marketListed?.markets||[]).length,activeOpenMarkets:(marketListed?.markets||[]).filter(m=>m?.active&&!m?.closed&&m?.slug).length,positiveLiquidityMarkets:(marketListed?.markets||[]).filter(m=>Number(m?.liquidity||0)>0).length,candidates:candidates.length}};
   } catch {
     return {ok:false,state:"PREVIEW_PROOF_FAILED",submitted:false,liveOrderSubmission:"DISABLED",fundingAuthorized:false};
   }
