@@ -88,22 +88,19 @@ function safeAccountView(response) {
     null;
 
   const noBalanceRecord = hasArrayEnvelope && rows.length === 0;
+  const positive = (value) => Number.isFinite(Number(value)) && Number(value) > 0;
 
   return {
     responseShape: hasArrayEnvelope ? "BALANCES_ARRAY" : directBalance ? "DIRECT_BALANCE_OBJECT" : "UNKNOWN",
     balanceRecordCount: hasArrayEnvelope ? rows.length : directBalance ? 1 : 0,
     noBalanceRecord,
-    currentBalance: usd?.currentBalance ?? null,
-    currency: usd?.currency ?? null,
-    buyingPower: usd?.buyingPower ?? null,
-    assetNotional: usd?.assetNotional ?? null,
-    assetAvailable: usd?.assetAvailable ?? null,
-    openOrders: usd?.openOrders ?? null,
-    unsettledFunds: usd?.unsettledFunds ?? null,
-    marginRequirement: usd?.marginRequirement ?? null,
-    pendingWithdrawals: Array.isArray(usd?.pendingWithdrawals)
-      ? usd.pendingWithdrawals.length
-      : null,
+    fundedRecordPresent: usd?.currentBalance !== null && usd?.currentBalance !== undefined,
+    buyingPowerAvailable: positive(usd?.buyingPower),
+    unsettledFundsPresent: positive(usd?.unsettledFunds),
+    pendingWithdrawalPresent: Array.isArray(usd?.pendingWithdrawals)
+      ? usd.pendingWithdrawals.length > 0
+      : false,
+    sensitiveAmountsExposed: false,
   };
 }
 
@@ -154,8 +151,8 @@ async function accountProof(env) {
       account,
       accountState: account.noBalanceRecord
         ? "AUTHENTICATED_NO_BALANCE_RECORDS"
-        : account.currentBalance !== null
-          ? "BALANCE_AVAILABLE"
+        : account.fundedRecordPresent
+          ? "FUNDED_RECORD_PRESENT"
           : "AUTHENTICATED_BALANCE_SHAPE_UNKNOWN",
       credentialDiagnostics: {
         detectedEncoding: built.secret.detected,
@@ -200,13 +197,10 @@ async function moneyPathProof(env) {
     const account=safeAccountView(balances);
     const ds=Array.isArray(deposits?.activities)?deposits.activities:[];
     const ws=Array.isArray(withdrawals?.activities)?withdrawals.activities:[];
-    const buyingPower = Number(account.buyingPower);
-    const unsettledFunds = Number(account.unsettledFunds);
-    const pendingWithdrawals = Number(account.pendingWithdrawals);
-    const hasBuyingPower = Number.isFinite(buyingPower) && buyingPower > 0;
-    const hasUnsettled = Number.isFinite(unsettledFunds) && unsettledFunds > 0;
-    const hasPendingWithdrawal = Number.isFinite(pendingWithdrawals) && pendingWithdrawals > 0;
-    const hasBalanceRecord = account.currentBalance !== null && account.currentBalance !== undefined;
+    const hasBuyingPower = account.buyingPowerAvailable;
+    const hasUnsettled = account.unsettledFundsPresent;
+    const hasPendingWithdrawal = account.pendingWithdrawalPresent;
+    const hasBalanceRecord = account.fundedRecordPresent;
     return {
       ok:true,state:"AUTHENTICATED_MONEY_PATH_READ_ONLY",
       depositActivity:ds.length?"OBSERVED":"NOT_YET_PROVEN",
@@ -461,8 +455,8 @@ async function load(){
       conn.textContent='VERIFIED';conn.className='val good';connSub.textContent='Authenticated read-only Polymarket US API connection.';
       gateAccount.textContent='PASS';gateAccount.className='good';statusDot.className='dot';statusText.innerHTML='<b class="good">AUTHENTICATED READ-ONLY · VERIFIED</b>';
       const a=account.account||{};
-      if(a.currentBalance!==null&&a.currentBalance!==undefined){
-        const n=Number(a.currentBalance);bal.textContent=Number.isFinite(n)?'$'+n.toFixed(2):'BALANCE AVAILABLE';balSub.textContent=(a.currency||'USD')+' · buying power record available';gateBalance.textContent='AVAILABLE';gateBalance.className='good';
+      if(a.fundedRecordPresent){
+        bal.textContent='FUNDED RECORD';balSub.textContent='Authenticated account state present · dollar amounts kept private';gateBalance.textContent='AVAILABLE';gateBalance.className='good';
       }else if(a.noBalanceRecord){
         bal.textContent='$0.00*';balSub.textContent='No funded balance record returned. *Unfunded display only; not withdrawal proof.';gateBalance.textContent='NO FUNDED RECORD';gateBalance.className='m';
       }else{bal.textContent='NOT AVAILABLE';balSub.textContent='Authenticated, but balance response was not recognized.';}
