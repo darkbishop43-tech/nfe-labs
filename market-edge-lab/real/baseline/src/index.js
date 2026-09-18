@@ -437,12 +437,15 @@ function shadowRelevant(text) {
   const q = String(text || "").toLowerCase();
   const asset = q.includes("bitcoin") || /\bbtc\b/.test(q)
     ? "BTC"
-    : q.includes("ethereum") || /\beth\b/.test(q)
+    : q.includes("ethereum") || /\beth\b/.test(q) || /\bether\b/.test(q)
       ? "ETH"
       : null;
   if (!asset) return null;
-  const up = /\b(up|above|higher|rise|gain|over|increase)\b/.test(q);
-  const down = /\b(down|below|lower|fall|drop|under|decrease)\b/.test(q);
+  // US crypto events commonly use "high/low" wording and Ethereum can be named
+  // "Ether". These are classification aliases only; scoring and execution rules
+  // remain unchanged.
+  const up = /\b(up|above|higher|high|rise|gain|over|increase)\b/.test(q);
+  const down = /\b(down|below|lower|low|fall|drop|dip|under|decrease)\b/.test(q);
   if (!up && !down) return null;
   return { asset, bear: down && !up };
 }
