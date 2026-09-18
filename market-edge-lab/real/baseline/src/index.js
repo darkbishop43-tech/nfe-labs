@@ -233,7 +233,7 @@ async function previewProof(env) {
         }
         if (!Number.isFinite(ask) || ask <= 0) {
           const probeBook = await publicClient.markets.book(market.slug).catch(()=>null);
-          marketEvidence.push({slug:market.slug,state:probeBook?.state||null,bids:Array.isArray(probeBook?.bids)?probeBook.bids.length:0,offers:Array.isArray(probeBook?.offers)?probeBook.offers.length:0});
+          marketEvidence.push({slug:market.slug,title:market.title||null,outcome:market.outcome||null,state:probeBook?.state||null,bids:Array.isArray(probeBook?.bids)?probeBook.bids.length:0,offers:Array.isArray(probeBook?.offers)?probeBook.offers.length:0});
           diagnostics.push("NO_VALID_ASK_OR_BOOK_OFFER");
           continue;
         }
@@ -446,6 +446,11 @@ export default {
     if (url.pathname === "/preview-proof") {
       const proof = await previewProof(env);
       return json(proof, proof.ok ? 200 : 422);
+    }
+
+    if (url.pathname === "/market-diagnostic") {
+      const proof = await previewProof(env);
+      return json({ok:proof.ok,state:proof.state,diagnostic:proof.diagnostic||null,discovery:proof.discovery||null,submitted:false,sensitiveTextExposed:false}, 200);
     }
 
     return json({ ok: false, error: "NOT_FOUND" }, 404);
