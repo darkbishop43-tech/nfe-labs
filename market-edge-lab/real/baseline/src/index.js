@@ -384,6 +384,43 @@ async function coinbaseSpot(product) {
   return price;
 }
 
+async function coinbase24hSeries(product) {
+  const end = new Date();
+  const start = new Date(end.getTime() - 24 * 60 * 60 * 1000);
+  const qs = new URLSearchParams({
+    granularity: "3600",
+    start: start.toISOString(),
+    end: end.toISOString(),
+  });
+  const [current, candleResponse] = await Promise.all([
+    coinbaseSpot(product),
+    fetch("https://api.exchange.coinbase.com/products/" + product + "/candles?" + qs.toString(), {
+      headers: { "User-Agent": "NFE-Market-Edge-Baseline-Real/0.3" },
+    }),
+  ]);
+  if (!candleResponse.ok) throw new Error("COINBASE_CANDLES_FAILED_" + candleResponse.status);
+  const raw = await candleResponse.json();
+  const points = (Array.isArray(raw) ? raw : [])
+    .map((row) => ({ ts: Number(row?.[0]) * 1000, price: Number(row?.[4]) }))
+    .filter((p) => Number.isFinite(p.ts) && Number.isFinite(p.price) && p.price > 0)
+    .sort((a, b) => a.ts - b.ts);
+  const first = points[0]?.price ?? current;
+  const changePct = first > 0 ? ((current - first) / first) * 100 : 0;
+  return { product, current, changePct, points, source: "COINBASE_EXCHANGE_PUBLIC_API" };
+}
+
+async function livePriceProof() {
+  try {
+    const [btc, eth] = await Promise.all([
+      coinbase24hSeries("BTC-USD"),
+      coinbase24hSeries("ETH-USD"),
+    ]);
+    return { ok: true, window: "24H", btc, eth };
+  } catch {
+    return { ok: false, state: "PRICE_SERIES_UNAVAILABLE", window: "24H" };
+  }
+}
+
 function shadowRelevant(text) {
   const q = String(text || "").toLowerCase();
   const asset = q.includes("bitcoin") || /\bbtc\b/.test(q)
@@ -696,8 +733,8 @@ function dashboardHtml() {
 <title>Market Edge — Baseline Real</title>
 <style>
 :root{--bg:#050a11;--p:#0d1724;--p2:#111e2d;--line:#243a55;--gold:#d8b15e;--gold2:#f3d58a;--blue:#3479e8;--text:#f5f7fb;--muted:#91a6be;--green:#67e49b;--yellow:#f0c75e;--red:#ff8585;--shadow:0 14px 38px #0007}
-*{box-sizing:border-box}body{margin:0;background:radial-gradient(circle at 80% 0,#0d2440 0,transparent 35%),var(--bg);color:var(--text);font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial;min-height:100vh}.w{max-width:1080px;margin:auto;padding:16px 12px 48px}.hero,.card,.opp{background:linear-gradient(180deg,var(--p2),var(--p));border:1px solid var(--line);border-radius:16px}.hero{padding:14px 18px;display:flex;align-items:center;justify-content:space-between;gap:15px}.brand{display:flex;align-items:center;gap:14px}.logo{width:140px;height:78px;object-fit:contain;border-radius:10px}.k{font-size:10px;letter-spacing:.16em;text-transform:uppercase;color:var(--gold)}h1{font-size:28px;margin:3px 0}.sub,.m{font-size:12px;color:var(--muted)}.actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:flex-end}.pill,.btn{border:1px solid #725f34;color:var(--gold2);background:#0b1421;border-radius:999px;padding:8px 11px;font-size:11px;font-weight:800}.pill.real{border-color:#315a8c;color:#a9d0ff}.btn{cursor:pointer}.btn:hover{border-color:var(--gold2);background:#121e2c}.grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-top:11px}.card{padding:14px}.label{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.08em}.val{font-size:24px;font-weight:850;margin-top:5px}.good{color:var(--green)}.warn{color:var(--yellow)}.bad{color:var(--red)}.section{margin-top:11px}.statusline{display:flex;align-items:center;gap:9px;margin-top:8px}.dot{width:10px;height:10px;border-radius:50%;background:var(--green);box-shadow:0 0 0 5px #67e49b18}.dot.warn{background:var(--yellow);box-shadow:0 0 0 5px #f0c75e18}.dot.bad{background:var(--red);box-shadow:none}.wide{display:grid;grid-template-columns:1.25fr .75fr;gap:10px}.rows{display:grid}.row{display:flex;justify-content:space-between;gap:14px;padding:10px 0;border-top:1px solid #1b2d42;font-size:12px}.row:first-child{border-top:0}.opps{display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin-top:9px}.opp{padding:11px}.oppHead{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;align-items:start}.q{font-size:13px;font-weight:700;line-height:1.35}.tag{border:1px solid #725f34;background:#0a1421;color:var(--gold2);border-radius:10px;padding:6px 8px;font-size:9px;font-weight:900;white-space:nowrap}.meta{font-size:11px;color:var(--muted);margin-top:7px}.gate{display:grid;grid-template-columns:1fr auto;gap:10px;align-items:center;padding:10px 0;border-top:1px solid #1b2d42;font-size:12px}.gate:first-child{border-top:0}.footer{text-align:center;color:#62778e;font-size:10px;margin-top:18px}.notice{border-left:3px solid var(--gold);padding:9px 11px;background:#0a1421;color:var(--muted);font-size:11px;line-height:1.45;margin-top:10px}
-@media(max-width:720px){.grid{grid-template-columns:repeat(2,1fr)}.wide{grid-template-columns:1fr}.opps{grid-template-columns:1fr}.logo{width:100px;height:58px}h1{font-size:23px}.hero{align-items:flex-start}}@media(max-width:460px){.grid{grid-template-columns:1fr}.brand{gap:8px}.logo{width:78px;height:48px}.k{font-size:8px}.sub{font-size:10px}.pill,.btn{font-size:9px;padding:6px 8px}.val{font-size:20px}.hero{padding:12px}}
+*{box-sizing:border-box}body{margin:0;background:radial-gradient(circle at 80% 0,#0d2440 0,transparent 35%),var(--bg);color:var(--text);font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial;min-height:100vh}.w{max-width:1080px;margin:auto;padding:16px 12px 48px}.hero,.card,.opp{background:linear-gradient(180deg,var(--p2),var(--p));border:1px solid var(--line);border-radius:16px}.hero{padding:14px 18px;display:flex;align-items:center;justify-content:space-between;gap:15px}.brand{display:flex;align-items:center;gap:14px}.logo{width:140px;height:78px;object-fit:contain;border-radius:10px}.k{font-size:10px;letter-spacing:.16em;text-transform:uppercase;color:var(--gold)}h1{font-size:28px;margin:3px 0}.sub,.m{font-size:12px;color:var(--muted)}.actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:flex-end}.pill,.btn{border:1px solid #725f34;color:var(--gold2);background:#0b1421;border-radius:999px;padding:8px 11px;font-size:11px;font-weight:800}.pill.real{border-color:#315a8c;color:#a9d0ff}.btn{cursor:pointer}.btn:hover{border-color:var(--gold2);background:#121e2c}.grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-top:11px}.card{padding:14px}.label{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.08em}.val{font-size:24px;font-weight:850;margin-top:5px}.good{color:var(--green)}.warn{color:var(--yellow)}.bad{color:var(--red)}.section{margin-top:11px}.statusline{display:flex;align-items:center;gap:9px;margin-top:8px}.dot{width:10px;height:10px;border-radius:50%;background:var(--green);box-shadow:0 0 0 5px #67e49b18}.dot.warn{background:var(--yellow);box-shadow:0 0 0 5px #f0c75e18}.dot.bad{background:var(--red);box-shadow:none}.wide{display:grid;grid-template-columns:1.25fr .75fr;gap:10px}.rows{display:grid}.row{display:flex;justify-content:space-between;gap:14px;padding:10px 0;border-top:1px solid #1b2d42;font-size:12px}.row:first-child{border-top:0}.opps{display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin-top:9px}.opp{padding:11px}.oppHead{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;align-items:start}.q{font-size:13px;font-weight:700;line-height:1.35}.tag{border:1px solid #725f34;background:#0a1421;color:var(--gold2);border-radius:10px;padding:6px 8px;font-size:9px;font-weight:900;white-space:nowrap}.meta{font-size:11px;color:var(--muted);margin-top:7px}.gate{display:grid;grid-template-columns:1fr auto;gap:10px;align-items:center;padding:10px 0;border-top:1px solid #1b2d42;font-size:12px}.gate:first-child{border-top:0}.marketGrid{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin-top:9px}.marketCard{background:#0a1421;border:1px solid #1f344d;border-radius:14px;padding:13px}.marketTop{display:flex;justify-content:space-between;gap:12px;align-items:end}.marketPrice{font-size:25px;font-weight:850}.marketChange{font-size:15px;font-weight:850}.spark{width:100%;height:92px;margin-top:9px;display:block}.spark polyline{fill:none;stroke:currentColor;stroke-width:2;vector-effect:non-scaling-stroke}.spark .base{stroke:#486079;stroke-width:1}.pnlGrid{display:grid;grid-template-columns:repeat(3,1fr);gap:9px;margin-top:9px}.pnlBox{background:#0a1421;border:1px solid #1f344d;border-radius:12px;padding:12px}.pnlNum{font-size:22px;font-weight:850;margin-top:4px}.footer{text-align:center;color:#62778e;font-size:10px;margin-top:18px}.notice{border-left:3px solid var(--gold);padding:9px 11px;background:#0a1421;color:var(--muted);font-size:11px;line-height:1.45;margin-top:10px}
+@media(max-width:720px){.grid{grid-template-columns:repeat(2,1fr)}.wide{grid-template-columns:1fr}.opps{grid-template-columns:1fr}.marketGrid{grid-template-columns:1fr}.pnlGrid{grid-template-columns:1fr}.logo{width:100px;height:58px}h1{font-size:23px}.hero{align-items:flex-start}}@media(max-width:460px){.grid{grid-template-columns:1fr}.brand{gap:8px}.logo{width:78px;height:48px}.k{font-size:8px}.sub{font-size:10px}.pill,.btn{font-size:9px;padding:6px 8px}.val{font-size:20px}.hero{padding:12px}}
 </style>
 </head>
 <body>
@@ -720,6 +757,31 @@ function dashboardHtml() {
   <div class="card section">
     <b>Real-System Status</b>
     <div class="statusline"><span id="statusDot" class="dot warn"></span><div><div id="statusText"><b>CHECKING AUTHENTICATED READ…</b></div><div class="m">This page can observe and verify. It cannot authorize funding or submit an order.</div></div></div>
+  </div>
+
+  <div class="card section">
+    <b>BTC / ETH · 24-Hour Price</b>
+    <div class="marketGrid">
+      <div class="marketCard">
+        <div class="marketTop"><div><div class="label">Bitcoin</div><div id="btcPrice" class="marketPrice">CHECKING…</div></div><div id="btcChange" class="marketChange">—</div></div>
+        <svg id="btcChart" class="spark" viewBox="0 0 100 30" preserveAspectRatio="none" aria-label="Bitcoin 24 hour price chart"></svg>
+      </div>
+      <div class="marketCard">
+        <div class="marketTop"><div><div class="label">Ethereum</div><div id="ethPrice" class="marketPrice">CHECKING…</div></div><div id="ethChange" class="marketChange">—</div></div>
+        <svg id="ethChart" class="spark" viewBox="0 0 100 30" preserveAspectRatio="none" aria-label="Ethereum 24 hour price chart"></svg>
+      </div>
+    </div>
+    <div class="notice">Market price charts use public Coinbase Exchange data for observation only. They do not represent Polymarket contract prices.</div>
+  </div>
+
+  <div class="card section">
+    <b>Profit / Loss</b>
+    <div class="pnlGrid">
+      <div class="pnlBox"><div class="label">Realized P/L</div><div class="pnlNum">$0.00</div><div class="m">No Baseline Real orders have been submitted.</div></div>
+      <div class="pnlBox"><div class="label">Unrealized P/L</div><div class="pnlNum">$0.00</div><div class="m">No real Baseline position is open.</div></div>
+      <div class="pnlBox"><div class="label">Total Real P/L</div><div class="pnlNum">$0.00</div><div class="m">REAL P/L · NOT STARTED</div></div>
+    </div>
+    <div class="notice"><b>REAL MONEY ONLY:</b> this panel is intentionally separate from Shadow results. Shadow observations never count as real profit or loss.</div>
   </div>
 
   <div class="section wide">
@@ -797,9 +859,26 @@ async function load(){
   const conn=E('conn'),connSub=E('connSub'),bal=E('bal'),balSub=E('balSub'),creds=E('creds'),gateAccount=E('gateAccount'),gateBalance=E('gateBalance'),gatePreview=E('gatePreview'),markets=E('markets'),statusDot=E('statusDot'),statusText=E('statusText'),refresh=E('refresh');
   refresh.disabled=true;refresh.textContent='CHECKING…';gatePreview.textContent='CHECKING LIVE PROOF…';gatePreview.className='m';
   try{
-    const [ar,sr,mr,pr,moneyr,shr]=await Promise.all([fetch('/account',{cache:'no-store'}),fetch('/status',{cache:'no-store'}),fetch('/markets',{cache:'no-store'}),fetch('/preview-proof',{cache:'no-store'}),fetch('/money-path-proof',{cache:'no-store'}),fetch('/shadow-state',{cache:'no-store'})]);
-    const account=await ar.json(),status=await sr.json(),market=await mr.json(),preview=await pr.json(),money=await moneyr.json(),shadow=await shr.json();
+    const [ar,sr,mr,pr,moneyr,shr,pxr]=await Promise.all([fetch('/account',{cache:'no-store'}),fetch('/status',{cache:'no-store'}),fetch('/markets',{cache:'no-store'}),fetch('/preview-proof',{cache:'no-store'}),fetch('/money-path-proof',{cache:'no-store'}),fetch('/shadow-state',{cache:'no-store'}),fetch('/price-proof',{cache:'no-store'})]);
+    const account=await ar.json(),status=await sr.json(),market=await mr.json(),preview=await pr.json(),money=await moneyr.json(),shadow=await shr.json(),prices=await pxr.json();
     const shadowLive=shadow.status==='LIVE_US_SHADOW';
+    const moneyFmt=n=>Number(n).toLocaleString(undefined,{style:'currency',currency:'USD',maximumFractionDigits:2});
+    const pctFmt=n=>(Number(n)>=0?'+':'')+Number(n).toFixed(2)+'%';
+    const drawSpark=(id,points,change)=>{
+      const svg=E(id); if(!svg) return;
+      const vals=(Array.isArray(points)?points:[]).map(p=>Number(p.price)).filter(Number.isFinite);
+      if(vals.length<2){svg.innerHTML='';return;}
+      const lo=Math.min(...vals),hi=Math.max(...vals),span=(hi-lo)||1;
+      const coords=vals.map((v,i)=>((i/(vals.length-1))*100).toFixed(2)+','+(28-((v-lo)/span)*26).toFixed(2)).join(' ');
+      svg.className='spark '+(Number(change)>=0?'good':'bad');
+      svg.innerHTML='<line class="base" x1="0" y1="28" x2="100" y2="28"></line><polyline points="'+coords+'"></polyline>';
+    };
+    if(prices?.ok){
+      E('btcPrice').textContent=moneyFmt(prices.btc.current); E('btcChange').textContent=pctFmt(prices.btc.changePct); E('btcChange').className='marketChange '+(prices.btc.changePct>=0?'good':'bad'); drawSpark('btcChart',prices.btc.points,prices.btc.changePct);
+      E('ethPrice').textContent=moneyFmt(prices.eth.current); E('ethChange').textContent=pctFmt(prices.eth.changePct); E('ethChange').className='marketChange '+(prices.eth.changePct>=0?'good':'bad'); drawSpark('ethChart',prices.eth.points,prices.eth.changePct);
+    }else{
+      E('btcPrice').textContent='UNAVAILABLE'; E('ethPrice').textContent='UNAVAILABLE';
+    }
     E('shadowRuntime').textContent=shadow.status||'UNKNOWN';E('shadowRuntime').className=shadowLive?'good':'warn';
     E('shadowStarted').textContent=shadow.startedAt?new Date(shadow.startedAt).toLocaleString():'NOT STARTED';
     E('shadowLast').textContent=shadow.lastRunAt?new Date(shadow.lastRunAt).toLocaleString():'—';
@@ -873,6 +952,8 @@ export default {
     }
 
     if (url.pathname === "/markets") return json(await marketSnapshot());
+
+    if (url.pathname === "/price-proof") return json(await livePriceProof());
 
     if (url.pathname === "/money-path-proof") return json(await moneyPathProof(env));
 
