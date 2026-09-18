@@ -188,6 +188,24 @@ async function accountProof(env) {
   }
 }
 
+async function moneyPathProof(env) {
+  const built = await createClient(env);
+  if (!built.ok) return {ok:false,state:built.state,depositActivity:"NOT_PROVEN",withdrawalActivity:"NOT_PROVEN",cashOutLoop:"NOT_PROVEN",fundingAuthorized:false};
+  try {
+    const [balances, deposits, withdrawals] = await Promise.all([
+      built.client.account.balances(),
+      built.client.portfolio.activities({types:["ACTIVITY_TYPE_ACCOUNT_DEPOSIT"],limit:20,sortOrder:"SORT_ORDER_DESCENDING"}),
+      built.client.portfolio.activities({types:["ACTIVITY_TYPE_ACCOUNT_WITHDRAWAL"],limit:20,sortOrder:"SORT_ORDER_DESCENDING"})
+    ]);
+    const account=safeAccountView(balances);
+    const ds=Array.isArray(deposits?.activities)?deposits.activities:[];
+    const ws=Array.isArray(withdrawals?.activities)?withdrawals.activities:[];
+    return {ok:true,state:"AUTHENTICATED_MONEY_PATH_READ_ONLY",depositActivity:ds.length?"OBSERVED":"NOT_YET_PROVEN",fundedBalance:account.currentBalance!==null?"OBSERVED":"NOT_YET_PROVEN",withdrawalActivity:ws.length?"OBSERVED":"NOT_YET_PROVEN",cashOutLoop:(ds.length&&ws.length)?"ACTIVITY_OBSERVED_NOT_FULL_LOOP_CERTIFIED":"NOT_YET_PROVEN",depositCount:ds.length,withdrawalCount:ws.length,fundingAuthorized:false,liveOrderSubmission:"DISABLED",sensitiveTextExposed:false};
+  } catch {
+    return {ok:false,state:"MONEY_PATH_READ_FAILED",depositActivity:"NOT_PROVEN",withdrawalActivity:"NOT_PROVEN",cashOutLoop:"NOT_PROVEN",fundingAuthorized:false,sensitiveTextExposed:false};
+  }
+}
+
 async function previewProof(env) {
   const built = await createClient(env);
   if (!built.ok) return { ok: false, state: built.state, submitted: false, liveOrderSubmission: "DISABLED" };
@@ -383,6 +401,20 @@ function dashboardHtml() {
     </div>
     <div class="notice">A displayed unfunded state is not withdrawal proof. Funding remains locked until the remaining execution, rules, settlement, recordkeeping, and cash-out gates are independently verified.</div>
   </div>
+
+  <div class="card section">
+    <b>Money Path Proof</b>
+    <div class="actions" style="justify-content:flex-start;margin-top:10px"><a class="btn" href="https://polymarket.us/" target="_blank" rel="noopener noreferrer" style="text-decoration:none">DEPOSIT $5 · OFFICIAL POLYMARKET US</a><a class="btn" href="https://polymarket.us/" target="_blank" rel="noopener noreferrer" style="text-decoration:none">WITHDRAW · OFFICIAL POLYMARKET US</a></div>
+    <div class="rows" style="margin-top:8px">
+      <div class="row"><span>Deposit activity</span><strong id="moneyDeposit">CHECKING…</strong></div>
+      <div class="row"><span>Funded balance</span><strong id="moneyBalance">CHECKING…</strong></div>
+      <div class="row"><span>Withdrawal activity</span><strong id="moneyWithdrawal">CHECKING…</strong></div>
+      <div class="row"><span>Cash-out loop</span><strong id="moneyLoop">CHECKING…</strong></div>
+    </div>
+    <div class="notice">These controls hand money movement to the official Polymarket US site. Baseline Real does not receive bank credentials and does not initiate deposits or withdrawals. Funding remains unauthorized until the remaining gates are cleared.</div>
+    </div>
+    <div class="notice">A displayed unfunded state is not withdrawal proof. Funding remains locked until the remaining execution, rules, settlement, recordkeeping, and cash-out gates are independently verified.</div>
+  </div>
   <div class="footer">NFE-OS · MARKET EDGE — BASELINE REAL · GOVERNED VALIDATION · LIVE ORDERS DISABLED</div>
 </div>
 <script>
@@ -392,8 +424,9 @@ async function load(){
   const conn=E('conn'),connSub=E('connSub'),bal=E('bal'),balSub=E('balSub'),creds=E('creds'),gateAccount=E('gateAccount'),gateBalance=E('gateBalance'),gatePreview=E('gatePreview'),markets=E('markets'),statusDot=E('statusDot'),statusText=E('statusText'),refresh=E('refresh');
   refresh.disabled=true;refresh.textContent='CHECKING…';gatePreview.textContent='CHECKING LIVE PROOF…';gatePreview.className='m';
   try{
-    const [ar,sr,mr,pr]=await Promise.all([fetch('/account',{cache:'no-store'}),fetch('/status',{cache:'no-store'}),fetch('/markets',{cache:'no-store'}),fetch('/preview-proof',{cache:'no-store'})]);
-    const account=await ar.json(),status=await sr.json(),market=await mr.json(),preview=await pr.json();
+    const [ar,sr,mr,pr,moneyr]=await Promise.all([fetch('/account',{cache:'no-store'}),fetch('/status',{cache:'no-store'}),fetch('/markets',{cache:'no-store'}),fetch('/preview-proof',{cache:'no-store'}),fetch('/money-path-proof',{cache:'no-store'})]);
+    const account=await ar.json(),status=await sr.json(),market=await mr.json(),preview=await pr.json(),money=await moneyr.json();
+    E('moneyDeposit').textContent=money.depositActivity||'NOT PROVEN';E('moneyBalance').textContent=money.fundedBalance||'NOT PROVEN';E('moneyWithdrawal').textContent=money.withdrawalActivity||'NOT PROVEN';E('moneyLoop').textContent=money.cashOutLoop||'NOT PROVEN';
     creds.textContent=status?.credentials?.keyIdInstalled&&status?.credentials?.secretInstalled?'INSTALLED':'MISSING';
     creds.className=creds.textContent==='INSTALLED'?'good':'bad';gatePreview.textContent=preview?.ok&&preview?.submitted===false?'PASS · NO SUBMISSION':((preview?.diagnostic?.category||preview?.state||'NOT PROVEN')+(preview?.diagnostic?.httpStatus?' · HTTP '+preview.diagnostic.httpStatus:'')+(!preview?.ok&&preview?.discovery?(' · SEARCH:'+String(preview.discovery.searchEvents??preview.discovery.eventsScanned??'?')+' CRYPTO:'+String(preview.discovery.cryptoEvents??'?')+' CAND:'+String(preview.discovery.candidates??'?')+(Array.isArray(preview.discovery.marketEvidence)&&preview.discovery.marketEvidence.length?' · BOOKS:'+preview.discovery.marketEvidence.map(x=>String(x.state||'?').replace('MARKET_STATE_','')+' B'+x.bids+' O'+x.offers).join(','):'') ):''));gatePreview.className=preview?.ok&&preview?.submitted===false?'good':'m';
     if(account.ok&&account.accountConnection==='VERIFIED'){
@@ -456,6 +489,8 @@ export default {
     }
 
     if (url.pathname === "/markets") return json(await marketSnapshot());
+
+    if (url.pathname === "/money-path-proof") return json(await moneyPathProof(env));
 
     if (url.pathname === "/preview-proof") {
       const proof = await previewProof(env);
