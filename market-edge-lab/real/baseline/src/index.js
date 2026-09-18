@@ -403,7 +403,7 @@ async function load(){
     const [ar,sr,mr,pr]=await Promise.all([fetch('/account',{cache:'no-store'}),fetch('/status',{cache:'no-store'}),fetch('/markets',{cache:'no-store'}),fetch('/preview-proof',{cache:'no-store'})]);
     const account=await ar.json(),status=await sr.json(),market=await mr.json(),preview=await pr.json();
     creds.textContent=status?.credentials?.keyIdInstalled&&status?.credentials?.secretInstalled?'INSTALLED':'MISSING';
-    creds.className=creds.textContent==='INSTALLED'?'good':'bad';gatePreview.textContent=preview?.ok&&preview?.submitted===false?'PASS · NO SUBMISSION':(preview?.state||'NOT PROVEN');gatePreview.className=preview?.ok&&preview?.submitted===false?'good':'m';
+    creds.className=creds.textContent==='INSTALLED'?'good':'bad';gatePreview.textContent=preview?.ok&&preview?.submitted===false?'PASS · NO SUBMISSION':((preview?.diagnostic?.category||preview?.state||'NOT PROVEN')+(preview?.diagnostic?.httpStatus?' · HTTP '+preview.diagnostic.httpStatus:''));gatePreview.className=preview?.ok&&preview?.submitted===false?'good':'m';
     if(account.ok&&account.accountConnection==='VERIFIED'){
       conn.textContent='VERIFIED';conn.className='val good';connSub.textContent='Authenticated read-only Polymarket US API connection.';
       gateAccount.textContent='PASS';gateAccount.className='good';statusDot.className='dot';statusText.innerHTML='<b class="good">AUTHENTICATED READ-ONLY · VERIFIED</b>';
