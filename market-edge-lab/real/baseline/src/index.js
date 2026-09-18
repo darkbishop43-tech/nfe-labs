@@ -176,7 +176,7 @@ async function accountProof(env) {
       state: "AUTHENTICATION_OR_ACCOUNT_READ_FAILED",
       accountConnection: "NOT_VERIFIED",
       errorType: error?.name || "Error",
-      message: error?.message || "Polymarket US account read failed.",
+      message: "Polymarket US account read failed. Sensitive provider error details are suppressed.",
       credentialDiagnostics: {
         detectedEncoding: built.secret.detected,
         decodedByteLength: built.secret.byteLength,
@@ -237,75 +237,47 @@ function dashboardHtml() {
   return `<!doctype html>
 <html lang="en">
 <head>
-<meta charset="utf-8" />
-<meta name="viewport" content="width=device-width,initial-scale=1" />
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>Market Edge — Baseline Real</title>
 <style>
-  :root { color-scheme: dark; font-family: Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif; }
-  * { box-sizing: border-box; }
-  body { margin:0; background:#07111f; color:#eaf2ff; }
-  .wrap { max-width:1180px; margin:0 auto; padding:24px; }
-  .top { display:flex; justify-content:space-between; gap:16px; align-items:flex-start; margin-bottom:20px; flex-wrap:wrap; }
-  h1 { margin:0 0 8px; font-size:clamp(26px,4vw,42px); }
-  .sub { color:#94a8c7; }
-  .pill { display:inline-flex; align-items:center; gap:8px; padding:8px 12px; border:1px solid #284261; border-radius:999px; background:#0d1b2e; font-size:13px; }
-  .dot { width:9px; height:9px; border-radius:50%; background:#6f8097; }
-  .good .dot { background:#30d17d; }
-  .warn .dot { background:#ffbf47; }
-  .lock .dot { background:#62a8ff; }
-  .grid { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:14px; }
-  .card { background:#0c192b; border:1px solid #20344f; border-radius:16px; padding:18px; }
-  .label { color:#8297b5; font-size:12px; text-transform:uppercase; letter-spacing:.08em; }
-  .value { font-size:24px; font-weight:750; margin-top:8px; word-break:break-word; }
-  .small { color:#9db0ca; font-size:13px; margin-top:8px; line-height:1.45; }
-  .section { margin-top:18px; }
-  .section h2 { font-size:18px; margin:0 0 12px; }
-  .wide { display:grid; grid-template-columns:1.25fr .75fr; gap:14px; }
-  .rows { display:grid; gap:9px; }
-  .row { display:flex; justify-content:space-between; gap:14px; padding:11px 0; border-bottom:1px solid #1b2d45; }
-  .row:last-child { border-bottom:0; }
-  .market { padding:12px 0; border-bottom:1px solid #1b2d45; }
-  .market:last-child { border-bottom:0; }
-  .market-title { font-weight:650; }
-  .market-meta { color:#8fa4c0; font-size:12px; margin-top:4px; }
-  button { border:1px solid #315a8c; background:#16385f; color:#edf6ff; border-radius:10px; padding:10px 14px; cursor:pointer; font-weight:650; }
-  button:hover { background:#1d4777; }
-  .danger { color:#ffb9b9; }
-  .ok { color:#78e4ad; }
-  .muted { color:#8297b5; }
-  .footer { margin-top:18px; color:#6f839f; font-size:12px; }
-  @media (max-width:850px) { .grid{grid-template-columns:repeat(2,1fr)} .wide{grid-template-columns:1fr} }
-  @media (max-width:520px) { .wrap{padding:16px}.grid{grid-template-columns:1fr} }
+:root{--bg:#050a11;--p:#0d1724;--p2:#111e2d;--line:#243a55;--gold:#d8b15e;--gold2:#f3d58a;--blue:#3479e8;--text:#f5f7fb;--muted:#91a6be;--green:#67e49b;--yellow:#f0c75e;--red:#ff8585;--shadow:0 14px 38px #0007}
+*{box-sizing:border-box}body{margin:0;background:radial-gradient(circle at 80% 0,#0d2440 0,transparent 35%),var(--bg);color:var(--text);font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial;min-height:100vh}.w{max-width:1080px;margin:auto;padding:16px 12px 48px}.hero,.card,.opp{background:linear-gradient(180deg,var(--p2),var(--p));border:1px solid var(--line);border-radius:16px}.hero{padding:14px 18px;display:flex;align-items:center;justify-content:space-between;gap:15px}.brand{display:flex;align-items:center;gap:14px}.logo{width:140px;height:78px;object-fit:contain;border-radius:10px}.k{font-size:10px;letter-spacing:.16em;text-transform:uppercase;color:var(--gold)}h1{font-size:28px;margin:3px 0}.sub,.m{font-size:12px;color:var(--muted)}.actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:flex-end}.pill,.btn{border:1px solid #725f34;color:var(--gold2);background:#0b1421;border-radius:999px;padding:8px 11px;font-size:11px;font-weight:800}.pill.real{border-color:#315a8c;color:#a9d0ff}.btn{cursor:pointer}.btn:hover{border-color:var(--gold2);background:#121e2c}.grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-top:11px}.card{padding:14px}.label{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.08em}.val{font-size:24px;font-weight:850;margin-top:5px}.good{color:var(--green)}.warn{color:var(--yellow)}.bad{color:var(--red)}.section{margin-top:11px}.statusline{display:flex;align-items:center;gap:9px;margin-top:8px}.dot{width:10px;height:10px;border-radius:50%;background:var(--green);box-shadow:0 0 0 5px #67e49b18}.dot.warn{background:var(--yellow);box-shadow:0 0 0 5px #f0c75e18}.dot.bad{background:var(--red);box-shadow:none}.wide{display:grid;grid-template-columns:1.25fr .75fr;gap:10px}.rows{display:grid}.row{display:flex;justify-content:space-between;gap:14px;padding:10px 0;border-top:1px solid #1b2d42;font-size:12px}.row:first-child{border-top:0}.opps{display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin-top:9px}.opp{padding:11px}.oppHead{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;align-items:start}.q{font-size:13px;font-weight:700;line-height:1.35}.tag{border:1px solid #725f34;background:#0a1421;color:var(--gold2);border-radius:10px;padding:6px 8px;font-size:9px;font-weight:900;white-space:nowrap}.meta{font-size:11px;color:var(--muted);margin-top:7px}.gate{display:grid;grid-template-columns:1fr auto;gap:10px;align-items:center;padding:10px 0;border-top:1px solid #1b2d42;font-size:12px}.gate:first-child{border-top:0}.footer{text-align:center;color:#62778e;font-size:10px;margin-top:18px}.notice{border-left:3px solid var(--gold);padding:9px 11px;background:#0a1421;color:var(--muted);font-size:11px;line-height:1.45;margin-top:10px}
+@media(max-width:720px){.grid{grid-template-columns:repeat(2,1fr)}.wide{grid-template-columns:1fr}.opps{grid-template-columns:1fr}.logo{width:100px;height:58px}h1{font-size:23px}.hero{align-items:flex-start}}@media(max-width:460px){.grid{grid-template-columns:1fr}.brand{gap:8px}.logo{width:78px;height:48px}.k{font-size:8px}.sub{font-size:10px}.pill,.btn{font-size:9px;padding:6px 8px}.val{font-size:20px}.hero{padding:12px}}
 </style>
 </head>
 <body>
-<div class="wrap">
-  <div class="top">
-    <div>
-      <div class="label">NFE-OS Research Lab · Polymarket US</div>
-      <h1>Market Edge — Baseline Real</h1>
-      <div class="sub">Real account connection · BTC/ETH only · governed validation build</div>
+<div class="w">
+  <div class="hero">
+    <div class="brand">
+      <img class="logo" alt="NFE-OS" src="https://raw.githubusercontent.com/darkbishop43-tech/nfe-labs/main/market-edge-lab/public/nfe-os-logo-market-edge.webp">
+      <div><div class="k">NFE-OS Research Lab · Polymarket US</div><h1>Market Edge — Baseline Real</h1><div class="sub">Real account validation · BTC/ETH only · governed test environment</div></div>
     </div>
-    <button id="refresh">Refresh Proof</button>
+    <div class="actions"><button id="refresh" class="btn" type="button">REFRESH PROOF</button><div class="pill real">REAL · READ ONLY</div><div class="pill">FUNDING LOCKED</div></div>
   </div>
 
   <div class="grid">
-    <div class="card"><div class="label">Polymarket Connection</div><div id="conn" class="value">Checking…</div><div id="connSub" class="small"></div></div>
-    <div class="card"><div class="label">Account Balance</div><div id="bal" class="value">Checking…</div><div id="balSub" class="small"></div></div>
-    <div class="card"><div class="label">Funding</div><div class="value">LOCKED</div><div class="small">$0 authorized. Planned first governed test: $5 only after remaining gates pass.</div></div>
-    <div class="card"><div class="label">Live Orders</div><div class="value">DISABLED</div><div class="small">No order-submission route is implemented.</div></div>
+    <div class="card"><div class="label">Polymarket Connection</div><div id="conn" class="val">CHECKING…</div><div id="connSub" class="m"></div></div>
+    <div class="card"><div class="label">Account State</div><div id="bal" class="val">CHECKING…</div><div id="balSub" class="m"></div></div>
+    <div class="card"><div class="label">Funding Authorization</div><div class="val warn">LOCKED</div><div class="m">$0 authorized · first governed test target $5 only after remaining gates pass.</div></div>
+    <div class="card"><div class="label">Live Orders</div><div class="val warn">DISABLED</div><div class="m">No live order-submission route is implemented.</div></div>
+  </div>
+
+  <div class="card section">
+    <b>Real-System Status</b>
+    <div class="statusline"><span id="statusDot" class="dot warn"></span><div><div id="statusText"><b>CHECKING AUTHENTICATED READ…</b></div><div class="m">This page can observe and verify. It cannot authorize funding or submit an order.</div></div></div>
   </div>
 
   <div class="section wide">
-    <div class="card">
-      <h2>BTC / ETH Market Observation</h2>
-      <div id="markets" class="small">Loading public Polymarket US markets…</div>
+    <div>
+      <b>BTC / ETH Market Observation</b>
+      <div id="markets" class="opps"><div class="m">Loading public Polymarket US markets…</div></div>
     </div>
     <div class="card">
-      <h2>Governance Status</h2>
-      <div class="rows">
-        <div class="row"><span>Credentials</span><strong id="creds">Checking…</strong></div>
-        <div class="row"><span>Secret exposure</span><strong class="ok">NONE</strong></div>
+      <b>Governance Status</b>
+      <div class="rows" style="margin-top:8px">
+        <div class="row"><span>Credentials</span><strong id="creds">CHECKING…</strong></div>
+        <div class="row"><span>Secret exposure</span><strong class="good">NONE</strong></div>
         <div class="row"><span>Shadow experiment</span><strong>NOT STARTED</strong></div>
         <div class="row"><span>Market scope</span><strong>BTC / ETH ONLY</strong></div>
         <div class="row"><span>Execution mode</span><strong>LOCKED</strong></div>
@@ -313,113 +285,56 @@ function dashboardHtml() {
     </div>
   </div>
 
-  <div class="section card">
-    <h2>Baseline Real Test Path</h2>
-    <div class="rows">
-      <div class="row"><span>1. Secure API credentials</span><strong class="ok">PASS</strong></div>
-      <div class="row"><span>2. Authenticated read-only account connection</span><strong id="gateAccount">Checking…</strong></div>
-      <div class="row"><span>3. Actual funded balance record</span><strong id="gateBalance">WAITING</strong></div>
-      <div class="row"><span>4. Shadow ledger + market observation</span><strong>NOT STARTED</strong></div>
-      <div class="row"><span>5. Order preview without submission</span><strong>NOT ENABLED</strong></div>
-      <div class="row"><span>6. $5 funded test</span><strong>NOT AUTHORIZED</strong></div>
+  <div class="card section">
+    <b>Baseline Real Test Path</b>
+    <div style="margin-top:8px">
+      <div class="gate"><span>1. Secure API credentials</span><strong class="good">PASS</strong></div>
+      <div class="gate"><span>2. Authenticated read-only account connection</span><strong id="gateAccount">CHECKING…</strong></div>
+      <div class="gate"><span>3. Actual funded balance record</span><strong id="gateBalance">WAITING</strong></div>
+      <div class="gate"><span>4. Shadow ledger + real market observation</span><strong>NOT STARTED</strong></div>
+      <div class="gate"><span>5. Authenticated order preview without submission</span><strong>NOT ENABLED</strong></div>
+      <div class="gate"><span>6. First governed $5 funded test</span><strong>NOT AUTHORIZED</strong></div>
     </div>
+    <div class="notice">A displayed unfunded state is not withdrawal proof. Funding remains locked until the remaining execution, rules, settlement, recordkeeping, and cash-out gates are independently verified.</div>
   </div>
-
-  <div class="footer">This dashboard is intentionally read-only. It cannot place an order or authorize funding.</div>
+  <div class="footer">NFE-OS · MARKET EDGE — BASELINE REAL · GOVERNED VALIDATION · LIVE ORDERS DISABLED</div>
 </div>
-
 <script>
-async function load() {
-  const conn = document.getElementById("conn");
-  const connSub = document.getElementById("connSub");
-  const bal = document.getElementById("bal");
-  const balSub = document.getElementById("balSub");
-  const creds = document.getElementById("creds");
-  const gateAccount = document.getElementById("gateAccount");
-  const gateBalance = document.getElementById("gateBalance");
-  const markets = document.getElementById("markets");
-
-  try {
-    const [accountRes, statusRes, marketRes] = await Promise.all([
-      fetch("/account", { cache:"no-store" }),
-      fetch("/status", { cache:"no-store" }),
-      fetch("/markets", { cache:"no-store" })
-    ]);
-
-    const account = await accountRes.json();
-    const status = await statusRes.json();
-    const market = await marketRes.json();
-
-    creds.textContent = status?.credentials?.keyIdInstalled && status?.credentials?.secretInstalled ? "INSTALLED" : "MISSING";
-
-    if (account.ok && account.accountConnection === "VERIFIED") {
-      conn.textContent = "VERIFIED";
-      conn.className = "value ok";
-      connSub.textContent = "Authenticated read-only API connection.";
-      gateAccount.textContent = "PASS";
-      gateAccount.className = "ok";
-
-      const a = account.account || {};
-      if (a.currentBalance !== null && a.currentBalance !== undefined) {
-        const n = Number(a.currentBalance);
-        bal.textContent = Number.isFinite(n) ? "$" + n.toFixed(2) : String(a.currentBalance);
-        balSub.textContent = (a.currency || "USD") + " · Buying power: " + (a.buyingPower ?? "n/a");
-        gateBalance.textContent = "AVAILABLE";
-        gateBalance.className = "ok";
-      } else if (a.noBalanceRecord) {
-        bal.textContent = "$0.00*";
-        balSub.textContent = "No funded balance record returned yet. *Displayed as unfunded, not treated as withdrawal proof.";
-        gateBalance.textContent = "NO FUNDED RECORD";
-        gateBalance.className = "muted";
-      } else {
-        bal.textContent = "Not available";
-        balSub.textContent = "Authenticated, but balance response was not recognized.";
-      }
-    } else {
-      conn.textContent = "NOT VERIFIED";
-      conn.className = "value danger";
-      connSub.textContent = account.message || account.state || "Account verification failed.";
-      gateAccount.textContent = "FAILED";
-      gateAccount.className = "danger";
-      bal.textContent = "Unavailable";
+const E=id=>document.getElementById(id);
+const esc=s=>String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
+async function load(){
+  const conn=E('conn'),connSub=E('connSub'),bal=E('bal'),balSub=E('balSub'),creds=E('creds'),gateAccount=E('gateAccount'),gateBalance=E('gateBalance'),markets=E('markets'),statusDot=E('statusDot'),statusText=E('statusText');
+  try{
+    const [ar,sr,mr]=await Promise.all([fetch('/account',{cache:'no-store'}),fetch('/status',{cache:'no-store'}),fetch('/markets',{cache:'no-store'})]);
+    const account=await ar.json(),status=await sr.json(),market=await mr.json();
+    creds.textContent=status?.credentials?.keyIdInstalled&&status?.credentials?.secretInstalled?'INSTALLED':'MISSING';
+    creds.className=creds.textContent==='INSTALLED'?'good':'bad';
+    if(account.ok&&account.accountConnection==='VERIFIED'){
+      conn.textContent='VERIFIED';conn.className='val good';connSub.textContent='Authenticated read-only Polymarket US API connection.';
+      gateAccount.textContent='PASS';gateAccount.className='good';statusDot.className='dot';statusText.innerHTML='<b class="good">AUTHENTICATED READ-ONLY · VERIFIED</b>';
+      const a=account.account||{};
+      if(a.currentBalance!==null&&a.currentBalance!==undefined){
+        const n=Number(a.currentBalance);bal.textContent=Number.isFinite(n)?'$'+n.toFixed(2):'BALANCE AVAILABLE';balSub.textContent=(a.currency||'USD')+' · buying power record available';gateBalance.textContent='AVAILABLE';gateBalance.className='good';
+      }else if(a.noBalanceRecord){
+        bal.textContent='$0.00*';balSub.textContent='No funded balance record returned. *Unfunded display only; not withdrawal proof.';gateBalance.textContent='NO FUNDED RECORD';gateBalance.className='m';
+      }else{bal.textContent='NOT AVAILABLE';balSub.textContent='Authenticated, but balance response was not recognized.';}
+    }else{
+      conn.textContent='NOT VERIFIED';conn.className='val bad';connSub.textContent='Authenticated account proof is unavailable. See /account for safe diagnostic state.';gateAccount.textContent='FAILED';gateAccount.className='bad';bal.textContent='UNAVAILABLE';statusDot.className='dot bad';statusText.innerHTML='<b class="bad">ACCOUNT PROOF NOT VERIFIED</b>';
     }
-
-    const groups = [
-      ["Bitcoin", market?.bitcoin || []],
-      ["Ethereum", market?.ethereum || []]
-    ];
-    const parts = [];
-    for (const [name, events] of groups) {
-      parts.push("<div class='label' style='margin-top:8px'>" + name + "</div>");
-      if (!events.length) {
-        parts.push("<div class='market'><div class='market-meta'>No active search results returned.</div></div>");
-      } else {
-        for (const event of events.slice(0,4)) {
-          parts.push("<div class='market'><div class='market-title'>" + escapeHtml(event.title || event.slug || "Market") + "</div><div class='market-meta'>Active public market data · observation only</div></div>");
-        }
-      }
+    const groups=[['BTC',market?.bitcoin||[]],['ETH',market?.ethereum||[]]],parts=[];
+    for(const [name,events] of groups){
+      if(!events.length){parts.push('<div class="opp"><div class="oppHead"><div class="q">'+name+' market search</div><div class="tag">OBSERVE ONLY</div></div><div class="meta">No active search results returned. This does not prove no '+name+' markets exist.</div></div>');continue;}
+      for(const event of events.slice(0,4))parts.push('<div class="opp"><div class="oppHead"><div class="q">'+esc(event.title||event.slug||'Market')+'</div><div class="tag">'+name+' · OBSERVE</div></div><div class="meta">Public Polymarket US market data · no order action</div></div>');
     }
-    markets.innerHTML = parts.join("");
-  } catch (err) {
-    conn.textContent = "CHECK FAILED";
-    conn.className = "value danger";
-    connSub.textContent = String(err?.message || err);
-    bal.textContent = "Unavailable";
-    markets.textContent = "Market observation check failed.";
+    markets.innerHTML=parts.join('');
+  }catch{
+    conn.textContent='CHECK FAILED';conn.className='val bad';connSub.textContent='Dashboard proof request failed; no secret details are displayed.';bal.textContent='UNAVAILABLE';statusDot.className='dot bad';statusText.innerHTML='<b class="bad">PROOF REFRESH FAILED</b>';markets.innerHTML='<div class="opp"><div class="meta">Market observation check failed.</div></div>';
   }
 }
-
-function escapeHtml(s) {
-  return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-}
-
-document.getElementById("refresh").addEventListener("click", load);
-load();
+E('refresh').addEventListener('click',load);load();
 </script>
-</body>
-</html>`;
+</body></html>`;
 }
-
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
