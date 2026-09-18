@@ -214,7 +214,7 @@ async function previewProof(env) {
     );
     if (!candidates.length) return { ok:false,state:"NO_ACTIVE_US_BTC_ETH_CANDIDATE",submitted:false,liveOrderSubmission:"DISABLED",fundingAuthorized:false,discovery:{searchEvents:eventMap.size,cryptoEvents:crypto.length,candidates:0,sensitiveTextExposed:false} };
 
-    const diagnostics=[];
+    const diagnostics=[];\n    const marketEvidence=[];
     for (const { market, event } of candidates.slice(0, 20)) {
       try {
         const bbo = await publicClient.markets.bbo(market.slug);
@@ -227,6 +227,8 @@ async function previewProof(env) {
           ask = Number(askValue);
         }
         if (!Number.isFinite(ask) || ask <= 0) {
+          const probeBook = await publicClient.markets.book(market.slug).catch(()=>null);
+          marketEvidence.push({slug:market.slug,state:probeBook?.state||null,bids:Array.isArray(probeBook?.bids)?probeBook.bids.length:0,offers:Array.isArray(probeBook?.offers)?probeBook.offers.length:0});
           diagnostics.push("NO_VALID_ASK_OR_BOOK_OFFER");
           continue;
         }
@@ -247,7 +249,7 @@ async function previewProof(env) {
         diagnostics.push(category+(status?"_HTTP_"+status:""));
       }
     }
-    return {ok:false,state:"SHORT_HORIZON_CANDIDATES_NOT_PREVIEWABLE",submitted:false,liveOrderSubmission:"DISABLED",fundingAuthorized:false,diagnostic:{category:diagnostics[0]||"NO_VALID_BBO",attempted:Math.min(candidates.length,20),allCandidateDiagnostics:[...new Set(diagnostics)].slice(0,6),sensitiveTextExposed:false},discovery:{searchEvents:eventMap.size,cryptoEvents:crypto.length,candidates:candidates.length}};
+    return {ok:false,state:"SHORT_HORIZON_CANDIDATES_NOT_PREVIEWABLE",submitted:false,liveOrderSubmission:"DISABLED",fundingAuthorized:false,diagnostic:{category:diagnostics[0]||"NO_VALID_BBO",attempted:Math.min(candidates.length,20),allCandidateDiagnostics:[...new Set(diagnostics)].slice(0,6),sensitiveTextExposed:false},discovery:{searchEvents:eventMap.size,cryptoEvents:crypto.length,candidates:candidates.length,marketEvidence:marketEvidence.slice(0,6)}};
   } catch {
     return {ok:false,state:"PREVIEW_PROOF_FAILED",submitted:false,liveOrderSubmission:"DISABLED",fundingAuthorized:false};
   }
