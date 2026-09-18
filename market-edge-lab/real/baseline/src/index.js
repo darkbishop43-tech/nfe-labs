@@ -548,8 +548,24 @@ async function discoverUsShadowMarkets() {
   );
   const marketRows = new Map();
 
-  for (const event of eventMap.values()) {
-    for (const compact of (event?.markets || [])) {
+  // Hydrate every searched event first. Search responses are intentionally compact;
+  // event retrieval is the authoritative way to obtain that event's complete market set.
+  // Keep the compact event as fallback so a single failed hydration cannot erase BTC.
+  for (const compactEvent of eventMap.values()) {
+    let event = compactEvent;
+    if (compactEvent?.slug) {
+      try {
+        const detail = await client.events.retrieveBySlug(compactEvent.slug);
+        event = detail?.event || detail || compactEvent;
+        eventBySlug.set(String(compactEvent.slug), event);
+      } catch {}
+    } else if (compactEvent?.id != null) {
+      try {
+        const detail = await client.events.retrieve(compactEvent.id);
+        event = detail?.event || detail || compactEvent;
+      } catch {}
+    }
+    for (const compact of (event?.markets || compactEvent?.markets || [])) {
       if (compact?.slug) {
         marketRows.set(String(compact.slug), { market: compact, event });
       }
