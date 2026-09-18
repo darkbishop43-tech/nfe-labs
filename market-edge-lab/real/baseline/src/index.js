@@ -415,8 +415,8 @@ async function livePriceProof(env) {
       const field = asset === "BTC" ? "btc" : "eth";
       const cutoff = Date.now() - 24 * 60 * 60 * 1000;
       const points = ledger
-        .filter((row) => row?.type === "SHADOW_REFRESH" && Number.isFinite(Number(row?.[field])) && Date.parse(row.at) >= cutoff)
-        .map((row) => ({ ts: Date.parse(row.at), price: Number(row[field]) }))
+        .filter((row) => row?.type === "SHADOW_REFRESH" && Number.isFinite(Number(row?.[field])) && Date.parse(row.ts) >= cutoff)
+        .map((row) => ({ ts: Date.parse(row.ts), price: Number(row[field]) }))
         .filter((p) => Number.isFinite(p.ts) && p.price > 0)
         .sort((a,b)=>a.ts-b.ts);
       const shadowCurrent = Number(state?.prices?.[asset]);
@@ -424,7 +424,8 @@ async function livePriceProof(env) {
       const current = asset === "BTC" ? liveBtc : liveEth;
       if (Number.isFinite(current) && current > 0 && (!points.length || points[points.length - 1].price !== current)) points.push({ ts: Date.now(), price: current });
       const first = points[0]?.price ?? current;
-      return { product: asset + "-USD", current, changePct: Number.isFinite(current) && first > 0 ? ((current-first)/first)*100 : 0, points, source: "BASELINE_REAL_SHADOW_OBSERVATIONS" };
+      const observedMinutes = points.length > 1 ? Math.max(0, (points[points.length-1].ts-points[0].ts)/60000) : 0;
+      return { product: asset + "-USD", current, changePct: Number.isFinite(current) && first > 0 ? ((current-first)/first)*100 : 0, points, source: "BASELINE_REAL_SHADOW_OBSERVATIONS", observedMinutes };
     };
     const btc=make("BTC"), eth=make("ETH");
     if (!Number.isFinite(btc.current) || !Number.isFinite(eth.current)) return {ok:false,state:"SHADOW_PRICE_HISTORY_BUILDING",window:"24H"};
@@ -780,7 +781,7 @@ function dashboardHtml() {
   </div>
 
   <div class="card section">
-    <b>BTC / ETH · 24-Hour Price</b>
+    <b>BTC / ETH · Shadow Price History</b>
     <div class="marketGrid">
       <div class="marketCard">
         <div class="marketTop"><div><div class="label">Bitcoin</div><div id="btcPrice" class="marketPrice">CHECKING…</div></div><div id="btcChange" class="marketChange">—</div></div>
@@ -791,7 +792,7 @@ function dashboardHtml() {
         <svg id="ethChart" class="spark" viewBox="0 0 100 30" preserveAspectRatio="none" aria-label="Ethereum 24 hour price chart"></svg>
       </div>
     </div>
-    <div class="notice">Market price charts use public Coinbase Exchange data for observation only. They do not represent Polymarket contract prices.</div>
+    <div class="notice">Charts show the Shadow engine's accumulated Coinbase spot observations since Shadow started, plus the current live spot. They are not a full 24-hour market-history feed and do not represent Polymarket contract prices.</div>
   </div>
 
   <div class="card section">
