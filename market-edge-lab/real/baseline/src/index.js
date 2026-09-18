@@ -1377,6 +1377,37 @@ export default {
       return json({ok:true,source:"POLYMARKET_US_PUBLIC_SEARCH_EXACT",proof,submitted:false,sensitiveValuesExposed:false});
     }
 
+    if (url.pathname === "/eth-market-list-proof") {
+      const client = new PolymarketUS();
+      const proof = [];
+      let offset = 0;
+      let pages = 0;
+      let totalRows = 0;
+      while (pages < 10) {
+        let result;
+        try {
+          result = await client.markets.list({ active: true, closed: false, limit: 100, offset });
+        } catch {
+          return json({ok:false,error:"PUBLIC_MARKET_LIST_FAILED",pages,totalRows,submitted:false,sensitiveValuesExposed:false});
+        }
+        const rows = Array.isArray(result?.markets) ? result.markets
+          : Array.isArray(result?.data) ? result.data
+          : Array.isArray(result) ? result : [];
+        totalRows += rows.length;
+        for (const m of rows) {
+          const text=[m?.title,m?.question,m?.slug,m?.outcome,m?.eventTitle,m?.eventSlug].filter(Boolean).join(" — ");
+          if (/ethereum|\beth\b|\bether\b/i.test(text)) proof.push({
+            title:m?.title||m?.question||null,slug:m?.slug||null,outcome:m?.outcome||null,
+            active:m?.active??null,closed:m?.closed??null
+          });
+        }
+        pages += 1;
+        if (rows.length < 100) break;
+        offset += rows.length;
+      }
+      return json({ok:true,source:"POLYMARKET_US_MARKETS_LIST",pages,totalRows,ethMatches:proof.length,samples:proof.slice(0,20),submitted:false,sensitiveValuesExposed:false});
+    }
+
     if (url.pathname === "/price-proof") return json(await livePriceProof(env));
 
     if (url.pathname === "/money-path-proof") return json(await moneyPathProof(env));
