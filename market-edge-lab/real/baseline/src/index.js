@@ -405,7 +405,11 @@ function shadowPriceSeries(asset) {
 
 async function livePriceProof(env) {
   try {
-    const state = await loadShadowState(env);
+    const [state, liveBtc, liveEth] = await Promise.all([
+      loadShadowState(env),
+      coinbaseSpot("BTC-USD"),
+      coinbaseSpot("ETH-USD"),
+    ]);
     const ledger = Array.isArray(state?.ledger) ? state.ledger : [];
     const make = (asset) => {
       const field = asset === "BTC" ? "btc" : "eth";
@@ -415,8 +419,10 @@ async function livePriceProof(env) {
         .map((row) => ({ ts: Date.parse(row.at), price: Number(row[field]) }))
         .filter((p) => Number.isFinite(p.ts) && p.price > 0)
         .sort((a,b)=>a.ts-b.ts);
-      const current = Number(state?.prices?.[asset]);
-      if (Number.isFinite(current) && current > 0 && (!points.length || points[points.length - 1].price !== current)) points.push({ ts: Date.parse(state?.lastRunAt || new Date().toISOString()), price: current });
+      const shadowCurrent = Number(state?.prices?.[asset]);
+      if (Number.isFinite(shadowCurrent) && shadowCurrent > 0 && (!points.length || points[points.length - 1].price !== shadowCurrent)) points.push({ ts: Date.parse(state?.lastRunAt || new Date().toISOString()), price: shadowCurrent });
+      const current = asset === "BTC" ? liveBtc : liveEth;
+      if (Number.isFinite(current) && current > 0 && (!points.length || points[points.length - 1].price !== current)) points.push({ ts: Date.now(), price: current });
       const first = points[0]?.price ?? current;
       return { product: asset + "-USD", current, changePct: Number.isFinite(current) && first > 0 ? ((current-first)/first)*100 : 0, points, source: "BASELINE_REAL_SHADOW_OBSERVATIONS" };
     };
@@ -443,6 +449,7 @@ function shadowRelevant(text) {
 }
 
 function scoreShadowMarket(market, moves) {
+  // Exact frozen Paper Baseline scoring formula; only the venue/price source is adapted to Polymarket US.
   const move = moves[market.asset] || 0;
   const directionalMove = market.bear ? -move : move;
   const fair = clamp(market.yes + directionalMove * 18, 0.02, 0.98);
@@ -678,6 +685,10 @@ async function runShadow(env) {
       rejected: state.rejectedCount,
       seen: state.seenCount,
       qualifying: opportunities.filter((o) => o.score >= SHADOW_CONFIG.entryScore && o.edge > 0).length,
+      btc,
+      eth,
+      btcMove: moves.BTC,
+      ethMove: moves.ETH,
       realMoneyMoved: false,
     });
   } catch (error) {
@@ -714,6 +725,8 @@ function publicShadowView(state) {
       observedBid: o.bid,
       score: o.score,
       edge: o.edge,
+      move: o.move,
+      fair: o.fair,
     })),
     openShadowPositions: (state?.positions || []).map((p) => ({
       slug: p.slug,
@@ -793,7 +806,7 @@ function dashboardHtml() {
 
   <div class="section wide">
     <div>
-      <b>BTC / ETH Market Observation</b>
+      <b>Current Opportunities · Polymarket US</b>
       <div id="markets" class="opps"><div class="m">Loading public Polymarket US markets…</div></div>
     </div>
     <div class="card">
@@ -907,10 +920,21 @@ async function load(){
     }else{
       conn.textContent='NOT VERIFIED';conn.className='val bad';connSub.textContent='Authenticated account proof is unavailable. See /account for safe diagnostic state.';gateAccount.textContent='FAILED';gateAccount.className='bad';bal.textContent='UNAVAILABLE';statusDot.className='dot bad';statusText.innerHTML='<b class="bad">ACCOUNT PROOF NOT VERIFIED</b>';
     }
-    const groups=[['BTC',market?.bitcoin||[]],['ETH',market?.ethereum||[]]],parts=[];
-    for(const [name,events] of groups){
-      if(!events.length){parts.push('<div class="opp"><div class="oppHead"><div class="q">'+name+' market search</div><div class="tag">OBSERVE ONLY</div></div><div class="meta">No active search results returned. This does not prove no '+name+' markets exist.</div></div>');continue;}
-      for(const event of events.slice(0,4))parts.push('<div class="opp"><div class="oppHead"><div class="q">'+esc(event.title||event.slug||'Market')+'</div><div class="tag">'+name+' · OBSERVE</div></div><div class="meta">Public Polymarket US market data · no order action</div></div>');
+    const opps=Array.isArray(shadow?.opportunities)?shadow.opportunities:[],parts=[];
+    if(!opps.length){
+      parts.push('<div class="opp"><div class="meta">No eligible BTC/ETH opportunities in the current Polymarket US Shadow observation.</div></div>');
+    } else {
+      for(const o of opps.slice(0,8)){
+        const ask=Number(o.observedAsk),bid=Number(o.observedBid),score=Number(o.score),move=Number(o.move),edge=Number(o.edge);
+        const qualifies=Number.isFinite(score)&&score>=0.80&&edge>0;
+        parts.push('<div class="opp"><div class="oppHead"><div class="q">'+esc(o.question||o.slug||'US market')+'</div><div class="tag">'+esc(o.asset||'')+' · '+(qualifies?'ENTRY ≥ .80':'OBSERVE')+'</div></div><div class="meta">'+
+          (Number.isFinite(move)?('move '+(move*100).toFixed(3)+'% · '):'')+
+          (Number.isFinite(ask)?('ASK '+(ask*100).toFixed(1)+'¢ · '):'')+
+          (Number.isFinite(bid)?('BID '+(bid*100).toFixed(1)+'¢ · '):'')+
+          'score '+(Number.isFinite(score)?score.toFixed(2):'—')+
+          (Number.isFinite(edge)?(' · edge '+(edge*100).toFixed(3)+'%'):'')+
+          ' · SHADOW ONLY</div></div>');
+      }
     }
     markets.innerHTML=parts.join('');
   }catch{
@@ -919,7 +943,18 @@ async function load(){
     refresh.disabled=false;refresh.textContent='REFRESH PROOF · '+new Date().toLocaleTimeString();
   }
 }
-E('refresh').addEventListener('click',load);load();
+async function refreshPrices(){
+  try{
+    const r=await fetch('/price-proof',{cache:'no-store'}),prices=await r.json();
+    if(!prices?.ok)return;
+    const moneyFmt=n=>Number(n).toLocaleString(undefined,{style:'currency',currency:'USD',maximumFractionDigits:2});
+    const pctFmt=n=>(Number(n)>=0?'+':'')+Number(n).toFixed(2)+'%';
+    const drawSpark=(id,points,change)=>{const svg=E(id);if(!svg)return;const vals=(Array.isArray(points)?points:[]).map(p=>Number(p.price)).filter(Number.isFinite);if(vals.length<2){svg.innerHTML='';return;}const lo=Math.min(...vals),hi=Math.max(...vals),span=(hi-lo)||1;const coords=vals.map((v,i)=>((i/(vals.length-1))*100).toFixed(2)+','+(28-((v-lo)/span)*26).toFixed(2)).join(' ');svg.className='spark '+(Number(change)>=0?'good':'bad');svg.innerHTML='<line class="base" x1="0" y1="28" x2="100" y2="28"></line><polyline points="'+coords+'"></polyline>';};
+    E('btcPrice').textContent=moneyFmt(prices.btc.current);E('btcChange').textContent=pctFmt(prices.btc.changePct);E('btcChange').className='marketChange '+(prices.btc.changePct>=0?'good':'bad');drawSpark('btcChart',prices.btc.points,prices.btc.changePct);
+    E('ethPrice').textContent=moneyFmt(prices.eth.current);E('ethChange').textContent=pctFmt(prices.eth.changePct);E('ethChange').className='marketChange '+(prices.eth.changePct>=0?'good':'bad');drawSpark('ethChart',prices.eth.points,prices.eth.changePct);
+  }catch{}
+}
+E('refresh').addEventListener('click',load);load();setInterval(refreshPrices,10000);
 </script>
 </body></html>`;
 }
