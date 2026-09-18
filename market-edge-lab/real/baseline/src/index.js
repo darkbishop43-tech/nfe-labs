@@ -56,7 +56,7 @@ function statusPayload(env) {
     isolation: "DEDICATED_WORKER",
     marketScope: env.MARKET_SCOPE || "BTC_ETH_ONLY",
     executionMode: env.EXECUTION_MODE || "LOCKED",
-    liveOrderSubmission: "DISABLED",
+    liveOrderSubmission: env.LIVE_ORDER_SUBMISSION || "DISABLED",
     fundingAuthorized: true,
     expectedFundingUsd: 10,
     fundingScope: "DEPOSIT_PROOF_ONLY",
@@ -1010,7 +1010,7 @@ function dashboardHtml() {
       <img class="logo" alt="NFE-OS" src="https://raw.githubusercontent.com/darkbishop43-tech/nfe-labs/main/market-edge-lab/public/nfe-os-logo-market-edge.webp">
       <div><div class="k">NFE-OS Research Lab · Polymarket US</div><h1>Market Edge — Baseline Real</h1><div class="sub">Real account validation · BTC/ETH only · governed test environment</div></div>
     </div>
-    <div class="actions"><button id="refresh" class="btn" type="button">REFRESH PROOF</button><div class="pill real">REAL · READ ONLY</div><div class="pill">FUNDING LOCKED</div></div>
+    <div class="actions"><button id="refresh" class="btn" type="button">REFRESH PROOF</button><div id="modePill" class="pill real">REAL · CHECKING</div><div class="pill">FUNDING COMPLETE · NEW FUNDING LOCKED</div></div>
   </div>
 
   <div class="grid">
@@ -1022,7 +1022,7 @@ function dashboardHtml() {
 
   <div class="card section">
     <b>Real-System Status</b>
-    <div class="statusline"><span id="statusDot" class="dot warn"></span><div><div id="statusText"><b>CHECKING AUTHENTICATED READ…</b></div><div class="m">This page can observe and verify. It cannot authorize funding or submit an order.</div></div></div>
+    <div class="statusline"><span id="statusDot" class="dot warn"></span><div><div id="statusText"><b>CHECKING REAL CONTROLLER…</b></div><div id="statusSub" class="m">Loading governed execution state.</div></div></div>
   </div>
 
   <div class="card section">
@@ -1062,7 +1062,7 @@ function dashboardHtml() {
         <div class="row"><span>Secret exposure</span><strong class="good">NONE</strong></div>
         <div class="row"><span>Shadow experiment</span><strong id="shadowGov">CHECKING…</strong></div>
         <div class="row"><span>Market scope</span><strong>BTC / ETH ONLY</strong></div>
-        <div class="row"><span>Execution mode</span><strong>LOCKED</strong></div>
+        <div class="row"><span>Execution mode</span><strong id="executionGov">CHECKING…</strong></div>
       </div>
     </div>
   </div>
@@ -1077,7 +1077,20 @@ function dashboardHtml() {
       <div class="row"><span>US BTC/ETH eligible markets</span><strong id="shadowEligible">0</strong></div>
       <div class="row"><span>Persistence</span><strong id="shadowPersistence">—</strong></div>
     </div>
-    <div class="notice">SHADOW ONLY · ENTRY ≥ .80 · EXIT ≤ .20 · MAX HOLD 5 MIN · MAX STAKE $5 · NO REAL ORDER SUBMISSION.</div>
+    <div class="notice">SHADOW SIGNAL ENGINE · ENTRY ≥ .80 · EXIT ≤ .20 · MAX HOLD 5 MIN · MAX STAKE $5. When the separate ONE-TRADE controller is armed, one qualifying Shadow signal may trigger the governed real test.</div>
+  </div>
+
+  <div class="card section">
+    <b>Real Trade Controller · One-Trade Acceptance Test</b>
+    <div class="rows" style="margin-top:8px">
+      <div class="row"><span>Controller</span><strong id="realController">CHECKING…</strong></div>
+      <div class="row"><span>State</span><strong id="realTradeStatus">CHECKING…</strong></div>
+      <div class="row"><span>Market / position</span><strong id="realTradeMarket">WAITING</strong></div>
+      <div class="row"><span>Entry order</span><strong id="realEntryOrder">NOT SUBMITTED</strong></div>
+      <div class="row"><span>Exit order</span><strong id="realExitOrder">NOT SUBMITTED</strong></div>
+      <div class="row"><span>Test consumed</span><strong id="realConsumed">NO</strong></div>
+    </div>
+    <div class="notice">ONE REAL TRADE ONLY · MAX $5 · ENTRY ≥ .80 · EXIT ≤ .20 OR 5 MIN. Provider account/app remains the independent source of truth for actual order/position activity.</div>
   </div>
 
   <div class="card section">
@@ -1111,12 +1124,12 @@ function dashboardHtml() {
       <div class="row"><span>Maximum Baseline trade stake</span><strong>$5</strong></div>
       <div class="row"><span>Intended first funding method</span><strong>DEBIT CARD</strong></div>
       <div class="row"><span>Funding authorization</span><strong class="good">$10 · DEPOSIT PROOF ONLY</strong></div>
-      <div class="row"><span>Live order submission</span><strong class="warn">DISABLED</strong></div>
+      <div class="row"><span>Live order submission</span><strong id="moneyLiveOrders">CHECKING…</strong></div>
     </div>
     </div>
     <div class="notice">A displayed unfunded state is not withdrawal proof. Funding remains locked until the remaining execution, rules, settlement, recordkeeping, and cash-out gates are independently verified.</div>
   </div>
-  <div class="footer">NFE-OS · MARKET EDGE — BASELINE REAL · GOVERNED VALIDATION · LIVE ORDERS DISABLED</div>
+  <div class="footer">NFE-OS · MARKET EDGE — BASELINE REAL · GOVERNED VALIDATION · ONE-TRADE TEST</div>
 </div>
 <script>
 const E=id=>document.getElementById(id);
@@ -1135,6 +1148,30 @@ async function load(){
     }else{
       liveOrdersState.textContent='DISABLED';liveOrdersState.className='val warn';
       liveOrdersSub.textContent='One-trade execution controller is implemented but DISARMED.';
+    }
+
+    const armed=Boolean(realTrade?.armed);
+    const modePill=E('modePill'),statusSub=E('statusSub'),executionGov=E('executionGov'),moneyLiveOrders=E('moneyLiveOrders');
+    modePill.textContent=armed?'REAL · ONE-TRADE ARMED':'REAL · EXECUTION DISARMED';
+    executionGov.textContent=armed?'ONE_TRADE_TEST · ARMED':'LOCKED / DISARMED';
+    executionGov.className=armed?'good':'warn';
+    moneyLiveOrders.textContent=armed?'ONE-TRADE ARMED':'DISABLED';
+    moneyLiveOrders.className=armed?'good':'warn';
+    E('realController').textContent=armed?'ARMED · ONE TRADE ONLY':'DISARMED';
+    E('realController').className=armed?'good':'warn';
+    E('realTradeStatus').textContent=realTrade?.status||'UNKNOWN';
+    E('realTradeStatus').className=(realTrade?.status==='ONE_TRADE_COMPLETE')?'good':(armed?'good':'warn');
+    E('realTradeMarket').textContent=realTrade?.question||realTrade?.marketSlug||'WAITING FOR ≥ .80 SIGNAL';
+    E('realEntryOrder').textContent=realTrade?.entryOrderPresent?'SUBMITTED / PRESENT':'NOT SUBMITTED';
+    E('realEntryOrder').className=realTrade?.entryOrderPresent?'good':'';
+    E('realExitOrder').textContent=realTrade?.exitOrderPresent?'SUBMITTED / PRESENT':'NOT SUBMITTED';
+    E('realExitOrder').className=realTrade?.exitOrderPresent?'good':'';
+    E('realConsumed').textContent=realTrade?.consumed?'YES · COMPLETE':'NO';
+    E('realConsumed').className=realTrade?.consumed?'good':'';
+    if(armed){
+      statusDot.className='dot good';
+      statusText.innerHTML='<b>AUTHENTICATED · ONE-TRADE CONTROLLER ARMED</b>';
+      statusSub.textContent='One governed real trade may execute automatically when the Baseline entry rule qualifies. No manual order is required.';
     }
     const moneyFmt=n=>Number(n).toLocaleString(undefined,{style:'currency',currency:'USD',maximumFractionDigits:2});
     const pctFmt=n=>(Number(n)>=0?'+':'')+Number(n).toFixed(2)+'%';
