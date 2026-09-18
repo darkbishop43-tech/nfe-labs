@@ -1077,6 +1077,17 @@ function dashboardHtml() {
   </div>
 
   <div class="card section">
+    <b>Paper → Real Divergence Evidence</b>
+    <div class="notice" style="margin-top:8px">
+      <b>OBSERVED 9/18/2026 ~11:53 AM EDT · PAPER SIGNAL NOT REAL-EXECUTABLE</b><br>
+      Paper Baseline observed <b>Ethereum above $2,600 on September 18</b> at score <b>0.82</b> and opened a simulated $5 paper position at 1.2¢.
+      Baseline Real did not mirror the signal because the authenticated Polymarket US event catalogue reached its end with 2,199 events inspected and zero identifiable ETH / Ethereum / Ether markets.
+      <b>No real order was submitted.</b>
+    </div>
+    <div class="m" style="margin-top:7px">Classification: PAPER → REAL NON-EXECUTABLE SIGNAL · venue availability divergence, not real P/L and not evidence of strategy failure.</div>
+  </div>
+
+  <div class="card section">
     <b>Profit / Loss</b>
     <div class="pnlGrid">
       <div class="pnlBox"><div class="label">Realized P/L</div><div class="pnlNum">$0.00</div><div class="m">No Baseline Real orders have been submitted.</div></div>
