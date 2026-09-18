@@ -221,9 +221,15 @@ async function previewProof(env) {
     for (const { market, event } of candidates.slice(0, 20)) {
       try {
         const bbo = await publicClient.markets.bbo(market.slug);
-        const askValue = bbo?.bestAsk?.value ?? bbo?.bestAsk;
-        const ask = Number(askValue);
-        if (!Number.isFinite(ask) || ask <= 0) { diagnostics.push("NO_VALID_ASK"); continue; }
+        let askValue = bbo?.bestAsk?.value ?? bbo?.bestAsk;
+        let ask = Number(askValue);
+        if (!Number.isFinite(ask) || ask <= 0) {
+          const book = await publicClient.markets.book(market.slug);
+          const offers = Array.isArray(book?.offers) ? book.offers : [];
+          askValue = offers[0]?.px?.value ?? offers[0]?.px;
+          ask = Number(askValue);
+        }
+        if (!Number.isFinite(ask) || ask <= 0) { diagnostics.push("NO_VALID_ASK_OR_BOOK_OFFER"); continue; }
         const request={marketSlug:market.slug,intent:"ORDER_INTENT_BUY_LONG",type:"ORDER_TYPE_LIMIT",price:{value:String(askValue),currency:"USD"},quantity:1,tif:"TIME_IN_FORCE_IMMEDIATE_OR_CANCEL",manualOrderIndicator:"MANUAL_ORDER_INDICATOR_AUTOMATIC",synchronousExecution:false};
         const response=await built.client.orders.preview({request});
         const order=response?.order||{};
