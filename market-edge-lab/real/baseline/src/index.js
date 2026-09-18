@@ -384,35 +384,47 @@ async function coinbaseSpot(product) {
   return price;
 }
 
-async function coinbase24hSeries(product) {
-  const end = new Date();
-  const start = new Date(end.getTime() - 24 * 60 * 60 * 1000);
-  const [current, candleResponse] = await Promise.all([
-    coinbaseSpot(product),
-    fetch("https://api.exchange.coinbase.com/products/" + product + "/candles?granularity=3600", {
-      headers: { "User-Agent": "NFE-Market-Edge-Baseline-Real/0.3" },
-    }),
-  ]);
-  if (!candleResponse.ok) throw new Error("COINBASE_CANDLES_FAILED_" + candleResponse.status);
-  const raw = await candleResponse.json();
-  const points = (Array.isArray(raw) ? raw : [])
-    .map((row) => ({ ts: Number(row?.[0]) * 1000, price: Number(row?.[4]) }))
-    .filter((p) => Number.isFinite(p.ts) && Number.isFinite(p.price) && p.price > 0)
-    .sort((a, b) => a.ts - b.ts);
-  const first = points[0]?.price ?? current;
-  const changePct = first > 0 ? ((current - first) / first) * 100 : 0;
-  return { product, current, changePct, points, source: "COINBASE_EXCHANGE_PUBLIC_API" };
+function shadowPriceSeries(asset) {
+  return loadShadowState(globalThis.__baselineRealEnv || {}).then((state) => {
+    const ledger = Array.isArray(state?.ledger) ? state.ledger : [];
+    const field = asset === "BTC" ? "btc" : "eth";
+    const points = ledger
+      .filter((row) => row?.type === "SHADOW_REFRESH" && Number.isFinite(Number(row?.[field])))
+      .map((row) => ({ ts: Date.parse(row.at), price: Number(row[field]) }))
+      .filter((p) => Number.isFinite(p.ts) && p.price > 0)
+      .slice(-288);
+    const current = Number(state?.prices?.[asset]);
+    if (Number.isFinite(current) && current > 0 && (!points.length || points[points.length - 1].price !== current)) {
+      points.push({ ts: Date.parse(state?.lastRunAt || new Date().toISOString()), price: current });
+    }
+    const first = points[0]?.price ?? current;
+    const changePct = Number.isFinite(current) && first > 0 ? ((current - first) / first) * 100 : 0;
+    return { product: asset + "-USD", current, changePct, points, source: "BASELINE_REAL_SHADOW_OBSERVATIONS", window: points.length >= 2 ? "OBSERVED" : "BUILDING" };
+  });
 }
 
-async function livePriceProof() {
+async function livePriceProof(env) {
   try {
-    const [btc, eth] = await Promise.all([
-      coinbase24hSeries("BTC-USD"),
-      coinbase24hSeries("ETH-USD"),
-    ]);
-    return { ok: true, window: "24H", btc, eth };
+    const state = await loadShadowState(env);
+    const ledger = Array.isArray(state?.ledger) ? state.ledger : [];
+    const make = (asset) => {
+      const field = asset === "BTC" ? "btc" : "eth";
+      const cutoff = Date.now() - 24 * 60 * 60 * 1000;
+      const points = ledger
+        .filter((row) => row?.type === "SHADOW_REFRESH" && Number.isFinite(Number(row?.[field])) && Date.parse(row.at) >= cutoff)
+        .map((row) => ({ ts: Date.parse(row.at), price: Number(row[field]) }))
+        .filter((p) => Number.isFinite(p.ts) && p.price > 0)
+        .sort((a,b)=>a.ts-b.ts);
+      const current = Number(state?.prices?.[asset]);
+      if (Number.isFinite(current) && current > 0 && (!points.length || points[points.length - 1].price !== current)) points.push({ ts: Date.parse(state?.lastRunAt || new Date().toISOString()), price: current });
+      const first = points[0]?.price ?? current;
+      return { product: asset + "-USD", current, changePct: Number.isFinite(current) && first > 0 ? ((current-first)/first)*100 : 0, points, source: "BASELINE_REAL_SHADOW_OBSERVATIONS" };
+    };
+    const btc=make("BTC"), eth=make("ETH");
+    if (!Number.isFinite(btc.current) || !Number.isFinite(eth.current)) return {ok:false,state:"SHADOW_PRICE_HISTORY_BUILDING",window:"24H"};
+    return {ok:true,window:"24H",btc,eth,note:"Uses the same Coinbase spot observations already captured by the governed Shadow engine; no separate chart-provider call."};
   } catch {
-    return { ok: false, state: "PRICE_SERIES_UNAVAILABLE", window: "24H" };
+    return {ok:false,state:"PRICE_SERIES_UNAVAILABLE",window:"24H"};
   }
 }
 
@@ -948,7 +960,7 @@ export default {
 
     if (url.pathname === "/markets") return json(await marketSnapshot());
 
-    if (url.pathname === "/price-proof") return json(await livePriceProof());
+    if (url.pathname === "/price-proof") return json(await livePriceProof(env));
 
     if (url.pathname === "/money-path-proof") return json(await moneyPathProof(env));
 
