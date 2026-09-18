@@ -432,7 +432,14 @@ function dashboardHtml() {
       <div class="row"><span>Withdrawal activity</span><strong id="moneyWithdrawal">CHECKING…</strong></div>
       <div class="row"><span>Cash-out loop</span><strong id="moneyLoop">CHECKING…</strong></div>
     </div>
-    <div class="notice">These controls hand money movement to the official Polymarket US site. Baseline Real does not receive bank credentials and does not initiate deposits or withdrawals. Funding remains unauthorized until the remaining gates are cleared.</div>
+    <div class="notice"><b>FIRST BANKROLL CONTROL:</b> $5 preferred. $10 is a contingency ceiling only if verified platform mechanics require it. Debit card is the intended first funding method. Buying power is not the same as cleared/withdrawable funds. These controls hand money movement to the official Polymarket US site; Baseline Real never receives bank credentials or initiates deposits/withdrawals.</div>
+    <div class="rows" style="margin-top:8px">
+      <div class="row"><span>Preferred first bankroll</span><strong>$5</strong></div>
+      <div class="row"><span>Contingency ceiling</span><strong>$10 · REQUIRES EVIDENCE</strong></div>
+      <div class="row"><span>Intended first funding method</span><strong>DEBIT CARD</strong></div>
+      <div class="row"><span>Funding authorization</span><strong class="warn">LOCKED</strong></div>
+      <div class="row"><span>Live order submission</span><strong class="warn">DISABLED</strong></div>
+    </div>
     </div>
     <div class="notice">A displayed unfunded state is not withdrawal proof. Funding remains locked until the remaining execution, rules, settlement, recordkeeping, and cash-out gates are independently verified.</div>
   </div>
