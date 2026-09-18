@@ -224,7 +224,7 @@ async function previewProof(env) {
     const candidates = (Array.isArray(marketListed?.markets) ? marketListed.markets : [])
       .filter((market) => market?.active && !market?.closed && market?.slug && Number(market?.liquidity || 0) > 0)
       .map((market) => ({ market, event: eventBySlug.get(market?.eventSlug) || null }));
-    if (!candidates.length) return { ok:false,state:"NO_SHORT_HORIZON_BTC_ETH_CANDIDATE",submitted:false,liveOrderSubmission:"DISABLED",fundingAuthorized:false,discovery:{windowHours:72,eventsScanned:(listed?.events||[]).length,cryptoEvents:crypto.length,sensitiveTextExposed:false} };
+    if (!candidates.length) return { ok:false,state:"NO_SHORT_HORIZON_BTC_ETH_CANDIDATE",submitted:false,liveOrderSubmission:"DISABLED",fundingAuthorized:false,discovery:{windowHours:72,eventsScanned:(listed?.events||[]).length,cryptoEvents:crypto.length,eventSlugCount:eventSlugs.length,marketsReturned:(marketListed?.markets||[]).length,activeOpenMarkets:(marketListed?.markets||[]).filter(m=>m?.active&&!m?.closed&&m?.slug).length,positiveLiquidityMarkets:(marketListed?.markets||[]).filter(m=>Number(m?.liquidity||0)>0).length,sensitiveTextExposed:false} };
 
     const diagnostics=[];
     for (const { market, event } of candidates.slice(0, 20)) {
