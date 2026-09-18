@@ -1,0 +1,6 @@
+name = "market-edge-robinhood-15m-observer"
+main = "src/index.js"
+compatibility_date = "2026-09-18"
+
+# Deliberately no secrets, KV bindings, account credentials, or order APIs.
+# This worker is public-page observation only.
