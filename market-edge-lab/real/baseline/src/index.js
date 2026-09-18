@@ -404,37 +404,34 @@ function shadowPriceSeries(asset) {
 }
 
 async function livePriceProof(env) {
+  // Display-only market monitor. This intentionally mirrors the frozen Paper Baseline:
+  // live Coinbase spot + Coinbase Exchange 24h stats/candles. It does not mutate Shadow state.
   try {
-    const [state, liveBtc, liveEth] = await Promise.all([
-      loadShadowState(env),
-      coinbaseSpot("BTC-USD"),
-      coinbaseSpot("ETH-USD"),
-    ]);
-    const ledger = Array.isArray(state?.ledger) ? state.ledger : [];
-    const make = (asset) => {
-      const field = asset === "BTC" ? "btc" : "eth";
-      const cutoff = Date.now() - 24 * 60 * 60 * 1000;
-      const points = ledger
-        .filter((row) => row?.type === "SHADOW_REFRESH" && Number.isFinite(Number(row?.[field])) && Date.parse(row.ts) >= cutoff)
-        .map((row) => ({ ts: Date.parse(row.ts), price: Number(row[field]) }))
-        .filter((p) => Number.isFinite(p.ts) && p.price > 0)
-        .sort((a,b)=>a.ts-b.ts);
-      const shadowCurrent = Number(state?.prices?.[asset]);
-      if (Number.isFinite(shadowCurrent) && shadowCurrent > 0 && (!points.length || points[points.length - 1].price !== shadowCurrent)) points.push({ ts: Date.parse(state?.lastRunAt || new Date().toISOString()), price: shadowCurrent });
-      const current = asset === "BTC" ? liveBtc : liveEth;
-      if (Number.isFinite(current) && current > 0 && (!points.length || points[points.length - 1].price !== current)) points.push({ ts: Date.now(), price: current });
-      const first = points[0]?.price ?? current;
-      const observedMinutes = points.length > 1 ? Math.max(0, (points[points.length-1].ts-points[0].ts)/60000) : 0;
-      return { product: asset + "-USD", current, changePct: Number.isFinite(current) && first > 0 ? ((current-first)/first)*100 : 0, points, source: "BASELINE_REAL_SHADOW_OBSERVATIONS", observedMinutes };
+    const make = async (asset) => {
+      const product = asset + "-USD";
+      const [current, statsRes, candlesRes] = await Promise.all([
+        coinbaseSpot(product),
+        fetch("https://api.exchange.coinbase.com/products/" + product + "/stats", { headers: { accept: "application/json" } }),
+        fetch("https://api.exchange.coinbase.com/products/" + product + "/candles?granularity=3600", { headers: { accept: "application/json" } }),
+      ]);
+      if (!statsRes.ok || !candlesRes.ok) throw new Error("COINBASE_TREND_UNAVAILABLE");
+      const [stats, candles] = await Promise.all([statsRes.json(), candlesRes.json()]);
+      const open = Number(stats?.open);
+      const last = Number(stats?.last);
+      const closes = (Array.isArray(candles) ? candles : [])
+        .filter((x) => Array.isArray(x) && Number.isFinite(Number(x[0])) && Number.isFinite(Number(x[4])))
+        .sort((a,b) => Number(a[0]) - Number(b[0]))
+        .slice(-24)
+        .map((x) => ({ ts: Number(x[0]) * 1000, price: Number(x[4]) }));
+      const changePct = Number.isFinite(open) && open > 0 && Number.isFinite(last) ? ((last-open)/open)*100 : 0;
+      return { product, current, changePct, points: closes, source: "COINBASE_EXCHANGE_24H", window: "24H" };
     };
-    const btc=make("BTC"), eth=make("ETH");
-    if (!Number.isFinite(btc.current) || !Number.isFinite(eth.current)) return {ok:false,state:"SHADOW_PRICE_HISTORY_BUILDING",window:"24H"};
-    return {ok:true,window:"24H",btc,eth,note:"Uses the same Coinbase spot observations already captured by the governed Shadow engine; no separate chart-provider call."};
+    const [btc, eth] = await Promise.all([make("BTC"), make("ETH")]);
+    return { ok: true, window: "24H", btc, eth, note: "Display-only Coinbase 24-hour trend, matching the frozen Paper Baseline monitor. Shadow trading state is unchanged." };
   } catch {
-    return {ok:false,state:"PRICE_SERIES_UNAVAILABLE",window:"24H"};
+    return { ok: false, state: "PRICE_SERIES_UNAVAILABLE", window: "24H" };
   }
 }
-
 function shadowRelevant(text) {
   const q = String(text || "").toLowerCase();
   const asset = q.includes("bitcoin") || /\bbtc\b/.test(q)
@@ -781,7 +778,7 @@ function dashboardHtml() {
   </div>
 
   <div class="card section">
-    <b>BTC / ETH · Shadow Price History</b>
+    <b>BTC / ETH · Live 24-Hour Market Display</b>
     <div class="marketGrid">
       <div class="marketCard">
         <div class="marketTop"><div><div class="label">Bitcoin</div><div id="btcPrice" class="marketPrice">CHECKING…</div></div><div id="btcChange" class="marketChange">—</div></div>
@@ -792,7 +789,7 @@ function dashboardHtml() {
         <svg id="ethChart" class="spark" viewBox="0 0 100 30" preserveAspectRatio="none" aria-label="Ethereum 24 hour price chart"></svg>
       </div>
     </div>
-    <div class="notice">Charts show the Shadow engine's accumulated Coinbase spot observations since Shadow started, plus the current live spot. They are not a full 24-hour market-history feed and do not represent Polymarket contract prices.</div>
+    <div class="notice">Live display mirrors Paper Baseline: Coinbase spot refresh plus Coinbase Exchange 24-hour candles. Display only; it does not change Shadow decisions and does not represent Polymarket contract prices.</div>
   </div>
 
   <div class="card section">
