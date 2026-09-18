@@ -519,9 +519,14 @@ function shadowLedger(state, type, payload = {}) {
 
 async function discoverUsShadowMarkets() {
   const client = new PolymarketUS();
+  // Query both long names and ticker/common-name variants. Results are deduplicated
+  // below, so broadening discovery does not duplicate markets or change scoring.
   const searches = await Promise.all([
     client.search.query({ query: "bitcoin", status: "active", limit: 50 }),
+    client.search.query({ query: "BTC", status: "active", limit: 50 }),
     client.search.query({ query: "ethereum", status: "active", limit: 50 }),
+    client.search.query({ query: "ETH", status: "active", limit: 50 }),
+    client.search.query({ query: "ether", status: "active", limit: 50 }),
   ]);
 
   const eventMap = new Map();
@@ -593,7 +598,20 @@ async function discoverUsShadowMarkets() {
     }
   }
 
-  return { markets: candidates, seen, rejected };
+  const coverage = {
+    BTC: {
+      eligible: candidates.filter((m) => m.asset === "BTC").length,
+      up: candidates.filter((m) => m.asset === "BTC" && !m.bear).length,
+      down: candidates.filter((m) => m.asset === "BTC" && m.bear).length,
+    },
+    ETH: {
+      eligible: candidates.filter((m) => m.asset === "ETH").length,
+      up: candidates.filter((m) => m.asset === "ETH" && !m.bear).length,
+      down: candidates.filter((m) => m.asset === "ETH" && m.bear).length,
+    },
+  };
+
+  return { markets: candidates, seen, rejected, coverage };
 }
 
 async function runShadow(env) {
@@ -666,6 +684,8 @@ async function runShadow(env) {
     state.moves = moves;
     state.opportunities = opportunities.slice(0, 20);
     state.eligibleCount = discovery.markets.length;
+    state.assetCoverage = discovery.coverage;
+    state.assetCoverageReady = Number(discovery.coverage?.BTC?.eligible || 0) > 0 && Number(discovery.coverage?.ETH?.eligible || 0) > 0;
     state.rejectedCount = discovery.rejected;
     state.seenCount = discovery.seen;
     state.lastRunAt = new Date(now).toISOString();
@@ -800,6 +820,15 @@ async function maybeRunOneTrade(env) {
     if (state.status === "ENTRY_SUBMITTING" || state.status === "BLOCKED_ENTRY_RECONCILIATION") {
       state.status = "BLOCKED_ENTRY_RECONCILIATION";
       realTradeLedger(state, "REAL_TEST_BLOCKED", { reason: "ENTRY_RECONCILIATION_REQUIRED" });
+      await saveRealTradeState(env, state);
+      return state;
+    }
+
+    // Safety gate for the first governed trade: do not allow the acceptance test
+    // to fire until live discovery has positively demonstrated BOTH BTC and ETH.
+    // This prevents a silently BTC-only discovery bug from consuming the one-trade test.
+    if (!shadow?.assetCoverageReady) {
+      state.status = "HOLD_ASSET_COVERAGE_NOT_PROVEN";
       await saveRealTradeState(env, state);
       return state;
     }
@@ -961,6 +990,8 @@ function publicShadowView(state) {
     runs: state?.runs || 0,
     strategy: state?.strategy || SHADOW_CONFIG,
     eligibleCount: state?.eligibleCount || 0,
+    assetCoverage: state?.assetCoverage || { BTC:{eligible:0,up:0,down:0}, ETH:{eligible:0,up:0,down:0} },
+    assetCoverageReady: Boolean(state?.assetCoverageReady),
     rejectedCount: state?.rejectedCount || 0,
     seenCount: state?.seenCount || 0,
     opportunities: (state?.opportunities || []).slice(0, 12).map((o) => ({
@@ -1210,6 +1241,9 @@ async function load(){
       conn.textContent='NOT VERIFIED';conn.className='val bad';connSub.textContent='Authenticated account proof is unavailable. See /account for safe diagnostic state.';gateAccount.textContent='FAILED';gateAccount.className='bad';bal.textContent='UNAVAILABLE';statusDot.className='dot bad';statusText.innerHTML='<b class="bad">ACCOUNT PROOF NOT VERIFIED</b>';
     }
     const opps=Array.isArray(shadow?.opportunities)?shadow.opportunities:[],parts=[];
+    const cov=shadow?.assetCoverage||{};
+    const coverageReady=Boolean(shadow?.assetCoverageReady);
+    parts.push('<div class="opp" style="grid-column:1/-1"><div class="oppHead"><div class="q">LIVE ASSET COVERAGE</div><div class="tag '+(coverageReady?'good':'warn')+'">'+(coverageReady?'BTC + ETH PROVEN':'FIRST TRADE HOLD')+'</div></div><div class="meta">BTC: '+Number(cov?.BTC?.eligible||0)+' eligible · '+Number(cov?.BTC?.up||0)+' up · '+Number(cov?.BTC?.down||0)+' down &nbsp; | &nbsp; ETH: '+Number(cov?.ETH?.eligible||0)+' eligible · '+Number(cov?.ETH?.up||0)+' up · '+Number(cov?.ETH?.down||0)+' down'+(coverageReady?'':' · Controller will not submit the first real order until both assets are discovered live.')+'</div></div>');
     if(!opps.length){
       parts.push('<div class="opp"><div class="meta">No eligible BTC/ETH opportunities in the current Polymarket US Shadow observation.</div></div>');
     } else {
