@@ -210,11 +210,20 @@ async function previewProof(env) {
       const hay = [event?.title,event?.slug,event?.description,event?.series?.title,event?.series?.slug,...(event?.tags||[]).flatMap(t=>[t?.label,t?.slug])].filter(Boolean).join(" ").toLowerCase();
       return /bitcoin|btc|ethereum|eth/.test(hay);
     });
-    const candidates = crypto.flatMap((event) =>
-      (Array.isArray(event?.markets) ? event.markets : [])
-        .filter((market) => market?.active && !market?.closed && market?.slug)
-        .map((market) => ({ market, event }))
-    );
+    const eventSlugs = crypto.map((event) => event?.slug).filter(Boolean);
+    const marketListed = eventSlugs.length ? await publicClient.markets.list({
+      eventSlug: eventSlugs,
+      active: true,
+      closed: false,
+      liquidityMin: 0.01,
+      orderBy: ["liquidity"],
+      orderDirection: "desc",
+      limit: 100,
+    }) : { markets: [] };
+    const eventBySlug = new Map(crypto.map((event) => [event?.slug, event]));
+    const candidates = (Array.isArray(marketListed?.markets) ? marketListed.markets : [])
+      .filter((market) => market?.active && !market?.closed && market?.slug && Number(market?.liquidity || 0) > 0)
+      .map((market) => ({ market, event: eventBySlug.get(market?.eventSlug) || null }));
     if (!candidates.length) return { ok:false,state:"NO_SHORT_HORIZON_BTC_ETH_CANDIDATE",submitted:false,liveOrderSubmission:"DISABLED",fundingAuthorized:false,discovery:{windowHours:72,eventsScanned:(listed?.events||[]).length,cryptoEvents:crypto.length,sensitiveTextExposed:false} };
 
     const diagnostics=[];
