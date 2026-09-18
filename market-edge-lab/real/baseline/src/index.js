@@ -349,6 +349,326 @@ async function marketSnapshot() {
   };
 }
 
+
+const SHADOW_CONFIG = {
+  entryScore: 0.80,
+  exitScore: 0.20,
+  maxStakeUsd: 5,
+  maxHoldMs: 5 * 60 * 1000,
+  maxLedger: 250,
+};
+
+const SHADOW_CACHE_URL = "https://market-edge-baseline-real.internal/shadow-state-v1";
+
+function clamp(v, lo, hi) {
+  return Math.max(lo, Math.min(hi, v));
+}
+
+function normalizeProbability(value) {
+  const n = Number(value?.value ?? value);
+  if (!Number.isFinite(n)) return null;
+  if (n > 1 && n <= 100) return n / 100;
+  if (n >= 0 && n <= 1) return n;
+  return null;
+}
+
+async function coinbaseSpot(product) {
+  const r = await fetch("https://api.exchange.coinbase.com/products/" + product + "/ticker", {
+    headers: { "User-Agent": "NFE-Market-Edge-Baseline-Real/0.3" },
+  });
+  if (!r.ok) throw new Error("COINBASE_READ_FAILED_" + r.status);
+  const data = await r.json();
+  const price = Number(data?.price);
+  if (!Number.isFinite(price) || price <= 0) throw new Error("COINBASE_PRICE_INVALID");
+  return price;
+}
+
+function shadowRelevant(text) {
+  const q = String(text || "").toLowerCase();
+  const asset = q.includes("bitcoin") || /\bbtc\b/.test(q)
+    ? "BTC"
+    : q.includes("ethereum") || /\beth\b/.test(q)
+      ? "ETH"
+      : null;
+  if (!asset) return null;
+  const up = /\b(up|above|higher|rise|gain|over|increase)\b/.test(q);
+  const down = /\b(down|below|lower|fall|drop|under|decrease)\b/.test(q);
+  if (!up && !down) return null;
+  return { asset, bear: down && !up };
+}
+
+function scoreShadowMarket(market, moves) {
+  const move = moves[market.asset] || 0;
+  const directionalMove = market.bear ? -move : move;
+  const fair = clamp(market.yes + directionalMove * 18, 0.02, 0.98);
+  const edge = fair - market.yes;
+  const score = clamp(0.5 + edge * 4, 0, 1);
+  return { ...market, move, fair, edge, score };
+}
+
+async function loadShadowState() {
+  const cache = caches.default;
+  const hit = await cache.match(new Request(SHADOW_CACHE_URL));
+  if (hit) {
+    try {
+      const parsed = await hit.json();
+      if (parsed && typeof parsed === "object") return parsed;
+    } catch {}
+  }
+  return {
+    mode: "REAL_US_SHADOW",
+    startedAt: null,
+    lastRunAt: null,
+    prices: { BTC: null, ETH: null },
+    moves: { BTC: 0, ETH: 0 },
+    positions: [],
+    opportunities: [],
+    ledger: [],
+    runs: 0,
+    status: "READY_NOT_STARTED",
+    persistence: "BEST_EFFORT_EDGE_CACHE",
+    liveOrderSubmission: "DISABLED",
+  };
+}
+
+async function saveShadowState(state) {
+  state.updatedAt = new Date().toISOString();
+  await caches.default.put(
+    new Request(SHADOW_CACHE_URL),
+    new Response(JSON.stringify(state), {
+      headers: {
+        "content-type": "application/json; charset=utf-8",
+        "cache-control": "public, max-age=31536000",
+      },
+    })
+  );
+}
+
+function shadowLedger(state, type, payload = {}) {
+  state.ledger.unshift({ ts: new Date().toISOString(), type, ...payload });
+  state.ledger = state.ledger.slice(0, SHADOW_CONFIG.maxLedger);
+}
+
+async function discoverUsShadowMarkets() {
+  const client = new PolymarketUS();
+  const searches = await Promise.all([
+    client.search.query({ query: "bitcoin", status: "active", limit: 50 }),
+    client.search.query({ query: "ethereum", status: "active", limit: 50 }),
+  ]);
+
+  const eventMap = new Map();
+  for (const result of searches) {
+    for (const event of (result?.events || [])) {
+      const key = String(event?.id ?? event?.slug ?? "");
+      if (key) eventMap.set(key, event);
+    }
+  }
+
+  const candidates = [];
+  let seen = 0;
+  let rejected = 0;
+
+  for (const event of eventMap.values()) {
+    for (const compact of (event?.markets || [])) {
+      seen += 1;
+      if (!compact?.slug || compact?.active === false || compact?.closed === true) {
+        rejected += 1;
+        continue;
+      }
+
+      let market = compact;
+      try {
+        const detail = await client.markets.retrieveBySlug(compact.slug);
+        market = detail?.market || compact;
+      } catch {}
+
+      const text = [event?.title, market?.title, market?.slug, market?.outcome].filter(Boolean).join(" — ");
+      const rel = shadowRelevant(text);
+      if (!rel || market?.active === false || market?.closed === true) {
+        rejected += 1;
+        continue;
+      }
+
+      try {
+        const bboRaw = await client.markets.bbo(market.slug);
+        const bbo = bboRaw?.marketData || bboRaw;
+        let yes = normalizeProbability(bbo?.bestAsk);
+        let bid = normalizeProbability(bbo?.bestBid);
+
+        if (yes === null) {
+          const bookRaw = await client.markets.book(market.slug);
+          const book = bookRaw?.marketData || bookRaw;
+          const offers = Array.isArray(book?.offers) ? book.offers : [];
+          const bids = Array.isArray(book?.bids) ? book.bids : [];
+          yes = normalizeProbability(offers[0]?.px);
+          if (bid === null) bid = normalizeProbability(bids[0]?.px);
+        }
+
+        if (yes === null || yes <= 0.01 || yes >= 0.99) {
+          rejected += 1;
+          continue;
+        }
+
+        candidates.push({
+          id: String(market?.id ?? market?.slug),
+          slug: market.slug,
+          question: text,
+          asset: rel.asset,
+          bear: rel.bear,
+          yes,
+          bid,
+          source: "POLYMARKET_US",
+        });
+      } catch {
+        rejected += 1;
+      }
+    }
+  }
+
+  return { markets: candidates, seen, rejected };
+}
+
+async function runShadow() {
+  const state = await loadShadowState();
+  const now = Date.now();
+
+  try {
+    const [btc, eth, discovery] = await Promise.all([
+      coinbaseSpot("BTC-USD"),
+      coinbaseSpot("ETH-USD"),
+      discoverUsShadowMarkets(),
+    ]);
+
+    const previous = state.prices || {};
+    const moves = {
+      BTC: previous.BTC ? (btc - previous.BTC) / previous.BTC : 0,
+      ETH: previous.ETH ? (eth - previous.ETH) / previous.ETH : 0,
+    };
+
+    const opportunities = discovery.markets
+      .map((m) => scoreShadowMarket(m, moves))
+      .sort((a, b) => b.score - a.score);
+
+    for (const position of [...(state.positions || [])]) {
+      const current = opportunities.find((o) => o.id === position.marketId);
+      if (!current) continue;
+      const age = now - position.openedAt;
+      if (current.score <= SHADOW_CONFIG.exitScore || age >= SHADOW_CONFIG.maxHoldMs) {
+        state.positions = state.positions.filter((p) => p.marketId !== position.marketId);
+        shadowLedger(state, "SHADOW_EXIT", {
+          marketId: position.marketId,
+          slug: position.slug,
+          question: position.question,
+          entryObservedAsk: position.entryObservedAsk,
+          exitObservedBid: current.bid,
+          heldMs: age,
+          reason: current.score <= SHADOW_CONFIG.exitScore ? "score_exit" : "max_hold",
+          realMoneyMoved: false,
+        });
+      }
+    }
+
+    for (const o of opportunities.slice(0, 20)) {
+      if ((state.positions || []).some((p) => p.marketId === o.id)) continue;
+      if (o.score < SHADOW_CONFIG.entryScore || o.edge <= 0) continue;
+      state.positions.push({
+        marketId: o.id,
+        slug: o.slug,
+        question: o.question,
+        asset: o.asset,
+        entryObservedAsk: o.yes,
+        maxStakeUsd: SHADOW_CONFIG.maxStakeUsd,
+        openedAt: now,
+        entryScore: o.score,
+      });
+      shadowLedger(state, "SHADOW_ENTRY", {
+        marketId: o.id,
+        slug: o.slug,
+        question: o.question,
+        asset: o.asset,
+        observedAsk: o.yes,
+        maxStakeUsd: SHADOW_CONFIG.maxStakeUsd,
+        score: o.score,
+        edge: o.edge,
+        realMoneyMoved: false,
+      });
+    }
+
+    state.prices = { BTC: btc, ETH: eth };
+    state.moves = moves;
+    state.opportunities = opportunities.slice(0, 20);
+    state.eligibleCount = discovery.markets.length;
+    state.rejectedCount = discovery.rejected;
+    state.seenCount = discovery.seen;
+    state.lastRunAt = new Date(now).toISOString();
+    state.startedAt = state.startedAt || state.lastRunAt;
+    state.runs = Number(state.runs || 0) + 1;
+    state.status = "LIVE_US_SHADOW";
+    state.liveOrderSubmission = "DISABLED";
+    state.strategy = {
+      entryScore: SHADOW_CONFIG.entryScore,
+      exitScore: SHADOW_CONFIG.exitScore,
+      maxHoldMs: SHADOW_CONFIG.maxHoldMs,
+      maxStakeUsd: SHADOW_CONFIG.maxStakeUsd,
+    };
+    shadowLedger(state, "SHADOW_REFRESH", {
+      eligible: state.eligibleCount,
+      rejected: state.rejectedCount,
+      seen: state.seenCount,
+      qualifying: opportunities.filter((o) => o.score >= SHADOW_CONFIG.entryScore && o.edge > 0).length,
+      realMoneyMoved: false,
+    });
+  } catch (error) {
+    state.lastRunAt = new Date(now).toISOString();
+    state.status = "ERROR";
+    shadowLedger(state, "SHADOW_ERROR", {
+      errorType: error?.name || "Error",
+      message: "Shadow observation failed; provider details suppressed.",
+      realMoneyMoved: false,
+    });
+  }
+
+  await saveShadowState(state);
+  return state;
+}
+
+function publicShadowView(state) {
+  return {
+    ok: state?.status !== "ERROR",
+    mode: "REAL_US_SHADOW",
+    status: state?.status || "UNKNOWN",
+    startedAt: state?.startedAt || null,
+    lastRunAt: state?.lastRunAt || null,
+    runs: state?.runs || 0,
+    strategy: state?.strategy || SHADOW_CONFIG,
+    eligibleCount: state?.eligibleCount || 0,
+    rejectedCount: state?.rejectedCount || 0,
+    seenCount: state?.seenCount || 0,
+    opportunities: (state?.opportunities || []).slice(0, 12).map((o) => ({
+      slug: o.slug,
+      question: o.question,
+      asset: o.asset,
+      observedAsk: o.yes,
+      observedBid: o.bid,
+      score: o.score,
+      edge: o.edge,
+    })),
+    openShadowPositions: (state?.positions || []).map((p) => ({
+      slug: p.slug,
+      question: p.question,
+      asset: p.asset,
+      entryObservedAsk: p.entryObservedAsk,
+      maxStakeUsd: p.maxStakeUsd,
+      openedAt: p.openedAt,
+      entryScore: p.entryScore,
+    })),
+    recentEvidence: (state?.ledger || []).slice(0, 25),
+    persistence: state?.persistence || "BEST_EFFORT_EDGE_CACHE",
+    realMoneyMoved: false,
+    liveOrderSubmission: "DISABLED",
+  };
+}
+
 function dashboardHtml() {
   return `<!doctype html>
 <html lang="en">
@@ -480,6 +800,10 @@ E('refresh').addEventListener('click',load);load();
 </body></html>`;
 }
 export default {
+  async scheduled(event, env, ctx) {
+    ctx.waitUntil(runShadow());
+  },
+
   async fetch(request, env) {
     const url = new URL(request.url);
 
@@ -522,6 +846,14 @@ export default {
     if (url.pathname === "/market-diagnostic") {
       const proof = await previewProof(env);
       return json({ok:proof.ok,state:proof.state,diagnostic:proof.diagnostic||null,discovery:proof.discovery||null,submitted:false,sensitiveTextExposed:false}, 200);
+    }
+
+    if (url.pathname === "/shadow-state") {
+      return json(publicShadowView(await loadShadowState()));
+    }
+
+    if (url.pathname === "/shadow-run") {
+      return json(publicShadowView(await runShadow()));
     }
 
     return json({ ok: false, error: "NOT_FOUND" }, 404);
