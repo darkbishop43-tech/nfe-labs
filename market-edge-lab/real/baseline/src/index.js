@@ -1377,6 +1377,97 @@ export default {
       return json({ok:true,source:"POLYMARKET_US_PUBLIC_SEARCH_EXACT",proof,submitted:false,sensitiveValuesExposed:false});
     }
 
+    if (url.pathname === "/eth-event-list-proof") {
+      const client = new PolymarketUS();
+      const matches = [];
+      let offset = 0;
+      let pages = 0;
+      let totalEvents = 0;
+      let totalEmbeddedMarkets = 0;
+      let reachedEnd = false;
+
+      // Official US SDK documents events.list() pagination with limit + offset.
+      // This diagnostic uses the event catalogue directly, independent of fuzzy search
+      // and independent of the working BTC discovery path.
+      while (pages < 50) {
+        let result;
+        try {
+          result = await client.events.list({ active: true, limit: 100, offset });
+        } catch {
+          return json({
+            ok:false,
+            error:"PUBLIC_EVENT_LIST_FAILED",
+            pages,
+            totalEvents,
+            totalEmbeddedMarkets,
+            reachedEnd:false,
+            ethMatches:matches.length,
+            samples:matches.slice(0,20),
+            submitted:false,
+            sensitiveValuesExposed:false
+          });
+        }
+
+        const events = Array.isArray(result?.events) ? result.events
+          : Array.isArray(result?.data?.events) ? result.data.events
+          : Array.isArray(result?.data) ? result.data
+          : Array.isArray(result) ? result : [];
+
+        for (const event of events) {
+          totalEvents += 1;
+          const markets = Array.isArray(event?.markets) ? event.markets : [];
+          totalEmbeddedMarkets += markets.length;
+
+          const eventText = [
+            event?.title,event?.question,event?.slug,event?.description
+          ].filter(Boolean).join(" — ");
+
+          if (/ethereum|\beth\b|\bether\b/i.test(eventText)) {
+            matches.push({
+              kind:"event",
+              title:event?.title||event?.question||null,
+              slug:event?.slug||null
+            });
+          }
+
+          for (const market of markets) {
+            const marketText = [
+              market?.title,market?.question,market?.slug,market?.description,
+              event?.title,event?.slug
+            ].filter(Boolean).join(" — ");
+            if (/ethereum|\beth\b|\bether\b/i.test(marketText)) {
+              matches.push({
+                kind:"market",
+                title:market?.title||market?.question||event?.title||null,
+                slug:market?.slug||null,
+                eventSlug:event?.slug||null
+              });
+            }
+          }
+        }
+
+        pages += 1;
+        if (events.length < 100) {
+          reachedEnd = true;
+          break;
+        }
+        offset += events.length;
+      }
+
+      return json({
+        ok:true,
+        source:"POLYMARKET_US_EVENTS_LIST",
+        pages,
+        totalEvents,
+        totalEmbeddedMarkets,
+        reachedEnd,
+        ethMatches:matches.length,
+        samples:matches.slice(0,20),
+        submitted:false,
+        sensitiveValuesExposed:false
+      });
+    }
+
     if (url.pathname === "/eth-market-list-proof") {
       const client = new PolymarketUS();
       const proof = [];
