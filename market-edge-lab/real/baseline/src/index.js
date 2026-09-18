@@ -359,6 +359,7 @@ const SHADOW_CONFIG = {
 };
 
 const SHADOW_CACHE_URL = "https://market-edge-baseline-real.internal/shadow-state-v1";
+const shadowCacheRequest = () => new Request(SHADOW_CACHE_URL, { method: "GET" });
 
 function clamp(v, lo, hi) {
   return Math.max(lo, Math.min(hi, v));
@@ -408,7 +409,7 @@ function scoreShadowMarket(market, moves) {
 
 async function loadShadowState() {
   const cache = caches.default;
-  const hit = await cache.match(new Request(SHADOW_CACHE_URL));
+  const hit = await cache.match(shadowCacheRequest());
   if (hit) {
     try {
       const parsed = await hit.json();
@@ -434,7 +435,7 @@ async function loadShadowState() {
 async function saveShadowState(state) {
   state.updatedAt = new Date().toISOString();
   await caches.default.put(
-    new Request(SHADOW_CACHE_URL),
+    shadowCacheRequest(),
     new Response(JSON.stringify(state), {
       headers: {
         "content-type": "application/json; charset=utf-8",
