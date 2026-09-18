@@ -229,7 +229,10 @@ async function previewProof(env) {
           askValue = offers[0]?.px?.value ?? offers[0]?.px;
           ask = Number(askValue);
         }
-        if (!Number.isFinite(ask) || ask <= 0) { diagnostics.push("NO_VALID_ASK_OR_BOOK_OFFER"); continue; }
+        if (!Number.isFinite(ask) || ask <= 0) {
+          diagnostics.push("NO_VALID_ASK_OR_BOOK_OFFER");
+          continue;
+        }
         const request={marketSlug:market.slug,intent:"ORDER_INTENT_BUY_LONG",type:"ORDER_TYPE_LIMIT",price:{value:String(askValue),currency:"USD"},quantity:1,tif:"TIME_IN_FORCE_IMMEDIATE_OR_CANCEL",manualOrderIndicator:"MANUAL_ORDER_INDICATOR_AUTOMATIC",synchronousExecution:false};
         const response=await built.client.orders.preview({request});
         const order=response?.order||{};
@@ -247,7 +250,7 @@ async function previewProof(env) {
         diagnostics.push(category+(status?"_HTTP_"+status:""));
       }
     }
-    return {ok:false,state:"SHORT_HORIZON_CANDIDATES_NOT_PREVIEWABLE",submitted:false,liveOrderSubmission:"DISABLED",fundingAuthorized:false,diagnostic:{category:diagnostics[0]||"NO_VALID_BBO",attempted:Math.min(candidates.length,20),sensitiveTextExposed:false},discovery:{windowHours:72,cryptoEvents:crypto.length,candidates:candidates.length}};
+    return {ok:false,state:"SHORT_HORIZON_CANDIDATES_NOT_PREVIEWABLE",submitted:false,liveOrderSubmission:"DISABLED",fundingAuthorized:false,diagnostic:{category:diagnostics[0]||"NO_VALID_BBO",attempted:Math.min(candidates.length,20),allCandidateDiagnostics:[...new Set(diagnostics)].slice(0,6),sensitiveTextExposed:false},discovery:{windowHours:72,cryptoEvents:crypto.length,candidates:candidates.length}};
   } catch {
     return {ok:false,state:"PREVIEW_PROOF_FAILED",submitted:false,liveOrderSubmission:"DISABLED",fundingAuthorized:false};
   }
