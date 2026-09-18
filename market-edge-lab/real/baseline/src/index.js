@@ -999,9 +999,9 @@ function dashboardHtml() {
 <title>Market Edge — Baseline Real</title>
 <style>
 :root{--bg:#050a11;--p:#0d1724;--p2:#111e2d;--line:#243a55;--gold:#d8b15e;--gold2:#f3d58a;--blue:#3479e8;--text:#f5f7fb;--muted:#91a6be;--green:#67e49b;--yellow:#f0c75e;--red:#ff8585;--shadow:0 14px 38px #0007}
-*{box-sizing:border-box}html{scroll-behavior:smooth}body{margin:0;background:radial-gradient(circle at 80% 0,#0d2440 0,transparent 35%),var(--bg);color:var(--text);font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial;min-height:100vh}.w{max-width:1320px;margin:auto;padding:12px 14px 36px}.hero,.card,.opp{background:linear-gradient(180deg,var(--p2),var(--p));border:1px solid var(--line);border-radius:16px}.hero{padding:11px 16px;display:flex;align-items:center;justify-content:space-between;gap:15px}.brand{display:flex;align-items:center;gap:14px}.logo{width:112px;height:64px;object-fit:contain;border-radius:10px}.k{font-size:10px;letter-spacing:.16em;text-transform:uppercase;color:var(--gold)}h1{font-size:25px;margin:2px 0}.sub,.m{font-size:12px;color:var(--muted)}.actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:flex-end}.pill,.btn{border:1px solid #725f34;color:var(--gold2);background:#0b1421;border-radius:999px;padding:8px 11px;font-size:11px;font-weight:800}.pill.real{border-color:#315a8c;color:#a9d0ff}.btn{cursor:pointer}.btn:hover{border-color:var(--gold2);background:#121e2c}.grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:8px}.card{padding:11px 13px}.label{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.08em}.val{font-size:24px;font-weight:850;margin-top:5px}.good{color:var(--green)}.warn{color:var(--yellow)}.bad{color:var(--red)}.section{margin-top:8px}.statusline{display:flex;align-items:center;gap:9px;margin-top:8px}.dot{width:10px;height:10px;border-radius:50%;background:var(--green);box-shadow:0 0 0 5px #67e49b18}.dot.warn{background:var(--yellow);box-shadow:0 0 0 5px #f0c75e18}.dot.bad{background:var(--red);box-shadow:none}.wide{display:grid;grid-template-columns:minmax(0,1.65fr) minmax(280px,.55fr);gap:8px}.rows{display:grid}.row{display:flex;justify-content:space-between;gap:14px;padding:7px 0;border-top:1px solid #1b2d42;font-size:12px}.row:first-child{border-top:0}.opps{display:grid;grid-template-columns:repeat(2,1fr);gap:7px;margin-top:7px}.opp{padding:9px}.oppHead{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;align-items:start}.q{font-size:13px;font-weight:700;line-height:1.35}.tag{border:1px solid #725f34;background:#0a1421;color:var(--gold2);border-radius:10px;padding:6px 8px;font-size:9px;font-weight:900;white-space:nowrap}.meta{font-size:11px;color:var(--muted);margin-top:7px}.gate{display:grid;grid-template-columns:1fr auto;gap:10px;align-items:center;padding:10px 0;border-top:1px solid #1b2d42;font-size:12px}.gate:first-child{border-top:0}.marketGrid{display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin-top:7px}.marketCard{background:#0a1421;border:1px solid #1f344d;border-radius:14px;padding:10px 12px}.marketTop{display:flex;justify-content:space-between;gap:12px;align-items:end}.marketPrice{font-size:25px;font-weight:850}.marketChange{font-size:15px;font-weight:850}.spark{width:100%;height:70px;margin-top:6px;display:block}.spark polyline{fill:none;stroke:currentColor;stroke-width:2;vector-effect:non-scaling-stroke}.spark .base{stroke:#486079;stroke-width:1}.pnlGrid{display:grid;grid-template-columns:repeat(3,1fr);gap:7px;margin-top:7px}.pnlBox{background:#0a1421;border:1px solid #1f344d;border-radius:12px;padding:9px 11px}.pnlNum{font-size:22px;font-weight:850;margin-top:4px}.footer{text-align:center;color:#62778e;font-size:10px;margin-top:18px}.notice{border-left:3px solid var(--gold);padding:7px 9px;background:#0a1421;color:var(--muted);font-size:11px;line-height:1.45;margin-top:10px}
+*{box-sizing:border-box}html{scroll-behavior:smooth}body{margin:0;background:radial-gradient(circle at 80% 0,#0d2440 0,transparent 35%),var(--bg);color:var(--text);font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial;min-height:100vh}.w{max-width:1320px;margin:auto;padding:12px 14px 36px}.hero,.card,.opp{background:linear-gradient(180deg,var(--p2),var(--p));border:1px solid var(--line);border-radius:16px}.hero{padding:11px 16px;display:flex;align-items:center;justify-content:space-between;gap:15px}.brand{display:flex;align-items:center;gap:14px}.logo{width:112px;height:64px;object-fit:contain;border-radius:10px}.k{font-size:10px;letter-spacing:.16em;text-transform:uppercase;color:var(--gold)}h1{font-size:25px;margin:2px 0}.sub,.m{font-size:12px;color:var(--muted)}.actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:flex-end}.pill,.btn{border:1px solid #725f34;color:var(--gold2);background:#0b1421;border-radius:999px;padding:8px 11px;font-size:11px;font-weight:800}.pill.real{border-color:#315a8c;color:#a9d0ff}.btn{cursor:pointer}.btn:hover{border-color:var(--gold2);background:#121e2c}.grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:8px}.card{padding:11px 13px}.label{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.08em}.val{font-size:24px;font-weight:850;margin-top:5px}.good{color:var(--green)}.warn{color:var(--yellow)}.bad{color:var(--red)}.section{margin-top:8px}.statusline{display:flex;align-items:center;gap:9px;margin-top:8px}.dot{width:10px;height:10px;border-radius:50%;background:var(--green);box-shadow:0 0 0 5px #67e49b18}.dot.warn{background:var(--yellow);box-shadow:0 0 0 5px #f0c75e18}.dot.bad{background:var(--red);box-shadow:none}.wide{display:grid;grid-template-columns:minmax(0,1.65fr) minmax(280px,.55fr);gap:8px}.rows{display:grid}.row{display:flex;justify-content:space-between;gap:14px;padding:7px 0;border-top:1px solid #1b2d42;font-size:12px}.row:first-child{border-top:0}.opps{display:grid;grid-template-columns:repeat(2,1fr);gap:7px;margin-top:7px}.opp{padding:9px}.oppHead{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;align-items:start}.q{font-size:13px;font-weight:700;line-height:1.35}.tag{border:1px solid #725f34;background:#0a1421;color:var(--gold2);border-radius:10px;padding:6px 8px;font-size:9px;font-weight:900;white-space:nowrap}.meta{font-size:11px;color:var(--muted);margin-top:7px}.gate{display:grid;grid-template-columns:1fr auto;gap:10px;align-items:center;padding:10px 0;border-top:1px solid #1b2d42;font-size:12px}.gate:first-child{border-top:0}.marketGrid{display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin-top:7px}.marketCard{background:#0a1421;border:1px solid #1f344d;border-radius:14px;padding:10px 12px}.marketTop{display:flex;justify-content:space-between;gap:12px;align-items:end}.marketPrice{font-size:25px;font-weight:850}.marketChange{font-size:15px;font-weight:850}.spark{width:100%;height:70px;margin-top:6px;display:block}.spark polyline{fill:none;stroke:currentColor;stroke-width:2;vector-effect:non-scaling-stroke}.spark .base{stroke:#486079;stroke-width:1}.pnlGrid{display:grid;grid-template-columns:repeat(3,1fr);gap:7px;margin-top:7px}.pnlBox,.miniBox{background:#0a1421;border:1px solid #1f344d;border-radius:12px;padding:9px 11px}.compactGrid{display:grid;grid-template-columns:repeat(3,1fr);gap:7px;margin-top:7px}.miniVal{font-size:14px;font-weight:850;margin-top:4px;line-height:1.25}.miniSub{font-size:10px;color:var(--muted);margin-top:3px}.pnlNum{font-size:22px;font-weight:850;margin-top:4px}.footer{text-align:center;color:#62778e;font-size:10px;margin-top:18px}.notice{border-left:3px solid var(--gold);padding:7px 9px;background:#0a1421;color:var(--muted);font-size:11px;line-height:1.45;margin-top:10px}
 @media(min-width:1100px){.opps{grid-template-columns:repeat(3,1fr)}}
-@media(max-width:720px){.grid{grid-template-columns:repeat(2,1fr)}.wide{grid-template-columns:1fr}.opps{grid-template-columns:1fr}.marketGrid{grid-template-columns:1fr}.pnlGrid{grid-template-columns:1fr}.logo{width:100px;height:58px}h1{font-size:23px}.hero{align-items:flex-start}}@media(max-width:460px){.grid{grid-template-columns:1fr}.brand{gap:8px}.logo{width:78px;height:48px}.k{font-size:8px}.sub{font-size:10px}.pill,.btn{font-size:9px;padding:6px 8px}.val{font-size:20px}.hero{padding:12px}}
+@media(max-width:720px){.grid{grid-template-columns:repeat(2,1fr)}.compactGrid{grid-template-columns:repeat(2,1fr)}.wide{grid-template-columns:1fr}.opps{grid-template-columns:1fr}.marketGrid{grid-template-columns:1fr}.pnlGrid{grid-template-columns:1fr}.logo{width:100px;height:58px}h1{font-size:23px}.hero{align-items:flex-start}}@media(max-width:460px){.grid{grid-template-columns:1fr}.compactGrid{grid-template-columns:1fr}.brand{gap:8px}.logo{width:78px;height:48px}.k{font-size:8px}.sub{font-size:10px}.pill,.btn{font-size:9px;padding:6px 8px}.val{font-size:20px}.hero{padding:12px}}
 </style>
 </head>
 <body>
@@ -1070,32 +1070,30 @@ function dashboardHtml() {
 
   <div class="card section">
     <b>Baseline Real Shadow Runtime</b>
-    <div class="rows" style="margin-top:8px">
-      <div class="row"><span>Status</span><strong id="shadowRuntime">CHECKING…</strong></div>
-      <div class="row"><span>Started</span><strong id="shadowStarted">—</strong></div>
-      <div class="row"><span>Last observation</span><strong id="shadowLast">—</strong></div>
-      <div class="row"><span>Runs</span><strong id="shadowRuns">0</strong></div>
-      <div class="row"><span>US BTC/ETH eligible markets</span><strong id="shadowEligible">0</strong></div>
-      <div class="row"><span>Persistence</span><strong id="shadowPersistence">—</strong></div>
+    <div class="compactGrid">
+      <div class="miniBox"><div class="label">Signal engine</div><div id="shadowRuntime" class="miniVal">CHECKING…</div><div class="miniSub">LIVE observation only</div></div>
+      <div class="miniBox"><div class="label">Runs / eligible</div><div class="miniVal"><span id="shadowRuns">0</span> runs · <span id="shadowEligible">0</span> markets</div><div class="miniSub">BTC / ETH US scope</div></div>
+      <div class="miniBox"><div class="label">Persistence</div><div id="shadowPersistence" class="miniVal">—</div><div class="miniSub">Isolated from paper experiments</div></div>
+      <div class="miniBox"><div class="label">Started</div><div id="shadowStarted" class="miniVal">—</div></div>
+      <div class="miniBox"><div class="label">Last observation</div><div id="shadowLast" class="miniVal">—</div></div>
+      <div class="miniBox"><div class="label">Trading rule</div><div class="miniVal">≥ .80 ENTRY · ≤ .20 EXIT</div><div class="miniSub">5 min max hold · $5 max stake</div></div>
     </div>
-    <div class="notice">SHADOW SIGNAL ENGINE · ENTRY ≥ .80 · EXIT ≤ .20 · MAX HOLD 5 MIN · MAX STAKE $5. When the separate ONE-TRADE controller is armed, one qualifying Shadow signal may trigger the governed real test.</div>
   </div>
 
   <div class="card section">
-    <b>Real Trade Controller · One-Trade Acceptance Test</b>
-    <div class="rows" style="margin-top:8px">
-      <div class="row"><span>Controller</span><strong id="realController">CHECKING…</strong></div>
-      <div class="row"><span>State</span><strong id="realTradeStatus">CHECKING…</strong></div>
-      <div class="row"><span>Market / position</span><strong id="realTradeMarket">WAITING</strong></div>
-      <div class="row"><span>Entry order</span><strong id="realEntryOrder">NOT SUBMITTED</strong></div>
-      <div class="row"><span>Exit order</span><strong id="realExitOrder">NOT SUBMITTED</strong></div>
-      <div class="row"><span>Test consumed</span><strong id="realConsumed">NO</strong></div>
+    <b>Real Orders · One-Trade Acceptance Test</b>
+    <div class="compactGrid">
+      <div class="miniBox"><div class="label">Orders waiting</div><div id="realController" class="miniVal">CHECKING…</div><div id="realTradeStatus" class="miniSub">CHECKING…</div></div>
+      <div class="miniBox"><div class="label">Current position</div><div id="realTradeMarket" class="miniVal">WAITING</div><div class="miniSub">No manual order required</div></div>
+      <div class="miniBox"><div class="label">Entry order</div><div id="realEntryOrder" class="miniVal">NOT SUBMITTED</div></div>
+      <div class="miniBox"><div class="label">Exit order</div><div id="realExitOrder" class="miniVal">NOT SUBMITTED</div></div>
+      <div class="miniBox"><div class="label">Test complete</div><div id="realConsumed" class="miniVal">NO</div></div>
+      <div class="miniBox"><div class="label">Live ability</div><div class="miniVal good">ARMED · AUTOMATIC</div><div class="miniSub">One trade · max $5</div></div>
     </div>
-    <div class="notice">ONE REAL TRADE ONLY · MAX $5 · ENTRY ≥ .80 · EXIT ≤ .20 OR 5 MIN. Provider account/app remains the independent source of truth for actual order/position activity.</div>
+    <div class="notice">WAITING is a valid live state: the controller will act only on a qualifying ≥ .80 Baseline signal. Polymarket remains the independent source of truth for actual order/position activity.</div>
   </div>
 
-  <div class="card section">
-    <b>Baseline Real Test Path</b>
+  <details class="card section"><summary><b>Setup / Validation Proof</b> · completed evidence</summary>
     <div style="margin-top:8px">
       <div class="gate"><span>1. Secure API credentials</span><strong class="good">PASS</strong></div>
       <div class="gate"><span>2. Authenticated read-only account connection</span><strong id="gateAccount">CHECKING…</strong></div>
@@ -1105,10 +1103,9 @@ function dashboardHtml() {
       <div class="gate"><span>6. First governed $10 account-funding proof</span><strong class="good">AUTHORIZED · DEPOSIT ONLY</strong></div>
     </div>
     <div class="notice">A displayed unfunded state is not withdrawal proof. Funding remains locked until the remaining execution, rules, settlement, recordkeeping, and cash-out gates are independently verified.</div>
-  </div>
+  </details>
 
-  <div class="card section">
-    <b>Money Path Proof</b>
+  <details class="card section"><summary><b>Money Path Proof</b> · funding / withdrawal evidence</summary>
     <div class="actions" style="justify-content:flex-start;margin-top:10px"><a class="btn" href="https://polymarket.us/" target="_blank" rel="noopener noreferrer" style="text-decoration:none">DEPOSIT $10 · OFFICIAL POLYMARKET US</a><a class="btn" href="https://polymarket.us/" target="_blank" rel="noopener noreferrer" style="text-decoration:none">WITHDRAW · OFFICIAL POLYMARKET US</a></div>
     <div class="rows" style="margin-top:8px">
       <div class="row"><span>Deposit activity</span><strong id="moneyDeposit">CHECKING…</strong></div>
@@ -1129,7 +1126,7 @@ function dashboardHtml() {
     </div>
     </div>
     <div class="notice">A displayed unfunded state is not withdrawal proof. Funding remains locked until the remaining execution, rules, settlement, recordkeeping, and cash-out gates are independently verified.</div>
-  </div>
+  </details>
   <div class="footer">NFE-OS · MARKET EDGE — BASELINE REAL · GOVERNED VALIDATION · ONE-TRADE TEST</div>
 </div>
 <script>
