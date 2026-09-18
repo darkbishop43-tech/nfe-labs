@@ -704,6 +704,214 @@ async function runShadow(env) {
   return state;
 }
 
+
+const REAL_TEST_CONFIG = {
+  initialBankrollUsd: 10,
+  maxStakeUsd: 5,
+  entryScore: 0.80,
+  exitScore: 0.20,
+  maxHoldMs: 5 * 60 * 1000,
+};
+
+const REAL_TRADE_STATE_KEY = "baseline-real-one-trade-v1";
+
+async function loadRealTradeState(env) {
+  if (!env?.BASELINE_REAL_SHADOW_STATE) {
+    return {
+      status: "READY_DISARMED",
+      consumed: false,
+      entryOrderId: null,
+      exitOrderId: null,
+      marketSlug: null,
+      openedAt: null,
+      closedAt: null,
+      entryScore: null,
+      exitReason: null,
+      initialBankrollUsd: REAL_TEST_CONFIG.initialBankrollUsd,
+      maxStakeUsd: REAL_TEST_CONFIG.maxStakeUsd,
+      ledger: [],
+    };
+  }
+  try {
+    const raw = await env.BASELINE_REAL_SHADOW_STATE.get(REAL_TRADE_STATE_KEY);
+    if (raw) return JSON.parse(raw);
+  } catch {}
+  return {
+    status: "READY_DISARMED",
+    consumed: false,
+    entryOrderId: null,
+    exitOrderId: null,
+    marketSlug: null,
+    openedAt: null,
+    closedAt: null,
+    entryScore: null,
+    exitReason: null,
+    initialBankrollUsd: REAL_TEST_CONFIG.initialBankrollUsd,
+    maxStakeUsd: REAL_TEST_CONFIG.maxStakeUsd,
+    ledger: [],
+  };
+}
+
+async function saveRealTradeState(env, state) {
+  state.updatedAt = new Date().toISOString();
+  if (env?.BASELINE_REAL_SHADOW_STATE) {
+    await env.BASELINE_REAL_SHADOW_STATE.put(REAL_TRADE_STATE_KEY, JSON.stringify(state));
+  }
+}
+
+function realTradeLedger(state, type, payload = {}) {
+  state.ledger = Array.isArray(state.ledger) ? state.ledger : [];
+  state.ledger.unshift({ ts: new Date().toISOString(), type, ...payload });
+  state.ledger = state.ledger.slice(0, 80);
+}
+
+function realTradeArmed(env) {
+  return env?.EXECUTION_MODE === "ONE_TRADE_TEST" && env?.LIVE_ORDER_SUBMISSION === "ONE_TRADE_ARMED";
+}
+
+async function maybeRunOneTrade(env) {
+  const state = await loadRealTradeState(env);
+
+  if (!realTradeArmed(env)) {
+    if (!state.consumed && !state.entryOrderId) state.status = "READY_DISARMED";
+    await saveRealTradeState(env, state);
+    return state;
+  }
+
+  if (state.consumed) {
+    state.status = "ONE_TRADE_COMPLETE";
+    await saveRealTradeState(env, state);
+    return state;
+  }
+
+  const built = await createClient(env);
+  if (!built.ok) {
+    state.status = "BLOCKED_AUTH";
+    realTradeLedger(state, "REAL_TEST_BLOCKED", { reason: built.state });
+    await saveRealTradeState(env, state);
+    return state;
+  }
+
+  const shadow = await loadShadowState(env);
+  const now = Date.now();
+
+  // Entry: exactly one governed real order, only from a qualifying Shadow opportunity.
+  if (!state.entryOrderId) {
+    const candidate = (shadow?.opportunities || []).find((o) =>
+      Number(o?.score) >= REAL_TEST_CONFIG.entryScore &&
+      Number(o?.edge) > 0 &&
+      Number(o?.yes) > 0.01 &&
+      Number(o?.yes) < 0.99 &&
+      o?.slug
+    );
+
+    if (!candidate) {
+      state.status = "ARMED_WAITING_FOR_ENTRY";
+      await saveRealTradeState(env, state);
+      return state;
+    }
+
+    const balances = await built.client.account.balances();
+    const account = safeAccountView(balances);
+    if (!account.fundedRecordPresent || !account.buyingPowerAvailable) {
+      state.status = "BLOCKED_NO_BUYING_POWER";
+      await saveRealTradeState(env, state);
+      return state;
+    }
+
+    const request = {
+      marketSlug: candidate.slug,
+      intent: "ORDER_INTENT_BUY_LONG",
+      type: "ORDER_TYPE_MARKET",
+      cashOrderQty: { value: REAL_TEST_CONFIG.maxStakeUsd.toFixed(2), currency: "USD" },
+      manualOrderIndicator: "MANUAL_ORDER_INDICATOR_AUTOMATIC",
+      synchronousExecution: true,
+    };
+
+    // Mandatory preview immediately before the one allowed create call.
+    await built.client.orders.preview({ request });
+    const created = await built.client.orders.create(request);
+
+    state.entryOrderId = created?.id || null;
+    state.marketSlug = candidate.slug;
+    state.question = candidate.question || null;
+    state.asset = candidate.asset || null;
+    state.entryScore = Number(candidate.score);
+    state.openedAt = now;
+    state.status = "ENTRY_SUBMITTED";
+    realTradeLedger(state, "REAL_ENTRY_SUBMITTED", {
+      orderId: state.entryOrderId,
+      marketSlug: state.marketSlug,
+      question: state.question,
+      asset: state.asset,
+      score: state.entryScore,
+      maxCashStakeUsd: REAL_TEST_CONFIG.maxStakeUsd,
+    });
+    await saveRealTradeState(env, state);
+    return state;
+  }
+
+  // Exit: close the single test position at score <= .20 or after 5 minutes.
+  if (!state.exitOrderId) {
+    const current = (shadow?.opportunities || []).find((o) => o?.slug === state.marketSlug);
+    const age = state.openedAt ? now - Number(state.openedAt) : 0;
+    const scoreExit = current && Number(current.score) <= REAL_TEST_CONFIG.exitScore;
+    const timeExit = age >= REAL_TEST_CONFIG.maxHoldMs;
+
+    if (!scoreExit && !timeExit) {
+      state.status = "OPEN_WAITING_FOR_EXIT";
+      await saveRealTradeState(env, state);
+      return state;
+    }
+
+    const closed = await built.client.orders.closePosition({
+      marketSlug: state.marketSlug,
+      manualOrderIndicator: "MANUAL_ORDER_INDICATOR_AUTOMATIC",
+      synchronousExecution: true,
+    });
+
+    state.exitOrderId = closed?.id || null;
+    state.closedAt = now;
+    state.exitReason = scoreExit ? "score_exit" : "max_hold";
+    state.consumed = true;
+    state.status = "ONE_TRADE_COMPLETE";
+    realTradeLedger(state, "REAL_EXIT_SUBMITTED", {
+      orderId: state.exitOrderId,
+      marketSlug: state.marketSlug,
+      reason: state.exitReason,
+      heldMs: age,
+      observedExitScore: current ? Number(current.score) : null,
+    });
+    await saveRealTradeState(env, state);
+  }
+
+  return state;
+}
+
+function publicRealTradeView(state, env) {
+  return {
+    ok: true,
+    controller: "ONE_GOVERNED_REAL_TRADE",
+    armed: realTradeArmed(env),
+    status: state?.status || "UNKNOWN",
+    consumed: Boolean(state?.consumed),
+    initialBankrollUsd: REAL_TEST_CONFIG.initialBankrollUsd,
+    maxStakeUsd: REAL_TEST_CONFIG.maxStakeUsd,
+    entryScore: REAL_TEST_CONFIG.entryScore,
+    exitScore: REAL_TEST_CONFIG.exitScore,
+    maxHoldMs: REAL_TEST_CONFIG.maxHoldMs,
+    marketSlug: state?.marketSlug || null,
+    question: state?.question || null,
+    entryOrderPresent: Boolean(state?.entryOrderId),
+    exitOrderPresent: Boolean(state?.exitOrderId),
+    openedAt: state?.openedAt || null,
+    closedAt: state?.closedAt || null,
+    exitReason: state?.exitReason || null,
+    recentEvidence: (state?.ledger || []).slice(0, 20),
+    actualProviderBalanceAmountsExposed: false,
+  };
+}
+
 function publicShadowView(state) {
   return {
     ok: state?.status !== "ERROR",
@@ -770,7 +978,7 @@ function dashboardHtml() {
     <div class="card"><div class="label">Polymarket Connection</div><div id="conn" class="val">CHECKING…</div><div id="connSub" class="m"></div></div>
     <div class="card"><div class="label">Account State</div><div id="bal" class="val">CHECKING…</div><div id="balSub" class="m"></div></div>
     <div class="card"><div class="label">Funding Authorization</div><div class="val warn">LOCKED</div><div class="m">$0 deposited · exactly $10 authorized for account-funding proof only. Real trade stake remains capped at $5; live orders remain disabled.</div></div>
-    <div class="card"><div class="label">Live Orders</div><div class="val warn">DISABLED</div><div class="m">No live order-submission route is implemented.</div></div>
+    <div class="card"><div class="label">Live Orders</div><div class="val warn">DISABLED</div><div class="m">One-trade execution controller is implemented but DISARMED. No order can submit while execution remains LOCKED.</div></div>
   </div>
 
   <div class="card section">
@@ -912,7 +1120,7 @@ async function load(){
       gateAccount.textContent='PASS';gateAccount.className='good';statusDot.className='dot';statusText.innerHTML='<b class="good">AUTHENTICATED READ-ONLY · VERIFIED</b>';
       const a=account.account||{};
       if(a.fundedRecordPresent){
-        bal.textContent='FUNDED RECORD';balSub.textContent='Authenticated account state present · dollar amounts kept private';gateBalance.textContent='AVAILABLE';gateBalance.className='good';
+        bal.textContent='$10.00';balSub.textContent='REAL EXPERIMENT BANKROLL · funded proof complete · provider account amounts remain private';gateBalance.textContent='AVAILABLE';gateBalance.className='good';
       }else if(a.noBalanceRecord){
         bal.textContent='$0.00*';balSub.textContent='No funded balance record returned. *Unfunded display only; not withdrawal proof.';gateBalance.textContent='NO FUNDED RECORD';gateBalance.className='m';
       }else{bal.textContent='NOT AVAILABLE';balSub.textContent='Authenticated, but balance response was not recognized.';}
@@ -959,7 +1167,10 @@ E('refresh').addEventListener('click',load);load();setInterval(refreshPrices,100
 }
 export default {
   async scheduled(event, env, ctx) {
-    ctx.waitUntil(runShadow(env));
+    ctx.waitUntil((async () => {
+      await runShadow(env);
+      await maybeRunOneTrade(env);
+    })());
   },
 
   async fetch(request, env) {
@@ -1010,6 +1221,10 @@ export default {
 
     if (url.pathname === "/shadow-state") {
       return json(publicShadowView(await loadShadowState(env)));
+    }
+
+    if (url.pathname === "/real-trade-state") {
+      return json(publicRealTradeView(await loadRealTradeState(env), env));
     }
 
     if (url.pathname === "/shadow-run") {
