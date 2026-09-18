@@ -387,14 +387,9 @@ async function coinbaseSpot(product) {
 async function coinbase24hSeries(product) {
   const end = new Date();
   const start = new Date(end.getTime() - 24 * 60 * 60 * 1000);
-  const qs = new URLSearchParams({
-    granularity: "3600",
-    start: start.toISOString(),
-    end: end.toISOString(),
-  });
   const [current, candleResponse] = await Promise.all([
     coinbaseSpot(product),
-    fetch("https://api.exchange.coinbase.com/products/" + product + "/candles?" + qs.toString(), {
+    fetch("https://api.exchange.coinbase.com/products/" + product + "/candles?granularity=3600", {
       headers: { "User-Agent": "NFE-Market-Edge-Baseline-Real/0.3" },
     }),
   ]);
