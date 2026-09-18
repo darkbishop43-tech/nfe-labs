@@ -1352,6 +1352,31 @@ export default {
       return json({ok:true,source:"POLYMARKET_US_PUBLIC_SEARCH",proof,submitted:false,sensitiveValuesExposed:false});
     }
 
+    if (url.pathname === "/eth-search-exact-proof") {
+      const client = new PolymarketUS();
+      const terms = ["Ethereum above", "Ethereum below", "ETH above", "ETH below", "Ether above", "Ether below"];
+      const proof = {};
+      for (const query of terms) {
+        try {
+          const result = await client.search.query({ query, status: "active", limit: 50 });
+          const events = Array.isArray(result?.events) ? result.events : [];
+          const rows = [];
+          for (const event of events) {
+            for (const market of (Array.isArray(event?.markets) ? event.markets : [])) {
+              const text=[event?.title,market?.title,market?.slug].filter(Boolean).join(" — ");
+              if (/ethereum|\beth\b|\bether\b/i.test(text)) rows.push({
+                eventTitle:event?.title||null,eventSlug:event?.slug||null,
+                marketTitle:market?.title||null,marketSlug:market?.slug||null,
+                active:market?.active??null,closed:market?.closed??null
+              });
+            }
+          }
+          proof[query]={eventCount:events.length,ethTextMatches:rows.length,samples:rows.slice(0,8)};
+        } catch { proof[query]={error:"PUBLIC_SEARCH_FAILED"}; }
+      }
+      return json({ok:true,source:"POLYMARKET_US_PUBLIC_SEARCH_EXACT",proof,submitted:false,sensitiveValuesExposed:false});
+    }
+
     if (url.pathname === "/price-proof") return json(await livePriceProof(env));
 
     if (url.pathname === "/money-path-proof") return json(await moneyPathProof(env));
