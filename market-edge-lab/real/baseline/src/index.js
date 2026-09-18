@@ -207,11 +207,15 @@ async function previewProof(env) {
       const hay = [event?.title,event?.slug,event?.description,event?.series?.title,event?.series?.slug,...(event?.tags||[]).flatMap(t=>[t?.label,t?.slug])].filter(Boolean).join(" ").toLowerCase();
       return /bitcoin|\bbtc\b|ethereum|\beth\b/.test(hay);
     });
-    const candidates = crypto.flatMap((event) =>
+    const searchedMarkets = crypto.flatMap((event) =>
       (Array.isArray(event?.markets) ? event.markets : [])
         .filter((market) => market?.active && !market?.closed && market?.slug)
         .map((market) => ({ market, event }))
     );
+    const eventSlugs = [...new Set(crypto.map((event)=>event?.slug).filter(Boolean))];
+    const listed = eventSlugs.length ? await publicClient.markets.list({ eventSlug:eventSlugs, active:true, closed:false, orderBy:["volume"], orderDirection:"desc", limit:100 }) : {markets:[]};
+    const detailMap = new Map((listed?.markets||[]).filter((market)=>market?.slug).map((market)=>[market.slug,market]));
+    const candidates = searchedMarkets.map(({market,event})=>({market:detailMap.get(market.slug)||market,event}));
     if (!candidates.length) return { ok:false,state:"NO_ACTIVE_US_BTC_ETH_CANDIDATE",submitted:false,liveOrderSubmission:"DISABLED",fundingAuthorized:false,discovery:{searchEvents:eventMap.size,cryptoEvents:crypto.length,candidates:0,sensitiveTextExposed:false} };
 
     const diagnostics=[];
