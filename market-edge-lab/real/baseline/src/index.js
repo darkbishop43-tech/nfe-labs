@@ -214,7 +214,8 @@ async function previewProof(env) {
     );
     if (!candidates.length) return { ok:false,state:"NO_ACTIVE_US_BTC_ETH_CANDIDATE",submitted:false,liveOrderSubmission:"DISABLED",fundingAuthorized:false,discovery:{searchEvents:eventMap.size,cryptoEvents:crypto.length,candidates:0,sensitiveTextExposed:false} };
 
-    const diagnostics=[];\n    const marketEvidence=[];
+    const diagnostics=[];
+    const marketEvidence=[];
     for (const { market, event } of candidates.slice(0, 20)) {
       try {
         const bbo = await publicClient.markets.bbo(market.slug);
