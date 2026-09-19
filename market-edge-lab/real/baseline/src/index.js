@@ -1242,7 +1242,7 @@ async function load(){
     const armed=Boolean(realTrade?.armed);
     const modePill=E('modePill'),statusSub=E('statusSub'),executionGov=E('executionGov'),moneyLiveOrders=E('moneyLiveOrders');
     modePill.textContent=armed?'REAL · EXECUTION DISABLED':'REAL · EXECUTION HARD DISABLED';
-    executionGov.textContent=armed?'SHADOW_ONLY · EXECUTION_DISABLED':'LOCKED / DISARMED';
+    executionGov.textContent=armed?'SHADOW ONLY · EXECUTION DISABLED':'HARD DISABLED';
     executionGov.className=armed?'good':'warn';
     moneyLiveOrders.textContent=armed?'EXECUTION DISABLED':'DISABLED';
     moneyLiveOrders.className=armed?'good':'warn';
@@ -1305,7 +1305,7 @@ async function load(){
     const coverageReady=Boolean(shadow?.assetCoverageReady);
     parts.push('<div class="opp" style="grid-column:1/-1"><div class="oppHead"><div class="q">LIVE ASSET COVERAGE</div><div class="tag '+(coverageReady?'good':'warn')+'">'+(coverageReady?'BTC + ETH PROVEN':'FIRST TRADE HOLD')+'</div></div><div class="meta">BTC: '+Number(cov?.BTC?.eligible||0)+' eligible · '+Number(cov?.BTC?.up||0)+' up · '+Number(cov?.BTC?.down||0)+' down &nbsp; | &nbsp; ETH: '+Number(cov?.ETH?.eligible||0)+' eligible · '+Number(cov?.ETH?.up||0)+' up · '+Number(cov?.ETH?.down||0)+' down'+(coverageReady?'':' · Controller will not submit the first real order until both assets are discovered live.')+'</div></div>');
     if(!opps.length){
-      parts.push('<div class="opp" style="grid-column:1/-1"><div class="oppHead"><div class="q">SHORT-HORIZON SCAN COMPLETE</div><div class="tag good">LIVE · VALID ZERO RESULT</div></div><div class="meta">No eligible BTC/ETH 15-minute, hourly, or daily opportunities were found in this successful Polymarket US Shadow observation. Longer-duration contracts remain rejected.</div></div>');
+      parts.push('<div class="opp" style="grid-column:1/-1"><div class="oppHead"><div class="q">SHORT-HORIZON SCAN COMPLETE</div><div class="tag good">LIVE · VALID ZERO RESULT</div></div><div class="meta">No eligible BTC/ETH 15-minute opportunities were found in this successful Kalshi Shadow observation. Baseline remains waiting for the next live contract window.</div></div>');
     } else {
       for(const o of opps){
         const ask=Number(o.observedAsk),bid=Number(o.observedBid),score=Number(o.score),move=Number(o.move),edge=Number(o.edge);
