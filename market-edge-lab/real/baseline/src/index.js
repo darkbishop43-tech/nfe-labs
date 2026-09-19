@@ -620,7 +620,7 @@ async function discoverKalshiShadowMarkets(env) {
       if(yesAsk<=0.01 || yesAsk>=0.99 || noAsk<=0.01 || noAsk>=0.99){rejected++;continue;}
       const open=Date.parse(m?.open_time||""), close=Date.parse(m?.close_time||"");
       const durationMs=Number.isFinite(open)&&Number.isFinite(close)?close-open:15*60*1000;
-      const base={marketTicker:m.ticker,slug:m.ticker,question:m.title||s.ticker,asset:s.asset,source:"KALSHI",horizon:"15M",durationMs};
+      const base={marketTicker:m.ticker,slug:m.ticker,question:m.title||s.ticker,asset:s.asset,source:"KALSHI",horizon:"15M",durationMs,openTime:m?.open_time||null,closeTime:m?.close_time||null};
       candidates.push({...base,id:m.ticker+":YES",outcomeSide:"YES",direction:"UP",bear:false,yes:yesAsk,bid:yesBid});
       candidates.push({...base,id:m.ticker+":NO",outcomeSide:"NO",direction:"DOWN",bear:true,yes:noAsk,bid:noBid});
     }
@@ -844,6 +844,140 @@ function realTradeArmed(env) {
   return false;
 }
 
+const KALSHI_ONE_TRADE_SAFETY = {
+  minTimeToCloseMs: REAL_TEST_CONFIG.maxHoldMs + 90 * 1000,
+  pendingOrderTimeoutMs: 30 * 1000,
+};
+
+function kalshiClientOrderId(state, phase) {
+  const seed=String(state?.authorizationNonce||state?.createdAt||Date.now()).replace(/[^0-9A-Za-z]/g,"").slice(-18);
+  return ("baseline-real-"+phase+"-"+seed).slice(0,64);
+}
+
+function kalshiCandidateTimeSafe(candidate, now=Date.now()) {
+  const close=Date.parse(candidate?.closeTime||"");
+  return Number.isFinite(close) && (close-now) > KALSHI_ONE_TRADE_SAFETY.minTimeToCloseMs;
+}
+
+function hasOpposingUnderlyingPosition(shadow, candidate) {
+  const ticker=String(candidate?.marketTicker||candidate?.slug||"");
+  if(!ticker) return true;
+  return (shadow?.positions||[]).some(p => {
+    const pt=String(p?.marketTicker||p?.slug||"").split(":")[0];
+    return pt===ticker && String(p?.outcomeSide||"")!==String(candidate?.outcomeSide||"");
+  });
+}
+
+// Final Kalshi controller is intentionally hard-disabled until BOTH explicit future
+// environment gates are set. This function is not wired to cron/fetch execution yet.
+async function maybeRunKalshiOneTrade(env) {
+  const state=await loadRealTradeState(env);
+  const now=Date.now();
+
+  if(!kalshiOneTradeEnabled(env)) {
+    if(!state.consumed && !state.entryOrderId) state.status="KALSHI_READY_HARD_DISABLED";
+    await saveRealTradeState(env,state);
+    return state;
+  }
+  if(state.consumed) {
+    state.status="ONE_TRADE_COMPLETE";
+    await saveRealTradeState(env,state);
+    return state;
+  }
+  if(!env?.BASELINE_REAL_SHADOW_STATE) {
+    state.status="BLOCKED_PERSISTENT_ONE_SHOT_LOCK_REQUIRED";
+    return state;
+  }
+
+  const shadow=await loadShadowState(env);
+  if(!shadow?.assetCoverageReady || shadow?.status!=="LIVE_KALSHI_SHADOW") {
+    state.status="HOLD_LIVE_KALSHI_COVERAGE_REQUIRED";
+    await saveRealTradeState(env,state);
+    return state;
+  }
+
+  // Entry path. No provider POST can happen until every gate below passes.
+  if(!state.entryOrderId) {
+    if(state.entrySubmitStartedAt || state.status==="ENTRY_SUBMITTING" || state.status==="BLOCKED_ENTRY_RECONCILIATION") {
+      state.status="BLOCKED_ENTRY_RECONCILIATION";
+      await saveRealTradeState(env,state);
+      return state;
+    }
+    const candidate=(shadow.opportunities||[]).find(o =>
+      Number(o?.score)>=REAL_TEST_CONFIG.entryScore && Number(o?.edge)>0 &&
+      Number(o?.yes)>0.01 && Number(o?.yes)<0.99 && o?.marketTicker &&
+      (o?.outcomeSide==="YES"||o?.outcomeSide==="NO") && kalshiCandidateTimeSafe(o,now)
+    );
+    if(!candidate) {
+      state.status="SHADOW_WAITING_FOR_SIGNAL";
+      await saveRealTradeState(env,state);
+      return state;
+    }
+    if(hasOpposingUnderlyingPosition(shadow,candidate)) {
+      state.status="BLOCKED_OPPOSING_POSITION";
+      await saveRealTradeState(env,state);
+      return state;
+    }
+
+    const sizing=estimateKalshiFeeSafeSize(candidate.yes,REAL_TEST_CONFIG.maxStakeUsd);
+    if(!sizing.ok || sizing.totalDebitUsd>REAL_TEST_CONFIG.maxStakeUsd || sizing.count<1) {
+      state.status="BLOCKED_FEE_SAFE_SIZE";
+      await saveRealTradeState(env,state);
+      return state;
+    }
+
+    // Re-check execution credential and available balance immediately before a future POST.
+    const br=await kalshiExecutionGet(env,"/trade-api/v2/portfolio/balance");
+    if(!br.ok) {
+      state.status="BLOCKED_EXECUTION_BALANCE_READ";
+      await saveRealTradeState(env,state);
+      return state;
+    }
+    const balance=await br.json();
+    const availableCents=Number(balance?.balance);
+    if(!Number.isFinite(availableCents) || availableCents < Math.ceil(sizing.totalDebitUsd*100)) {
+      state.status="BLOCKED_INSUFFICIENT_EXECUTION_BALANCE";
+      await saveRealTradeState(env,state);
+      return state;
+    }
+
+    // One-way latch BEFORE any provider write. A crash after this point blocks replay.
+    state.authorizationNonce=state.authorizationNonce||crypto.randomUUID();
+    state.marketSlug=candidate.marketTicker;
+    state.marketTicker=candidate.marketTicker;
+    state.outcomeSide=candidate.outcomeSide;
+    state.direction=candidate.direction;
+    state.question=candidate.question||null;
+    state.asset=candidate.asset||null;
+    state.entryScore=Number(candidate.score);
+    state.entryObservedAsk=Number(candidate.yes);
+    state.entryCount=sizing.count;
+    state.entryFeeBudgetUsd=sizing.feeUsd;
+    state.entryTotalDebitCapUsd=sizing.totalDebitUsd;
+    state.entryClientOrderId=kalshiClientOrderId(state,"entry");
+    state.entrySubmitStartedAt=now;
+    state.status="ENTRY_SUBMITTING";
+    realTradeLedger(state,"KALSHI_ENTRY_PRE_SUBMIT_LATCHED",{
+      marketTicker:state.marketTicker,outcomeSide:state.outcomeSide,score:state.entryScore,
+      count:state.entryCount,totalDebitCapUsd:state.entryTotalDebitCapUsd,clientOrderId:state.entryClientOrderId
+    });
+    await saveRealTradeState(env,state);
+
+    // Deliberate final fail-closed boundary: exact V2 outcome-side request semantics and
+    // fill reconciliation must be proven against current official schema before this call
+    // is permitted. No write is performed by this build.
+    state.status="BLOCKED_V2_REQUEST_SCHEMA_FINAL_PROOF";
+    realTradeLedger(state,"KALSHI_WRITE_WITHHELD",{reason:"V2_REQUEST_SCHEMA_AND_FILL_RECONCILIATION_NOT_YET_CERTIFIED"});
+    await saveRealTradeState(env,state);
+    return state;
+  }
+
+  // Existing order/position path fails closed until provider fill reconciliation is certified.
+  state.status="BLOCKED_POSITION_RECONCILIATION";
+  await saveRealTradeState(env,state);
+  return state;
+}
+
 async function maybeRunOneTrade(env) {
   const state = await loadRealTradeState(env);
 
@@ -1015,7 +1149,7 @@ function publicRealTradeView(state, env) {
   return {
     ok: true,
     controller: "ONE_GOVERNED_REAL_TRADE",
-    armed: realTradeArmed(env),
+    armed: kalshiOneTradeEnabled(env),
     status: state?.status || "UNKNOWN",
     consumed: Boolean(state?.consumed),
     initialBankrollUsd: REAL_TEST_CONFIG.initialBankrollUsd,
@@ -1054,6 +1188,10 @@ function publicShadowView(state) {
     errorStage: state?.errorStage || null,
     opportunities: (state?.opportunities || []).map((o) => ({
       slug: o.slug,
+      marketTicker: o.marketTicker || o.slug,
+      outcomeSide: o.outcomeSide || null,
+      direction: o.direction || null,
+      closeTime: o.closeTime || null,
       question: o.question,
       asset: o.asset,
       observedAsk: o.yes,
@@ -1067,6 +1205,9 @@ function publicShadowView(state) {
     })),
     openShadowPositions: (state?.positions || []).map((p) => ({
       slug: p.slug,
+      marketTicker: p.marketTicker || p.slug,
+      outcomeSide: p.outcomeSide || null,
+      direction: p.direction || null,
       question: p.question,
       asset: p.asset,
       entryObservedAsk: p.entryObservedAsk,
@@ -1844,6 +1985,33 @@ export default {
       } catch(error) {
         return json({ok:false,state:"KALSHI_EXECUTION_READINESS_READ_FAILED",errorCode:String(error?.message||"READ_FAILED").slice(0,120),submitted:false,realMoneyMoved:false},422);
       }
+    }
+
+    if (url.pathname === "/kalshi-final-controller-safety-proof") {
+      const shadow=await loadShadowState(env);
+      const candidates=(shadow?.opportunities||[]).filter(o=>Number(o?.score)>=REAL_TEST_CONFIG.entryScore&&Number(o?.edge)>0);
+      const candidate=candidates[0]||null;
+      const sizing=candidate?estimateKalshiFeeSafeSize(candidate.yes,REAL_TEST_CONFIG.maxStakeUsd):null;
+      return json({
+        ok:true,
+        state:"KALSHI_FINAL_CONTROLLER_HARD_DISABLED",
+        strategy:{entryScore:REAL_TEST_CONFIG.entryScore,exitScore:REAL_TEST_CONFIG.exitScore,maxHoldMinutes:REAL_TEST_CONFIG.maxHoldMs/60000,maxStakeUsd:REAL_TEST_CONFIG.maxStakeUsd},
+        safeguards:{
+          oneShotPersistentLockRequired:true,
+          opposingUnderlyingPositionGuard:true,
+          minTimeToCloseMs:KALSHI_ONE_TRADE_SAFETY.minTimeToCloseMs,
+          feeSafeSizing:Boolean(sizing?.ok),
+          liveKalshiCoverageRequired:true,
+          executionBalanceRecheckRequired:true,
+          uniqueClientOrderIdRequired:true,
+          entryPreSubmitLatchRequired:true,
+          partialFillReconciliationRequired:true,
+          pendingOrderTimeoutMs:KALSHI_ONE_TRADE_SAFETY.pendingOrderTimeoutMs,
+          v2RequestSchemaFinalProofRequired:true
+        },
+        current:{shadowStatus:shadow?.status||"UNKNOWN",qualifyingSignals:candidates.length,candidate:candidate?{marketTicker:candidate.marketTicker,outcomeSide:candidate.outcomeSide,direction:candidate.direction,score:candidate.score,closeTime:candidate.closeTime,sizing}:null},
+        interlocks:{controllerEnabled:kalshiOneTradeEnabled(env),postOrdersCalled:false,deleteOrdersCalled:false,submitted:false,realMoneyMoved:false}
+      });
     }
 
     if (url.pathname === "/price-proof") return json(await livePriceProof(env));
