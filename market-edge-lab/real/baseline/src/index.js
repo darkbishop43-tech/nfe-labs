@@ -1404,6 +1404,41 @@ export default {
       });
     }
 
+    // Read-only catalogue shape probe for Polymarket US crypto. This intentionally
+    // inspects event/market metadata without previewing or submitting any order.
+    if (url.pathname === "/us-crypto-catalogue-proof") {
+      const client = new PolymarketUS();
+      const rows = [];
+      let offset = 0, pages = 0, totalEvents = 0, cryptoEvents = 0;
+      while (pages < 30) {
+        const result = await client.events.list({ active: true, limit: 100, offset });
+        const events = Array.isArray(result?.events) ? result.events
+          : Array.isArray(result?.data?.events) ? result.data.events
+          : Array.isArray(result?.data) ? result.data
+          : Array.isArray(result) ? result : [];
+        for (const event of events) {
+          totalEvents++;
+          const markets = Array.isArray(event?.markets) ? event.markets : [];
+          const eventText=[event?.title,event?.question,event?.slug,event?.description].filter(Boolean).join(" — ");
+          for (const market of (markets.length?markets:[null])) {
+            const text=[eventText,market?.title,market?.question,market?.slug,market?.outcome].filter(Boolean).join(" — ");
+            if (!/bitcoin|ethereum|\bbtc\b|\beth\b|\bether\b|crypto/i.test(text)) continue;
+            cryptoEvents++;
+            if (rows.length < 100) rows.push({
+              eventTitle:event?.title||event?.question||null,eventSlug:event?.slug||null,
+              eventStart:event?.startTime||null,eventEnd:event?.endTime||null,
+              marketTitle:market?.title||market?.question||null,marketSlug:market?.slug||null,
+              outcome:market?.outcome||null,active:market?.active??event?.active??null,closed:market?.closed??event?.closed??null
+            });
+          }
+        }
+        pages++;
+        if(events.length<100) break;
+        offset+=events.length;
+      }
+      return json({ok:true,source:"POLYMARKET_US_EVENTS_LIST",pages,totalEvents,cryptoMatches:cryptoEvents,sample:rows,submitted:false,liveOrderSubmission:"DISABLED",realMoneyMoved:false});
+    }
+
     if (url.pathname === "/price-proof") return json(await livePriceProof(env));
 
     if (url.pathname === "/money-path-proof") return json(await moneyPathProof(env));
