@@ -1214,7 +1214,7 @@ async function load(){
     }else{
       E('btcPrice').textContent='UNAVAILABLE'; E('ethPrice').textContent='UNAVAILABLE';
     }
-    E('shadowRuntime').textContent=shadow.status||'UNKNOWN';E('shadowRuntime').className=shadowLive?'good':'warn';
+    E('shadowRuntime').textContent=shadowLive?(Number(shadow.eligibleCount||0)>0?'LIVE':'LIVE · NO ELIGIBLE SHORT-HORIZON MARKETS'):(shadow.status||'UNKNOWN');E('shadowRuntime').className=shadowLive?'good':'warn';
     E('shadowStarted').textContent=shadow.startedAt?new Date(shadow.startedAt).toLocaleString():'NOT STARTED';
     E('shadowLast').textContent=shadow.lastRunAt?new Date(shadow.lastRunAt).toLocaleString():'—';
     E('shadowRuns').textContent=String(shadow.runs||0);E('shadowEligible').textContent=String(shadow.eligibleCount||0);E('shadowPersistence').textContent=shadow.persistence||'—';
@@ -1240,7 +1240,7 @@ async function load(){
     const coverageReady=Boolean(shadow?.assetCoverageReady);
     parts.push('<div class="opp" style="grid-column:1/-1"><div class="oppHead"><div class="q">LIVE ASSET COVERAGE</div><div class="tag '+(coverageReady?'good':'warn')+'">'+(coverageReady?'BTC + ETH PROVEN':'FIRST TRADE HOLD')+'</div></div><div class="meta">BTC: '+Number(cov?.BTC?.eligible||0)+' eligible · '+Number(cov?.BTC?.up||0)+' up · '+Number(cov?.BTC?.down||0)+' down &nbsp; | &nbsp; ETH: '+Number(cov?.ETH?.eligible||0)+' eligible · '+Number(cov?.ETH?.up||0)+' up · '+Number(cov?.ETH?.down||0)+' down'+(coverageReady?'':' · Controller will not submit the first real order until both assets are discovered live.')+'</div></div>');
     if(!opps.length){
-      parts.push('<div class="opp"><div class="meta">No eligible BTC/ETH opportunities in the current Polymarket US Shadow observation.</div></div>');
+      parts.push('<div class="opp" style="grid-column:1/-1"><div class="oppHead"><div class="q">SHORT-HORIZON SCAN COMPLETE</div><div class="tag good">LIVE · VALID ZERO RESULT</div></div><div class="meta">No eligible BTC/ETH 15-minute, hourly, or daily opportunities were found in this successful Polymarket US Shadow observation. Longer-duration contracts remain rejected.</div></div>');
     } else {
       for(const o of opps){
         const ask=Number(o.observedAsk),bid=Number(o.observedBid),score=Number(o.score),move=Number(o.move),edge=Number(o.edge);
