@@ -643,13 +643,13 @@ async function runShadow(env) {
   const state = await loadShadowState(env);
   const now = Date.now();
 
-  let stage = "COINBASE_AND_DISCOVERY";
+  let stage = "BTC_SPOT";
   try {
-    const [btc, eth, discovery] = await Promise.all([
-      coinbaseSpot("BTC-USD"),
-      coinbaseSpot("ETH-USD"),
-      discoverUsShadowMarkets(),
-    ]);
+    const btc = await coinbaseSpot("BTC-USD");
+    stage = "ETH_SPOT";
+    const eth = await coinbaseSpot("ETH-USD");
+    stage = "POLYMARKET_DISCOVERY";
+    const discovery = await discoverUsShadowMarkets();
     stage = "SCORING";
 
     const previous = state.prices || {};
@@ -1479,6 +1479,24 @@ export default {
     if (url.pathname === "/shadow-refresh-proof") {
       const refreshed = await runShadow(env);
       return json(publicShadowView(refreshed));
+    }
+
+    // Public, read-only diagnostic view: exposes only bounded failure stage/code.
+    // No credentials, provider payloads, order calls, or secret text are returned.
+    if (url.pathname === "/shadow-diagnostic") {
+      const state = await loadShadowState(env);
+      return json({
+        ok: state?.status !== "ERROR",
+        status: state?.status || "UNKNOWN",
+        lastRunAt: state?.lastRunAt || null,
+        errorStage: state?.errorStage || null,
+        errorCode: state?.errorCode || null,
+        eligibleCount: Number(state?.eligibleCount || 0),
+        seenCount: Number(state?.seenCount || 0),
+        rejectedCount: Number(state?.rejectedCount || 0),
+        liveOrderSubmission: "DISABLED",
+        realMoneyMoved: false
+      });
     }
 
     if (url.pathname === "/real-trade-state") {
