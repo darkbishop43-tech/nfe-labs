@@ -556,9 +556,12 @@ function kalshiControllerSwitchEnabled(env) {
   return env?.KALSHI_ONE_TRADE_CONTROLLER_ENABLED === "ENABLED";
 }
 function kalshiAuthorizationValid(state, now=Date.now()) {
+  // Founder authorization is for exactly one governed entry, not a short time window.
+  // It remains valid while waiting for the frozen >= .80 signal and is permanently
+  // consumed before the first provider entry write.
   return Boolean(state?.founderAuthorization?.authorized === true &&
     !state?.founderAuthorization?.consumed &&
-    Number(state?.founderAuthorization?.expiresAt||0) > now);
+    state?.founderAuthorization?.scope === "ONE_TRADE_MAX_5_USD");
 }
 function kalshiOneTradeEnabled(env, state=null) {
   return kalshiControllerSwitchEnabled(env) && kalshiAuthorizationValid(state);
@@ -1682,7 +1685,7 @@ async function authorizeOneBaselineTrade(){
   if(!confirm("Authorize exactly ONE governed Baseline trade, maximum $5, only at score >= .80?")) return;
   const r=await fetch("/kalshi-authorize-one-trade",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({authorization:"AUTHORIZE_ONE_TRADE_MAX_5_USD"})});
   const j=await r.json();
-  alert(j.ok ? "AUTHORIZED: system will wait for a legitimate >= .80 signal. Authorization expires in 15 minutes if unused." : "NOT AUTHORIZED: "+(j.state||r.status));
+  alert(j.ok ? "AUTHORIZED: system will wait for one legitimate >= .80 signal; the authorization is consumed before that one entry write." : "NOT AUTHORIZED: "+(j.state||r.status));
   location.reload();
 }
 </script></body></html>`;
@@ -1707,7 +1710,7 @@ export default {
       let body={}; try{body=await request.json();}catch{}
       if(body?.authorization!=="AUTHORIZE_ONE_TRADE_MAX_5_USD") return json({ok:false,state:"EXPLICIT_AUTHORIZATION_PHRASE_REQUIRED",armed:false},400);
       const now=Date.now();
-      state.founderAuthorization={authorized:true,authorizedAt:now,expiresAt:now+15*60*1000,consumed:false,scope:"ONE_TRADE_MAX_5_USD"};
+      state.founderAuthorization={authorized:true,authorizedAt:now,expiresAt:null,consumed:false,scope:"ONE_TRADE_MAX_5_USD"};
       state.status="AUTHORIZED_WAITING_FOR_QUALIFYING_SIGNAL";
       realTradeLedger(state,"FOUNDER_ONE_TRADE_AUTHORIZED",{scope:"ONE_TRADE_MAX_5_USD",expiresAt:state.founderAuthorization.expiresAt});
       await saveRealTradeState(env,state);
@@ -2231,7 +2234,7 @@ export default {
           schedulerMayObserve:true,
           schedulerMaySubmitWithoutFounderAuthorization:false,
           authorizationEndpointStillRequiresExplicitPhrase:true,
-          authorizationExpiresAfterMinutes:15,
+          authorizationExpiresAfterMinutes:null,
           oneTradeOnly:true,
           maxStakeUsd:REAL_TEST_CONFIG.maxStakeUsd,
           continuousTradingAuthorized:false
@@ -2257,7 +2260,7 @@ export default {
         state:"KALSHI_ONE_TRADE_ARMING_MECHANISM_READY_NOT_ARMED",
         authorizationDesign:{
           persistentKvAuthorization:true,
-          expiresAfterMinutes:15,
+          expiresAfterMinutes:null,
           oneTradeOnly:true,
           authorizationConsumedBeforeProviderWrite:true,
           controllerSwitchAlsoRequired:true,
