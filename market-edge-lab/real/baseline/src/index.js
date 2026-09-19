@@ -524,17 +524,14 @@ async function discoverUsShadowMarkets() {
   const client = new PolymarketUS();
   // Query both long names and ticker/common-name variants. Results are deduplicated
   // below, so broadening discovery does not duplicate markets or change scoring.
-  const searches = await Promise.all([
-    client.search.query({ query: "bitcoin", status: "active", limit: 50 }),
-    client.search.query({ query: "BTC", status: "active", limit: 50 }),
-    client.search.query({ query: "bitcoin up or down", status: "active", limit: 50 }),
-    client.search.query({ query: "BTC up or down", status: "active", limit: 50 }),
-    client.search.query({ query: "ethereum", status: "active", limit: 50 }),
-    client.search.query({ query: "ETH", status: "active", limit: 50 }),
-    client.search.query({ query: "ether", status: "active", limit: 50 }),
-    client.search.query({ query: "ethereum up or down", status: "active", limit: 50 }),
-    client.search.query({ query: "ETH up or down", status: "active", limit: 50 }),
-  ]);
+  const searchTerms = ["bitcoin","BTC","bitcoin up or down","BTC up or down","ethereum","ETH","ether","ethereum up or down","ETH up or down"];
+  // One rejected fuzzy-search request must not kill the entire Shadow observation.
+  // This matters because the provider can throttle or reject individual broad queries.
+  const settled = await Promise.allSettled(
+    searchTerms.map((query) => client.search.query({ query, status: "active", limit: 50 }))
+  );
+  const searches = settled.filter((x) => x.status === "fulfilled").map((x) => x.value);
+  if (!searches.length) throw new Error("POLYMARKET_US_SEARCH_UNAVAILABLE");
 
   const eventMap = new Map();
   for (const result of searches) {
@@ -659,9 +656,10 @@ async function runShadow(env) {
       ETH: previous.ETH ? (eth - previous.ETH) / previous.ETH : 0,
     };
 
+    const horizonRank = { "15M": 0, "HOURLY": 1, "DAILY": 2 };
     const opportunities = discovery.markets
       .map((m) => scoreShadowMarket(m, moves))
-      .sort((a, b) => b.score - a.score);
+      .sort((a, b) => (horizonRank[a.horizon] ?? 9) - (horizonRank[b.horizon] ?? 9) || b.score - a.score);
 
     for (const position of [...(state.positions || [])]) {
       const current = opportunities.find((o) => o.id === position.marketId);
@@ -753,7 +751,13 @@ async function runShadow(env) {
     });
   }
 
-  await saveShadowState(env, state);
+  try {
+    await saveShadowState(env, state);
+  } catch {
+    // Observation evidence remains usable for this request even if persistence is
+    // temporarily unavailable; never turn a successful provider read into SIGNAL ERROR.
+    state.persistence = "WRITE_UNAVAILABLE_THIS_RUN";
+  }
   return state;
 }
 
@@ -1202,7 +1206,7 @@ async function load(){
   const conn=E('conn'),connSub=E('connSub'),bal=E('bal'),balSub=E('balSub'),creds=E('creds'),gateAccount=E('gateAccount'),gateBalance=E('gateBalance'),gatePreview=E('gatePreview'),markets=E('markets'),statusDot=E('statusDot'),statusText=E('statusText'),refresh=E('refresh');
   refresh.disabled=true;refresh.textContent='CHECKING…';gatePreview.textContent='CHECKING LIVE PROOF…';gatePreview.className='m';
   try{
-    const [ar,sr,mr,pr,moneyr,shr,pxr,rtr]=await Promise.all([fetch('/account',{cache:'no-store'}),fetch('/status',{cache:'no-store'}),fetch('/markets',{cache:'no-store'}),fetch('/preview-proof',{cache:'no-store'}),fetch('/money-path-proof',{cache:'no-store'}),fetch('/shadow-state',{cache:'no-store'}),fetch('/price-proof',{cache:'no-store'}),fetch('/real-trade-state',{cache:'no-store'})]);
+    const [ar,sr,mr,pr,moneyr,shr,pxr,rtr]=await Promise.all([fetch('/account',{cache:'no-store'}),fetch('/status',{cache:'no-store'}),fetch('/markets',{cache:'no-store'}),fetch('/preview-proof',{cache:'no-store'}),fetch('/money-path-proof',{cache:'no-store'}),fetch('/shadow-run',{cache:'no-store'}),fetch('/price-proof',{cache:'no-store'}),fetch('/real-trade-state',{cache:'no-store'})]);
     const account=await ar.json(),status=await sr.json(),market=await mr.json(),preview=await pr.json(),money=await moneyr.json(),shadow=await shr.json(),prices=await pxr.json(),realTrade=await rtr.json();
     const shadowLive=shadow.status==='LIVE_US_SHADOW';
     const liveOrdersState=E('liveOrdersState'),liveOrdersSub=E('liveOrdersSub');
@@ -1282,10 +1286,11 @@ async function load(){
     if(!opps.length){
       parts.push('<div class="opp"><div class="meta">No eligible BTC/ETH opportunities in the current Polymarket US Shadow observation.</div></div>');
     } else {
-      for(const o of opps.slice(0,8)){
+      for(const o of opps){
         const ask=Number(o.observedAsk),bid=Number(o.observedBid),score=Number(o.score),move=Number(o.move),edge=Number(o.edge);
         const qualifies=Number.isFinite(score)&&score>=0.80&&edge>0;
-        parts.push('<div class="opp"><div class="oppHead"><div class="q">'+esc(o.question||o.slug||'US market')+'</div><div class="oppBadges"><div class="scoreBadge '+(qualifies?'hot':'')+'"><small>SCORE</small><strong>'+(Number.isFinite(score)?score.toFixed(2):'—')+'</strong></div><div class="tag">'+esc(o.asset||'')+' · '+(qualifies?'ENTRY ≥ .80':'OBSERVE')+'</div></div></div><div class="meta">'+
+        const horizon=esc(o.horizon||'UNCLASSIFIED');
+        parts.push('<div class="opp"><div class="oppHead"><div class="q">'+esc(o.question||o.slug||'US market')+'</div><div class="oppBadges"><div class="tag">'+horizon+'</div><div class="scoreBadge '+(qualifies?'hot':'')+'"><small>SCORE</small><strong>'+(Number.isFinite(score)?score.toFixed(2):'—')+'</strong></div><div class="tag">'+esc(o.asset||'')+' · '+(qualifies?'ENTRY ≥ .80':'OBSERVE')+'</div></div></div><div class="meta">'+
           (Number.isFinite(move)?('move '+(move*100).toFixed(3)+'% · '):'')+
           (Number.isFinite(ask)?('ASK '+(ask*100).toFixed(1)+'¢ · '):'')+
           (Number.isFinite(bid)?('BID '+(bid*100).toFixed(1)+'¢ · '):'')+
