@@ -522,121 +522,68 @@ function shadowLedger(state, type, payload = {}) {
 
 async function discoverUsShadowMarkets() {
   const client = new PolymarketUS();
-  // Query both long names and ticker/common-name variants. Results are deduplicated
-  // below, so broadening discovery does not duplicate markets or change scoring.
-  const searchTerms = ["bitcoin","BTC","bitcoin up or down","BTC up or down","ethereum","ETH","ether","ethereum up or down","ETH up or down"];
-  // One rejected fuzzy-search request must not kill the entire Shadow observation.
-  // This matters because the provider can throttle or reject individual broad queries.
-  const settled = await Promise.allSettled(
-    searchTerms.map((query) => client.search.query({ query, status: "active", limit: 50 }))
-  );
-  const searches = settled.filter((x) => x.status === "fulfilled").map((x) => x.value);
-  if (!searches.length) throw new Error("POLYMARKET_US_SEARCH_UNAVAILABLE");
-
-  const eventMap = new Map();
-  for (const result of searches) {
-    for (const event of (result?.events || [])) {
-      const key = String(event?.id ?? event?.slug ?? "");
-      if (key) eventMap.set(key, event);
-    }
-  }
-
   const candidates = [];
-  let seen = 0;
-  let rejected = 0;
+  let seen = 0, rejected = 0, offset = 0, pages = 0, reachedEnd = false;
 
-  for (const event of eventMap.values()) {
-    for (const compact of (event?.markets || [])) {
-      seen += 1;
-      if (!compact?.slug || compact?.active === false || compact?.closed === true) {
-        rejected += 1;
-        continue;
-      }
-
-      let market = compact;
-      try {
-        const detail = await client.markets.retrieveBySlug(compact.slug);
-        market = detail?.market || compact;
-      } catch {}
-
-      const text = [event?.title, event?.slug, market?.title, market?.slug, market?.outcome].filter(Boolean).join(" — ");
-      const rel = shadowRelevant(text);
-
-      // Baseline Real accepts short-horizon contracts only. Preference is
-      // 15-minute, then hourly, then daily. Longer contracts are rejected.
+  // Resource-bounded catalogue discovery. Filter event metadata BEFORE any
+  // per-market detail/BBO request; only short-horizon BTC/ETH candidates incur
+  // market-data calls. This avoids the 1102 failure caused by thousands of
+  // sequential provider requests.
+  while (pages < 30) {
+    const result = await client.events.list({ active: true, limit: 100, offset });
+    const events = Array.isArray(result?.events) ? result.events
+      : Array.isArray(result?.data?.events) ? result.data.events
+      : Array.isArray(result?.data) ? result.data
+      : Array.isArray(result) ? result : [];
+    for (const event of events) {
+      const eventText = [event?.title,event?.question,event?.slug,event?.description].filter(Boolean).join(" — ");
+      const rel = shadowRelevant(eventText);
       const startMs = Date.parse(event?.startTime || "");
       const endMs = Date.parse(event?.endTime || "");
       const durationMs = Number.isFinite(startMs) && Number.isFinite(endMs) ? endMs - startMs : NaN;
-      const explicit15m = /15\s*(?:min|minute)|15m\b|quarter[- ]?hour/i.test(text);
-      const explicitHourly = /\b(?:hourly|this hour|1\s*hour)\b/i.test(text);
-      const explicitDaily = /\b(?:daily|today|tonight|this day|24\s*hour)\b/i.test(text);
-      const timed15m = Number.isFinite(durationMs) && durationMs >= 10 * 60 * 1000 && durationMs <= 20 * 60 * 1000;
-      const timedHourly = Number.isFinite(durationMs) && durationMs > 20 * 60 * 1000 && durationMs <= 90 * 60 * 1000;
-      const timedDaily = Number.isFinite(durationMs) && durationMs > 90 * 60 * 1000 && durationMs <= 30 * 60 * 60 * 1000;
-      const horizon = (explicit15m || timed15m) ? "15M"
-        : (explicitHourly || timedHourly) ? "HOURLY"
-        : (explicitDaily || timedDaily) ? "DAILY"
-        : null;
-      if (!rel || !horizon || market?.active === false || market?.closed === true) {
-        rejected += 1;
-        continue;
-      }
+      const explicit15m = /15\s*(?:min|minute)|15m\b|quarter[- ]?hour/i.test(eventText);
+      const explicitHourly = /\b(?:hourly|this hour|1\s*hour)\b/i.test(eventText);
+      const explicitDaily = /\b(?:daily|today|tonight|this day|24\s*hour)\b/i.test(eventText);
+      const timed15m = Number.isFinite(durationMs) && durationMs >= 10*60*1000 && durationMs <= 20*60*1000;
+      const timedHourly = Number.isFinite(durationMs) && durationMs > 20*60*1000 && durationMs <= 90*60*1000;
+      const timedDaily = Number.isFinite(durationMs) && durationMs > 90*60*1000 && durationMs <= 30*60*60*1000;
+      const horizon = (explicit15m||timed15m) ? "15M" : (explicitHourly||timedHourly) ? "HOURLY" : (explicitDaily||timedDaily) ? "DAILY" : null;
+      const markets = Array.isArray(event?.markets) ? event.markets : [];
+      seen += Math.max(markets.length,1);
+      if (!rel || !horizon) { rejected += Math.max(markets.length,1); continue; }
 
-      try {
-        const bboRaw = await client.markets.bbo(market.slug);
-        const bbo = bboRaw?.marketData || bboRaw;
-        let yes = normalizeProbability(bbo?.bestAsk);
-        let bid = normalizeProbability(bbo?.bestBid);
-
-        if (yes === null) {
-          const bookRaw = await client.markets.book(market.slug);
-          const book = bookRaw?.marketData || bookRaw;
-          const offers = Array.isArray(book?.offers) ? book.offers : [];
-          const bids = Array.isArray(book?.bids) ? book.bids : [];
-          yes = normalizeProbability(offers[0]?.px);
-          if (bid === null) bid = normalizeProbability(bids[0]?.px);
-        }
-
-        if (yes === null || yes <= 0.01 || yes >= 0.99) {
-          rejected += 1;
-          continue;
-        }
-
-        candidates.push({
-          id: String(market?.id ?? market?.slug),
-          slug: market.slug,
-          question: text,
-          asset: rel.asset,
-          bear: rel.bear,
-          yes,
-          bid,
-          source: "POLYMARKET_US",
-          horizon,
-          durationMs: Number.isFinite(durationMs) ? durationMs : null,
-        });
-      } catch {
-        rejected += 1;
+      for (const compact of markets) {
+        if (!compact?.slug || compact?.active === false || compact?.closed === true) { rejected++; continue; }
+        try {
+          const marketText=[eventText,compact?.title,compact?.question,compact?.slug,compact?.outcome].filter(Boolean).join(" — ");
+          const marketRel=shadowRelevant(marketText)||rel;
+          const bboRaw=await client.markets.bbo(compact.slug);
+          const bbo=bboRaw?.marketData||bboRaw;
+          let yes=normalizeProbability(bbo?.bestAsk), bid=normalizeProbability(bbo?.bestBid);
+          if (yes===null) {
+            const bookRaw=await client.markets.book(compact.slug);
+            const book=bookRaw?.marketData||bookRaw;
+            const offers=Array.isArray(book?.offers)?book.offers:[], bids=Array.isArray(book?.bids)?book.bids:[];
+            yes=normalizeProbability(offers[0]?.px);
+            if (bid===null) bid=normalizeProbability(bids[0]?.px);
+          }
+          if (yes===null || yes<=0.01 || yes>=0.99) { rejected++; continue; }
+          candidates.push({id:String(compact?.id??compact.slug),slug:compact.slug,question:marketText,asset:marketRel.asset,bear:marketRel.bear,yes,bid,source:"POLYMARKET_US",horizon,durationMs:Number.isFinite(durationMs)?durationMs:null});
+        } catch { rejected++; }
       }
     }
+    pages++;
+    if (events.length < 100) { reachedEnd=true; break; }
+    offset += events.length;
   }
 
-  const horizonRank = { "15M": 0, "HOURLY": 1, "DAILY": 2 };
-  candidates.sort((a, b) => (horizonRank[a.horizon] ?? 9) - (horizonRank[b.horizon] ?? 9));
-
-  const coverage = {
-    BTC: {
-      eligible: candidates.filter((m) => m.asset === "BTC").length,
-      up: candidates.filter((m) => m.asset === "BTC" && !m.bear).length,
-      down: candidates.filter((m) => m.asset === "BTC" && m.bear).length,
-    },
-    ETH: {
-      eligible: candidates.filter((m) => m.asset === "ETH").length,
-      up: candidates.filter((m) => m.asset === "ETH" && !m.bear).length,
-      down: candidates.filter((m) => m.asset === "ETH" && m.bear).length,
-    },
+  const rank={"15M":0,"HOURLY":1,"DAILY":2};
+  candidates.sort((a,b)=>(rank[a.horizon]??9)-(rank[b.horizon]??9));
+  const coverage={
+    BTC:{eligible:candidates.filter(m=>m.asset==="BTC").length,up:candidates.filter(m=>m.asset==="BTC"&&!m.bear).length,down:candidates.filter(m=>m.asset==="BTC"&&m.bear).length},
+    ETH:{eligible:candidates.filter(m=>m.asset==="ETH").length,up:candidates.filter(m=>m.asset==="ETH"&&!m.bear).length,down:candidates.filter(m=>m.asset==="ETH"&&m.bear).length}
   };
-
-  return { markets: candidates, seen, rejected, coverage };
+  return {markets:candidates,seen,rejected,coverage,pages,reachedEnd};
 }
 
 async function runShadow(env) {
