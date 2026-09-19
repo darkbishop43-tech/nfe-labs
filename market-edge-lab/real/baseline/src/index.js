@@ -2056,6 +2056,60 @@ export default {
       }
     }
 
+    if (url.pathname === "/kalshi-live-contract-verification-proof") {
+      const shadow=await loadShadowState(env);
+      const sample=(shadow?.opportunities||[]).find(o=>o?.marketTicker&&(o?.outcomeSide==="YES"||o?.outcomeSide==="NO"))||null;
+      const sizing=sample?estimateKalshiFeeSafeSize(sample.yes,REAL_TEST_CONFIG.maxStakeUsd):null;
+      const request=(sample&&sizing?.ok)?kalshiV2EntryPayload(sample,sizing,"CONTRACT-PROOF-NO-SUBMIT"):null;
+      return json({
+        ok:true,
+        state:"KALSHI_LIVE_WRITE_CONTRACT_INDEPENDENTLY_REVERIFIED_HARD_DISABLED",
+        verifiedAt:"2026-09-19",
+        evidence:{
+          kalshiHelpCenter:{title:"Kalshi API",published:"2026-03-10",supportsAuthenticatedOrdersTradesPortfolio:true},
+          generatedSdk:{package:"kalshi-typescript",version:"3.26.0",createOrderV2:"POST /portfolio/events/orders",cancelOrderV2:"DELETE /portfolio/events/orders/{order_id}",getOrder:"GET /portfolio/orders/{order_id}"},
+          productionBase:"https://api.elections.kalshi.com/trade-api/v2"
+        },
+        contract:{
+          side:["bid","ask"],
+          bidMeaning:"BUY_YES",
+          askMeaning:"SELL_YES_EQUIVALENT_BUY_NO_AT_COMPLEMENT",
+          count:"fixed-point contract string",
+          price:"fixed-point YES-leg dollar string",
+          timeInForce:"immediate_or_cancel",
+          selfTradePreventionType:"taker_at_cross",
+          reduceOnlySupported:true,
+          cancelOrderOnPauseSupported:true,
+          createResponse:["order_id","client_order_id","fill_count","remaining_count","average_fill_price","average_fee_paid","ts_ms"],
+          fillsReconciledByOrderId:true,
+          partialFillMustBeManagedByExactFillCount:true
+        },
+        dryRun:{
+          sampleAvailable:Boolean(sample),
+          feeSafeSizing:Boolean(sizing?.ok),
+          request:request?{...request,client_order_id:"CONTRACT-PROOF-NO-SUBMIT"}:null
+        },
+        strategyUnchanged:{
+          entryScore:REAL_TEST_CONFIG.entryScore,
+          exitScore:REAL_TEST_CONFIG.exitScore,
+          maxHoldMinutes:REAL_TEST_CONFIG.maxHoldMs/60000,
+          maxStakeUsd:REAL_TEST_CONFIG.maxStakeUsd
+        },
+        remainingTradeTimeGates:{
+          freshKalshiLocationVerificationRequired:true,
+          currentFeeScheduleRecheckRequired:true,
+          founderSingleTradeAuthorizationRequired:true
+        },
+        interlocks:{
+          controllerEnabled:kalshiOneTradeEnabled(env),
+          postOrdersCalled:false,
+          deleteOrdersCalled:false,
+          submitted:false,
+          realMoneyMoved:false
+        }
+      });
+    }
+
     if (url.pathname === "/kalshi-v2-zero-submit-proof") {
       const shadow=await loadShadowState(env);
       const sample=(shadow?.opportunities||[]).find(o=>o?.marketTicker&&(o?.outcomeSide==="YES"||o?.outcomeSide==="NO"))||null;
