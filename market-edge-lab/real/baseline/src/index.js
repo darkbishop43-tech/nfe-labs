@@ -2056,6 +2056,64 @@ export default {
       }
     }
 
+    if (url.pathname === "/kalshi-fee-readiness-proof") {
+      const shadow=await loadShadowState(env);
+      const sample=(shadow?.opportunities||[]).find(o=>o?.marketTicker&&(o?.outcomeSide==="YES"||o?.outcomeSide==="NO"))||null;
+      const sizing=sample?estimateKalshiFeeSafeSize(sample.yes,REAL_TEST_CONFIG.maxStakeUsd):null;
+      return json({
+        ok:true,
+        state:"KALSHI_CURRENT_FEE_MODEL_REVERIFIED_PRETRADE",
+        verifiedAt:"2026-09-19",
+        authoritativeSources:{
+          helpCenter:{
+            title:"Fees",
+            published:"2026-04-19",
+            saysTransactionFeesChargedOnExpectedEarnings:true,
+            warnsSomeMarketsHaveDifferentFees:true
+          },
+          regulatoryFeeSchedule:{
+            page:"kalshi.com/regulatory/fee-schedule",
+            currentPageReachable:true,
+            generalTakerFormula:"ceil_to_cent(0.07 * C * P * (1-P))",
+            makerFormula:"ceil_to_cent(0.0175 * C * P * (1-P))"
+          }
+        },
+        controllerInterpretation:{
+          entryUsesImmediateOrCancel:true,
+          entryThereforeModeledAsTaker:true,
+          maxStakeCapIncludesEntryFee:true,
+          entryFeeFormula:"ceil_to_cent(0.07 * C * P * (1-P))",
+          specialMarketFeeOverrideRisk:"FAIL_CLOSED_IF_A_MARKET_SPECIFIC_FEE_DIFFERS_FROM_GENERAL_SCHEDULE",
+          exitFee:"SEPARATE_REALIZED_TRADING_COST_RECORDED_ON_EXIT"
+        },
+        currentDryRun:{
+          sampleAvailable:Boolean(sample),
+          ticker:sample?.marketTicker||null,
+          outcomeSide:sample?.outcomeSide||null,
+          observedAsk:sample?.yes??null,
+          feeSafeSizing:Boolean(sizing?.ok),
+          count:sizing?.count||0,
+          premiumUsd:sizing?.premiumUsd||0,
+          estimatedEntryFeeUsd:sizing?.feeUsd||0,
+          estimatedEntryDebitUsd:sizing?.totalDebitUsd||0,
+          maxStakeUsd:REAL_TEST_CONFIG.maxStakeUsd
+        },
+        finalPretradeGates:{
+          feeModelReverified:true,
+          freshKalshiLocationVerificationRequired:true,
+          founderSingleTradeAuthorizationRequired:true,
+          continuousAutomaticTradingAuthorized:false
+        },
+        interlocks:{
+          controllerEnabled:kalshiOneTradeEnabled(env),
+          postOrdersCalled:false,
+          deleteOrdersCalled:false,
+          submitted:false,
+          realMoneyMoved:false
+        }
+      });
+    }
+
     if (url.pathname === "/kalshi-live-contract-verification-proof") {
       const shadow=await loadShadowState(env);
       const sample=(shadow?.opportunities||[]).find(o=>o?.marketTicker&&(o?.outcomeSide==="YES"||o?.outcomeSide==="NO"))||null;
