@@ -690,7 +690,8 @@ export default {
     if(url.pathname==="/status")return json(statusPayload(env));
     if(url.pathname==="/account"){const proof=await accountProof(env);return json(proof,proof.ok?200:proof.state==="SECRET_FORMAT_INVALID"?422:502);}
     if(url.pathname==="/markets")return json(await marketSnapshot());
-    if(url.pathname==="/btc-15m-proof")return json(await robinhoodBtc15mProof());\n    if(url.pathname==="/btc-15m-signal")return json(await robinhoodBtc15mSignal(env));
+    if(url.pathname==="/btc-15m-proof")return json(await robinhoodBtc15mProof());
+    if(url.pathname==="/btc-15m-signal")return json(await robinhoodBtc15mSignal(env));
     if(url.pathname==="/money-path-proof")return json(await moneyPathProof(env));
     if(url.pathname==="/preview-proof"){const proof=await previewProof(env);return json(proof,proof.ok?200:422);}
     if(url.pathname==="/shadow-state")return json(publicShadowView(await loadShadowState(env)));
