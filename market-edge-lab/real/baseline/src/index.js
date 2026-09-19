@@ -643,12 +643,14 @@ async function runShadow(env) {
   const state = await loadShadowState(env);
   const now = Date.now();
 
+  let stage = "COINBASE_AND_DISCOVERY";
   try {
     const [btc, eth, discovery] = await Promise.all([
       coinbaseSpot("BTC-USD"),
       coinbaseSpot("ETH-USD"),
       discoverUsShadowMarkets(),
     ]);
+    stage = "SCORING";
 
     const previous = state.prices || {};
     const moves = {
@@ -718,6 +720,8 @@ async function runShadow(env) {
     state.startedAt = state.startedAt || state.lastRunAt;
     state.runs = Number(state.runs || 0) + 1;
     state.status = "LIVE_US_SHADOW";
+    state.errorCode = null;
+    state.errorStage = null;
     state.liveOrderSubmission = "DISABLED";
     state.strategy = {
       entryScore: SHADOW_CONFIG.entryScore,
@@ -744,6 +748,8 @@ async function runShadow(env) {
     state.assetCoverageReady = false;
     state.lastRunAt = new Date(now).toISOString();
     state.status = "ERROR";
+    state.errorCode = String(error?.message || "SHADOW_OBSERVATION_FAILED").slice(0, 120);
+    state.errorStage = stage;
     shadowLedger(state, "SHADOW_ERROR", {
       errorType: error?.name || "Error",
       message: "Shadow observation failed; provider details suppressed.",
@@ -1031,7 +1037,9 @@ function publicShadowView(state) {
     assetCoverageReady: Boolean(state?.assetCoverageReady),
     rejectedCount: state?.rejectedCount || 0,
     seenCount: state?.seenCount || 0,
-    opportunities: (state?.opportunities || []).slice(0, 12).map((o) => ({
+    errorCode: state?.errorCode || null,
+    errorStage: state?.errorStage || null,
+    opportunities: (state?.opportunities || []).map((o) => ({
       slug: o.slug,
       question: o.question,
       asset: o.asset,
