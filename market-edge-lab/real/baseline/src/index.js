@@ -451,7 +451,7 @@ function shadowRelevant(text) {
 }
 
 function scoreShadowMarket(market, moves) {
-  // Exact frozen Paper Baseline scoring formula; only the venue/price source is adapted to Polymarket US.
+  // Exact frozen Paper Baseline scoring formula; only the venue/price source is adapted to Kalshi.
   const move = moves[market.asset] || 0;
   const directionalMove = market.bear ? -move : move;
   const fair = clamp(market.yes + directionalMove * 18, 0.02, 0.98);
@@ -551,6 +551,42 @@ async function kalshiExecutionGet(env,path) {
   const headers=await kalshiExecutionHeaders(env,"GET",path);
   return fetch("https://api.elections.kalshi.com"+path,{method:"GET",headers});
 }
+
+function kalshiOneTradeEnabled(env) {
+  return env?.KALSHI_ONE_TRADE_CONTROLLER_ENABLED === "ENABLED" &&
+         env?.KALSHI_FOUNDER_ONE_TRADE_AUTHORIZATION === "AUTHORIZED_ONCE";
+}
+async function kalshiExecutionWrite(env, method, path, payload) {
+  if (!kalshiOneTradeEnabled(env)) throw new Error("KALSHI_ONE_TRADE_CONTROLLER_HARD_DISABLED");
+  const headers=await kalshiExecutionHeaders(env,method,path);
+  headers["content-type"]="application/json";
+  return fetch("https://api.elections.kalshi.com"+path,{method,headers,body:payload===undefined?undefined:JSON.stringify(payload)});
+}
+async function kalshiCreateOrderV2(env,payload) {
+  return kalshiExecutionWrite(env,"POST","/trade-api/v2/portfolio/events/orders",payload);
+}
+async function kalshiCancelOrderV2(env,orderId) {
+  return kalshiExecutionWrite(env,"DELETE","/trade-api/v2/portfolio/events/orders/"+encodeURIComponent(orderId));
+}
+
+function estimateKalshiFeeSafeSize(price, maxStakeUsd) {
+  // Fail closed: no real order may be enabled until a market-specific fee source/formula
+  // is verified and incorporated. We model premium only and reserve execution.
+  const p=Number(price);
+  if(!Number.isFinite(p)||p<=0||p>=1) return {ok:false,reason:"INVALID_PRICE",count:0};
+  const count=Math.max(0,Math.floor(Number(maxStakeUsd)/p));
+  const premium=Number((count*p).toFixed(4));
+  return {
+    ok:false,
+    reason:"FEE_NOT_YET_VERIFIED_FOR_THIS_MARKET",
+    count,
+    premiumUsd:premium,
+    feeUsd:null,
+    totalDebitUsd:null,
+    maxStakeUsd:Number(maxStakeUsd),
+    executionAllowed:false
+  };
+}
 async function discoverKalshiShadowMarkets(env) {
   const series=[{asset:"BTC",ticker:"KXBTC15M"},{asset:"ETH",ticker:"KXETH15M"}];
   const candidates=[]; let seen=0,rejected=0;
@@ -561,17 +597,24 @@ async function discoverKalshiShadowMarkets(env) {
     const data=await r.json(), markets=Array.isArray(data?.markets)?data.markets:[];
     seen+=markets.length;
     for(const m of markets) {
-      const yes=normalizeProbability(m?.yes_ask_dollars??m?.yes_ask);
-      const bid=normalizeProbability(m?.yes_bid_dollars??m?.yes_bid);
-      if(!m?.ticker || m?.status!=="active" || yes===null || bid===null || yes<=0.01 || yes>=0.99){rejected++;continue;}
+      const yesAsk=normalizeProbability(m?.yes_ask_dollars??m?.yes_ask);
+      const yesBid=normalizeProbability(m?.yes_bid_dollars??m?.yes_bid);
+      const directNoAsk=normalizeProbability(m?.no_ask_dollars??m?.no_ask);
+      const directNoBid=normalizeProbability(m?.no_bid_dollars??m?.no_bid);
+      const noAsk=directNoAsk!==null?directNoAsk:(yesBid!==null?Number((1-yesBid).toFixed(4)):null);
+      const noBid=directNoBid!==null?directNoBid:(yesAsk!==null?Number((1-yesAsk).toFixed(4)):null);
+      if(!m?.ticker || m?.status!=="active" || yesAsk===null || yesBid===null || noAsk===null || noBid===null){rejected++;continue;}
+      if(yesAsk<=0.01 || yesAsk>=0.99 || noAsk<=0.01 || noAsk>=0.99){rejected++;continue;}
       const open=Date.parse(m?.open_time||""), close=Date.parse(m?.close_time||"");
       const durationMs=Number.isFinite(open)&&Number.isFinite(close)?close-open:15*60*1000;
-      candidates.push({id:m.ticker,slug:m.ticker,question:m.title||s.ticker,asset:s.asset,bear:false,yes,bid,source:"KALSHI",horizon:"15M",durationMs});
+      const base={marketTicker:m.ticker,slug:m.ticker,question:m.title||s.ticker,asset:s.asset,source:"KALSHI",horizon:"15M",durationMs};
+      candidates.push({...base,id:m.ticker+":YES",outcomeSide:"YES",direction:"UP",bear:false,yes:yesAsk,bid:yesBid});
+      candidates.push({...base,id:m.ticker+":NO",outcomeSide:"NO",direction:"DOWN",bear:true,yes:noAsk,bid:noBid});
     }
   }
   const coverage={
-    BTC:{eligible:candidates.filter(x=>x.asset==="BTC").length,up:candidates.filter(x=>x.asset==="BTC").length,down:0},
-    ETH:{eligible:candidates.filter(x=>x.asset==="ETH").length,up:candidates.filter(x=>x.asset==="ETH").length,down:0}
+    BTC:{eligible:candidates.filter(x=>x.asset==="BTC").length,up:candidates.filter(x=>x.asset==="BTC"&&x.direction==="UP").length,down:candidates.filter(x=>x.asset==="BTC"&&x.direction==="DOWN").length},
+    ETH:{eligible:candidates.filter(x=>x.asset==="ETH").length,up:candidates.filter(x=>x.asset==="ETH"&&x.direction==="UP").length,down:candidates.filter(x=>x.asset==="ETH"&&x.direction==="DOWN").length}
   };
   return {markets:candidates,seen,rejected,coverage,pages:1,reachedEnd:true,source:"KALSHI_AUTHENTICATED_READ_ONLY"};
 }
@@ -1180,12 +1223,12 @@ async function load(){
       liveOrdersSub.textContent='Shadow validation only. No Kalshi real order can execute from this build.';
     }else{
       liveOrdersState.textContent='DISABLED';liveOrdersState.className='val warn';
-      liveOrdersSub.textContent='One-trade execution controller is implemented but DISARMED.';
+      liveOrdersSub.textContent='Kalshi one-trade controller paths are implemented but HARD DISABLED.';
     }
 
     const armed=Boolean(realTrade?.armed);
     const modePill=E('modePill'),statusSub=E('statusSub'),executionGov=E('executionGov'),moneyLiveOrders=E('moneyLiveOrders');
-    modePill.textContent=armed?'REAL · EXECUTION DISABLED':'REAL · EXECUTION DISARMED';
+    modePill.textContent=armed?'REAL · EXECUTION DISABLED':'REAL · EXECUTION HARD DISABLED';
     executionGov.textContent=armed?'SHADOW_ONLY · EXECUTION_DISABLED':'LOCKED / DISARMED';
     executionGov.className=armed?'good':'warn';
     moneyLiveOrders.textContent=armed?'EXECUTION DISABLED':'DISABLED';
@@ -1676,28 +1719,50 @@ export default {
         const discovery=await discoverKalshiShadowMarkets(env);
         const candidate=discovery.markets[0]||null;
         if(!candidate) return json({ok:false,state:"NO_LIVE_KALSHI_15M_MARKET",submitted:false,realMoneyMoved:false},422);
-        const ask=Number(candidate.yes), bid=Number(candidate.bid), maxStake=SHADOW_CONFIG.maxStakeUsd;
-        const count=ask>0?Math.max(0,Math.floor(maxStake/ask)):0;
-        const notional=Number((count*ask).toFixed(4));
+        const sizing=estimateKalshiFeeSafeSize(candidate.yes,SHADOW_CONFIG.maxStakeUsd);
+        const clientOrderId="baseline-real-one-trade-DRY-RUN";
+        const dryOrderBody={
+          ticker:candidate.marketTicker||candidate.slug,
+          client_order_id:clientOrderId,
+          side:"bid",
+          price_dollars:Number(candidate.yes).toFixed(4),
+          count_fp:String(sizing.count)
+        };
         return json({
           ok:true,
-          state:"KALSHI_ONE_TRADE_CONTROLLER_HARD_DISABLED",
+          state:"KALSHI_ONE_TRADE_PATHS_IMPLEMENTED_HARD_DISABLED",
           venue:"KALSHI",
-          documentationContract:{
-            generation:"V2_EVENT_MARKET_ORDER",
-            createOrder:{method:"POST",path:"/trade-api/v2/portfolio/events/orders",bookSide:"bid",priceField:"price_dollars",countField:"count_fp"},
-            cancelOrder:{method:"DELETE",pathTemplate:"/trade-api/v2/portfolio/events/orders/{order_id}"},
-            note:"V2 uses single-book bid/ask direction and fixed-point dollar prices; no write request is made by this proof."
+          currentCoverage:discovery.coverage,
+          selectedDryCandidate:{
+            ticker:candidate.marketTicker||candidate.slug,
+            asset:candidate.asset,
+            outcomeSide:candidate.outcomeSide,
+            direction:candidate.direction,
+            horizon:candidate.horizon,
+            observedEntryAsk:candidate.yes,
+            observedExitBid:candidate.bid
           },
-          proposedEntry:{ticker:candidate.slug,asset:candidate.asset,horizon:candidate.horizon,observedAsk:ask,observedBid:bid,count,maximumPremiumBeforeFeesUsd:notional},
-          frozenRules:{entryScore:SHADOW_CONFIG.entryScore,exitScore:SHADOW_CONFIG.exitScore,maxHoldMinutes:SHADOW_CONFIG.maxHoldMs/60000,maxStakeUsd:maxStake},
+          directionModel:{
+            yes:{meaning:"UP",bear:false},
+            no:{meaning:"DOWN",bear:true},
+            bothDirectionsAvailable:true
+          },
+          v2WritePath:{
+            create:{method:"POST",path:"/trade-api/v2/portfolio/events/orders",body:dryOrderBody,endpointCalled:false},
+            cancel:{method:"DELETE",pathTemplate:"/trade-api/v2/portfolio/events/orders/{order_id}",endpointCalled:false}
+          },
+          feeSafeSizing:sizing,
+          frozenRules:{entryScore:SHADOW_CONFIG.entryScore,exitScore:SHADOW_CONFIG.exitScore,maxHoldMinutes:SHADOW_CONFIG.maxHoldMs/60000,maxStakeUsd:SHADOW_CONFIG.maxStakeUsd},
           interlocks:{
-            controllerEnabled:false,
+            controllerEnabled:kalshiOneTradeEnabled(env),
+            controllerEnableVariablePresent:Boolean(env?.KALSHI_ONE_TRADE_CONTROLLER_ENABLED),
+            founderAuthorizationVariablePresent:Boolean(env?.KALSHI_FOUNDER_ONE_TRADE_AUTHORIZATION),
+            feeVerified:false,
             requiresExplicitFounderAuthorization:true,
             requiresFreshLocationVerificationAtTradeTime:true,
             requiresScoreAtLeast:SHADOW_CONFIG.entryScore,
             maximumHoldMinutes:SHADOW_CONFIG.maxHoldMs/60000,
-            maximumStakeUsd:maxStake,
+            maximumStakeUsd:SHADOW_CONFIG.maxStakeUsd,
             postOrdersCalled:false,
             deleteOrdersCalled:false,
             submitted:false,
