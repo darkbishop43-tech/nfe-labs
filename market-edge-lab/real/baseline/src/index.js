@@ -527,9 +527,13 @@ async function discoverUsShadowMarkets() {
   const searches = await Promise.all([
     client.search.query({ query: "bitcoin", status: "active", limit: 50 }),
     client.search.query({ query: "BTC", status: "active", limit: 50 }),
+    client.search.query({ query: "bitcoin up or down", status: "active", limit: 50 }),
+    client.search.query({ query: "BTC up or down", status: "active", limit: 50 }),
     client.search.query({ query: "ethereum", status: "active", limit: 50 }),
     client.search.query({ query: "ETH", status: "active", limit: 50 }),
     client.search.query({ query: "ether", status: "active", limit: 50 }),
+    client.search.query({ query: "ethereum up or down", status: "active", limit: 50 }),
+    client.search.query({ query: "ETH up or down", status: "active", limit: 50 }),
   ]);
 
   const eventMap = new Map();
@@ -558,9 +562,19 @@ async function discoverUsShadowMarkets() {
         market = detail?.market || compact;
       } catch {}
 
-      const text = [event?.title, market?.title, market?.slug, market?.outcome].filter(Boolean).join(" — ");
+      const text = [event?.title, event?.slug, market?.title, market?.slug, market?.outcome].filter(Boolean).join(" — ");
       const rel = shadowRelevant(text);
-      if (!rel || market?.active === false || market?.closed === true) {
+
+      // Baseline Real is intentionally a short-horizon experiment. Do not let
+      // year-end/long-duration crypto contracts masquerade as eligible markets.
+      // Accept explicit 15-minute naming or an event whose declared duration is
+      // approximately one 15-minute window.
+      const explicit15m = /15\\s*(?:min|minute)|15m\\b|quarter[- ]?hour/i.test(text);
+      const startMs = Date.parse(event?.startTime || "");
+      const endMs = Date.parse(event?.endTime || "");
+      const durationMs = Number.isFinite(startMs) && Number.isFinite(endMs) ? endMs - startMs : NaN;
+      const timed15m = Number.isFinite(durationMs) && durationMs >= 10 * 60 * 1000 && durationMs <= 20 * 60 * 1000;
+      if (!rel || (!explicit15m && !timed15m) || market?.active === false || market?.closed === true) {
         rejected += 1;
         continue;
       }
