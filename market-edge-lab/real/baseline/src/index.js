@@ -1324,6 +1324,62 @@ export default {
 
     if (url.pathname === "/markets") return json(await marketSnapshot());
 
+    // Read-only Polymarket US short-horizon catalogue diagnostic.
+    // This scans the official US event catalogue directly so fuzzy search cannot
+    // hide BTC/ETH markets. It never previews or submits an order.
+    if (url.pathname === "/crypto-short-horizon-proof") {
+      const client = new PolymarketUS();
+      const matches = [];
+      let offset = 0, pages = 0, totalEvents = 0, reachedEnd = false;
+      while (pages < 60) {
+        let result;
+        try {
+          result = await client.events.list({ active: true, limit: 100, offset });
+        } catch {
+          return json({ok:false,state:"POLYMARKET_US_EVENT_SCAN_FAILED",pages,totalEvents,matches:matches.slice(0,40),submitted:false});
+        }
+        const events = Array.isArray(result?.events) ? result.events
+          : Array.isArray(result?.data?.events) ? result.data.events
+          : Array.isArray(result?.data) ? result.data
+          : Array.isArray(result) ? result : [];
+        for (const event of events) {
+          totalEvents += 1;
+          const markets = Array.isArray(event?.markets) ? event.markets : [];
+          const rows = markets.length ? markets : [null];
+          for (const market of rows) {
+            const text = [event?.title,event?.question,event?.slug,event?.description,market?.title,market?.question,market?.slug,market?.description].filter(Boolean).join(" — ");
+            const asset = /bitcoin|\bbtc\b/i.test(text) ? "BTC" : /ethereum|\beth\b|\bether\b/i.test(text) ? "ETH" : null;
+            if (!asset) continue;
+            const short = /15\s*(?:min|minute)|quarter[- ]?hour|15m\b/i.test(text);
+            const intraday = short || /\b(?:5|10|30|45|60)\s*(?:min|minute)|hourly|this hour|today|daily|intraday/i.test(text);
+            if (!intraday) continue;
+            matches.push({
+              asset,
+              short15m: short,
+              eventTitle:event?.title||event?.question||null,
+              eventSlug:event?.slug||null,
+              marketTitle:market?.title||market?.question||null,
+              marketSlug:market?.slug||null,
+              active:market?.active??event?.active??null,
+              closed:market?.closed??event?.closed??null
+            });
+          }
+        }
+        pages += 1;
+        if (events.length < 100) { reachedEnd = true; break; }
+        offset += events.length;
+      }
+      const dedup=[...new Map(matches.map(x=>[(x.marketSlug||x.eventSlug||JSON.stringify(x)),x])).values()];
+      return json({
+        ok:true,source:"POLYMARKET_US_EVENTS_LIST",pages,totalEvents,reachedEnd,
+        btc15m:dedup.filter(x=>x.asset==="BTC"&&x.short15m).length,
+        eth15m:dedup.filter(x=>x.asset==="ETH"&&x.short15m).length,
+        btcIntraday:dedup.filter(x=>x.asset==="BTC").length,
+        ethIntraday:dedup.filter(x=>x.asset==="ETH").length,
+        matches:dedup.slice(0,40),submitted:false,liveOrderSubmission:"DISABLED"
+      });
+    }
+
     if (url.pathname === "/price-proof") return json(await livePriceProof(env));
 
     if (url.pathname === "/money-path-proof") return json(await moneyPathProof(env));
