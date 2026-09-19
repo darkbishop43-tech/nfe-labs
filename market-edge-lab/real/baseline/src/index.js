@@ -1671,6 +1671,44 @@ export default {
       }
     }
 
+    if (url.pathname === "/kalshi-one-trade-controller-proof") {
+      try {
+        const discovery=await discoverKalshiShadowMarkets(env);
+        const candidate=discovery.markets[0]||null;
+        if(!candidate) return json({ok:false,state:"NO_LIVE_KALSHI_15M_MARKET",submitted:false,realMoneyMoved:false},422);
+        const ask=Number(candidate.yes), bid=Number(candidate.bid), maxStake=SHADOW_CONFIG.maxStakeUsd;
+        const count=ask>0?Math.max(0,Math.floor(maxStake/ask)):0;
+        const notional=Number((count*ask).toFixed(4));
+        return json({
+          ok:true,
+          state:"KALSHI_ONE_TRADE_CONTROLLER_HARD_DISABLED",
+          venue:"KALSHI",
+          documentationContract:{
+            generation:"V2_EVENT_MARKET_ORDER",
+            createOrder:{method:"POST",path:"/trade-api/v2/portfolio/events/orders",bookSide:"bid",priceField:"price_dollars",countField:"count_fp"},
+            cancelOrder:{method:"DELETE",pathTemplate:"/trade-api/v2/portfolio/events/orders/{order_id}"},
+            note:"V2 uses single-book bid/ask direction and fixed-point dollar prices; no write request is made by this proof."
+          },
+          proposedEntry:{ticker:candidate.slug,asset:candidate.asset,horizon:candidate.horizon,observedAsk:ask,observedBid:bid,count,maximumPremiumBeforeFeesUsd:notional},
+          frozenRules:{entryScore:SHADOW_CONFIG.entryScore,exitScore:SHADOW_CONFIG.exitScore,maxHoldMinutes:SHADOW_CONFIG.maxHoldMs/60000,maxStakeUsd:maxStake},
+          interlocks:{
+            controllerEnabled:false,
+            requiresExplicitFounderAuthorization:true,
+            requiresFreshLocationVerificationAtTradeTime:true,
+            requiresScoreAtLeast:SHADOW_CONFIG.entryScore,
+            maximumHoldMinutes:SHADOW_CONFIG.maxHoldMs/60000,
+            maximumStakeUsd:maxStake,
+            postOrdersCalled:false,
+            deleteOrdersCalled:false,
+            submitted:false,
+            realMoneyMoved:false
+          }
+        });
+      } catch(error) {
+        return json({ok:false,state:"KALSHI_ONE_TRADE_CONTROLLER_PROOF_FAILED",errorCode:String(error?.message||"PROOF_FAILED"),submitted:false,realMoneyMoved:false},500);
+      }
+    }
+
     if (url.pathname === "/kalshi-execution-readiness-proof") {
       try {
         const discovery = await discoverKalshiShadowMarkets(env);
