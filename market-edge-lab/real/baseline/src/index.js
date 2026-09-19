@@ -1299,8 +1299,10 @@ E('refresh').addEventListener('click',load);load();setInterval(refreshPrices,100
 export default {
   async scheduled(event, env, ctx) {
     ctx.waitUntil((async () => {
+      // Safety gate: Baseline Real's authenticated order client is Polymarket US.
+      // Robinhood 15-minute observations must never trigger this cross-venue money path.
+      // Keep the existing one-trade controller disabled while the instrument source is being repaired.
       await runShadow(env);
-      await maybeRunOneTrade(env);
     })());
   },
 
