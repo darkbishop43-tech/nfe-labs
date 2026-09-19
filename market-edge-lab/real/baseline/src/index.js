@@ -565,16 +565,22 @@ async function discoverUsShadowMarkets() {
       const text = [event?.title, event?.slug, market?.title, market?.slug, market?.outcome].filter(Boolean).join(" — ");
       const rel = shadowRelevant(text);
 
-      // Baseline Real is intentionally a short-horizon experiment. Do not let
-      // year-end/long-duration crypto contracts masquerade as eligible markets.
-      // Accept explicit 15-minute naming or an event whose declared duration is
-      // approximately one 15-minute window.
-      const explicit15m = /15\s*(?:min|minute)|15m\b|quarter[- ]?hour/i.test(text);
+      // Baseline Real accepts short-horizon contracts only. Preference is
+      // 15-minute, then hourly, then daily. Longer contracts are rejected.
       const startMs = Date.parse(event?.startTime || "");
       const endMs = Date.parse(event?.endTime || "");
       const durationMs = Number.isFinite(startMs) && Number.isFinite(endMs) ? endMs - startMs : NaN;
+      const explicit15m = /15\s*(?:min|minute)|15m\b|quarter[- ]?hour/i.test(text);
+      const explicitHourly = /\b(?:hourly|this hour|1\s*hour)\b/i.test(text);
+      const explicitDaily = /\b(?:daily|today|tonight|this day|24\s*hour)\b/i.test(text);
       const timed15m = Number.isFinite(durationMs) && durationMs >= 10 * 60 * 1000 && durationMs <= 20 * 60 * 1000;
-      if (!rel || (!explicit15m && !timed15m) || market?.active === false || market?.closed === true) {
+      const timedHourly = Number.isFinite(durationMs) && durationMs > 20 * 60 * 1000 && durationMs <= 90 * 60 * 1000;
+      const timedDaily = Number.isFinite(durationMs) && durationMs > 90 * 60 * 1000 && durationMs <= 30 * 60 * 60 * 1000;
+      const horizon = (explicit15m || timed15m) ? "15M"
+        : (explicitHourly || timedHourly) ? "HOURLY"
+        : (explicitDaily || timedDaily) ? "DAILY"
+        : null;
+      if (!rel || !horizon || market?.active === false || market?.closed === true) {
         rejected += 1;
         continue;
       }
@@ -608,12 +614,17 @@ async function discoverUsShadowMarkets() {
           yes,
           bid,
           source: "POLYMARKET_US",
+          horizon,
+          durationMs: Number.isFinite(durationMs) ? durationMs : null,
         });
       } catch {
         rejected += 1;
       }
     }
   }
+
+  const horizonRank = { "15M": 0, "HOURLY": 1, "DAILY": 2 };
+  candidates.sort((a, b) => (horizonRank[a.horizon] ?? 9) - (horizonRank[b.horizon] ?? 9));
 
   const coverage = {
     BTC: {
@@ -728,6 +739,11 @@ async function runShadow(env) {
       realMoneyMoved: false,
     });
   } catch (error) {
+    // A failed discovery must fail closed: stale long-duration cards are not evidence.
+    state.opportunities = [];
+    state.eligibleCount = 0;
+    state.assetCoverage = { BTC: { eligible: 0, up: 0, down: 0 }, ETH: { eligible: 0, up: 0, down: 0 } };
+    state.assetCoverageReady = false;
     state.lastRunAt = new Date(now).toISOString();
     state.status = "ERROR";
     shadowLedger(state, "SHADOW_ERROR", {
