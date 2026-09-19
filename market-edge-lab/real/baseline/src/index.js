@@ -374,7 +374,7 @@ async function robinhoodBtc15mProof() {
         const targetRaw = text.match(/\$([0-9][0-9,]*(?:\.[0-9]+)?)\s+or above/i)?.[1] || null;
         const bidRaw = text.match(/Bid\s+([0-9]+(?:\.[0-9]+)?)¢/i)?.[1] || null;
         const askRaw = text.match(/Ask\s+([0-9]+(?:\.[0-9]+)?)¢/i)?.[1] || null;
-        const title = text.match(/BTC 15 min[^$]{0,100}/i)?.[0]?.trim() || link.text || null;
+        const title = text.match(/BTC 15 min\\s*·\\s*[^$<]{1,60}/i)?.[0]?.replace(/Prediction Market.*$/i, "Prediction Market").trim() || "BTC 15 min";
         const live = /\bLIVE\b/i.test(text) && !/closed and no longer tradable/i.test(text);
         events.push({
           asset: "BTC",
@@ -401,6 +401,69 @@ async function robinhoodBtc15mProof() {
   } catch {
     return { ...base, state: "PUBLIC_OBSERVATION_FAILED" };
   }
+}
+
+
+async function robinhoodBtc15mSignal(env) {
+  const [proof, state, btc] = await Promise.all([
+    robinhoodBtc15mProof(),
+    loadShadowState(env),
+    coinbaseSpot("BTC-USD"),
+  ]);
+  const event = Array.isArray(proof?.events) ? proof.events[0] : null;
+  const previous = Number(state?.prices?.BTC);
+  const ask = Number(event?.askCents) / 100;
+  if (!proof?.ok || !event || !Number.isFinite(ask) || ask <= 0 || ask >= 1) {
+    return {
+      ok: false,
+      state: "NO_SCOREABLE_BTC_15M_EVENT",
+      observation: proof,
+      execution: "OBSERVE_ONLY",
+      crossVenueExecution: "BLOCKED",
+      orderSubmission: "DISABLED_FOR_ROBINHOOD_SIGNALS",
+    };
+  }
+  const move = Number.isFinite(previous) && previous > 0 ? (btc - previous) / previous : 0;
+  const fair = clamp(ask + move * 18, 0.02, 0.98);
+  const edge = fair - ask;
+  const score = clamp(0.5 + edge * 4, 0, 1);
+  const action = score >= SHADOW_CONFIG.entryScore && edge > 0 ? "ENTRY_SIGNAL" : "WAIT";
+  return {
+    ok: true,
+    state: "BTC_15M_SIGNAL_READY",
+    contract: {
+      title: event.title,
+      target: event.target,
+      bidCents: event.bidCents,
+      askCents: event.askCents,
+      live: event.live,
+      url: event.url,
+      window: event.instrumentWindow,
+    },
+    market: {
+      coinbaseBtcUsd: btc,
+      previousBaselineBtcUsd: Number.isFinite(previous) ? previous : null,
+      btcMovePct: move * 100,
+      settlementBenchmarkNote: "Robinhood resolves against CF Benchmarks BRTI; Coinbase is the unchanged Baseline movement input adaptation.",
+    },
+    signal: {
+      askProbability: ask,
+      fair,
+      edge,
+      score,
+      entryThreshold: SHADOW_CONFIG.entryScore,
+      exitThreshold: SHADOW_CONFIG.exitScore,
+      maxHoldMinutes: SHADOW_CONFIG.maxHoldMs / 60000,
+      maxStakeUsd: SHADOW_CONFIG.maxStakeUsd,
+      action,
+      strategyChanged: false,
+    },
+    execution: "OBSERVE_ONLY",
+    crossVenueExecution: "BLOCKED",
+    orderSubmission: "DISABLED_FOR_ROBINHOOD_SIGNALS",
+    moneyMovement: "DISABLED_FOR_ROBINHOOD_SIGNALS",
+    observedAt: new Date().toISOString(),
+  };
 }
 
 const SHADOW_CONFIG = {
@@ -569,8 +632,52 @@ async function loadRealTradeState(env){
 }
 function publicRealTradeView(s,env){return {mode:"ONE_TRADE_TEST",executionSafetyGate:"POLYMARKET_CONTROLLER_NOT_SCHEDULED_DURING_ROBINHOOD_15M_REPAIR",phase:s.phase,position:s.position,entry:s.entry,exit:s.exit,completed:s.completed,realizedPnlUsd:s.realizedPnlUsd||0,unrealizedPnlUsd:s.unrealizedPnlUsd||0,totalPnlUsd:(s.realizedPnlUsd||0)+(s.unrealizedPnlUsd||0),submittedOrders:s.submittedOrders||0,lastError:s.lastError||null,authorizedMaxStakeUsd:REAL_TEST_CONFIG.maxStakeUsd,liveOrderSubmission:"BLOCKED_DURING_ROBINHOOD_15M_REPAIR",credentialsInstalled:Boolean(env.POLYMARKET_US_KEY_ID&&env.POLYMARKET_US_SECRET),updatedAt:s.updatedAt||null};}
 
-function dashboardHtml(){return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Market Edge — Baseline Real</title><style>body{font-family:system-ui;background:#07111d;color:#fff;padding:24px}a{color:#8ec5ff}.card{background:#101d2b;border:1px solid #29435f;border-radius:14px;padding:16px;max-width:900px}.bad{color:#ff8a8a}.good{color:#77e6a5}</style></head><body><div class="card"><h1>Market Edge — Baseline Real</h1><p>BTC 15-minute observation repair in progress.</p><p class="bad"><strong>Execution safety gate:</strong> Polymarket real-order controller is not scheduled during Robinhood 15-minute repair.</p><p><a href="/btc-15m-proof">BTC 15-minute proof</a></p><p><a href="/shadow-state">Shadow state</a></p><p><a href="/real-trade-state">Real trade state</a></p></div></body></html>`;}
-
+function dashboardHtml(){return `<!doctype html>
+<html>
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Market Edge — Baseline Real</title>
+<style>
+:root{--bg:#07111d;--card:#101d2b;--line:#29435f;--text:#fff;--muted:#9db1c7;--good:#77e6a5;--warn:#f0c75e;--bad:#ff8a8a;--blue:#8ec5ff}
+*{box-sizing:border-box}body{margin:0;font-family:system-ui;background:var(--bg);color:var(--text);padding:18px}.wrap{max-width:1100px;margin:auto}.hero,.card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:18px}.hero h1{margin:0 0 6px;font-size:28px}.muted{color:var(--muted)}.bad{color:var(--bad)}.good{color:var(--good)}.warn{color:var(--warn)}.grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-top:10px}.v{font-size:24px;font-weight:800;margin-top:5px}.label{font-size:11px;color:var(--muted);text-transform:uppercase}.wide{grid-column:span 2}.row{display:flex;gap:10px;flex-wrap:wrap;margin-top:10px}.pill{padding:7px 10px;border:1px solid var(--line);border-radius:999px;font-size:12px}.links a{color:var(--blue);margin-right:16px}pre{white-space:pre-wrap;word-break:break-word;font-size:12px;color:var(--muted)}@media(max-width:760px){.grid{grid-template-columns:1fr 1fr}.wide{grid-column:span 2}.hero h1{font-size:23px}}
+</style>
+</head>
+<body><div class="wrap">
+<div class="hero">
+<h1>Market Edge — Baseline Real</h1>
+<div class="muted">BTC 15-minute live observation + unchanged Baseline signal layer</div>
+<p class="bad"><strong>Execution safety gate:</strong> Robinhood signals cannot submit Polymarket orders. Real-money execution remains blocked.</p>
+<div class="links"><a href="/btc-15m-proof">Observation proof</a><a href="/btc-15m-signal">Signal proof</a><a href="/shadow-state">Shadow state</a><a href="/real-trade-state">Real trade state</a></div>
+</div>
+<div class="grid">
+<div class="card wide"><div class="label">Live BTC 15-minute contract</div><div id="contract" class="v">Loading…</div><div id="target" class="muted"></div></div>
+<div class="card"><div class="label">Live Ask</div><div id="ask" class="v">—</div></div>
+<div class="card"><div class="label">Signal</div><div id="action" class="v">—</div></div>
+<div class="card"><div class="label">BTC Move</div><div id="move" class="v">—</div></div>
+<div class="card"><div class="label">Baseline Score</div><div id="score" class="v">—</div><div class="muted">Entry ≥ 0.80</div></div>
+<div class="card"><div class="label">Edge</div><div id="edge" class="v">—</div></div>
+<div class="card"><div class="label">Safety</div><div class="v good">BLOCKED</div><div class="muted">No Robinhood-triggered order submission</div></div>
+</div>
+<div class="card" style="margin-top:10px"><div class="label">Runtime evidence</div><div id="status" class="muted">Refreshing every 15 seconds…</div><pre id="details"></pre></div>
+</div>
+<script>
+const f=(n,d=2)=>Number.isFinite(Number(n))?Number(n).toFixed(d):"—";
+async function refresh(){
+ try{
+  const r=await fetch("/btc-15m-signal",{cache:"no-store"}); const d=await r.json();
+  const c=d.contract||{}; const s=d.signal||{}; const m=d.market||{};
+  document.getElementById("contract").textContent=c.title||d.state||"No live contract";
+  document.getElementById("target").textContent=c.target?"Target $"+Number(c.target).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2}):"";
+  document.getElementById("ask").textContent=Number.isFinite(Number(c.askCents))?f(c.askCents,1)+"¢":"—";
+  const a=document.getElementById("action");a.textContent=s.action||"WAIT";a.className="v "+(s.action==="ENTRY_SIGNAL"?"good":"warn");
+  document.getElementById("move").textContent=f(m.btcMovePct,3)+"%";
+  document.getElementById("score").textContent=f(s.score,2);
+  document.getElementById("edge").textContent=f((s.edge||0)*100,2)+"%";
+  document.getElementById("status").textContent=(d.ok?"LIVE SIGNAL LAYER":"NOT READY")+" · "+(d.observedAt||"");
+  document.getElementById("details").textContent="Coinbase BTC: $"+f(m.coinbaseBtcUsd,2)+" | Previous Baseline BTC: $"+f(m.previousBaselineBtcUsd,2)+" | max hold 5m | max stake $5 | execution "+(d.execution||"BLOCKED");
+ }catch(e){document.getElementById("status").textContent="Signal refresh failed";}}
+refresh();setInterval(refresh,15000);
+</script></body></html>`;}
 export default {
   async scheduled(_event,env,_ctx){
     await runShadow(env);
@@ -583,7 +690,7 @@ export default {
     if(url.pathname==="/status")return json(statusPayload(env));
     if(url.pathname==="/account"){const proof=await accountProof(env);return json(proof,proof.ok?200:proof.state==="SECRET_FORMAT_INVALID"?422:502);}
     if(url.pathname==="/markets")return json(await marketSnapshot());
-    if(url.pathname==="/btc-15m-proof")return json(await robinhoodBtc15mProof());
+    if(url.pathname==="/btc-15m-proof")return json(await robinhoodBtc15mProof());\n    if(url.pathname==="/btc-15m-signal")return json(await robinhoodBtc15mSignal(env));
     if(url.pathname==="/money-path-proof")return json(await moneyPathProof(env));
     if(url.pathname==="/preview-proof"){const proof=await previewProof(env);return json(proof,proof.ok?200:422);}
     if(url.pathname==="/shadow-state")return json(publicShadowView(await loadShadowState(env)));
