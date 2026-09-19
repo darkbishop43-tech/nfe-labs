@@ -482,7 +482,7 @@ async function loadShadowState(env) {
     } catch {}
   }
   return {
-    mode: "REAL_US_SHADOW",
+    mode: "REAL_KALSHI_SHADOW",
     startedAt: null,
     lastRunAt: null,
     prices: { BTC: null, ETH: null },
@@ -520,70 +520,44 @@ function shadowLedger(state, type, payload = {}) {
   state.ledger = state.ledger.slice(0, SHADOW_CONFIG.maxLedger);
 }
 
-async function discoverUsShadowMarkets() {
-  const client = new PolymarketUS();
-  const candidates = [];
-  let seen = 0, rejected = 0, offset = 0, pages = 0, reachedEnd = false;
-
-  // Resource-bounded catalogue discovery. Filter event metadata BEFORE any
-  // per-market detail/BBO request; only short-horizon BTC/ETH candidates incur
-  // market-data calls. This avoids the 1102 failure caused by thousands of
-  // sequential provider requests.
-  while (pages < 30) {
-    const result = await client.events.list({ active: true, limit: 100, offset });
-    const events = Array.isArray(result?.events) ? result.events
-      : Array.isArray(result?.data?.events) ? result.data.events
-      : Array.isArray(result?.data) ? result.data
-      : Array.isArray(result) ? result : [];
-    for (const event of events) {
-      const eventText = [event?.title,event?.question,event?.slug,event?.description].filter(Boolean).join(" — ");
-      const rel = shadowRelevant(eventText);
-      const startMs = Date.parse(event?.startTime || "");
-      const endMs = Date.parse(event?.endTime || "");
-      const durationMs = Number.isFinite(startMs) && Number.isFinite(endMs) ? endMs - startMs : NaN;
-      const explicit15m = /15\s*(?:min|minute)|15m\b|quarter[- ]?hour/i.test(eventText);
-      const explicitHourly = /\b(?:hourly|this hour|1\s*hour)\b/i.test(eventText);
-      const explicitDaily = /\b(?:daily|today|tonight|this day|24\s*hour)\b/i.test(eventText);
-      const timed15m = Number.isFinite(durationMs) && durationMs >= 10*60*1000 && durationMs <= 20*60*1000;
-      const timedHourly = Number.isFinite(durationMs) && durationMs > 20*60*1000 && durationMs <= 90*60*1000;
-      const timedDaily = Number.isFinite(durationMs) && durationMs > 90*60*1000 && durationMs <= 30*60*60*1000;
-      const horizon = (explicit15m||timed15m) ? "15M" : (explicitHourly||timedHourly) ? "HOURLY" : (explicitDaily||timedDaily) ? "DAILY" : null;
-      const markets = Array.isArray(event?.markets) ? event.markets : [];
-      seen += Math.max(markets.length,1);
-      if (!rel || !horizon) { rejected += Math.max(markets.length,1); continue; }
-
-      for (const compact of markets) {
-        if (!compact?.slug || compact?.active === false || compact?.closed === true) { rejected++; continue; }
-        try {
-          const marketText=[eventText,compact?.title,compact?.question,compact?.slug,compact?.outcome].filter(Boolean).join(" — ");
-          const marketRel=shadowRelevant(marketText)||rel;
-          const bboRaw=await client.markets.bbo(compact.slug);
-          const bbo=bboRaw?.marketData||bboRaw;
-          let yes=normalizeProbability(bbo?.bestAsk), bid=normalizeProbability(bbo?.bestBid);
-          if (yes===null) {
-            const bookRaw=await client.markets.book(compact.slug);
-            const book=bookRaw?.marketData||bookRaw;
-            const offers=Array.isArray(book?.offers)?book.offers:[], bids=Array.isArray(book?.bids)?book.bids:[];
-            yes=normalizeProbability(offers[0]?.px);
-            if (bid===null) bid=normalizeProbability(bids[0]?.px);
-          }
-          if (yes===null || yes<=0.01 || yes>=0.99) { rejected++; continue; }
-          candidates.push({id:String(compact?.id??compact.slug),slug:compact.slug,question:marketText,asset:marketRel.asset,bear:marketRel.bear,yes,bid,source:"POLYMARKET_US",horizon,durationMs:Number.isFinite(durationMs)?durationMs:null});
-        } catch { rejected++; }
-      }
+async function kalshiShadowHeaders(env, method, path) {
+  if (!env?.KALSHI_KEY_ID || !env?.KALSHI_PRIVATE_KEY) throw new Error("KALSHI_CREDENTIALS_NOT_INSTALLED");
+  const body=String(env.KALSHI_PRIVATE_KEY).replace(/-----BEGIN [^-]+-----/g,"").replace(/-----END [^-]+-----/g,"").replace(/\s+/g,"");
+  const raw=atob(body); const bytes=new Uint8Array(raw.length);
+  for(let i=0;i<raw.length;i++) bytes[i]=raw.charCodeAt(i);
+  const key=await crypto.subtle.importKey("pkcs8",bytes.buffer,{name:"RSA-PSS",hash:"SHA-256"},false,["sign"]);
+  const ts=String(Date.now()), signPath=path.split("?")[0];
+  const sig=await crypto.subtle.sign({name:"RSA-PSS",saltLength:32},key,new TextEncoder().encode(ts+method.toUpperCase()+signPath));
+  let binary=""; for(const x of new Uint8Array(sig)) binary+=String.fromCharCode(x);
+  return {accept:"application/json","KALSHI-ACCESS-KEY":String(env.KALSHI_KEY_ID).trim(),"KALSHI-ACCESS-TIMESTAMP":ts,"KALSHI-ACCESS-SIGNATURE":btoa(binary)};
+}
+async function kalshiShadowGet(env,path) {
+  const headers=await kalshiShadowHeaders(env,"GET",path);
+  return fetch("https://api.elections.kalshi.com"+path,{method:"GET",headers});
+}
+async function discoverKalshiShadowMarkets(env) {
+  const series=[{asset:"BTC",ticker:"KXBTC15M"},{asset:"ETH",ticker:"KXETH15M"}];
+  const candidates=[]; let seen=0,rejected=0;
+  for(const s of series) {
+    const path="/trade-api/v2/markets?series_ticker="+encodeURIComponent(s.ticker)+"&status=open&limit=6";
+    const r=await kalshiShadowGet(env,path);
+    if(!r.ok) throw new Error("KALSHI_MARKETS_READ_FAILED_"+r.status);
+    const data=await r.json(), markets=Array.isArray(data?.markets)?data.markets:[];
+    seen+=markets.length;
+    for(const m of markets) {
+      const yes=normalizeProbability(m?.yes_ask_dollars??m?.yes_ask);
+      const bid=normalizeProbability(m?.yes_bid_dollars??m?.yes_bid);
+      if(!m?.ticker || m?.status!=="active" || yes===null || bid===null || yes<=0.01 || yes>=0.99){rejected++;continue;}
+      const open=Date.parse(m?.open_time||""), close=Date.parse(m?.close_time||"");
+      const durationMs=Number.isFinite(open)&&Number.isFinite(close)?close-open:15*60*1000;
+      candidates.push({id:m.ticker,slug:m.ticker,question:m.title||s.ticker,asset:s.asset,bear:false,yes,bid,source:"KALSHI",horizon:"15M",durationMs});
     }
-    pages++;
-    if (events.length < 100) { reachedEnd=true; break; }
-    offset += events.length;
   }
-
-  const rank={"15M":0,"HOURLY":1,"DAILY":2};
-  candidates.sort((a,b)=>(rank[a.horizon]??9)-(rank[b.horizon]??9));
   const coverage={
-    BTC:{eligible:candidates.filter(m=>m.asset==="BTC").length,up:candidates.filter(m=>m.asset==="BTC"&&!m.bear).length,down:candidates.filter(m=>m.asset==="BTC"&&m.bear).length},
-    ETH:{eligible:candidates.filter(m=>m.asset==="ETH").length,up:candidates.filter(m=>m.asset==="ETH"&&!m.bear).length,down:candidates.filter(m=>m.asset==="ETH"&&m.bear).length}
+    BTC:{eligible:candidates.filter(x=>x.asset==="BTC").length,up:candidates.filter(x=>x.asset==="BTC").length,down:0},
+    ETH:{eligible:candidates.filter(x=>x.asset==="ETH").length,up:candidates.filter(x=>x.asset==="ETH").length,down:0}
   };
-  return {markets:candidates,seen,rejected,coverage,pages,reachedEnd};
+  return {markets:candidates,seen,rejected,coverage,pages:1,reachedEnd:true,source:"KALSHI_AUTHENTICATED_READ_ONLY"};
 }
 
 async function runShadow(env) {
@@ -596,8 +570,8 @@ async function runShadow(env) {
     btc = await coinbaseSpot("BTC-USD");
     stage = "ETH_SPOT";
     eth = await coinbaseSpot("ETH-USD");
-    stage = "POLYMARKET_DISCOVERY";
-    discovery = await discoverUsShadowMarkets();
+    stage = "KALSHI_DISCOVERY";
+    discovery = await discoverKalshiShadowMarkets(env);
     stage = "SCORING";
 
     const previous = state.prices || {};
@@ -667,7 +641,8 @@ async function runShadow(env) {
     state.lastRunAt = new Date(now).toISOString();
     state.startedAt = state.startedAt || state.lastRunAt;
     state.runs = Number(state.runs || 0) + 1;
-    state.status = "LIVE_US_SHADOW";
+    state.status = "LIVE_KALSHI_SHADOW";
+    state.venue = "KALSHI";
     state.errorCode = null;
     state.errorStage = null;
     state.liveOrderSubmission = "DISABLED";
@@ -974,7 +949,8 @@ function publicRealTradeView(state, env) {
 function publicShadowView(state) {
   return {
     ok: state?.status !== "ERROR",
-    mode: "REAL_US_SHADOW",
+    mode: "REAL_KALSHI_SHADOW",
+    venue: state?.venue || "KALSHI",
     status: state?.status || "UNKNOWN",
     startedAt: state?.startedAt || null,
     lastRunAt: state?.lastRunAt || null,
