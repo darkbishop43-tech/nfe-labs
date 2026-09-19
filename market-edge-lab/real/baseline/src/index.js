@@ -351,6 +351,82 @@ async function marketSnapshot() {
 }
 
 
+const ROBINHOOD_BTC_15M_URL = "https://robinhood.com/us/en/prediction-markets/crypto/";
+
+function cleanPublicHtml(value) {
+  return String(value || "")
+    .replace(/&amp;/g, "&").replace(/&#x27;/g, "'").replace(/&quot;/g, '"')
+    .replace(/<[^>]*>/g, " ").replace(/\\s+/g, " ").trim();
+}
+
+function robinhoodBtc15mLinks(html) {
+  const links = [];
+  const re = /href=["']([^"']*\\/prediction-markets\\/crypto\\/events\\/[^"']+)["'][^>]*>([\\s\\S]*?)<\\/a>/gi;
+  let match;
+  while ((match = re.exec(html))) {
+    const href = match[1].startsWith("http") ? match[1] : "https://robinhood.com" + match[1];
+    const text = cleanPublicHtml(match[2]);
+    const hay = (href + " " + text).toLowerCase();
+    if (!/(btc|bitcoin)/.test(hay) || !/15[ -]?min/.test(hay)) continue;
+    links.push({ href, text });
+  }
+  return [...new Map(links.map((row) => [row.href, row])).values()];
+}
+
+async function robinhoodBtc15mProof() {
+  const base = {
+    ok: false,
+    mode: "OBSERVE_ONLY",
+    targetInstrument: "BTC_15_MINUTE_EVENT_CONTRACTS",
+    signalStrategyChanged: false,
+    crossVenueExecution: "BLOCKED",
+    orderSubmission: "DISABLED_FOR_ROBINHOOD_SIGNALS",
+    moneyMovement: "DISABLED_FOR_ROBINHOOD_SIGNALS",
+    source: "ROBINHOOD_PUBLIC_WEB",
+    observedAt: new Date().toISOString(),
+  };
+  try {
+    const index = await fetch(ROBINHOOD_BTC_15M_URL, {
+      headers: { accept: "text/html", "user-agent": "NFE-Market-Edge-Baseline-Real/0.4" },
+      cf: { cacheTtl: 0 },
+    });
+    if (!index.ok) return { ...base, state: "PUBLIC_INDEX_UNAVAILABLE", httpStatus: index.status };
+    const links = robinhoodBtc15mLinks(await index.text());
+    const events = [];
+    for (const link of links.slice(0, 12)) {
+      try {
+        const response = await fetch(link.href, {
+          headers: { accept: "text/html", "user-agent": "NFE-Market-Edge-Baseline-Real/0.4" },
+          cf: { cacheTtl: 0 },
+        });
+        if (!response.ok) continue;
+        const text = cleanPublicHtml(await response.text());
+        const targetRaw = text.match(/\\$([0-9][0-9,]*(?:\\.[0-9]+)?)\\s+or above/i)?.[1] || null;
+        const bidRaw = text.match(/Bid\\s+([0-9]+(?:\\.[0-9]+)?)¢/i)?.[1] || null;
+        const askRaw = text.match(/Ask\\s+([0-9]+(?:\\.[0-9]+)?)¢/i)?.[1] || null;
+        const title = text.match(/BTC 15 min[^$]{0,100}/i)?.[0]?.trim() || link.text || null;
+        const live = /\\bLIVE\\b/i.test(text) && !/closed and no longer tradable/i.test(text);
+        events.push({
+          asset: "BTC", instrumentWindow: "15_MINUTES", title,
+          target: targetRaw ? Number(targetRaw.replace(/,/g, "")) : null,
+          bidCents: bidRaw ? Number(bidRaw) : null,
+          askCents: askRaw ? Number(askRaw) : null,
+          live, url: link.href,
+          execution: "OBSERVE_ONLY",
+        });
+      } catch {}
+    }
+    const liveEvents = events.filter((row) => row.live);
+    return {
+      ...base, ok: true, state: liveEvents.length ? "LIVE_BTC_15M_OBSERVED" : "NO_LIVE_BTC_15M_OBSERVED",
+      discoveredLinks: links.length, liveCoverage: { BTC: liveEvents.length }, events: liveEvents,
+    };
+  } catch {
+    return { ...base, state: "PUBLIC_OBSERVATION_FAILED" };
+  }
+}
+
+
 const SHADOW_CONFIG = {
   entryScore: 0.80,
   exitScore: 0.20,
@@ -1336,7 +1412,7 @@ export default {
       return json(proof, status);
     }
 
-    if (url.pathname === "/markets") return json(await marketSnapshot());
+    if (url.pathname === "/markets") return json(await marketSnapshot());\n\n    if (url.pathname === "/btc-15m-proof") return json(await robinhoodBtc15mProof());
 
     // Temporary read-only discovery diagnostic. It exposes only public market metadata,
     // never credentials/account values, and cannot submit an order.
