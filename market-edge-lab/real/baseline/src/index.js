@@ -1050,18 +1050,123 @@ async function maybeRunKalshiOneTrade(env) {
       await saveRealTradeState(env,state);
       return state;
     }
-    state.dryEntryRequest={...dryEntry,client_order_id:"REDACTED_UNIQUE_ID"};
-    state.status="V2_SCHEMA_CERTIFIED_WRITE_WITHHELD";
-    realTradeLedger(state,"KALSHI_WRITE_WITHHELD",{
-      reason:"ZERO_SUBMIT_ACCEPTANCE_PROOF_ONLY",
-      v2Side:dryEntry.side,timeInForce:dryEntry.time_in_force,reduceOnly:dryEntry.reduce_only
-    });
+    // Consume the one-shot Founder authorization BEFORE the provider write.
+    // From this point forward no second entry may be created from this authorization.
+    state.founderAuthorization.consumed=true;
+    state.founderAuthorization.consumedAt=Date.now();
+    await saveRealTradeState(env,state);
+
+    let er;
+    try {
+      er=await kalshiCreateOrderV2(env,{...state,founderAuthorization:{...state.founderAuthorization,consumed:false}},dryEntry);
+    } catch(e) {
+      state.status="BLOCKED_ENTRY_WRITE_ERROR";
+      state.entryWriteError=String(e?.message||e);
+      await saveRealTradeState(env,state);
+      return state;
+    }
+    const entryBody=await er.json().catch(()=>({}));
+    if(!er.ok) {
+      state.status="BLOCKED_ENTRY_PROVIDER_REJECTED";
+      state.entryProviderStatus=er.status;
+      state.entryProviderResponse=entryBody;
+      await saveRealTradeState(env,state);
+      return state;
+    }
+    const es=summarizeKalshiV2CreateResponse(entryBody);
+    state.entryOrderId=es.orderId;
+    state.filledCount=es.fillCount;
+    state.entryRemainingCount=es.remainingCount;
+    state.entryAverageFillPrice=es.averageFillPrice;
+    state.entryAverageFeePaid=es.averageFeePaid;
+    state.entryFilledAt=Date.now();
+    if(!state.entryOrderId) {
+      state.status="BLOCKED_ENTRY_RESPONSE_MISSING_ORDER_ID";
+      await saveRealTradeState(env,state);
+      return state;
+    }
+    if(!(state.filledCount>0)) {
+      state.status="ONE_TRADE_ENTRY_NO_FILL_COMPLETE";
+      state.consumed=true;
+      realTradeLedger(state,"KALSHI_ENTRY_NO_FILL",{orderId:state.entryOrderId});
+      await saveRealTradeState(env,state);
+      return state;
+    }
+    state.status="POSITION_OPEN";
+    realTradeLedger(state,"KALSHI_ENTRY_FILLED",{orderId:state.entryOrderId,filledCount:state.filledCount,averageFillPrice:state.entryAverageFillPrice});
     await saveRealTradeState(env,state);
     return state;
   }
 
-  // Existing order/position path fails closed until provider fill reconciliation is certified.
-  state.status="BLOCKED_POSITION_RECONCILIATION";
+  // Manage only the exact quantity actually filled on entry.
+  if(!(Number(state.filledCount)>0)) {
+    state.status="BLOCKED_POSITION_WITHOUT_FILL";
+    await saveRealTradeState(env,state);
+    return state;
+  }
+  const shadowNow=await loadShadowState(env);
+  const current=(shadowNow?.opportunities||[]).find(o=>o?.marketTicker===state.marketTicker&&o?.outcomeSide===state.outcomeSide);
+  const age=now-Number(state.entryFilledAt||state.entrySubmitStartedAt||now);
+  const exitByScore=current && Number(current.score)<=REAL_TEST_CONFIG.exitScore;
+  const exitByTime=age>=REAL_TEST_CONFIG.maxHoldMs;
+  if(!exitByScore&&!exitByTime) {
+    state.status="POSITION_OPEN_WAITING_FOR_EXIT";
+    await saveRealTradeState(env,state);
+    return state;
+  }
+  if(!current || !(Number(current.bid)>0.01) || !(Number(current.bid)<0.99)) {
+    state.status="EXIT_REQUIRED_WAITING_FOR_LIVE_BID";
+    await saveRealTradeState(env,state);
+    return state;
+  }
+  if(state.exitSubmitStartedAt) {
+    state.status="BLOCKED_EXIT_RECONCILIATION";
+    await saveRealTradeState(env,state);
+    return state;
+  }
+  state.exitClientOrderId=kalshiClientOrderId(state,"exit");
+  state.exitSubmitStartedAt=Date.now();
+  state.exitReason=exitByScore?"SCORE_EXIT":"MAX_HOLD_EXIT";
+  await saveRealTradeState(env,state);
+  const exitPayload=kalshiV2ExitPayload(state,current.bid,state.exitClientOrderId);
+  if(!exitPayload) {
+    state.status="BLOCKED_EXIT_REQUEST_BUILD";
+    await saveRealTradeState(env,state);
+    return state;
+  }
+  // Exit is allowed only for the already-open governed position; no new exposure can be created.
+  // Reuse a synthetic active authorization solely for reduce_only exit of the exact filled quantity.
+  const exitGateState={...state,founderAuthorization:{authorized:true,consumed:false,expiresAt:Date.now()+60000}};
+  let xr;
+  try { xr=await kalshiCreateOrderV2(env,exitGateState,exitPayload); }
+  catch(e) {
+    state.status="EXIT_WRITE_ERROR_RETRY_BLOCKED";
+    state.exitWriteError=String(e?.message||e);
+    await saveRealTradeState(env,state);
+    return state;
+  }
+  const exitBody=await xr.json().catch(()=>({}));
+  if(!xr.ok) {
+    state.status="EXIT_PROVIDER_REJECTED_RETRY_BLOCKED";
+    state.exitProviderStatus=xr.status;
+    state.exitProviderResponse=exitBody;
+    await saveRealTradeState(env,state);
+    return state;
+  }
+  const xs=summarizeKalshiV2CreateResponse(exitBody);
+  state.exitOrderId=xs.orderId;
+  state.exitFilledCount=xs.fillCount;
+  state.exitRemainingCount=xs.remainingCount;
+  state.exitAverageFillPrice=xs.averageFillPrice;
+  state.exitAverageFeePaid=xs.averageFeePaid;
+  if(Number(state.exitFilledCount)>=Number(state.filledCount)) {
+    state.status="ONE_TRADE_COMPLETE";
+    state.consumed=true;
+    state.completedAt=Date.now();
+    realTradeLedger(state,"KALSHI_EXIT_FILLED",{orderId:state.exitOrderId,reason:state.exitReason,filledCount:state.exitFilledCount});
+  } else {
+    state.status="EXIT_PARTIAL_FILL_RECONCILIATION_REQUIRED";
+  }
   await saveRealTradeState(env,state);
   return state;
 }
@@ -1401,7 +1506,7 @@ function dashboardHtml() {
   </div>
 
   <div class="card section">
-    <b>Real Orders · One-Trade Acceptance Test</b>
+    <b>Real Orders · One-Trade Acceptance Test <button onclick="authorizeOneBaselineTrade()" style="float:right;padding:7px 12px;border-radius:8px;cursor:pointer">Authorize ONE ≤$5 Trade</button></b>
     <div class="compactGrid">
       <div class="miniBox"><div class="label">Orders waiting</div><div id="realController" class="miniVal">CHECKING…</div><div id="realTradeStatus" class="miniSub">CHECKING…</div></div>
       <div class="miniBox"><div class="label">Current position</div><div id="realTradeMarket" class="miniVal">WAITING</div><div class="miniSub">No manual order required</div></div>
@@ -1572,7 +1677,15 @@ async function refreshPrices(){
 }
 E('refresh').addEventListener('click',load);load();setInterval(refreshPrices,10000);
 </script>
-</body></html>`;
+<script>
+async function authorizeOneBaselineTrade(){
+  if(!confirm("Authorize exactly ONE governed Baseline trade, maximum $5, only at score >= .80?")) return;
+  const r=await fetch("/kalshi-authorize-one-trade",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({authorization:"AUTHORIZE_ONE_TRADE_MAX_5_USD"})});
+  const j=await r.json();
+  alert(j.ok ? "AUTHORIZED: system will wait for a legitimate >= .80 signal. Authorization expires in 15 minutes if unused." : "NOT AUTHORIZED: "+(j.state||r.status));
+  location.reload();
+}
+</script></body></html>`;
 }
 export default {
   async scheduled(event, env, ctx) {
