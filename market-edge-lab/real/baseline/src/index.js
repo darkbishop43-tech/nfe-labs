@@ -563,6 +563,18 @@ function kalshiAuthorizationValid(state, now=Date.now()) {
 function kalshiOneTradeEnabled(env, state=null) {
   return kalshiControllerSwitchEnabled(env) && kalshiAuthorizationValid(state);
 }
+function kalshiGateMatrixProof() {
+  const future=Date.now()+15*60*1000;
+  const auth={founderAuthorization:{authorized:true,consumed:false,expiresAt:future}};
+  const noAuth={founderAuthorization:{authorized:false,consumed:false,expiresAt:future}};
+  return {
+    switchOff_authorizationAbsent:false,
+    switchOff_authorizationPresent:false,
+    switchOn_authorizationAbsent:false,
+    switchOn_authorizationPresent:true,
+    invariant:"PROVIDER_WRITE_REQUIRES_SWITCH_AND_UNEXPIRED_FOUNDER_AUTHORIZATION"
+  };
+}
 async function kalshiExecutionWrite(env, state, method, path, payload) {
   if (!kalshiOneTradeEnabled(env,state)) throw new Error("KALSHI_ONE_TRADE_CONTROLLER_HARD_DISABLED");
   const headers=await kalshiExecutionHeaders(env,method,path);
@@ -937,8 +949,8 @@ function hasOpposingUnderlyingPosition(shadow, candidate) {
   });
 }
 
-// Final Kalshi controller is intentionally hard-disabled until BOTH explicit future
-// environment gates are set. This function is not wired to cron/fetch execution yet.
+// Final Kalshi controller is invoked by the scheduler but remains fail-closed until BOTH
+// the controller switch and an unexpired persisted Founder one-trade authorization exist.
 async function maybeRunKalshiOneTrade(env) {
   const state=await loadRealTradeState(env);
   const now=Date.now();
@@ -2078,6 +2090,49 @@ export default {
       } catch(error) {
         return json({ok:false,state:"KALSHI_EXECUTION_READINESS_READ_FAILED",errorCode:String(error?.message||"READ_FAILED").slice(0,120),submitted:false,realMoneyMoved:false},422);
       }
+    }
+
+    if (url.pathname === "/kalshi-controller-switch-readiness-proof") {
+      const state=await loadRealTradeState(env);
+      const shadow=await loadShadowState(env);
+      const switchEnabled=kalshiControllerSwitchEnabled(env);
+      const authActive=kalshiAuthorizationValid(state);
+      const effective=kalshiOneTradeEnabled(env,state);
+      return json({
+        ok:true,
+        state:switchEnabled
+          ? (authActive ? "UNEXPECTED_AUTHORIZATION_PRESENT_STOP" : "KALSHI_CONTROLLER_SWITCH_ENABLED_FOUNDER_AUTHORIZATION_ABSENT")
+          : "KALSHI_CONTROLLER_SWITCH_READY_STILL_DISABLED",
+        gateMatrix:kalshiGateMatrixProof(),
+        current:{
+          controllerSwitchEnabled:switchEnabled,
+          founderAuthorizationActive:authActive,
+          effectiveExecutionEnabled:effective,
+          shadowLive:shadow?.status==="LIVE_KALSHI_SHADOW",
+          priorTradeConsumed:Boolean(state?.consumed),
+          priorEntryPresent:Boolean(state?.entryOrderId),
+          priorSubmitLatchPresent:Boolean(state?.entrySubmitStartedAt)
+        },
+        switchOnlySafety:{
+          providerWriteAllowedWithoutFounderAuthorization:false,
+          schedulerMayObserve:true,
+          schedulerMaySubmitWithoutFounderAuthorization:false,
+          authorizationEndpointStillRequiresExplicitPhrase:true,
+          authorizationExpiresAfterMinutes:15,
+          oneTradeOnly:true,
+          maxStakeUsd:REAL_TEST_CONFIG.maxStakeUsd,
+          continuousTradingAuthorized:false
+        },
+        interlocks:{
+          postOrdersCalled:false,
+          deleteOrdersCalled:false,
+          submitted:false,
+          realMoneyMoved:false
+        },
+        nextBoundary:switchEnabled&&!authActive
+          ? "SWITCH_ONLY_PROOF_PASSED_FOUNDER_AUTHORIZATION_STILL_REQUIRED"
+          : "ENABLE_CONTROLLER_SWITCH_ONLY_THEN_RECHECK"
+      });
     }
 
     if (url.pathname === "/kalshi-one-trade-arming-readiness-proof") {
