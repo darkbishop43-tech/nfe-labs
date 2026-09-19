@@ -1412,7 +1412,9 @@ export default {
       return json(proof, status);
     }
 
-    if (url.pathname === "/markets") return json(await marketSnapshot());\n\n    if (url.pathname === "/btc-15m-proof") return json(await robinhoodBtc15mProof());
+    if (url.pathname === "/markets") return json(await marketSnapshot());
+
+    if (url.pathname === "/btc-15m-proof") return json(await robinhoodBtc15mProof());
 
     // Temporary read-only discovery diagnostic. It exposes only public market metadata,
     // never credentials/account values, and cannot submit an order.
