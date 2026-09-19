@@ -535,6 +535,22 @@ async function kalshiShadowGet(env,path) {
   const headers=await kalshiShadowHeaders(env,"GET",path);
   return fetch("https://api.elections.kalshi.com"+path,{method:"GET",headers});
 }
+
+async function kalshiExecutionHeaders(env, method, path) {
+  if (!env?.KALSHI_EXECUTION_KEY_ID || !env?.KALSHI_EXECUTION_PRIVATE_KEY) throw new Error("KALSHI_EXECUTION_CREDENTIALS_NOT_INSTALLED");
+  const body=String(env.KALSHI_EXECUTION_PRIVATE_KEY).replace(/-----BEGIN [^-]+-----/g,"").replace(/-----END [^-]+-----/g,"").replace(/\s+/g,"");
+  const raw=atob(body); const bytes=new Uint8Array(raw.length);
+  for(let i=0;i<raw.length;i++) bytes[i]=raw.charCodeAt(i);
+  const key=await crypto.subtle.importKey("pkcs8",bytes.buffer,{name:"RSA-PSS",hash:"SHA-256"},false,["sign"]);
+  const ts=String(Date.now()), signPath=path.split("?")[0];
+  const sig=await crypto.subtle.sign({name:"RSA-PSS",saltLength:32},key,new TextEncoder().encode(ts+method.toUpperCase()+signPath));
+  let binary=""; for(const x of new Uint8Array(sig)) binary+=String.fromCharCode(x);
+  return {accept:"application/json","KALSHI-ACCESS-KEY":String(env.KALSHI_EXECUTION_KEY_ID).trim(),"KALSHI-ACCESS-TIMESTAMP":ts,"KALSHI-ACCESS-SIGNATURE":btoa(binary)};
+}
+async function kalshiExecutionGet(env,path) {
+  const headers=await kalshiExecutionHeaders(env,"GET",path);
+  return fetch("https://api.elections.kalshi.com"+path,{method:"GET",headers});
+}
 async function discoverKalshiShadowMarkets(env) {
   const series=[{asset:"BTC",ticker:"KXBTC15M"},{asset:"ETH",ticker:"KXETH15M"}];
   const candidates=[]; let seen=0,rejected=0;
@@ -1616,6 +1632,43 @@ export default {
         credentialsUsed:true,credentialValuesExposed:false,accountWriteAccessUsed:false,
         submitted:false,liveOrderSubmission:"DISABLED_FOR_THIS_ROUTE",realMoneyMoved:false,results:out
       });
+    }
+
+    if (url.pathname === "/kalshi-execution-credential-proof") {
+      try {
+        // Deliberately harmless authenticated GET. This route contains no POST/DELETE fetch.
+        const path="/trade-api/v2/portfolio/balance";
+        const response=await kalshiExecutionGet(env,path);
+        let body=null;
+        try { body=await response.json(); } catch {}
+        return json({
+          ok:response.ok,
+          state:response.ok?"KALSHI_EXECUTION_CREDENTIAL_AUTHENTICATED_NO_ORDER":"KALSHI_EXECUTION_CREDENTIAL_AUTH_FAILED",
+          venue:"KALSHI",
+          proof:{
+            method:"GET",
+            path,
+            httpStatus:response.status,
+            authenticated:response.ok,
+            responseShape:body&&typeof body==="object"?Object.keys(body).sort():[],
+            credentialValuesExposed:false
+          },
+          safety:{
+            credentialRole:"SEPARATE_EXECUTION_CREDENTIAL",
+            legacyExecutionControllerArmed:false,
+            postOrdersCalled:false,
+            deleteOrdersCalled:false,
+            submitted:false,
+            realMoneyMoved:false
+          }
+        },response.ok?200:502);
+      } catch(error) {
+        return json({
+          ok:false,state:"KALSHI_EXECUTION_CREDENTIAL_PROOF_FAILED",
+          errorCode:String(error?.message||"EXECUTION_CREDENTIAL_PROOF_FAILED"),
+          safety:{legacyExecutionControllerArmed:false,postOrdersCalled:false,deleteOrdersCalled:false,submitted:false,realMoneyMoved:false}
+        },500);
+      }
     }
 
     if (url.pathname === "/kalshi-execution-readiness-proof") {
