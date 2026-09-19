@@ -1444,6 +1444,34 @@ export default {
       return json({ok:true,source:"POLYMARKET_US_TARGETED_SEARCH",queryCounts,eligibleShortHorizon:matches.length,btc:matches.filter(x=>x.asset==="BTC").length,eth:matches.filter(x=>x.asset==="ETH").length,matches:matches.slice(0,100),submitted:false,liveOrderSubmission:"DISABLED",realMoneyMoved:false});
     }
 
+    // Read-only raw inspection of the fuzzy results returned specifically by the
+    // "15 minute" searches. No horizon inference here: expose timing/title/market
+    // metadata so we can determine whether the provider actually has such contracts.
+    if (url.pathname === "/us-15m-search-inspect") {
+      const client = new PolymarketUS();
+      const queries = ["bitcoin 15 minute","ethereum 15 minute"];
+      const out = [];
+      for (const query of queries) {
+        try {
+          const result = await client.search.query({ query, status: "active", limit: 50 });
+          const events = Array.isArray(result?.events) ? result.events : [];
+          out.push({query,count:events.length,events:events.map(event=>({
+            id:event?.id||null,title:event?.title||null,slug:event?.slug||null,
+            startTime:event?.startTime||null,endTime:event?.endTime||null,
+            active:event?.active??null,closed:event?.closed??null,
+            markets:(Array.isArray(event?.markets)?event.markets:[]).map(m=>({
+              id:m?.id||null,title:m?.title||null,question:m?.question||null,
+              slug:m?.slug||null,outcome:m?.outcome||null,
+              active:m?.active??null,closed:m?.closed??null
+            }))
+          }))});
+        } catch (error) {
+          out.push({query,error:String(error?.message||"SEARCH_FAILED").slice(0,100)});
+        }
+      }
+      return json({ok:true,source:"POLYMARKET_US_15M_RAW_INSPECTION",queries:out,submitted:false,liveOrderSubmission:"DISABLED",realMoneyMoved:false});
+    }
+
     // Read-only search proof: events.list currently exposes no crypto-labelled
     // catalogue rows, so inspect the official US search surface independently.
     if (url.pathname === "/us-crypto-search-proof") {
