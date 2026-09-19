@@ -1406,6 +1406,32 @@ export default {
 
     // Read-only catalogue shape probe for Polymarket US crypto. This intentionally
     // inspects event/market metadata without previewing or submitting any order.
+    // Read-only search proof: events.list currently exposes no crypto-labelled
+    // catalogue rows, so inspect the official US search surface independently.
+    if (url.pathname === "/us-crypto-search-proof") {
+      const client = new PolymarketUS();
+      const queries = ["crypto","coin","bitcoin","BTC","ethereum","ETH"];
+      const out = [];
+      for (const query of queries) {
+        try {
+          const result = await client.search.query({ query, status: "active", limit: 50 });
+          const events = Array.isArray(result?.events) ? result.events : [];
+          out.push({query,count:events.length,events:events.slice(0,20).map(event=>({
+            id:event?.id||null,title:event?.title||null,slug:event?.slug||null,
+            active:event?.active??null,closed:event?.closed??null,
+            startTime:event?.startTime||null,endTime:event?.endTime||null,
+            markets:(Array.isArray(event?.markets)?event.markets:[]).slice(0,20).map(m=>({
+              id:m?.id||null,title:m?.title||null,slug:m?.slug||null,outcome:m?.outcome||null,
+              active:m?.active??null,closed:m?.closed??null
+            }))
+          }))});
+        } catch (error) {
+          out.push({query,error:String(error?.message||"SEARCH_FAILED").slice(0,100)});
+        }
+      }
+      return json({ok:true,source:"POLYMARKET_US_SEARCH",queries:out,submitted:false,liveOrderSubmission:"DISABLED",realMoneyMoved:false});
+    }
+
     if (url.pathname === "/us-crypto-catalogue-proof") {
       const client = new PolymarketUS();
       const rows = [];
