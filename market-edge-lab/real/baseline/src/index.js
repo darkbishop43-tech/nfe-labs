@@ -1406,6 +1406,44 @@ export default {
 
     // Read-only catalogue shape probe for Polymarket US crypto. This intentionally
     // inspects event/market metadata without previewing or submitting any order.
+    // Read-only targeted US search summary. Keeps the browser output compact and
+    // separates short-horizon candidates from noisy fuzzy-search matches.
+    if (url.pathname === "/us-btc-eth-horizon-proof") {
+      const client = new PolymarketUS();
+      const queries = ["bitcoin today","bitcoin daily","bitcoin hourly","bitcoin 15 minute","BTC today","ethereum today","ethereum daily","ethereum hourly","ethereum 15 minute","ETH today"];
+      const dedup = new Map();
+      const queryCounts = [];
+      for (const query of queries) {
+        try {
+          const result = await client.search.query({ query, status: "active", limit: 50 });
+          const events = Array.isArray(result?.events) ? result.events : [];
+          queryCounts.push({query,count:events.length});
+          for (const event of events) {
+            const markets = Array.isArray(event?.markets)&&event.markets.length?event.markets:[null];
+            for (const market of markets) {
+              const text=[event?.title,event?.question,event?.slug,event?.description,market?.title,market?.question,market?.slug,market?.outcome].filter(Boolean).join(" — ");
+              const asset=/bitcoin|\bbtc\b/i.test(text)?"BTC":/ethereum|\beth\b|\bether\b/i.test(text)?"ETH":null;
+              if(!asset) continue;
+              const startMs=Date.parse(event?.startTime||""), endMs=Date.parse(event?.endTime||"");
+              const durationMs=Number.isFinite(startMs)&&Number.isFinite(endMs)?endMs-startMs:NaN;
+              const explicit15=/15\s*(?:min|minute)|15m\b|quarter[- ]?hour/i.test(text);
+              const explicitHour=/\b(?:hourly|this hour|1\s*hour)\b/i.test(text);
+              const explicitDay=/\b(?:daily|today|tonight|this day|24\s*hour)\b/i.test(text);
+              const timed15=Number.isFinite(durationMs)&&durationMs>=10*60e3&&durationMs<=20*60e3;
+              const timedHour=Number.isFinite(durationMs)&&durationMs>20*60e3&&durationMs<=90*60e3;
+              const timedDay=Number.isFinite(durationMs)&&durationMs>90*60e3&&durationMs<=30*60*60e3;
+              const horizon=(explicit15||timed15)?"15M":(explicitHour||timedHour)?"HOURLY":(explicitDay||timedDay)?"DAILY":null;
+              if(!horizon) continue;
+              const key=String(market?.id||market?.slug||event?.id||event?.slug||text);
+              dedup.set(key,{asset,horizon,eventId:event?.id||null,eventTitle:event?.title||null,eventSlug:event?.slug||null,startTime:event?.startTime||null,endTime:event?.endTime||null,marketId:market?.id||null,marketTitle:market?.title||null,marketSlug:market?.slug||null,active:market?.active??event?.active??null,closed:market?.closed??event?.closed??null});
+            }
+          }
+        } catch (error) { queryCounts.push({query,error:String(error?.message||"SEARCH_FAILED").slice(0,80)}); }
+      }
+      const matches=[...dedup.values()];
+      return json({ok:true,source:"POLYMARKET_US_TARGETED_SEARCH",queryCounts,eligibleShortHorizon:matches.length,btc:matches.filter(x=>x.asset==="BTC").length,eth:matches.filter(x=>x.asset==="ETH").length,matches:matches.slice(0,100),submitted:false,liveOrderSubmission:"DISABLED",realMoneyMoved:false});
+    }
+
     // Read-only search proof: events.list currently exposes no crypto-labelled
     // catalogue rows, so inspect the official US search surface independently.
     if (url.pathname === "/us-crypto-search-proof") {
