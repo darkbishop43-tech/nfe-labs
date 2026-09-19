@@ -644,12 +644,13 @@ async function runShadow(env) {
   const now = Date.now();
 
   let stage = "BTC_SPOT";
+  let btc, eth, discovery;
   try {
-    const btc = await coinbaseSpot("BTC-USD");
+    btc = await coinbaseSpot("BTC-USD");
     stage = "ETH_SPOT";
-    const eth = await coinbaseSpot("ETH-USD");
+    eth = await coinbaseSpot("ETH-USD");
     stage = "POLYMARKET_DISCOVERY";
-    const discovery = await discoverUsShadowMarkets();
+    discovery = await discoverUsShadowMarkets();
     stage = "SCORING";
 
     const previous = state.prices || {};
@@ -1497,6 +1498,24 @@ export default {
         liveOrderSubmission: "DISABLED",
         realMoneyMoved: false
       });
+    }
+
+    // Same safe diagnostic evidence, rendered as plain HTML so the Founder can
+    // inspect it in a browser without exposing secrets or enabling execution.
+    if (url.pathname === "/shadow-diagnostic-view") {
+      const state = await loadShadowState(env);
+      const safe = {
+        status: state?.status || "UNKNOWN",
+        lastRunAt: state?.lastRunAt || null,
+        errorStage: state?.errorStage || null,
+        errorCode: state?.errorCode || null,
+        eligibleCount: Number(state?.eligibleCount || 0),
+        seenCount: Number(state?.seenCount || 0),
+        rejectedCount: Number(state?.rejectedCount || 0),
+        liveOrderSubmission: "DISABLED",
+        realMoneyMoved: false
+      };
+      return new Response("<!doctype html><meta name=viewport content='width=device-width'><title>Baseline Real Shadow Diagnostic</title><body style='font-family:system-ui;background:#07111d;color:#eef;padding:24px'><h2>Baseline Real · Shadow Diagnostic</h2><pre style='white-space:pre-wrap;font-size:16px'>"+JSON.stringify(safe,null,2).replace(/&/g,"&amp;").replace(/</g,"&lt;")+"</pre></body>", {headers:{"content-type":"text/html;charset=utf-8","cache-control":"no-store"}});
     }
 
     if (url.pathname === "/real-trade-state") {
