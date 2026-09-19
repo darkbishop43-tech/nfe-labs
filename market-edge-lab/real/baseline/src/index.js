@@ -1482,6 +1482,25 @@ export default {
       return json(publicShadowView(refreshed));
     }
 
+    // Browser-safe one-shot diagnostic: run a fresh Shadow observation and return
+    // only bounded diagnostic fields. No order controller is invoked.
+    if (url.pathname === "/shadow-refresh-diagnostic-view") {
+      const refreshed = await runShadow(env);
+      const safe = {
+        status: refreshed?.status || "UNKNOWN",
+        lastRunAt: refreshed?.lastRunAt || null,
+        errorStage: refreshed?.errorStage || null,
+        errorCode: refreshed?.errorCode || null,
+        eligibleCount: Number(refreshed?.eligibleCount || 0),
+        seenCount: Number(refreshed?.seenCount || 0),
+        rejectedCount: Number(refreshed?.rejectedCount || 0),
+        coverage: refreshed?.assetCoverage || null,
+        liveOrderSubmission: "DISABLED",
+        realMoneyMoved: false
+      };
+      return new Response("<!doctype html><meta name=viewport content='width=device-width'><title>Baseline Real Fresh Shadow Diagnostic</title><body style='font-family:system-ui;background:#07111d;color:#eef;padding:24px'><h2>Baseline Real · Fresh Shadow Diagnostic</h2><pre style='white-space:pre-wrap;font-size:16px'>"+JSON.stringify(safe,null,2).replace(/&/g,"&amp;").replace(/</g,"&lt;")+"</pre></body>", {headers:{"content-type":"text/html;charset=utf-8","cache-control":"no-store"}});
+    }
+
     // Public, read-only diagnostic view: exposes only bounded failure stage/code.
     // No credentials, provider payloads, order calls, or secret text are returned.
     if (url.pathname === "/shadow-diagnostic") {
