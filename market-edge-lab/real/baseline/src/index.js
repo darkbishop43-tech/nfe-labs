@@ -1206,7 +1206,7 @@ async function load(){
   const conn=E('conn'),connSub=E('connSub'),bal=E('bal'),balSub=E('balSub'),creds=E('creds'),gateAccount=E('gateAccount'),gateBalance=E('gateBalance'),gatePreview=E('gatePreview'),markets=E('markets'),statusDot=E('statusDot'),statusText=E('statusText'),refresh=E('refresh');
   refresh.disabled=true;refresh.textContent='CHECKING…';gatePreview.textContent='CHECKING LIVE PROOF…';gatePreview.className='m';
   try{
-    const [ar,sr,mr,pr,moneyr,shr,pxr,rtr]=await Promise.all([fetch('/account',{cache:'no-store'}),fetch('/status',{cache:'no-store'}),fetch('/markets',{cache:'no-store'}),fetch('/preview-proof',{cache:'no-store'}),fetch('/money-path-proof',{cache:'no-store'}),fetch('/shadow-run',{cache:'no-store'}),fetch('/price-proof',{cache:'no-store'}),fetch('/real-trade-state',{cache:'no-store'})]);
+    const [ar,sr,mr,pr,moneyr,shr,pxr,rtr]=await Promise.all([fetch('/account',{cache:'no-store'}),fetch('/status',{cache:'no-store'}),fetch('/markets',{cache:'no-store'}),fetch('/preview-proof',{cache:'no-store'}),fetch('/money-path-proof',{cache:'no-store'}),fetch('/shadow-state',{cache:'no-store'}),fetch('/price-proof',{cache:'no-store'}),fetch('/real-trade-state',{cache:'no-store'})]);
     const account=await ar.json(),status=await sr.json(),market=await mr.json(),preview=await pr.json(),money=await moneyr.json(),shadow=await shr.json(),prices=await pxr.json(),realTrade=await rtr.json();
     const shadowLive=shadow.status==='LIVE_US_SHADOW';
     const liveOrdersState=E('liveOrdersState'),liveOrdersSub=E('liveOrdersSub');
@@ -1464,6 +1464,13 @@ export default {
 
     if (url.pathname === "/shadow-state") {
       return json(publicShadowView(await loadShadowState(env)));
+    }
+
+    // Read-only diagnostic trigger. It refreshes Shadow evidence only and never
+    // invokes maybeRunOneTrade or any provider order endpoint.
+    if (url.pathname === "/shadow-refresh-proof") {
+      const refreshed = await runShadow(env);
+      return json(publicShadowView(refreshed));
     }
 
     if (url.pathname === "/real-trade-state") {
