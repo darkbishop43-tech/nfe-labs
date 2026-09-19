@@ -1542,8 +1542,10 @@ export default {
       const out = [];
       for (const s of series) {
         try {
-          const mr = await fetch(base + "/markets?series_ticker=" + encodeURIComponent(s.ticker) + "&status=open&limit=20", {
-            headers: {accept:"application/json"}
+          // Kalshi public API can rate-limit shared Cloudflare egress. Ask for only
+          // the few rows this proof needs and identify the read-only client.
+          const mr = await fetch(base + "/markets?series_ticker=" + encodeURIComponent(s.ticker) + "&status=open&limit=6", {
+            headers: {accept:"application/json","user-agent":"NFE-Market-Edge-Baseline-Real/kalshi-read-only-proof"}
           });
           if (!mr.ok) {
             out.push({asset:s.asset,seriesTicker:s.ticker,ok:false,stage:"MARKETS",httpStatus:mr.status});
@@ -1556,8 +1558,8 @@ export default {
             let book = null;
             let bookStatus = null;
             try {
-              const br = await fetch(base + "/markets/" + encodeURIComponent(m.ticker) + "/orderbook?depth=10", {
-                headers: {accept:"application/json"}
+              const br = await fetch(base + "/markets/" + encodeURIComponent(m.ticker) + "/orderbook?depth=3", {
+                headers: {accept:"application/json","user-agent":"NFE-Market-Edge-Baseline-Real/kalshi-read-only-proof"}
               });
               bookStatus = br.status;
               if (br.ok) book = await br.json();
