@@ -569,23 +569,36 @@ async function kalshiCancelOrderV2(env,orderId) {
   return kalshiExecutionWrite(env,"DELETE","/trade-api/v2/portfolio/events/orders/"+encodeURIComponent(orderId));
 }
 
+function kalshiGeneralTakerFeeUsd(price,count,multiplier=1) {
+  const p=Number(price), n=Number(count), m=Number(multiplier);
+  if(!Number.isFinite(p)||p<=0||p>=1||!Number.isFinite(n)||n<=0||!Number.isFinite(m)||m<0) return null;
+  const raw=m*0.07*n*p*(1-p);
+  // Conservative implementation: always round upward to the next cent.
+  return Math.ceil((raw-1e-12)*100)/100;
+}
 function estimateKalshiFeeSafeSize(price, maxStakeUsd) {
-  // Fail closed: no real order may be enabled until a market-specific fee source/formula
-  // is verified and incorporated. We model premium only and reserve execution.
-  const p=Number(price);
-  if(!Number.isFinite(p)||p<=0||p>=1) return {ok:false,reason:"INVALID_PRICE",count:0};
-  const count=Math.max(0,Math.floor(Number(maxStakeUsd)/p));
-  const premium=Number((count*p).toFixed(4));
-  return {
-    ok:false,
-    reason:"FEE_NOT_YET_VERIFIED_FOR_THIS_MARKET",
-    count,
-    premiumUsd:premium,
-    feeUsd:null,
-    totalDebitUsd:null,
-    maxStakeUsd:Number(maxStakeUsd),
-    executionAllowed:false
-  };
+  const p=Number(price), cap=Number(maxStakeUsd);
+  if(!Number.isFinite(p)||p<=0||p>=1||!Number.isFinite(cap)||cap<=0) return {ok:false,reason:"INVALID_PRICE_OR_CAP",count:0,executionAllowed:false};
+  for(let count=Math.floor(cap/p);count>=1;count--){
+    const premium=Number((count*p).toFixed(4));
+    const fee=kalshiGeneralTakerFeeUsd(p,count,1);
+    const total=Number((premium+fee).toFixed(4));
+    if(fee!==null && total<=cap) return {
+      ok:true,
+      reason:"GENERAL_TAKER_FEE_VERIFIED_AND_WITHIN_CAP",
+      scheduleEffective:"2026-07-07",
+      feeFormula:"ceil_to_cent(1 * 0.07 * C * P * (1-P))",
+      multiplier:1,
+      count,
+      premiumUsd:premium,
+      feeUsd:fee,
+      totalDebitUsd:total,
+      maxStakeUsd:cap,
+      executionAllowed:false,
+      note:"Sizing is fee-safe; execution remains separately hard-disabled."
+    };
+  }
+  return {ok:false,reason:"NO_CONTRACT_FITS_PREMIUM_PLUS_FEE_CAP",count:0,premiumUsd:0,feeUsd:0,totalDebitUsd:0,maxStakeUsd:cap,executionAllowed:false};
 }
 async function discoverKalshiShadowMarkets(env) {
   const series=[{asset:"BTC",ticker:"KXBTC15M"},{asset:"ETH",ticker:"KXETH15M"}];
@@ -1166,7 +1179,7 @@ function dashboardHtml() {
       <div class="miniBox"><div class="label">Entry order</div><div id="realEntryOrder" class="miniVal">NOT SUBMITTED</div></div>
       <div class="miniBox"><div class="label">Exit order</div><div id="realExitOrder" class="miniVal">NOT SUBMITTED</div></div>
       <div class="miniBox"><div class="label">Test complete</div><div id="realConsumed" class="miniVal">NO</div></div>
-      <div class="miniBox"><div class="label">Live ability</div><div class="miniVal good">DISABLED · NO REAL ORDERS</div><div class="miniSub">One trade · max $5</div></div>
+      <div class="miniBox"><div class="label">Live ability</div><div class="miniVal good">DISABLED · NO REAL ORDERS</div><div class="miniSub">One trade · premium + entry fee ≤ $5</div></div>
     </div>
     <div class="notice">WAITING is a valid Shadow state. Baseline observes Kalshi only; no real order endpoint is enabled in this build.</div>
   </div>
@@ -1757,7 +1770,9 @@ export default {
             controllerEnabled:kalshiOneTradeEnabled(env),
             controllerEnableVariablePresent:Boolean(env?.KALSHI_ONE_TRADE_CONTROLLER_ENABLED),
             founderAuthorizationVariablePresent:Boolean(env?.KALSHI_FOUNDER_ONE_TRADE_AUTHORIZATION),
-            feeVerified:false,
+            feeVerified:true,
+            feeScheduleEffective:"2026-07-07",
+            feeCapIncludesEntryFee:true,
             requiresExplicitFounderAuthorization:true,
             requiresFreshLocationVerificationAtTradeTime:true,
             requiresScoreAtLeast:SHADOW_CONFIG.entryScore,
