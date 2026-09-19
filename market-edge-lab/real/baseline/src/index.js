@@ -572,6 +572,21 @@ async function runShadow(env) {
     eth = await coinbaseSpot("ETH-USD");
     stage = "KALSHI_DISCOVERY";
     discovery = await discoverKalshiShadowMarkets(env);
+    const priorCoverageProof = state?.assetCoverageProof || { BTC:false, ETH:false };
+    const currentBTC = Number(discovery?.coverage?.BTC?.eligible || 0) > 0;
+    const currentETH = Number(discovery?.coverage?.ETH?.eligible || 0) > 0;
+    state.assetCoverageProof = {
+      BTC: Boolean(priorCoverageProof.BTC || currentBTC),
+      ETH: Boolean(priorCoverageProof.ETH || currentETH),
+      bothEverProven: Boolean((priorCoverageProof.BTC || currentBTC) && (priorCoverageProof.ETH || currentETH)),
+      currentBothLive: Boolean(currentBTC && currentETH),
+      currentBTC,
+      currentETH,
+      updatedAt: new Date(now).toISOString()
+    };
+    state.firstTradeCoverageGate = state.assetCoverageProof.bothEverProven
+      ? "BOTH_ASSETS_PROVEN_HISTORICALLY"
+      : "HOLD_UNTIL_BTC_AND_ETH_EACH_PROVEN";
     stage = "SCORING";
 
     const previous = state.prices || {};
@@ -1042,7 +1057,7 @@ function dashboardHtml() {
         <svg id="ethChart" class="spark" viewBox="0 0 100 30" preserveAspectRatio="none" aria-label="Ethereum 24 hour price chart"></svg>
       </div>
     </div>
-    <div class="notice">Live display mirrors Paper Baseline: Coinbase spot refresh plus Coinbase Exchange 24-hour candles. Display only; it does not change Shadow decisions and does not represent Polymarket contract prices.</div>
+    <div class="notice">Live display mirrors Paper Baseline: Coinbase spot refresh plus Coinbase Exchange 24-hour candles. Display only; it does not change Shadow decisions and does not represent Kalshi contract prices.</div>
   </div>
 
   <div class="card section">
