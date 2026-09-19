@@ -569,7 +569,7 @@ async function discoverUsShadowMarkets() {
       // year-end/long-duration crypto contracts masquerade as eligible markets.
       // Accept explicit 15-minute naming or an event whose declared duration is
       // approximately one 15-minute window.
-      const explicit15m = /15\\s*(?:min|minute)|15m\\b|quarter[- ]?hour/i.test(text);
+      const explicit15m = /15\s*(?:min|minute)|15m\b|quarter[- ]?hour/i.test(text);
       const startMs = Date.parse(event?.startTime || "");
       const endMs = Date.parse(event?.endTime || "");
       const durationMs = Number.isFinite(startMs) && Number.isFinite(endMs) ? endMs - startMs : NaN;
@@ -1354,10 +1354,10 @@ export default {
           const markets = Array.isArray(event?.markets) && event.markets.length ? event.markets : [null];
           for (const market of markets) {
             const text=[event?.title,event?.slug,event?.description,market?.title,market?.slug,market?.outcome].filter(Boolean).join(" — ");
-            const asset=/bitcoin|\\bbtc\\b/i.test(text)?"BTC":/ethereum|\\beth\\b|\\bether\\b/i.test(text)?"ETH":null;
+            const asset=/bitcoin|\bbtc\b/i.test(text)?"BTC":/ethereum|\beth\b|\bether\b/i.test(text)?"ETH":null;
             if(!asset) continue;
-            const is15=/15\\s*(?:min|minute)|15m\\b|quarter[- ]?hour/i.test(text);
-            const intraday=is15||/\\b(?:5|10|30|45|60)\\s*(?:min|minute)|hourly|this hour|today|daily|intraday/i.test(text);
+            const is15=/15\s*(?:min|minute)|15m\b|quarter[- ]?hour/i.test(text);
+            const intraday=is15||/\b(?:5|10|30|45|60)\s*(?:min|minute)|hourly|this hour|today|daily|intraday/i.test(text);
             if(intraday) found.push({asset,is15,eventTitle:event?.title||null,eventSlug:event?.slug||null,marketTitle:market?.title||null,marketSlug:market?.slug||null});
           }
         }
