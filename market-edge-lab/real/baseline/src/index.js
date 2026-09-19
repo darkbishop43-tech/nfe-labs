@@ -1531,82 +1531,97 @@ export default {
       return json({ok:true,source:"POLYMARKET_US_EVENTS_LIST",pages,totalEvents,cryptoMatches:cryptoEvents,sample:rows,submitted:false,liveOrderSubmission:"DISABLED",realMoneyMoved:false});
     }
 
-    // Read-only Kalshi architecture proof for the unchanged Baseline Real rules.
-    // Uses only Kalshi public market-data endpoints: no account, key, preview, or order.
+    // Authenticated, read-only Kalshi proof for the unchanged Baseline Real rules.
+    // Credentials sign GET market-data requests only. No portfolio/order/write endpoint is called.
     if (url.pathname === "/kalshi-15m-proof") {
-      const base = "https://external-api.kalshi.com/trade-api/v2";
+      const base = "https://api.elections.kalshi.com/trade-api/v2";
       const series = [
         {asset:"BTC", ticker:"KXBTC15M"},
         {asset:"ETH", ticker:"KXETH15M"}
       ];
+
+      function pemToArrayBuffer(pem) {
+        const body = String(pem || "")
+          .replace(/-----BEGIN [^-]+-----/g, "")
+          .replace(/-----END [^-]+-----/g, "")
+          .replace(/\s+/g, "");
+        if (!body) throw new Error("PRIVATE_KEY_EMPTY");
+        const raw = atob(body);
+        const bytes = new Uint8Array(raw.length);
+        for (let i=0;i<raw.length;i++) bytes[i]=raw.charCodeAt(i);
+        return bytes.buffer;
+      }
+
+      async function kalshiHeaders(method, path) {
+        if (!env.KALSHI_KEY_ID || !env.KALSHI_PRIVATE_KEY) throw new Error("KALSHI_CREDENTIALS_NOT_INSTALLED");
+        const timestamp = String(Date.now());
+        const signPath = path.split("?")[0];
+        const message = new TextEncoder().encode(timestamp + method.toUpperCase() + signPath);
+        const key = await crypto.subtle.importKey(
+          "pkcs8",
+          pemToArrayBuffer(env.KALSHI_PRIVATE_KEY),
+          {name:"RSA-PSS", hash:"SHA-256"},
+          false,
+          ["sign"]
+        );
+        const signature = await crypto.subtle.sign({name:"RSA-PSS",saltLength:32}, key, message);
+        let binary="";
+        for (const b of new Uint8Array(signature)) binary += String.fromCharCode(b);
+        return {
+          accept:"application/json",
+          "KALSHI-ACCESS-KEY":String(env.KALSHI_KEY_ID).trim(),
+          "KALSHI-ACCESS-TIMESTAMP":timestamp,
+          "KALSHI-ACCESS-SIGNATURE":btoa(binary)
+        };
+      }
+
+      async function authenticatedGet(path) {
+        const headers = await kalshiHeaders("GET", path);
+        return fetch(base + path.replace("/trade-api/v2",""), {method:"GET",headers});
+      }
+
       const out = [];
       for (const s of series) {
         try {
-          // Kalshi public API can rate-limit shared Cloudflare egress. Ask for only
-          // the few rows this proof needs and identify the read-only client.
-          const mr = await fetch(base + "/markets?series_ticker=" + encodeURIComponent(s.ticker) + "&status=open&limit=6", {
-            headers: {accept:"application/json","user-agent":"NFE-Market-Edge-Baseline-Real/kalshi-read-only-proof"}
-          });
-          if (!mr.ok) {
-            out.push({asset:s.asset,seriesTicker:s.ticker,ok:false,stage:"MARKETS",httpStatus:mr.status});
+          const path="/trade-api/v2/markets?series_ticker="+encodeURIComponent(s.ticker)+"&status=open&limit=6";
+          const mr=await authenticatedGet(path);
+          if(!mr.ok) {
+            out.push({asset:s.asset,seriesTicker:s.ticker,ok:false,stage:"AUTHENTICATED_MARKETS",httpStatus:mr.status});
             continue;
           }
-          const payload = await mr.json();
-          const markets = Array.isArray(payload?.markets) ? payload.markets : [];
-          const rows = [];
-          for (const m of markets.slice(0,6)) {
-            let book = null;
-            let bookStatus = null;
-            try {
-              const br = await fetch(base + "/markets/" + encodeURIComponent(m.ticker) + "/orderbook?depth=3", {
-                headers: {accept:"application/json","user-agent":"NFE-Market-Edge-Baseline-Real/kalshi-read-only-proof"}
-              });
-              bookStatus = br.status;
-              if (br.ok) book = await br.json();
-            } catch {}
-            const ob = book?.orderbook_fp || book?.orderbook || book || null;
+          const payload=await mr.json();
+          const markets=Array.isArray(payload?.markets)?payload.markets:[];
+          const rows=[];
+          for(const m of markets.slice(0,6)) {
+            const op="/trade-api/v2/markets/"+encodeURIComponent(m.ticker)+"/orderbook?depth=3";
+            const br=await authenticatedGet(op);
+            const book=br.ok?await br.json():null;
             rows.push({
-              ticker:m?.ticker||null,
-              eventTicker:m?.event_ticker||null,
-              title:m?.title||null,
-              subtitle:m?.subtitle||null,
-              yesSubtitle:m?.yes_sub_title||null,
-              noSubtitle:m?.no_sub_title||null,
-              status:m?.status||null,
-              openTime:m?.open_time||null,
-              closeTime:m?.close_time||null,
-              expectedExpirationTime:m?.expected_expiration_time||null,
-              expirationTime:m?.expiration_time||null,
-              canCloseEarly:m?.can_close_early??null,
-              yesBid:m?.yes_bid_dollars??m?.yes_bid??null,
-              yesAsk:m?.yes_ask_dollars??m?.yes_ask??null,
-              noBid:m?.no_bid_dollars??m?.no_bid??null,
-              noAsk:m?.no_ask_dollars??m?.no_ask??null,
-              lastPrice:m?.last_price_dollars??m?.last_price??null,
-              volume:m?.volume_fp??m?.volume??null,
-              liquidity:m?.liquidity_dollars??m?.liquidity??null,
-              rulesPrimary:m?.rules_primary||null,
-              rulesSecondary:m?.rules_secondary||null,
-              orderbookHttpStatus:bookStatus,
-              orderbook:ob
+              ticker:m?.ticker||null,eventTicker:m?.event_ticker||null,title:m?.title||null,
+              subtitle:m?.subtitle||null,status:m?.status||null,openTime:m?.open_time||null,
+              closeTime:m?.close_time||null,expectedExpirationTime:m?.expected_expiration_time||null,
+              expirationTime:m?.expiration_time||null,canCloseEarly:m?.can_close_early??null,
+              yesBid:m?.yes_bid_dollars??m?.yes_bid??null,yesAsk:m?.yes_ask_dollars??m?.yes_ask??null,
+              noBid:m?.no_bid_dollars??m?.no_bid??null,noAsk:m?.no_ask_dollars??m?.no_ask??null,
+              lastPrice:m?.last_price_dollars??m?.last_price??null,volume:m?.volume_fp??m?.volume??null,
+              liquidity:m?.liquidity_dollars??m?.liquidity??null,rulesPrimary:m?.rules_primary||null,
+              rulesSecondary:m?.rules_secondary||null,orderbookHttpStatus:br.status,
+              orderbook:book?.orderbook_fp||book?.orderbook||null
             });
           }
           out.push({asset:s.asset,seriesTicker:s.ticker,ok:true,count:markets.length,markets:rows});
-        } catch (error) {
-          out.push({asset:s.asset,seriesTicker:s.ticker,ok:false,stage:"FETCH",error:String(error?.message||"READ_FAILED").slice(0,100)});
+        } catch(error) {
+          const msg=String(error?.message||"READ_FAILED");
+          out.push({asset:s.asset,seriesTicker:s.ticker,ok:false,stage:"AUTH_OR_FETCH",errorCode:
+            msg.includes("PRIVATE_KEY")?"PRIVATE_KEY_FORMAT":
+            msg.includes("CREDENTIALS")?"CREDENTIALS_MISSING":"SIGNED_READ_FAILED"});
         }
       }
       return json({
-        ok:out.some(x=>x.ok),
-        source:"KALSHI_PUBLIC_API_READ_ONLY",
+        ok:out.some(x=>x.ok),source:"KALSHI_AUTHENTICATED_API_READ_ONLY",
         baselineRules:{entryScore:0.80,exitScore:0.20,maxHoldMinutes:5,maxStakeUsd:5},
-        venuesChanged:false,
-        accountRequired:false,
-        credentialsUsed:false,
-        submitted:false,
-        liveOrderSubmission:"DISABLED",
-        realMoneyMoved:false,
-        results:out
+        credentialsUsed:true,credentialValuesExposed:false,accountWriteAccessUsed:false,
+        submitted:false,liveOrderSubmission:"DISABLED_FOR_THIS_ROUTE",realMoneyMoved:false,results:out
       });
     }
 
