@@ -1037,6 +1037,8 @@ function publicShadowView(state) {
       edge: o.edge,
       move: o.move,
       fair: o.fair,
+      horizon: o.horizon || null,
+      durationMs: o.durationMs ?? null,
     })),
     openShadowPositions: (state?.positions || []).map((p) => ({
       slug: p.slug,
