@@ -752,7 +752,9 @@ function realTradeLedger(state, type, payload = {}) {
 }
 
 function realTradeArmed(env) {
-  return env?.EXECUTION_MODE === "ONE_TRADE_TEST" && env?.LIVE_ORDER_SUBMISSION === "ONE_TRADE_ARMED";
+  // Safety interlock: the legacy Polymarket execution controller is intentionally disabled.
+  // Kalshi execution must use a separate, later-authorized credential and code path.
+  return false;
 }
 
 async function maybeRunOneTrade(env) {
@@ -808,7 +810,7 @@ async function maybeRunOneTrade(env) {
     );
 
     if (!candidate) {
-      state.status = "ARMED_WAITING_FOR_ENTRY";
+      state.status = "SHADOW_WAITING_FOR_SIGNAL";
       await saveRealTradeState(env, state);
       return state;
     }
@@ -1055,7 +1057,7 @@ function dashboardHtml() {
 
   <div class="section wide">
     <div>
-      <b>Current Opportunities · Polymarket US</b>
+      <b>Current Opportunities · Kalshi</b>
       <div id="markets" class="opps"><div class="m">Loading public Polymarket US markets…</div></div>
     </div>
     <div class="card">
@@ -1090,9 +1092,9 @@ function dashboardHtml() {
       <div class="miniBox"><div class="label">Entry order</div><div id="realEntryOrder" class="miniVal">NOT SUBMITTED</div></div>
       <div class="miniBox"><div class="label">Exit order</div><div id="realExitOrder" class="miniVal">NOT SUBMITTED</div></div>
       <div class="miniBox"><div class="label">Test complete</div><div id="realConsumed" class="miniVal">NO</div></div>
-      <div class="miniBox"><div class="label">Live ability</div><div class="miniVal good">ARMED · AUTOMATIC</div><div class="miniSub">One trade · max $5</div></div>
+      <div class="miniBox"><div class="label">Live ability</div><div class="miniVal good">DISABLED · NO REAL ORDERS</div><div class="miniSub">One trade · max $5</div></div>
     </div>
-    <div class="notice">WAITING is a valid live state: the controller will act only on a qualifying ≥ .80 Baseline signal. Polymarket remains the independent source of truth for actual order/position activity.</div>
+    <div class="notice">WAITING is a valid Shadow state. Baseline observes Kalshi only; no real order endpoint is enabled in this build.</div>
   </div>
 
   <details class="card section"><summary><b>Setup / Validation Proof</b> · completed evidence</summary>
@@ -1143,8 +1145,8 @@ async function load(){
     const shadowLive=shadow.status==='LIVE_US_SHADOW';
     const liveOrdersState=E('liveOrdersState'),liveOrdersSub=E('liveOrdersSub');
     if(realTrade?.armed){
-      liveOrdersState.textContent='ONE-TRADE ARMED';liveOrdersState.className='val good';
-      liveOrdersSub.textContent='Exactly one governed real trade may execute when Baseline score ≥ .80. Max stake $5. Then controller consumes itself.';
+      liveOrdersState.textContent='EXECUTION DISABLED';liveOrdersState.className='val good';
+      liveOrdersSub.textContent='Shadow validation only. No Kalshi real order can execute from this build.';
     }else{
       liveOrdersState.textContent='DISABLED';liveOrdersState.className='val warn';
       liveOrdersSub.textContent='One-trade execution controller is implemented but DISARMED.';
@@ -1152,12 +1154,12 @@ async function load(){
 
     const armed=Boolean(realTrade?.armed);
     const modePill=E('modePill'),statusSub=E('statusSub'),executionGov=E('executionGov'),moneyLiveOrders=E('moneyLiveOrders');
-    modePill.textContent=armed?'REAL · ONE-TRADE ARMED':'REAL · EXECUTION DISARMED';
-    executionGov.textContent=armed?'ONE_TRADE_TEST · ARMED':'LOCKED / DISARMED';
+    modePill.textContent=armed?'REAL · EXECUTION DISABLED':'REAL · EXECUTION DISARMED';
+    executionGov.textContent=armed?'SHADOW_ONLY · EXECUTION_DISABLED':'LOCKED / DISARMED';
     executionGov.className=armed?'good':'warn';
-    moneyLiveOrders.textContent=armed?'ONE-TRADE ARMED':'DISABLED';
+    moneyLiveOrders.textContent=armed?'EXECUTION DISABLED':'DISABLED';
     moneyLiveOrders.className=armed?'good':'warn';
-    E('realController').textContent=armed?'ARMED · ONE TRADE ONLY':'DISARMED';
+    E('realController').textContent=armed?'DISABLED · SHADOW ONLY':'DISARMED';
     E('realController').className=armed?'good':'warn';
     E('realTradeStatus').textContent=realTrade?.status||'UNKNOWN';
     E('realTradeStatus').className=(realTrade?.status==='ONE_TRADE_COMPLETE')?'good':(armed?'good':'warn');
@@ -1171,7 +1173,7 @@ async function load(){
     if(armed){
       statusDot.className='dot good';
       statusText.innerHTML='<b>AUTHENTICATED · ONE-TRADE CONTROLLER ARMED</b>';
-      statusSub.textContent='One governed real trade may execute automatically when the Baseline entry rule qualifies. No manual order is required.';
+      statusSub.textContent='Kalshi market data is authenticated and read-only. Real execution remains disabled.';
     }
     const moneyFmt=n=>Number(n).toLocaleString(undefined,{style:'currency',currency:'USD',maximumFractionDigits:2});
     const pctFmt=n=>(Number(n)>=0?'+':'')+Number(n).toFixed(2)+'%';
@@ -1200,7 +1202,7 @@ async function load(){
     creds.textContent=status?.credentials?.keyIdInstalled&&status?.credentials?.secretInstalled?'INSTALLED':'MISSING';
     creds.className=creds.textContent==='INSTALLED'?'good':'bad';gatePreview.textContent=preview?.ok&&preview?.submitted===false?'PASS · NO SUBMISSION':((preview?.diagnostic?.category||preview?.state||'NOT PROVEN')+(preview?.diagnostic?.httpStatus?' · HTTP '+preview.diagnostic.httpStatus:'')+(!preview?.ok&&preview?.discovery?(' · SEARCH:'+String(preview.discovery.searchEvents??preview.discovery.eventsScanned??'?')+' CRYPTO:'+String(preview.discovery.cryptoEvents??'?')+' CAND:'+String(preview.discovery.candidates??'?')+(Array.isArray(preview.discovery.marketEvidence)&&preview.discovery.marketEvidence.length?' · BOOKS:'+preview.discovery.marketEvidence.map(x=>String(x.state||'?').replace('MARKET_STATE_','')+' B'+x.bids+' O'+x.offers).join(','):'') ):''));gatePreview.className=preview?.ok&&preview?.submitted===false?'good':'m';
     if(account.ok&&account.accountConnection==='VERIFIED'){
-      conn.textContent='VERIFIED';conn.className='val good';connSub.textContent='Authenticated read-only Polymarket US API connection.';
+      conn.textContent='VERIFIED';conn.className='val good';connSub.textContent='Authenticated read-only Kalshi API connection.';
       gateAccount.textContent='PASS';gateAccount.className='good';statusDot.className='dot';statusText.innerHTML='<b class="good">AUTHENTICATED READ-ONLY · VERIFIED</b>';
       const a=account.account||{};
       if(a.fundedRecordPresent){
@@ -1599,6 +1601,59 @@ export default {
         credentialsUsed:true,credentialValuesExposed:false,accountWriteAccessUsed:false,
         submitted:false,liveOrderSubmission:"DISABLED_FOR_THIS_ROUTE",realMoneyMoved:false,results:out
       });
+    }
+
+    if (url.pathname === "/kalshi-execution-readiness-proof") {
+      try {
+        const discovery = await discoverKalshiShadowMarkets(env);
+        const candidate = discovery.markets[0] || null;
+        if (!candidate) return json({ok:false,state:"NO_LIVE_KALSHI_15M_MARKET",submitted:false,realMoneyMoved:false},422);
+        const ask = Number(candidate.yes);
+        const bid = Number(candidate.bid);
+        const maxStake = SHADOW_CONFIG.maxStakeUsd;
+        const maxContracts = ask > 0 ? Math.max(0, Math.floor(maxStake / ask)) : 0;
+        const plannedNotional = Number((maxContracts * ask).toFixed(4));
+        return json({
+          ok:true,
+          state:"KALSHI_EXECUTION_MECHANICS_MODELED_NOT_SUBMITTED",
+          venue:"KALSHI",
+          market:{ticker:candidate.slug,asset:candidate.asset,ask,bid,horizon:candidate.horizon},
+          frozenRules:{entryScore:SHADOW_CONFIG.entryScore,exitScore:SHADOW_CONFIG.exitScore,maxHoldMinutes:SHADOW_CONFIG.maxHoldMs/60000,maxStakeUsd:maxStake},
+          entryPlan:{
+            method:"POST",
+            path:"/trade-api/v2/portfolio/events/orders",
+            side:"bid",
+            meaning:"LONG_YES",
+            price:ask.toFixed(4),
+            count:String(maxContracts),
+            plannedNotionalUsd:plannedNotional,
+            clientOrderIdRequiredByUs:true,
+            endpointCalled:false
+          },
+          exitPlan:{
+            method:"POST",
+            path:"/trade-api/v2/portfolio/events/orders",
+            side:"ask",
+            meaning:"OPPOSITE_DIRECTION_FOR_YES_EXIT",
+            referenceBid:bid.toFixed(4),
+            endpointCalled:false
+          },
+          cancellationPlan:{
+            method:"DELETE",
+            pathTemplate:"/trade-api/v2/portfolio/events/orders/{order_id}",
+            endpointCalled:false
+          },
+          safety:{
+            currentCredential:"READ_ONLY",
+            legacyExecutionControllerArmed:false,
+            writeEndpointPresentInThisProof:false,
+            submitted:false,
+            realMoneyMoved:false
+          }
+        });
+      } catch(error) {
+        return json({ok:false,state:"KALSHI_EXECUTION_READINESS_READ_FAILED",errorCode:String(error?.message||"READ_FAILED").slice(0,120),submitted:false,realMoneyMoved:false},422);
+      }
     }
 
     if (url.pathname === "/price-proof") return json(await livePriceProof(env));
