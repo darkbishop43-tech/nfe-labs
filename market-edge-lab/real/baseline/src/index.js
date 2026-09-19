@@ -552,21 +552,28 @@ async function kalshiExecutionGet(env,path) {
   return fetch("https://api.elections.kalshi.com"+path,{method:"GET",headers});
 }
 
-function kalshiOneTradeEnabled(env) {
-  return env?.KALSHI_ONE_TRADE_CONTROLLER_ENABLED === "ENABLED" &&
-         env?.KALSHI_FOUNDER_ONE_TRADE_AUTHORIZATION === "AUTHORIZED_ONCE";
+function kalshiControllerSwitchEnabled(env) {
+  return env?.KALSHI_ONE_TRADE_CONTROLLER_ENABLED === "ENABLED";
 }
-async function kalshiExecutionWrite(env, method, path, payload) {
-  if (!kalshiOneTradeEnabled(env)) throw new Error("KALSHI_ONE_TRADE_CONTROLLER_HARD_DISABLED");
+function kalshiAuthorizationValid(state, now=Date.now()) {
+  return Boolean(state?.founderAuthorization?.authorized === true &&
+    !state?.founderAuthorization?.consumed &&
+    Number(state?.founderAuthorization?.expiresAt||0) > now);
+}
+function kalshiOneTradeEnabled(env, state=null) {
+  return kalshiControllerSwitchEnabled(env) && kalshiAuthorizationValid(state);
+}
+async function kalshiExecutionWrite(env, state, method, path, payload) {
+  if (!kalshiOneTradeEnabled(env,state)) throw new Error("KALSHI_ONE_TRADE_CONTROLLER_HARD_DISABLED");
   const headers=await kalshiExecutionHeaders(env,method,path);
   headers["content-type"]="application/json";
   return fetch("https://api.elections.kalshi.com"+path,{method,headers,body:payload===undefined?undefined:JSON.stringify(payload)});
 }
-async function kalshiCreateOrderV2(env,payload) {
-  return kalshiExecutionWrite(env,"POST","/trade-api/v2/portfolio/events/orders",payload);
+async function kalshiCreateOrderV2(env,state,payload) {
+  return kalshiExecutionWrite(env,state,"POST","/trade-api/v2/portfolio/events/orders",payload);
 }
-async function kalshiCancelOrderV2(env,orderId) {
-  return kalshiExecutionWrite(env,"DELETE","/trade-api/v2/portfolio/events/orders/"+encodeURIComponent(orderId));
+async function kalshiCancelOrderV2(env,state,orderId) {
+  return kalshiExecutionWrite(env,state,"DELETE","/trade-api/v2/portfolio/events/orders/"+encodeURIComponent(orderId));
 }
 
 async function kalshiGetOrderV2(env,orderId) {
@@ -936,7 +943,7 @@ async function maybeRunKalshiOneTrade(env) {
   const state=await loadRealTradeState(env);
   const now=Date.now();
 
-  if(!kalshiOneTradeEnabled(env)) {
+  if(!kalshiOneTradeEnabled(env,state)) {
     if(!state.consumed && !state.entryOrderId) state.status="KALSHI_READY_HARD_DISABLED";
     await saveRealTradeState(env,state);
     return state;
@@ -1559,13 +1566,28 @@ export default {
   async scheduled(event, env, ctx) {
     ctx.waitUntil((async () => {
       await runShadow(env);
-      // SAFETY HOLD: keep live one-trade submission unscheduled while short-horizon
-      // Polymarket BTC/ETH market discovery is being validated.
+      // One-trade controller is invoked after fresh Shadow data, but remains inert unless
+      // the separate controller switch AND an unexpired persisted Founder authorization exist.
+      await maybeRunKalshiOneTrade(env);
     })());
   },
 
   async fetch(request, env) {
     const url = new URL(request.url);
+
+    if (request.method === "POST" && url.pathname === "/kalshi-authorize-one-trade") {
+      if(!kalshiControllerSwitchEnabled(env)) return json({ok:false,state:"CONTROLLER_SWITCH_HARD_DISABLED",armed:false,submitted:false,realMoneyMoved:false},423);
+      const state=await loadRealTradeState(env);
+      if(state?.consumed||state?.entryOrderId||state?.entrySubmitStartedAt) return json({ok:false,state:"ONE_TRADE_ALREADY_USED_OR_LATCHED",armed:false},409);
+      let body={}; try{body=await request.json();}catch{}
+      if(body?.authorization!=="AUTHORIZE_ONE_TRADE_MAX_5_USD") return json({ok:false,state:"EXPLICIT_AUTHORIZATION_PHRASE_REQUIRED",armed:false},400);
+      const now=Date.now();
+      state.founderAuthorization={authorized:true,authorizedAt:now,expiresAt:now+15*60*1000,consumed:false,scope:"ONE_TRADE_MAX_5_USD"};
+      state.status="AUTHORIZED_WAITING_FOR_QUALIFYING_SIGNAL";
+      realTradeLedger(state,"FOUNDER_ONE_TRADE_AUTHORIZED",{scope:"ONE_TRADE_MAX_5_USD",expiresAt:state.founderAuthorization.expiresAt});
+      await saveRealTradeState(env,state);
+      return json({ok:true,state:state.status,armed:true,expiresAt:state.founderAuthorization.expiresAt,submitted:false,realMoneyMoved:false});
+    }
 
     if (request.method !== "GET") {
       return json({
@@ -1981,7 +2003,9 @@ export default {
           feeSafeSizing:sizing,
           frozenRules:{entryScore:SHADOW_CONFIG.entryScore,exitScore:SHADOW_CONFIG.exitScore,maxHoldMinutes:SHADOW_CONFIG.maxHoldMs/60000,maxStakeUsd:SHADOW_CONFIG.maxStakeUsd},
           interlocks:{
-            controllerEnabled:kalshiOneTradeEnabled(env),
+            controllerSwitchEnabled:kalshiControllerSwitchEnabled(env),
+          oneTradeAuthorizationActive:false,
+          controllerEnabled:false,
             controllerEnableVariablePresent:Boolean(env?.KALSHI_ONE_TRADE_CONTROLLER_ENABLED),
             founderAuthorizationVariablePresent:Boolean(env?.KALSHI_FOUNDER_ONE_TRADE_AUTHORIZATION),
             feeVerified:true,
@@ -2056,6 +2080,36 @@ export default {
       }
     }
 
+    if (url.pathname === "/kalshi-one-trade-arming-readiness-proof") {
+      const state=await loadRealTradeState(env);
+      const shadow=await loadShadowState(env);
+      const alreadyUsed=Boolean(state?.consumed||state?.entryOrderId||state?.entrySubmitStartedAt);
+      return json({
+        ok:true,
+        state:"KALSHI_ONE_TRADE_ARMING_MECHANISM_READY_NOT_ARMED",
+        authorizationDesign:{
+          persistentKvAuthorization:true,
+          expiresAfterMinutes:15,
+          oneTradeOnly:true,
+          authorizationConsumedBeforeProviderWrite:true,
+          controllerSwitchAlsoRequired:true,
+          manualKalshiClickRequired:false,
+          continuousTradingAuthorized:false
+        },
+        current:{
+          controllerSwitchEnabled:kalshiControllerSwitchEnabled(env),
+          founderAuthorizationActive:kalshiAuthorizationValid(state),
+          priorTradeConsumed:Boolean(state?.consumed),
+          priorEntryPresent:Boolean(state?.entryOrderId),
+          priorSubmitLatchPresent:Boolean(state?.entrySubmitStartedAt),
+          shadowLive:shadow?.status==="LIVE_KALSHI_SHADOW",
+          safeToOfferFounderAuthorization:!alreadyUsed && shadow?.status==="LIVE_KALSHI_SHADOW"
+        },
+        interlocks:{postOrdersCalled:false,deleteOrdersCalled:false,submitted:false,realMoneyMoved:false},
+        nextBoundary:"FOUNDER_EXPLICIT_SINGLE_TRADE_AUTHORIZATION_REQUIRED"
+      });
+    }
+
     if (url.pathname === "/kalshi-fee-readiness-proof") {
       const shadow=await loadShadowState(env);
       const sample=(shadow?.opportunities||[]).find(o=>o?.marketTicker&&(o?.outcomeSide==="YES"||o?.outcomeSide==="NO"))||null;
@@ -2105,7 +2159,9 @@ export default {
           continuousAutomaticTradingAuthorized:false
         },
         interlocks:{
-          controllerEnabled:kalshiOneTradeEnabled(env),
+          controllerSwitchEnabled:kalshiControllerSwitchEnabled(env),
+          oneTradeAuthorizationActive:false,
+          controllerEnabled:false,
           postOrdersCalled:false,
           deleteOrdersCalled:false,
           submitted:false,
@@ -2159,7 +2215,9 @@ export default {
           founderSingleTradeAuthorizationRequired:true
         },
         interlocks:{
-          controllerEnabled:kalshiOneTradeEnabled(env),
+          controllerSwitchEnabled:kalshiControllerSwitchEnabled(env),
+          oneTradeAuthorizationActive:false,
+          controllerEnabled:false,
           postOrdersCalled:false,
           deleteOrdersCalled:false,
           submitted:false,
@@ -2197,7 +2255,9 @@ export default {
           ambiguity:"fail closed; reconcile by order_id via Get Order and Get Fills before any further write",
           exitPartial:"reconcile exit fill; never mark complete until filled quantity equals managed position quantity"
         },
-        interlocks:{controllerEnabled:kalshiOneTradeEnabled(env),postOrdersCalled:false,deleteOrdersCalled:false,submitted:false,realMoneyMoved:false}
+        interlocks:{controllerSwitchEnabled:kalshiControllerSwitchEnabled(env),
+          oneTradeAuthorizationActive:false,
+          controllerEnabled:false,postOrdersCalled:false,deleteOrdersCalled:false,submitted:false,realMoneyMoved:false}
       });
     }
 
@@ -2231,7 +2291,9 @@ export default {
           reduceOnlyExitRequired:true
         },
         current:{shadowStatus:shadow?.status||"UNKNOWN",qualifyingSignals:candidates.length,candidate:candidate?{marketTicker:candidate.marketTicker,outcomeSide:candidate.outcomeSide,direction:candidate.direction,score:candidate.score,closeTime:candidate.closeTime,sizing}:null},
-        interlocks:{controllerEnabled:kalshiOneTradeEnabled(env),postOrdersCalled:false,deleteOrdersCalled:false,submitted:false,realMoneyMoved:false}
+        interlocks:{controllerSwitchEnabled:kalshiControllerSwitchEnabled(env),
+          oneTradeAuthorizationActive:false,
+          controllerEnabled:false,postOrdersCalled:false,deleteOrdersCalled:false,submitted:false,realMoneyMoved:false}
       });
     }
 
