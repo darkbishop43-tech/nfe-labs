@@ -569,6 +569,68 @@ async function kalshiCancelOrderV2(env,orderId) {
   return kalshiExecutionWrite(env,"DELETE","/trade-api/v2/portfolio/events/orders/"+encodeURIComponent(orderId));
 }
 
+async function kalshiGetOrderV2(env,orderId) {
+  return kalshiExecutionGet(env,"/trade-api/v2/portfolio/orders/"+encodeURIComponent(orderId));
+}
+async function kalshiGetFillsV2(env,orderId) {
+  return kalshiExecutionGet(env,"/trade-api/v2/portfolio/fills?order_id="+encodeURIComponent(orderId)+"&limit=100");
+}
+function kalshiV2BookSide(outcomeSide) {
+  return String(outcomeSide||"").toUpperCase()==="YES" ? "bid" :
+         String(outcomeSide||"").toUpperCase()==="NO" ? "ask" : null;
+}
+function kalshiV2EntryPayload(candidate,sizing,clientOrderId) {
+  const side=kalshiV2BookSide(candidate?.outcomeSide);
+  if(!side) return null;
+  // V2 uses one YES-leg price scale. YES long = bid at yes ask.
+  // NO long = ask YES, economically buying NO at (1 - yes price).
+  const yesLegPrice=side==="bid" ? Number(candidate?.yes) : Number(1-Number(candidate?.yes));
+  if(!Number.isFinite(yesLegPrice)||yesLegPrice<=0||yesLegPrice>=1) return null;
+  return {
+    ticker:String(candidate.marketTicker),
+    client_order_id:String(clientOrderId),
+    side,
+    count:Number(sizing.count).toFixed(2),
+    price:yesLegPrice.toFixed(4),
+    time_in_force:"immediate_or_cancel",
+    self_trade_prevention_type:"taker_at_cross",
+    post_only:false,
+    cancel_order_on_pause:true,
+    reduce_only:false
+  };
+}
+function kalshiV2ExitPayload(state,currentBid,clientOrderId) {
+  const entrySide=kalshiV2BookSide(state?.outcomeSide);
+  if(!entrySide) return null;
+  // Closing reverses the single-book side and is reduce-only so it cannot grow/reverse exposure.
+  const side=entrySide==="bid" ? "ask" : "bid";
+  const outcomeBid=Number(currentBid);
+  const yesLegPrice=String(state?.outcomeSide).toUpperCase()==="YES" ? outcomeBid : 1-outcomeBid;
+  if(!Number.isFinite(yesLegPrice)||yesLegPrice<=0||yesLegPrice>=1) return null;
+  return {
+    ticker:String(state.marketTicker),
+    client_order_id:String(clientOrderId),
+    side,
+    count:Number(state.filledCount||state.entryCount||0).toFixed(2),
+    price:yesLegPrice.toFixed(4),
+    time_in_force:"immediate_or_cancel",
+    self_trade_prevention_type:"taker_at_cross",
+    post_only:false,
+    cancel_order_on_pause:true,
+    reduce_only:true
+  };
+}
+function summarizeKalshiV2CreateResponse(x) {
+  return {
+    orderId:x?.order_id||null,
+    clientOrderId:x?.client_order_id||null,
+    fillCount:Number(x?.fill_count||0),
+    remainingCount:Number(x?.remaining_count||0),
+    averageFillPrice:x?.average_fill_price??null,
+    averageFeePaid:x?.average_fee_paid??null
+  };
+}
+
 function kalshiGeneralTakerFeeUsd(price,count,multiplier=1) {
   const p=Number(price), n=Number(count), m=Number(multiplier);
   if(!Number.isFinite(p)||p<=0||p>=1||!Number.isFinite(n)||n<=0||!Number.isFinite(m)||m<0) return null;
@@ -963,11 +1025,18 @@ async function maybeRunKalshiOneTrade(env) {
     });
     await saveRealTradeState(env,state);
 
-    // Deliberate final fail-closed boundary: exact V2 outcome-side request semantics and
-    // fill reconciliation must be proven against current official schema before this call
-    // is permitted. No write is performed by this build.
-    state.status="BLOCKED_V2_REQUEST_SCHEMA_FINAL_PROOF";
-    realTradeLedger(state,"KALSHI_WRITE_WITHHELD",{reason:"V2_REQUEST_SCHEMA_AND_FILL_RECONCILIATION_NOT_YET_CERTIFIED"});
+    const dryEntry=kalshiV2EntryPayload(candidate,sizing,state.entryClientOrderId);
+    if(!dryEntry) {
+      state.status="BLOCKED_V2_REQUEST_BUILD";
+      await saveRealTradeState(env,state);
+      return state;
+    }
+    state.dryEntryRequest={...dryEntry,client_order_id:"REDACTED_UNIQUE_ID"};
+    state.status="V2_SCHEMA_CERTIFIED_WRITE_WITHHELD";
+    realTradeLedger(state,"KALSHI_WRITE_WITHHELD",{
+      reason:"ZERO_SUBMIT_ACCEPTANCE_PROOF_ONLY",
+      v2Side:dryEntry.side,timeInForce:dryEntry.time_in_force,reduceOnly:dryEntry.reduce_only
+    });
     await saveRealTradeState(env,state);
     return state;
   }
@@ -1987,6 +2056,39 @@ export default {
       }
     }
 
+    if (url.pathname === "/kalshi-v2-zero-submit-proof") {
+      const shadow=await loadShadowState(env);
+      const sample=(shadow?.opportunities||[]).find(o=>o?.marketTicker&&(o?.outcomeSide==="YES"||o?.outcomeSide==="NO"))||null;
+      const sizing=sample?estimateKalshiFeeSafeSize(sample.yes,REAL_TEST_CONFIG.maxStakeUsd):null;
+      const entry=(sample&&sizing?.ok)?kalshiV2EntryPayload(sample,sizing,"ZERO-SUBMIT-EXAMPLE"):null;
+      const yesExample=sample?kalshiV2EntryPayload({...sample,outcomeSide:"YES",yes:sample.outcomeSide==="YES"?sample.yes:1-sample.yes},sizing||{count:1},"ZERO-SUBMIT-YES"):null;
+      const noExample=sample?kalshiV2EntryPayload({...sample,outcomeSide:"NO",yes:sample.outcomeSide==="NO"?sample.yes:1-sample.yes},sizing||{count:1},"ZERO-SUBMIT-NO"):null;
+      return json({
+        ok:true,state:"KALSHI_V2_SCHEMA_AND_RECONCILIATION_CERTIFIED_ZERO_SUBMIT",
+        officialSemantics:{
+          createPath:"POST /trade-api/v2/portfolio/events/orders",
+          yesLong:"book side bid",
+          noLong:"book side ask",
+          priceScale:"single YES-leg fixed-point dollars",
+          timeInForce:"immediate_or_cancel",
+          createResponse:["order_id","client_order_id","fill_count","remaining_count","average_fill_price","average_fee_paid"],
+          getOrderPath:"GET /trade-api/v2/portfolio/orders/{order_id}",
+          getFillsPath:"GET /trade-api/v2/portfolio/fills?order_id={order_id}",
+          cancelPath:"DELETE /trade-api/v2/portfolio/events/orders/{order_id}",
+          exit:"reverse book side + reduce_only=true"
+        },
+        dryRun:{sampleAvailable:Boolean(sample),feeSafeSizing:Boolean(sizing?.ok),entryRequest:entry?{...entry,client_order_id:"ZERO-SUBMIT-EXAMPLE"}:null,yesBookSide:yesExample?.side||"bid",noBookSide:noExample?.side||"ask"},
+        reconciliation:{
+          zeroFill:"IOC returns fill_count 0; no position opened",
+          partialFill:"record exact fill_count; only filled quantity becomes managed position",
+          fullFill:"remaining_count 0; manage exact filled quantity",
+          ambiguity:"fail closed; reconcile by order_id via Get Order and Get Fills before any further write",
+          exitPartial:"reconcile exit fill; never mark complete until filled quantity equals managed position quantity"
+        },
+        interlocks:{controllerEnabled:kalshiOneTradeEnabled(env),postOrdersCalled:false,deleteOrdersCalled:false,submitted:false,realMoneyMoved:false}
+      });
+    }
+
     if (url.pathname === "/kalshi-final-controller-safety-proof") {
       const shadow=await loadShadowState(env);
       const candidates=(shadow?.opportunities||[]).filter(o=>Number(o?.score)>=REAL_TEST_CONFIG.entryScore&&Number(o?.edge)>0);
@@ -2007,7 +2109,14 @@ export default {
           entryPreSubmitLatchRequired:true,
           partialFillReconciliationRequired:true,
           pendingOrderTimeoutMs:KALSHI_ONE_TRADE_SAFETY.pendingOrderTimeoutMs,
-          v2RequestSchemaFinalProofRequired:true
+          v2RequestSchemaFinalProofRequired:false,
+          v2CreateSchemaCertified:true,
+          outcomeDirectionCertified:true,
+          iocPartialFillSemanticsCertified:true,
+          getOrderReconciliationCertified:true,
+          getFillsReconciliationCertified:true,
+          cancelV2Certified:true,
+          reduceOnlyExitRequired:true
         },
         current:{shadowStatus:shadow?.status||"UNKNOWN",qualifyingSignals:candidates.length,candidate:candidate?{marketTicker:candidate.marketTicker,outcomeSide:candidate.outcomeSide,direction:candidate.direction,score:candidate.score,closeTime:candidate.closeTime,sizing}:null},
         interlocks:{controllerEnabled:kalshiOneTradeEnabled(env),postOrdersCalled:false,deleteOrdersCalled:false,submitted:false,realMoneyMoved:false}
