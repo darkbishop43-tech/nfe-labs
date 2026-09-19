@@ -1324,6 +1324,37 @@ export default {
 
     if (url.pathname === "/markets") return json(await marketSnapshot());
 
+    // Temporary read-only Polymarket US catalogue proof for the requested
+    // short-horizon BTC/ETH instrument check. No preview or order submission.
+    if (url.pathname === "/crypto-short-horizon-proof") {
+      const client = new PolymarketUS();
+      const found = [];
+      let offset = 0, pages = 0, totalEvents = 0, reachedEnd = false;
+      while (pages < 50) {
+        let result;
+        try { result = await client.events.list({ active: true, limit: 100, offset }); }
+        catch { return json({ok:false,state:"EVENT_CATALOGUE_READ_FAILED",pages,totalEvents,submitted:false}); }
+        const events = Array.isArray(result?.events) ? result.events : [];
+        for (const event of events) {
+          totalEvents++;
+          const markets = Array.isArray(event?.markets) && event.markets.length ? event.markets : [null];
+          for (const market of markets) {
+            const text=[event?.title,event?.slug,event?.description,market?.title,market?.slug,market?.outcome].filter(Boolean).join(" — ");
+            const asset=/bitcoin|\\bbtc\\b/i.test(text)?"BTC":/ethereum|\\beth\\b|\\bether\\b/i.test(text)?"ETH":null;
+            if(!asset) continue;
+            const is15=/15\\s*(?:min|minute)|15m\\b|quarter[- ]?hour/i.test(text);
+            const intraday=is15||/\\b(?:5|10|30|45|60)\\s*(?:min|minute)|hourly|this hour|today|daily|intraday/i.test(text);
+            if(intraday) found.push({asset,is15,eventTitle:event?.title||null,eventSlug:event?.slug||null,marketTitle:market?.title||null,marketSlug:market?.slug||null});
+          }
+        }
+        pages++;
+        if(events.length<100){reachedEnd=true;break;}
+        offset+=events.length;
+      }
+      const rows=[...new Map(found.map(x=>[(x.marketSlug||x.eventSlug||JSON.stringify(x)),x])).values()];
+      return json({ok:true,source:"POLYMARKET_US_EVENTS_LIST",pages,totalEvents,reachedEnd,btc15m:rows.filter(x=>x.asset==="BTC"&&x.is15).length,eth15m:rows.filter(x=>x.asset==="ETH"&&x.is15).length,btcIntraday:rows.filter(x=>x.asset==="BTC").length,ethIntraday:rows.filter(x=>x.asset==="ETH").length,matches:rows.slice(0,50),submitted:false,liveOrderSubmission:"DISABLED"});
+    }
+
     // Read-only Polymarket US short-horizon catalogue diagnostic.
     // This scans the official US event catalogue directly so fuzzy search cannot
     // hide BTC/ETH markets. It never previews or submits an order.
