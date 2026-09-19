@@ -1531,6 +1531,83 @@ export default {
       return json({ok:true,source:"POLYMARKET_US_EVENTS_LIST",pages,totalEvents,cryptoMatches:cryptoEvents,sample:rows,submitted:false,liveOrderSubmission:"DISABLED",realMoneyMoved:false});
     }
 
+    // Read-only Kalshi architecture proof for the unchanged Baseline Real rules.
+    // Uses only Kalshi public market-data endpoints: no account, key, preview, or order.
+    if (url.pathname === "/kalshi-15m-proof") {
+      const base = "https://external-api.kalshi.com/trade-api/v2";
+      const series = [
+        {asset:"BTC", ticker:"KXBTC15M"},
+        {asset:"ETH", ticker:"KXETH15M"}
+      ];
+      const out = [];
+      for (const s of series) {
+        try {
+          const mr = await fetch(base + "/markets?series_ticker=" + encodeURIComponent(s.ticker) + "&status=open&limit=20", {
+            headers: {accept:"application/json"}
+          });
+          if (!mr.ok) {
+            out.push({asset:s.asset,seriesTicker:s.ticker,ok:false,stage:"MARKETS",httpStatus:mr.status});
+            continue;
+          }
+          const payload = await mr.json();
+          const markets = Array.isArray(payload?.markets) ? payload.markets : [];
+          const rows = [];
+          for (const m of markets.slice(0,6)) {
+            let book = null;
+            let bookStatus = null;
+            try {
+              const br = await fetch(base + "/markets/" + encodeURIComponent(m.ticker) + "/orderbook?depth=10", {
+                headers: {accept:"application/json"}
+              });
+              bookStatus = br.status;
+              if (br.ok) book = await br.json();
+            } catch {}
+            const ob = book?.orderbook_fp || book?.orderbook || book || null;
+            rows.push({
+              ticker:m?.ticker||null,
+              eventTicker:m?.event_ticker||null,
+              title:m?.title||null,
+              subtitle:m?.subtitle||null,
+              yesSubtitle:m?.yes_sub_title||null,
+              noSubtitle:m?.no_sub_title||null,
+              status:m?.status||null,
+              openTime:m?.open_time||null,
+              closeTime:m?.close_time||null,
+              expectedExpirationTime:m?.expected_expiration_time||null,
+              expirationTime:m?.expiration_time||null,
+              canCloseEarly:m?.can_close_early??null,
+              yesBid:m?.yes_bid_dollars??m?.yes_bid??null,
+              yesAsk:m?.yes_ask_dollars??m?.yes_ask??null,
+              noBid:m?.no_bid_dollars??m?.no_bid??null,
+              noAsk:m?.no_ask_dollars??m?.no_ask??null,
+              lastPrice:m?.last_price_dollars??m?.last_price??null,
+              volume:m?.volume_fp??m?.volume??null,
+              liquidity:m?.liquidity_dollars??m?.liquidity??null,
+              rulesPrimary:m?.rules_primary||null,
+              rulesSecondary:m?.rules_secondary||null,
+              orderbookHttpStatus:bookStatus,
+              orderbook:ob
+            });
+          }
+          out.push({asset:s.asset,seriesTicker:s.ticker,ok:true,count:markets.length,markets:rows});
+        } catch (error) {
+          out.push({asset:s.asset,seriesTicker:s.ticker,ok:false,stage:"FETCH",error:String(error?.message||"READ_FAILED").slice(0,100)});
+        }
+      }
+      return json({
+        ok:out.some(x=>x.ok),
+        source:"KALSHI_PUBLIC_API_READ_ONLY",
+        baselineRules:{entryScore:0.80,exitScore:0.20,maxHoldMinutes:5,maxStakeUsd:5},
+        venuesChanged:false,
+        accountRequired:false,
+        credentialsUsed:false,
+        submitted:false,
+        liveOrderSubmission:"DISABLED",
+        realMoneyMoved:false,
+        results:out
+      });
+    }
+
     if (url.pathname === "/price-proof") return json(await livePriceProof(env));
 
     if (url.pathname === "/money-path-proof") return json(await moneyPathProof(env));
