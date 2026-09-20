@@ -2274,6 +2274,39 @@ export default {
       return json({ok:true,state:state.status,armed:true,expiresAt:state.founderAuthorization.expiresAt,submitted:false,realMoneyMoved:false});
     }
 
+    if (url.pathname === "/kalshi-approved-5-dollar-shard-transfer") {
+      if(request.method==="GET"){
+        const state=await loadRealTradeState(env);
+        const already=state?.shardTransfer?.transferId||null;
+        return new Response("<!doctype html><meta name=viewport content='width=device-width'><title>Approved $5 Kalshi Shard Transfer</title><body style='font-family:system-ui;background:#07111d;color:#eef;padding:24px;max-width:720px;margin:auto'><h2>Approved $5 Internal Kalshi Transfer</h2><p>Exact action: move <b>$5.00</b> from exchange index <b>0</b> to exchange index <b>2</b>. No order is created and no trade authorization is changed.</p>"+(already?"<p><b>BLOCKED:</b> transfer already recorded as "+String(already).replace(/[&<>]/g,"")+"</p>":"<form method=post><input type=hidden name=confirm value='APPROVE $5 SHARD TRANSFER 0→2'><button style='font-size:18px;padding:14px 20px' type=submit>Execute approved $5 transfer</button></form>")+"<p>This endpoint is one-shot and rechecks live balances before sending.</p></body>",{headers:{"content-type":"text/html;charset=utf-8","cache-control":"no-store"}});
+      }
+      if(request.method!=="POST") return json({ok:false,error:"METHOD_NOT_ALLOWED"},405);
+      const state=await loadRealTradeState(env);
+      if(state?.shardTransfer?.transferId) return json({ok:false,state:"TRANSFER_ALREADY_RECORDED",transferId:state.shardTransfer.transferId},409);
+
+      // Reconcile live balances immediately before the only allowed money-moving POST.
+      const br=await kalshiExecutionGet(env,"/trade-api/v2/portfolio/balance");
+      let bb={}; try{bb=await br.json();}catch{}
+      if(!br.ok) return json({ok:false,state:"PRE_TRANSFER_BALANCE_READ_FAILED",httpStatus:br.status,body:bb},502);
+      const rows=Array.isArray(bb?.balance_breakdown)?bb.balance_breakdown:[];
+      const map=Object.fromEntries(rows.map(x=>[String(x?.exchange_index),Number(x?.balance)]));
+      const source=map["0"], destination=map["2"];
+      if(!(Number.isFinite(source)&&Number.isFinite(destination)&&source===10&&destination===0)){
+        return json({ok:false,state:"TRANSFER_PRECONDITION_FAILED",observed:{index0:source,index2:destination,totalBalance:bb?.balance??null},expected:{index0:10,index2:0}},409);
+      }
+
+      const payload={source:"event_contract",destination:"event_contract",amount:50000,source_exchange_shard:0,destination_exchange_shard:2,source_subaccount:0,destination_subaccount:0};
+      const tr=await kalshiApprovedShardTransfer(env,payload);
+      let tb={}; try{tb=await tr.json();}catch{}
+      if(!tr.ok || !tb?.transfer_id){
+        return json({ok:false,state:"TRANSFER_PROVIDER_REJECTED",httpStatus:tr.status,providerResponse:tb,preTransfer:{index0:source,index2:destination},moneyMoveAttempted:true},502);
+      }
+      state.shardTransfer={transferId:String(tb.transfer_id),acceptedAt:Date.now(),amountCenticents:50000,amountUsd:5,sourceExchangeShard:0,destinationExchangeShard:2,status:"REQUEST_ACCEPTED_AWAITING_BALANCE_PROOF"};
+      realTradeLedger(state,"KALSHI_SHARD_TRANSFER_ACCEPTED",{transferId:state.shardTransfer.transferId,amountUsd:5,sourceExchangeShard:0,destinationExchangeShard:2});
+      await saveRealTradeState(env,state);
+      return json({ok:true,state:"KALSHI_SHARD_TRANSFER_REQUEST_ACCEPTED",transferId:state.shardTransfer.transferId,amountUsd:5,fromExchangeIndex:0,toExchangeIndex:2,orderCreated:false,tradeAuthorizationChanged:false,next:"VERIFY BALANCE BEFORE REARMING"});
+    }
+
     if (request.method !== "GET") {
       return json({
         ok: false,
@@ -2657,39 +2690,6 @@ export default {
         return json({ok:false,readOnly:true,state:"KALSHI_SHARD_ALLOCATION_PROOF_FAILED",errorCode:String(error?.message||"FAILED"),
           safety:{providerWrites:0,transfers:0,orders:0,reauthorizations:0,stateMutation:false,realMoneyMoved:false}},500);
       }
-    }
-
-    if (url.pathname === "/kalshi-approved-5-dollar-shard-transfer") {
-      if(request.method==="GET"){
-        const state=await loadRealTradeState(env);
-        const already=state?.shardTransfer?.transferId||null;
-        return new Response("<!doctype html><meta name=viewport content='width=device-width'><title>Approved $5 Kalshi Shard Transfer</title><body style='font-family:system-ui;background:#07111d;color:#eef;padding:24px;max-width:720px;margin:auto'><h2>Approved $5 Internal Kalshi Transfer</h2><p>Exact action: move <b>$5.00</b> from exchange index <b>0</b> to exchange index <b>2</b>. No order is created and no trade authorization is changed.</p>"+(already?"<p><b>BLOCKED:</b> transfer already recorded as "+String(already).replace(/[&<>]/g,"")+"</p>":"<form method=post><input type=hidden name=confirm value='APPROVE $5 SHARD TRANSFER 0→2'><button style='font-size:18px;padding:14px 20px' type=submit>Execute approved $5 transfer</button></form>")+"<p>This endpoint is one-shot and rechecks live balances before sending.</p></body>",{headers:{"content-type":"text/html;charset=utf-8","cache-control":"no-store"}});
-      }
-      if(request.method!=="POST") return json({ok:false,error:"METHOD_NOT_ALLOWED"},405);
-      const state=await loadRealTradeState(env);
-      if(state?.shardTransfer?.transferId) return json({ok:false,state:"TRANSFER_ALREADY_RECORDED",transferId:state.shardTransfer.transferId},409);
-
-      // Reconcile live balances immediately before the only allowed money-moving POST.
-      const br=await kalshiExecutionGet(env,"/trade-api/v2/portfolio/balance");
-      let bb={}; try{bb=await br.json();}catch{}
-      if(!br.ok) return json({ok:false,state:"PRE_TRANSFER_BALANCE_READ_FAILED",httpStatus:br.status,body:bb},502);
-      const rows=Array.isArray(bb?.balance_breakdown)?bb.balance_breakdown:[];
-      const map=Object.fromEntries(rows.map(x=>[String(x?.exchange_index),Number(x?.balance)]));
-      const source=map["0"], destination=map["2"];
-      if(!(Number.isFinite(source)&&Number.isFinite(destination)&&source===10&&destination===0)){
-        return json({ok:false,state:"TRANSFER_PRECONDITION_FAILED",observed:{index0:source,index2:destination,totalBalance:bb?.balance??null},expected:{index0:10,index2:0}},409);
-      }
-
-      const payload={source:"event_contract",destination:"event_contract",amount:50000,source_exchange_shard:0,destination_exchange_shard:2,source_subaccount:0,destination_subaccount:0};
-      const tr=await kalshiApprovedShardTransfer(env,payload);
-      let tb={}; try{tb=await tr.json();}catch{}
-      if(!tr.ok || !tb?.transfer_id){
-        return json({ok:false,state:"TRANSFER_PROVIDER_REJECTED",httpStatus:tr.status,providerResponse:tb,preTransfer:{index0:source,index2:destination},moneyMoveAttempted:true},502);
-      }
-      state.shardTransfer={transferId:String(tb.transfer_id),acceptedAt:Date.now(),amountCenticents:50000,amountUsd:5,sourceExchangeShard:0,destinationExchangeShard:2,status:"REQUEST_ACCEPTED_AWAITING_BALANCE_PROOF"};
-      realTradeLedger(state,"KALSHI_SHARD_TRANSFER_ACCEPTED",{transferId:state.shardTransfer.transferId,amountUsd:5,sourceExchangeShard:0,destinationExchangeShard:2});
-      await saveRealTradeState(env,state);
-      return json({ok:true,state:"KALSHI_SHARD_TRANSFER_REQUEST_ACCEPTED",transferId:state.shardTransfer.transferId,amountUsd:5,fromExchangeIndex:0,toExchangeIndex:2,orderCreated:false,tradeAuthorizationChanged:false,next:"VERIFY BALANCE BEFORE REARMING"});
     }
 
     if (url.pathname === "/kalshi-shard-transfer-readiness") {
