@@ -731,40 +731,41 @@ function estimateKalshiFeeSafeSize(price, maxStakeUsd) {
   return {ok:false,reason:"NO_CONTRACT_FITS_PREMIUM_PLUS_FEE_CAP",count:0,premiumUsd:0,feeUsd:0,totalDebitUsd:0,maxStakeUsd:cap,executionAllowed:false};
 }
 async function discoverKalshi15mSeriesFromOpenMarkets(env, wantedAssets) {
-  const found={};
-  const paths=[
-    "/trade-api/v2/markets?status=open&limit=100",
-    "/trade-api/v2/markets?status=open&limit=100&cursor="
-  ];
-  let cursor="", pages=0;
-  while(pages<12) {
+  const found={}, evidence=Object.fromEntries(wantedAssets.map(a=>[a,{textMatches:0,durationMatches:0,seriesTickers:[]}]));
+  let cursor="", pages=0, scanned=0, reachedEnd=false, readError=null;
+  // Exhaust the provider cursor (bounded only by a high safety ceiling) so "not found"
+  // means the catalogue was actually traversed rather than only the first 2,400 rows.
+  while(pages<100) {
     const path="/trade-api/v2/markets?status=open&limit=200"+(cursor?"&cursor="+encodeURIComponent(cursor):"");
-    let r; try{r=await kalshiShadowGet(env,path);}catch{break;}
-    if(!r.ok) break;
+    let r; try{r=await kalshiShadowGet(env,path);}catch{readError="NETWORK_OR_SIGNING_READ_FAILED";break;}
+    if(!r.ok){readError="MARKETS_READ_FAILED_"+r.status;break;}
     const data=await r.json();
     const markets=Array.isArray(data?.markets)?data.markets:[];
+    scanned+=markets.length;
     for(const m of markets){
-      const title=String(m?.title||"").toUpperCase();
-      const subtitle=String(m?.subtitle||"").toUpperCase();
-      const ticker=String(m?.ticker||"").toUpperCase();
-      const seriesTicker=String(m?.series_ticker||m?.seriesTicker||"").toUpperCase();
+      const title=String(m?.title||"").toUpperCase(), subtitle=String(m?.subtitle||"").toUpperCase();
+      const ticker=String(m?.ticker||"").toUpperCase(), seriesTicker=String(m?.series_ticker||m?.seriesTicker||"").toUpperCase();
       const text=title+" "+subtitle+" "+ticker+" "+seriesTicker;
+      const open=Date.parse(m?.open_time||""), close=Date.parse(m?.close_time||"");
+      const duration=Number.isFinite(open)&&Number.isFinite(close)?close-open:null;
+      const durationMatch=duration!==null&&duration>=10*60*1000&&duration<=20*60*1000;
+      const shortText=/15\s*(MIN|MINUTE)|15M/.test(text);
       for(const asset of wantedAssets){
-        if(found[asset]) continue;
         const assetMatch=new RegExp("(^|[^A-Z])"+asset+"([^A-Z]|$)").test(text);
-        const open=Date.parse(m?.open_time||""), close=Date.parse(m?.close_time||"");
-        const duration=Number.isFinite(open)&&Number.isFinite(close)?close-open:null;
-        const durationMatch=duration!==null&&duration>=10*60*1000&&duration<=20*60*1000;
-        const shortText=/15\s*(MIN|MINUTE)|15M/.test(text);
-        if(assetMatch&&(durationMatch||shortText)&&seriesTicker){
+        if(!assetMatch) continue;
+        evidence[asset].textMatches++;
+        if(durationMatch||shortText) evidence[asset].durationMatches++;
+        if(seriesTicker&&!evidence[asset].seriesTickers.includes(seriesTicker)&&evidence[asset].seriesTickers.length<8) evidence[asset].seriesTickers.push(seriesTicker);
+        if(!found[asset]&&(durationMatch||shortText)&&seriesTicker){
           found[asset]={ticker:seriesTicker,title:m?.title||"",frequency:"15m",settlementSources:[],dynamicallyResolved:true,discoveredFrom:"OPEN_MARKET_CATALOGUE"};
         }
       }
     }
-    cursor=String(data?.cursor||"");
-    pages++;
-    if(!cursor||Object.keys(found).length>=wantedAssets.length) break;
+    cursor=String(data?.cursor||""); pages++;
+    if(!cursor){reachedEnd=true;break;}
+    if(Object.keys(found).length>=wantedAssets.length) break;
   }
+  Object.defineProperty(found,"_proof",{value:{pages,scanned,reachedEnd,readError,evidence},enumerable:false});
   return found;
 }
 
@@ -791,6 +792,7 @@ async function resolveKalshi15mSeries(env, priorSeries=[]) {
   });
   const unresolvedAssets=Object.keys(wanted).filter(asset=>!catalogueHas15m(asset) && !priorByAsset[asset]);
   const marketDiscovered=unresolvedAssets.length ? await discoverKalshi15mSeriesFromOpenMarkets(env,unresolvedAssets) : {};
+  const discoveryProof=marketDiscovered?._proof||{pages:0,scanned:0,reachedEnd:true,readError:null,evidence:{}};
   const resolved=[];
   for(const [asset,meta] of Object.entries(wanted)) {
     const exact=rows.find(s=>{
@@ -822,7 +824,8 @@ async function resolveKalshi15mSeries(env, priorSeries=[]) {
       dynamicallyResolved,
       discoveredFrom: exact?.ticker?"SERIES_CATALOGUE":prior?.discoveredFrom||marketFound?.discoveredFrom||(fallback?"KNOWN_VALIDATED_FALLBACK":null),
       metadataReady,
-      executionEligible:(asset==="BTC"||asset==="ETH") ? Boolean(chosenTicker) : metadataReady
+      executionEligible:(asset==="BTC"||asset==="ETH") ? Boolean(chosenTicker) : metadataReady,
+      discoveryProof: discoveryProof?.evidence?.[asset] ? {...discoveryProof.evidence[asset],pages:discoveryProof.pages,scanned:discoveryProof.scanned,reachedEnd:discoveryProof.reachedEnd,readError:discoveryProof.readError} : null
     });
   }
   return resolved;
@@ -3019,7 +3022,7 @@ export default {
         seenCount: Number(refreshed?.seenCount || 0),
         rejectedCount: Number(refreshed?.rejectedCount || 0),
         coverage: refreshed?.assetCoverage || null,
-        seriesResolution: (refreshed?.kalshiSeriesCache||[]).map(s=>({asset:s.asset,ticker:s.ticker||null,title:s.title||null,frequency:s.frequency||null,dynamicallyResolved:Boolean(s.dynamicallyResolved),metadataReady:Boolean(s.metadataReady),executionEligible:Boolean(s.executionEligible),discoveredFrom:s.discoveredFrom||null})),
+        seriesResolution: (refreshed?.kalshiSeriesCache||[]).map(s=>({asset:s.asset,ticker:s.ticker||null,title:s.title||null,frequency:s.frequency||null,dynamicallyResolved:Boolean(s.dynamicallyResolved),metadataReady:Boolean(s.metadataReady),executionEligible:Boolean(s.executionEligible),discoveredFrom:s.discoveredFrom||null,discoveryProof:s.discoveryProof||null})),
         liveOrderSubmission: "DISABLED",
         realMoneyMoved: false
       };
