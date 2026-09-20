@@ -1163,6 +1163,17 @@ async function saveRealTradeState(env, state) {
   }
 }
 
+async function saveRealTradeStateIfChanged(env, state, beforeState) {
+  const comparable = (value) => {
+    const copy = JSON.parse(JSON.stringify(value || {}));
+    delete copy.updatedAt;
+    return JSON.stringify(copy);
+  };
+  if (comparable(state) === comparable(beforeState)) return false;
+  await saveRealTradeState(env, state);
+  return true;
+}
+
 function realTradeLedger(state, type, payload = {}) {
   state.ledger = Array.isArray(state.ledger) ? state.ledger : [];
   state.ledger.unshift({ ts: new Date().toISOString(), type, ...payload });
@@ -1255,11 +1266,13 @@ function hasOpposingUnderlyingPosition(shadow, candidate) {
 // the controller switch and an unexpired persisted Founder one-trade authorization exist.
 async function maybeRunKalshiOneTrade(env) {
   const state=await loadRealTradeState(env);
+  const persistedState=JSON.parse(JSON.stringify(state));
+  const persistIfChanged=()=>saveRealTradeStateIfChanged(env,state,persistedState);
   const now=Date.now();
 
   if(state.consumed) {
     state.status="ONE_TRADE_COMPLETE";
-    await saveRealTradeState(env,state);
+    await persistIfChanged();
     return state;
   }
   // Once a provider submission latch exists, never overwrite its failure/reconciliation
@@ -1268,14 +1281,14 @@ async function maybeRunKalshiOneTrade(env) {
     if(state.entryProviderStatus!=null) state.status="BLOCKED_ENTRY_PROVIDER_REJECTED";
     else if(state.entryWriteError) state.status="BLOCKED_ENTRY_WRITE_ERROR";
     else if(!String(state.status||"").startsWith("BLOCKED_ENTRY_") && state.status!=="BLOCKED_V2_REQUEST_BUILD") state.status="BLOCKED_ENTRY_RECONCILIATION";
-    await saveRealTradeState(env,state);
+    await persistIfChanged();
     return state;
   }
   // Founder authorization gates the single ENTRY only. Once an entry exists,
   // the exact filled position remains under managed reduce-only exit control.
   if(!state.entryOrderId && !kalshiOneTradeEnabled(env,state)) {
     state.status="KALSHI_READY_HARD_DISABLED";
-    await saveRealTradeState(env,state);
+    await persistIfChanged();
     return state;
   }
   if(!env?.BASELINE_REAL_SHADOW_STATE) {
@@ -1286,7 +1299,7 @@ async function maybeRunKalshiOneTrade(env) {
   const shadow=await loadShadowState(env);
   if(!shadow?.assetCoverageReady || shadow?.status!=="LIVE_KALSHI_SHADOW") {
     state.status="HOLD_LIVE_KALSHI_COVERAGE_REQUIRED";
-    await saveRealTradeState(env,state);
+    await persistIfChanged();
     return state;
   }
 
@@ -1294,7 +1307,7 @@ async function maybeRunKalshiOneTrade(env) {
   if(!state.entryOrderId) {
     if(state.entrySubmitStartedAt || state.status==="ENTRY_SUBMITTING" || state.status==="BLOCKED_ENTRY_RECONCILIATION") {
       state.status="BLOCKED_ENTRY_RECONCILIATION";
-      await saveRealTradeState(env,state);
+      await persistIfChanged();
       return state;
     }
     const qualifyingCandidates=(shadow.opportunities||[]).filter(o =>
@@ -1307,19 +1320,19 @@ async function maybeRunKalshiOneTrade(env) {
     const candidate=qualifyingCandidates.slice().sort((a,b)=>Number(b?.score||0)-Number(a?.score||0))[0]||null;
     if(!candidate) {
       state.status="SHADOW_WAITING_FOR_SIGNAL";
-      await saveRealTradeState(env,state);
+      await persistIfChanged();
       return state;
     }
     if(hasOpposingUnderlyingPosition(shadow,candidate)) {
       state.status="BLOCKED_OPPOSING_POSITION";
-      await saveRealTradeState(env,state);
+      await persistIfChanged();
       return state;
     }
 
     const sizing=estimateKalshiFeeSafeSize(candidate.yes,REAL_TEST_CONFIG.maxStakeUsd);
     if(!sizing.ok || sizing.totalDebitUsd>REAL_TEST_CONFIG.maxStakeUsd || sizing.count<1) {
       state.status="BLOCKED_FEE_SAFE_SIZE";
-      await saveRealTradeState(env,state);
+      await persistIfChanged();
       return state;
     }
 
@@ -1327,7 +1340,7 @@ async function maybeRunKalshiOneTrade(env) {
     const br=await kalshiExecutionGet(env,"/trade-api/v2/portfolio/balance");
     if(!br.ok) {
       state.status="BLOCKED_EXECUTION_BALANCE_READ";
-      await saveRealTradeState(env,state);
+      await persistIfChanged();
       return state;
     }
     const balance=await br.json();
@@ -1350,7 +1363,7 @@ async function maybeRunKalshiOneTrade(env) {
         passed:false
       };
       realTradeLedger(state,"CANDIDATE_SHARD_BALANCE_PREFLIGHT_BLOCKED",state.executionBalancePreflight);
-      await saveRealTradeState(env,state);
+      await persistIfChanged();
       return state;
     }
     state.executionBalancePreflight={
@@ -1376,7 +1389,7 @@ async function maybeRunKalshiOneTrade(env) {
         authorization:{oneTradeAuthorized:kalshiAuthorizationValid(state),scope:state?.founderAuthorization?.scope||null,authorizedAt:state?.founderAuthorization?.authorizedAt||null,expiresAt:state?.founderAuthorization?.expiresAt??null}
       },postTradeOutcomeEvidence:state?.firstRealTradeEvidence?.postTradeOutcomeEvidence||null};
       realTradeLedger(state,"FIRST_REAL_TRADE_DECISION_SNAPSHOT_CAPTURED",{marketTicker:candidate.marketTicker,asset:candidate.asset,score:safeFinite(candidate.score),exchangeIndex:candidate.exchangeIndex??null});
-      await saveRealTradeState(env,state);
+      await persistIfChanged();
     }
 
     // One-way latch BEFORE any provider write. A crash after this point blocks replay.
@@ -1400,19 +1413,19 @@ async function maybeRunKalshiOneTrade(env) {
       marketTicker:state.marketTicker,outcomeSide:state.outcomeSide,score:state.entryScore,exchangeIndex:state.exchangeIndex??null,
       count:state.entryCount,totalDebitCapUsd:state.entryTotalDebitCapUsd,clientOrderId:state.entryClientOrderId
     });
-    await saveRealTradeState(env,state);
+    await persistIfChanged();
 
     const dryEntry=kalshiV2EntryPayload(candidate,sizing,state.entryClientOrderId);
     if(!dryEntry) {
       state.status="BLOCKED_V2_REQUEST_BUILD";
-      await saveRealTradeState(env,state);
+      await persistIfChanged();
       return state;
     }
     // Consume the one-shot Founder authorization BEFORE the provider write.
     // From this point forward no second entry may be created from this authorization.
     state.founderAuthorization.consumed=true;
     state.founderAuthorization.consumedAt=Date.now();
-    await saveRealTradeState(env,state);
+    await persistIfChanged();
 
     let er;
     try {
@@ -1420,7 +1433,7 @@ async function maybeRunKalshiOneTrade(env) {
     } catch(e) {
       state.status="BLOCKED_ENTRY_WRITE_ERROR";
       state.entryWriteError=String(e?.message||e);
-      await saveRealTradeState(env,state);
+      await persistIfChanged();
       return state;
     }
     const entryBody=await er.json().catch(()=>({}));
@@ -1428,7 +1441,7 @@ async function maybeRunKalshiOneTrade(env) {
       state.status="BLOCKED_ENTRY_PROVIDER_REJECTED";
       state.entryProviderStatus=er.status;
       state.entryProviderResponse=entryBody;
-      await saveRealTradeState(env,state);
+      await persistIfChanged();
       return state;
     }
     const es=summarizeKalshiV2CreateResponse(entryBody);
@@ -1440,28 +1453,28 @@ async function maybeRunKalshiOneTrade(env) {
     state.entryFilledAt=Date.now();
     if(!state.entryOrderId) {
       state.status="BLOCKED_ENTRY_RESPONSE_MISSING_ORDER_ID";
-      await saveRealTradeState(env,state);
+      await persistIfChanged();
       return state;
     }
     if(!(state.filledCount>0)) {
       state.status="ONE_TRADE_ENTRY_NO_FILL_COMPLETE";
       state.consumed=true;
       realTradeLedger(state,"KALSHI_ENTRY_NO_FILL",{orderId:state.entryOrderId});
-      await saveRealTradeState(env,state);
+      await persistIfChanged();
       return state;
     }
     state.status="POSITION_OPEN";
     state.firstRealTradeEvidence=state.firstRealTradeEvidence||{};
     state.firstRealTradeEvidence.postTradeOutcomeEvidence={...(state.firstRealTradeEvidence.postTradeOutcomeEvidence||{}),entry:{submittedAt:state.entrySubmitStartedAt||null,orderId:state.entryOrderId||null,requestedPrice:state.entryObservedAsk??null,filledAt:state.entryFilledAt||null,actualFillPrice:state.entryAverageFillPrice??null,quantity:state.filledCount??null,entryFeeUsd:state.entryAverageFeePaid??null,status:"FILLED"},positionState:"OPEN"};
     realTradeLedger(state,"KALSHI_ENTRY_FILLED",{orderId:state.entryOrderId,filledCount:state.filledCount,averageFillPrice:state.entryAverageFillPrice});
-    await saveRealTradeState(env,state);
+    await persistIfChanged();
     return state;
   }
 
   // Manage only the exact quantity actually filled on entry.
   if(!(Number(state.filledCount)>0)) {
     state.status="BLOCKED_POSITION_WITHOUT_FILL";
-    await saveRealTradeState(env,state);
+    await persistIfChanged();
     return state;
   }
   const shadowNow=await loadShadowState(env);
@@ -1471,17 +1484,17 @@ async function maybeRunKalshiOneTrade(env) {
   const exitByTime=age>=REAL_TEST_CONFIG.maxHoldMs;
   if(!exitByScore&&!exitByTime) {
     state.status="POSITION_OPEN_WAITING_FOR_EXIT";
-    await saveRealTradeState(env,state);
+    await persistIfChanged();
     return state;
   }
   if(!current || !(Number(current.bid)>0.01) || !(Number(current.bid)<0.99)) {
     state.status="EXIT_REQUIRED_WAITING_FOR_LIVE_BID";
-    await saveRealTradeState(env,state);
+    await persistIfChanged();
     return state;
   }
   if(state.exitSubmitStartedAt && (now-Number(state.exitSubmitStartedAt))<KALSHI_ONE_TRADE_SAFETY.pendingOrderTimeoutMs) {
     state.status="BLOCKED_EXIT_RECONCILIATION";
-    await saveRealTradeState(env,state);
+    await persistIfChanged();
     return state;
   }
   if(state.exitSubmitStartedAt) state.exitSubmitStartedAt=null;
@@ -1491,7 +1504,7 @@ async function maybeRunKalshiOneTrade(env) {
     state.status="ONE_TRADE_COMPLETE";
     state.consumed=true;
     state.completedAt=Date.now();
-    await saveRealTradeState(env,state);
+    await persistIfChanged();
     return state;
   }
   state.exitAttempt=Number(state.exitAttempt||0)+1;
@@ -1499,11 +1512,11 @@ async function maybeRunKalshiOneTrade(env) {
   state.exitClientOrderId=kalshiClientOrderId(state,"exit"+state.exitAttempt);
   state.exitSubmitStartedAt=Date.now();
   state.exitReason=exitByScore?"SCORE_EXIT":"MAX_HOLD_EXIT";
-  await saveRealTradeState(env,state);
+  await persistIfChanged();
   const exitPayload=kalshiV2ExitPayload(state,current.bid,state.exitClientOrderId);
   if(!exitPayload) {
     state.status="BLOCKED_EXIT_REQUEST_BUILD";
-    await saveRealTradeState(env,state);
+    await persistIfChanged();
     return state;
   }
   // Managed exits do not reuse entry authorization. They are restricted to the
@@ -1514,7 +1527,7 @@ async function maybeRunKalshiOneTrade(env) {
     state.status="EXIT_WRITE_ERROR_RETRY_PENDING";
     state.exitWriteError=String(e?.message||e);
     state.exitSubmitStartedAt=null;
-    await saveRealTradeState(env,state);
+    await persistIfChanged();
     return state;
   }
   const exitBody=await xr.json().catch(()=>({}));
@@ -1523,7 +1536,7 @@ async function maybeRunKalshiOneTrade(env) {
     state.exitProviderStatus=xr.status;
     state.exitProviderResponse=exitBody;
     state.exitSubmitStartedAt=null;
-    await saveRealTradeState(env,state);
+    await persistIfChanged();
     return state;
   }
   const xs=summarizeKalshiV2CreateResponse(exitBody);
@@ -1547,7 +1560,7 @@ async function maybeRunKalshiOneTrade(env) {
     state.status="POSITION_OPEN_EXIT_RETRY_REQUIRED";
     realTradeLedger(state,"KALSHI_EXIT_PARTIAL",{orderId:state.exitOrderId,attempt:state.exitAttempt,filledThisAttempt:Number(xs.fillCount||0),remaining:state.exitRemainingCount});
   }
-  await saveRealTradeState(env,state);
+  await persistIfChanged();
   return state;
 }
 
