@@ -3264,6 +3264,33 @@ export default {
       return json(publicRealTradeView(await loadRealTradeState(env), env));
     }
 
+    if (url.pathname === "/failed-xrp-provider-reconciliation") {
+      try {
+        const state=await loadRealTradeState(env);
+        const ticker=String(state?.marketTicker||"").trim();
+        const clientOrderId=String(state?.entryClientOrderId||"").trim();
+        if(!ticker || !clientOrderId) return json({ok:false,readOnly:true,state:"RECONCILIATION_IDENTIFIERS_MISSING"},409);
+        const orderPath="/trade-api/v2/portfolio/orders?ticker="+encodeURIComponent(ticker)+"&limit=100";
+        const fillPath="/trade-api/v2/portfolio/fills?ticker="+encodeURIComponent(ticker)+"&limit=1000";
+        const [or,fr]=await Promise.all([kalshiExecutionGet(env,orderPath),kalshiExecutionGet(env,fillPath)]);
+        let ob={},fb={}; try{ob=await or.json();}catch{} try{fb=await fr.json();}catch{}
+        const orders=Array.isArray(ob?.orders)?ob.orders:[];
+        const fills=Array.isArray(fb?.fills)?fb.fills:[];
+        const clientOrders=orders.filter(x=>String(x?.client_order_id||"")===clientOrderId);
+        const clientOrderIds=new Set(clientOrders.map(x=>String(x?.order_id||"")).filter(Boolean));
+        const relatedFills=fills.filter(x=>clientOrderIds.has(String(x?.order_id||"")));
+        return json({
+          ok:or.ok&&fr.ok,readOnly:true,state:"FAILED_XRP_PROVIDER_RECONCILIATION",
+          local:{ticker,clientOrderId,entryOrderId:state?.entryOrderId||null,filledCount:Number(state?.filledCount||0),providerHttpStatus:state?.entryProviderStatus??null},
+          provider:{ordersHttpStatus:or.status,fillsHttpStatus:fr.status,matchingClientOrders:clientOrders,relatedFills},
+          reconciledNoOrderOrFill:or.ok&&fr.ok&&clientOrders.length===0&&relatedFills.length===0,
+          safety:{providerWrites:0,transfers:0,ordersCreated:0,reauthorizations:0,stateMutation:false,realMoneyMoved:false}
+        },or.ok&&fr.ok?200:502);
+      } catch(error) {
+        return json({ok:false,readOnly:true,state:"FAILED_XRP_PROVIDER_RECONCILIATION_FAILED",errorCode:String(error?.message||"FAILED"),safety:{providerWrites:0,transfers:0,ordersCreated:0,reauthorizations:0,stateMutation:false,realMoneyMoved:false}},500);
+      }
+    }
+
     if (url.pathname === "/first-entry-failure-proof") {
       const state=await loadRealTradeState(env);
       return json({
