@@ -1030,13 +1030,40 @@ function firstTradeEvidenceStage(state){
 }
 function publicFirstTradeEvidence(state){
   const e=state?.firstRealTradeEvidence||{};
-  return {stage:firstTradeEvidenceStage(state),preTradeDecisionSnapshot:e.preTradeDecisionSnapshot||null,postTradeOutcomeEvidence:e.postTradeOutcomeEvidence||null,chain:{
+  return {stage:firstTradeEvidenceStage(state),preTradeDecisionSnapshot:e.preTradeDecisionSnapshot||null,postTradeOutcomeEvidence:e.postTradeOutcomeEvidence||null,postTradeResearchReview:e.postTradeResearchReview||null,chain:{
     discovered:Boolean(e.preTradeDecisionSnapshot),qualified:Boolean(e.preTradeDecisionSnapshot?.qualification?.score>=REAL_TEST_CONFIG.entryScore),
     compared:Array.isArray(e.preTradeDecisionSnapshot?.eligibleCandidatesConsidered),selected:Boolean(e.preTradeDecisionSnapshot?.selected),
     authorized:Boolean(e.preTradeDecisionSnapshot?.authorization?.oneTradeAuthorized),submitted:Boolean(state?.entrySubmitStartedAt),
     filled:Number(state?.filledCount||0)>0,exitedOrSettled:Boolean(state?.consumed),
     accounted:e.postTradeOutcomeEvidence?.resultingCashBalanceUsd!=null
   }};
+}
+function buildPostTradeResearchReview(state){
+  const pre=state?.firstRealTradeEvidence?.preTradeDecisionSnapshot;
+  const post=state?.firstRealTradeEvidence?.postTradeOutcomeEvidence;
+  if(!pre||!post||!state?.consumed)return null;
+  const entry=safeFinite(post?.entry?.actualFillPrice);
+  const exit=safeFinite(post?.exit?.averageFillPrice);
+  const qty=safeFinite(post?.exit?.filledCount??post?.entry?.quantity);
+  const entryFee=safeFinite(post?.entry?.entryFeeUsd)||0;
+  const exitFee=safeFinite(post?.exit?.exitFeeUsd)||0;
+  const gross=(entry!==null&&exit!==null&&qty!==null)?Number(((exit-entry)*qty).toFixed(4)):null;
+  const net=gross===null?null:Number((gross-entryFee-exitFee).toFixed(4));
+  const outcome=net===null?"ACCOUNTING_PENDING":net>0?"GAIN":net<0?"LOSS":"FLAT";
+  const observations=[];
+  if(post?.exit?.reason==="MAX_HOLD_EXIT") observations.push("Position reached the existing 5-minute maximum-hold boundary.");
+  if(post?.exit?.reason==="SCORE_EXIT") observations.push("Existing Baseline exit score condition triggered before maximum hold.");
+  if(entry!==null&&pre?.qualification?.observedAsk!=null&&Math.abs(entry-Number(pre.qualification.observedAsk))>0.0001) observations.push("Actual entry fill differed from the decision-time observed ask; execution slippage should be tracked.");
+  if((entryFee+exitFee)>0) observations.push("Real venue fees reduced realized result and should remain part of future paper-vs-real comparison.");
+  if(outcome==="LOSS") observations.push("Loss preserved as evidence; inspect pre-trade movement, edge, contract price and competing candidates without changing the frozen rule from this single result.");
+  if(outcome==="GAIN") observations.push("Gain preserved as evidence; do not infer profitability or tune the frozen rule from this single result.");
+  return {
+    schema:"BASELINE_REAL_POST_TRADE_RESEARCH_V1",generatedFromPreservedEvidence:true,
+    strategyMutationAuthorized:false,outcome,grossPnlUsd:gross,totalRecordedFeesUsd:Number((entryFee+exitFee).toFixed(4)),netPnlUsd:net,
+    observations,
+    futureShadowHypotheses:observations.map((x,i)=>({id:i+1,hypothesis:x,status:"PROSPECTIVE_TEST_REQUIRED",mayChangeBaseline:false})),
+    learningRule:"RECORD -> COMPARE BEFORE/AFTER -> FORM HYPOTHESIS -> TEST ON FUTURE SHADOW/PAPER DATA -> FOUNDER REVIEW BEFORE ANY STRATEGY CHANGE"
+  };
 }
 
 function realTradeArmed(env) {
@@ -1327,6 +1354,8 @@ async function maybeRunKalshiOneTrade(env) {
     state.firstRealTradeEvidence=state.firstRealTradeEvidence||{};
     state.firstRealTradeEvidence.postTradeOutcomeEvidence={...(state.firstRealTradeEvidence.postTradeOutcomeEvidence||{}),exit:{orderId:state.exitOrderId||null,reason:state.exitReason||null,filledCount:state.exitFilledTotal??null,averageFillPrice:state.exitAverageFillPrice??null,exitFeeUsd:state.exitAverageFeePaid??null,completedAt:new Date(state.completedAt).toISOString()},positionState:"CLOSED",realizedPnlUsd:null,resultingCashBalanceUsd:null,accountingStatus:"WAITING_FOR_FINAL_BALANCE_RECONCILIATION"};
     realTradeLedger(state,"KALSHI_EXIT_FILLED",{orderId:state.exitOrderId,reason:state.exitReason,filledCount:state.exitFilledTotal});
+    state.firstRealTradeEvidence.postTradeResearchReview=buildPostTradeResearchReview(state);
+    realTradeLedger(state,"POST_TRADE_RESEARCH_REVIEW_CREATED",{outcome:state.firstRealTradeEvidence.postTradeResearchReview?.outcome||"ACCOUNTING_PENDING",strategyMutationAuthorized:false});
   } else {
     state.status="POSITION_OPEN_EXIT_RETRY_REQUIRED";
     realTradeLedger(state,"KALSHI_EXIT_PARTIAL",{orderId:state.exitOrderId,attempt:state.exitAttempt,filledThisAttempt:Number(xs.fillCount||0),remaining:state.exitRemainingCount});
@@ -1707,6 +1736,20 @@ function dashboardHtml() {
     <div id="evSummary" class="notice">Waiting for a naturally occurring qualifying decision. No evidence is fabricated before it exists.</div>
   </details>
 
+  <details class="card section" open><summary><b>Trade Ledger + Post-Trade Research Review</b> · evidence first · strategy frozen</summary>
+    <div class="rows" style="margin-top:10px">
+      <div class="row"><span>Trade specimen</span><strong id="reviewTrade">WAITING FOR FIRST REAL TRADE</strong></div>
+      <div class="row"><span>Outcome</span><strong id="reviewOutcome">NOT YET OCCURRED</strong></div>
+      <div class="row"><span>Gross P/L</span><strong id="reviewGross">—</strong></div>
+      <div class="row"><span>Recorded fees</span><strong id="reviewFees">—</strong></div>
+      <div class="row"><span>Net P/L</span><strong id="reviewNet">—</strong></div>
+      <div class="row"><span>Learning status</span><strong id="reviewLearning">WAITING</strong></div>
+      <div class="row"><span>Strategy changes</span><strong class="warn">NOT AUTHORIZED</strong></div>
+    </div>
+    <div id="reviewLessons" class="notice">After the first completed trade, this area will compare immutable BEFORE evidence with AFTER execution evidence, record gains/losses and execution effects, and produce hypotheses for future shadow/paper testing. It does not modify Baseline automatically.</div>
+    <div id="tradeLedgerRows" class="rows" style="margin-top:8px"><div class="row"><span>Ledger</span><strong>WAITING</strong></div></div>
+  </details>
+
   <details class="card section"><summary><b>Setup / Validation Proof</b> · completed evidence</summary>
     <div style="margin-top:8px">
       <div class="gate"><span>1. Secure API credentials</span><strong class="good">PASS</strong></div>
@@ -1794,6 +1837,1071 @@ async function load(){
     const evSummary=E('evSummary');if(evSummary&&pre)evSummary.textContent='BEFORE SNAPSHOT LOCKED · '+(pre.selected?.asset||'')+' · '+(pre.selected?.marketTicker||'')+' · '+(pre.selected?.side||'')+' · score '+Number(pre.qualification?.score||0).toFixed(2)+' · captured '+(pre.capturedAt||'');
     E('realConsumed').textContent=realTrade?.consumed?'YES · COMPLETE':'NO';
     E('realConsumed').className=realTrade?.consumed?'good':'';
+    const review=ev?.postTradeResearchReview||null,post=ev?.postTradeOutcomeEvidence||null;
+    const moneyOrDash=v=>Number.isFinite(Number(v))?'
+    if(authBtn){
+      if(managedPosition){authBtn.textContent='POSITION UNDER GOVERNED EXIT';authBtn.disabled=true;}
+      else if(armed){authBtn.textContent='ONE TRADE AUTHORIZED · WAITING';authBtn.disabled=true;}
+      else if(realTrade?.consumed){authBtn.textContent='ONE-TRADE TEST COMPLETE';authBtn.disabled=true;}
+    }
+    if(managedPosition){
+      statusDot.className='dot good';
+      statusText.innerHTML='<b>AUTHENTICATED · GOVERNED POSITION OPEN</b>';
+      statusSub.textContent='Entry authorization is consumed. Exact reduce-only exit management remains active.';
+    }else if(armed){
+      statusDot.className='dot good';
+      statusText.innerHTML='<b>AUTHENTICATED · ONE-TRADE AUTO-SELECTION AUTHORIZED</b>';
+      statusSub.textContent='System is waiting for a validated BTC/ETH/SOL/XRP/HYPE opportunity at score ≥ .80.';
+    }
+    const moneyFmt=n=>Number(n).toLocaleString(undefined,{style:'currency',currency:'USD',maximumFractionDigits:2});
+    const pctFmt=n=>(Number(n)>=0?'+':'')+Number(n).toFixed(2)+'%';
+    const drawSpark=(id,points,change)=>{
+      const svg=E(id); if(!svg) return;
+      const vals=(Array.isArray(points)?points:[]).map(p=>Number(p.price)).filter(Number.isFinite);
+      if(vals.length<2){svg.innerHTML='';return;}
+      const lo=Math.min(...vals),hi=Math.max(...vals),span=(hi-lo)||1;
+      const coords=vals.map((v,i)=>((i/(vals.length-1))*100).toFixed(2)+','+(28-((v-lo)/span)*26).toFixed(2)).join(' ');
+      svg.className='spark '+(Number(change)>=0?'good':'bad');
+      svg.innerHTML='<line class="base" x1="0" y1="28" x2="100" y2="28"></line><polyline points="'+coords+'"></polyline>';
+    };
+    if(prices?.ok){
+      for(const a of ['btc','eth','sol','xrp','hype']){
+        const p=prices?.[a], priceEl=E(a+'Price'), changeEl=E(a+'Change');
+        if(p && Number.isFinite(Number(p.current))){
+          priceEl.textContent=moneyFmt(p.current);
+          changeEl.textContent=pctFmt(p.changePct);
+          changeEl.className='marketChange '+(p.changePct>=0?'good':'bad');
+          drawSpark(a+'Chart',p.points,p.changePct);
+        }else{
+          priceEl.textContent='UNAVAILABLE'; changeEl.textContent='—';
+        }
+      }
+    }else{
+      for(const a of ['btc','eth','sol','xrp','hype']) E(a+'Price').textContent='UNAVAILABLE';
+    }
+    E('shadowRuntime').textContent=shadowLive?(Number(shadow.eligibleCount||0)>0?'LIVE':'LIVE · NO ELIGIBLE SHORT-HORIZON MARKETS'):(shadow.status||'UNKNOWN');E('shadowRuntime').className=shadowLive?'good':'warn';
+    E('shadowStarted').textContent=shadow.startedAt?new Date(shadow.startedAt).toLocaleString():'NOT STARTED';
+    E('shadowLast').textContent=shadow.lastRunAt?new Date(shadow.lastRunAt).toLocaleString():'—';
+    E('shadowRuns').textContent=String(shadow.runs||0);E('shadowEligible').textContent=String(shadow.eligibleCount||0);E('shadowPersistence').textContent=shadow.persistence||'—';
+    E('shadowGov').textContent=shadowLive?'LIVE':'NOT STARTED';E('shadowGov').className=shadowLive?'good':'';
+    E('gateShadow').textContent=shadowLive?'PASS · LIVE US SHADOW':'NOT STARTED';E('gateShadow').className=shadowLive?'good':'';
+    E('moneyDeposit').textContent=money.depositActivity||'NOT PROVEN';E('moneyBuyingPower').textContent=money.buyingPower||'NOT PROVEN';E('moneyClearing').textContent=money.fundsClearing||'NOT PROVEN';E('moneyBalance').textContent=money.fundedBalance||'NOT PROVEN';E('moneyEligible').textContent=money.withdrawalEligibility||'NOT PROVEN';E('moneyWithdrawal').textContent=money.withdrawalActivity||'NOT PROVEN';E('moneyLoop').textContent=money.cashOutLoop||'NOT PROVEN';
+    creds.textContent=status?.credentials?.keyIdInstalled&&status?.credentials?.secretInstalled?'INSTALLED':'MISSING';
+    creds.className=creds.textContent==='INSTALLED'?'good':'bad';gatePreview.textContent=preview?.ok&&preview?.submitted===false?'PASS · NO SUBMISSION':((preview?.diagnostic?.category||preview?.state||'NOT PROVEN')+(preview?.diagnostic?.httpStatus?' · HTTP '+preview.diagnostic.httpStatus:'')+(!preview?.ok&&preview?.discovery?(' · SEARCH:'+String(preview.discovery.searchEvents??preview.discovery.eventsScanned??'?')+' CRYPTO:'+String(preview.discovery.cryptoEvents??'?')+' CAND:'+String(preview.discovery.candidates??'?')+(Array.isArray(preview.discovery.marketEvidence)&&preview.discovery.marketEvidence.length?' · BOOKS:'+preview.discovery.marketEvidence.map(x=>String(x.state||'?').replace('MARKET_STATE_','')+' B'+x.bids+' O'+x.offers).join(','):'') ):''));gatePreview.className=preview?.ok&&preview?.submitted===false?'good':'m';
+    if(account.ok&&account.accountConnection==='VERIFIED'){
+      conn.textContent='VERIFIED';conn.className='val good';connSub.textContent='Authenticated read-only Kalshi API connection.';
+      gateAccount.textContent='PASS';gateAccount.className='good';statusDot.className='dot';statusText.innerHTML='<b class="good">AUTHENTICATED READ-ONLY · VERIFIED</b>';
+      const a=account.account||{};
+      if(a.fundedRecordPresent){
+        bal.textContent='$10.00';balSub.textContent='REAL EXPERIMENT BANKROLL · funded proof complete · provider account amounts remain private';gateBalance.textContent='AVAILABLE';gateBalance.className='good';
+      }else if(a.noBalanceRecord){
+        bal.textContent='$0.00*';balSub.textContent='No funded balance record returned. *Unfunded display only; not withdrawal proof.';gateBalance.textContent='NO FUNDED RECORD';gateBalance.className='m';
+      }else{bal.textContent='NOT AVAILABLE';balSub.textContent='Authenticated, but balance response was not recognized.';}
+    }else{
+      conn.textContent='NOT VERIFIED';conn.className='val bad';connSub.textContent='Authenticated account proof is unavailable. See /account for safe diagnostic state.';gateAccount.textContent='FAILED';gateAccount.className='bad';bal.textContent='UNAVAILABLE';statusDot.className='dot bad';statusText.innerHTML='<b class="bad">ACCOUNT PROOF NOT VERIFIED</b>';
+    }
+    const opps=Array.isArray(shadow?.opportunities)?shadow.opportunities:[],parts=[];
+    const cov=shadow?.assetCoverage||{};
+    const coverageReady=Boolean(shadow?.assetCoverageReady);
+    const coverageAssets=['BTC','ETH','SOL','XRP','HYPE'];
+    const coverageText=coverageAssets.map(a=>a+': '+Number(cov?.[a]?.eligible||0)+' eligible · '+Number(cov?.[a]?.up||0)+' up · '+Number(cov?.[a]?.down||0)+' down'+(cov?.[a]?.executionEligible?' · VALIDATED':' · DISCOVERY HOLD')).join(' &nbsp; | &nbsp; ');
+    parts.push('<div class="opp" style="grid-column:1/-1"><div class="oppHead"><div class="q">LIVE ASSET COVERAGE · 5-ASSET OBSERVATION</div><div class="tag '+(coverageReady?'good':'warn')+'">'+(coverageReady?'5-ASSET AUTO-SELECTION READY':'FIRST TRADE HOLD')+'</div></div><div class="meta">'+coverageText+(coverageReady?'':' · Controller will not submit the first real order until BTC and ETH are discovered live.')+'</div></div>');
+    if(!opps.length){
+      parts.push('<div class="opp" style="grid-column:1/-1"><div class="oppHead"><div class="q">SHORT-HORIZON SCAN COMPLETE</div><div class="tag good">LIVE · VALID ZERO RESULT</div></div><div class="meta">No eligible BTC/ETH/SOL/XRP/HYPE 15-minute opportunities were found in this successful Kalshi Shadow observation. Baseline remains waiting for the next live contract window.</div></div>');
+    } else {
+      for(const o of opps){
+        const ask=Number(o.observedAsk),bid=Number(o.observedBid),score=Number(o.score),move=Number(o.move),edge=Number(o.edge);
+        const qualifies=Number.isFinite(score)&&score>=0.80&&edge>0;
+        const horizon=esc(o.horizon||'UNCLASSIFIED');
+        parts.push('<div class="opp"><div class="oppHead"><div class="q">'+esc(o.question||o.slug||'US market')+'</div><div class="oppBadges"><div class="tag">'+horizon+'</div><div class="scoreBadge '+(qualifies?'hot':'')+'"><small>SCORE</small><strong>'+(Number.isFinite(score)?score.toFixed(2):'—')+'</strong></div><div class="tag">'+esc(o.asset||'')+' · '+((o.executionEligible===true)?(qualifies?'QUALIFIED ≥ .80':'AUTO SELECT ELIGIBLE'):'DISCOVERY HOLD')+'</div></div></div><div class="meta">'+
+          (Number.isFinite(move)?('move '+(move*100).toFixed(3)+'% · '):'')+
+          (Number.isFinite(ask)?('ASK '+(ask*100).toFixed(1)+'¢ · '):'')+
+          (Number.isFinite(bid)?('BID '+(bid*100).toFixed(1)+'¢ · '):'')+
+          (Number.isFinite(edge)?('edge '+(edge*100).toFixed(3)+'% · '):'')+
+          'SHADOW ONLY</div></div>');
+      }
+    }
+    markets.innerHTML=parts.join('');
+
+    const contractPool=E('contractPool');
+    if(contractPool){
+      const lanes=[];
+      for(const asset of coverageAssets){
+        const assetOpps=opps.filter(o=>String(o?.asset||'')===asset);
+        const cv=cov?.[asset]||{};
+        let body='';
+        if(assetOpps.length){
+          body=assetOpps.map(o=>{
+            const score=Number(o.score),ask=Number(o.observedAsk),bid=Number(o.observedBid),edge=Number(o.edge);
+            const qualifies=Number.isFinite(score)&&score>=0.80&&edge>0;
+            return '<div class="meta" style="padding:5px 0;border-top:1px solid rgba(255,255,255,.07)"><b>'+esc(o.direction||o.outcomeSide||'CONTRACT')+'</b> · '+esc(o.marketTicker||o.slug||'')+
+              ' · '+(Number.isFinite(ask)?'ASK '+(ask*100).toFixed(1)+'¢':'ASK —')+
+              ' · '+(Number.isFinite(bid)?'BID '+(bid*100).toFixed(1)+'¢':'BID —')+
+              ' · SCORE '+(Number.isFinite(score)?score.toFixed(2):'—')+
+              (qualifies?' · <span class="good">QUALIFIED ≥ .80</span>':'')+'</div>';
+          }).join('');
+        }else{
+          body='<div class="meta" style="padding-top:6px">Waiting for a live validated 15-minute '+asset+' contract. Lane is already reserved and will populate automatically when discovery succeeds.</div>';
+        }
+        lanes.push('<div class="opp"><div class="oppHead"><div class="q">'+asset+'</div><div class="tag '+(cv.executionEligible?'good':'warn')+'">'+(cv.executionEligible?'VALIDATED':'DISCOVERY HOLD')+'</div></div>'+
+          '<div class="meta">'+Number(cv.eligible||0)+' eligible · '+Number(cv.up||0)+' up · '+Number(cv.down||0)+' down</div>'+body+'</div>');
+      }
+      contractPool.innerHTML=lanes.join('');
+    }
+  }catch{
+    conn.textContent='CHECK FAILED';conn.className='val bad';connSub.textContent='Dashboard proof request failed; no secret details are displayed.';bal.textContent='UNAVAILABLE';statusDot.className='dot bad';statusText.innerHTML='<b class="bad">PROOF REFRESH FAILED</b>';markets.innerHTML='<div class="opp"><div class="meta">Market observation check failed.</div></div>';const cp=E('contractPool');if(cp)cp.innerHTML='<div class="opp"><div class="meta">Contract discovery refresh failed. Existing authorization remains unchanged.</div></div>';
+  }finally{
+    refresh.disabled=false;refresh.textContent='REFRESH PROOF · '+new Date().toLocaleTimeString();
+  }
+}
+async function refreshPrices(){
+  try{
+    const r=await fetch('/price-proof',{cache:'no-store'}),prices=await r.json();
+    if(!prices?.ok)return;
+    const moneyFmt=n=>Number(n).toLocaleString(undefined,{style:'currency',currency:'USD',maximumFractionDigits:2});
+    const pctFmt=n=>(Number(n)>=0?'+':'')+Number(n).toFixed(2)+'%';
+    const drawSpark=(id,points,change)=>{const svg=E(id);if(!svg)return;const vals=(Array.isArray(points)?points:[]).map(p=>Number(p.price)).filter(Number.isFinite);if(vals.length<2){svg.innerHTML='';return;}const lo=Math.min(...vals),hi=Math.max(...vals),span=(hi-lo)||1;const coords=vals.map((v,i)=>((i/(vals.length-1))*100).toFixed(2)+','+(28-((v-lo)/span)*26).toFixed(2)).join(' ');svg.className='spark '+(Number(change)>=0?'good':'bad');svg.innerHTML='<line class="base" x1="0" y1="28" x2="100" y2="28"></line><polyline points="'+coords+'"></polyline>';};
+    E('btcPrice').textContent=moneyFmt(prices.btc.current);E('btcChange').textContent=pctFmt(prices.btc.changePct);E('btcChange').className='marketChange '+(prices.btc.changePct>=0?'good':'bad');drawSpark('btcChart',prices.btc.points,prices.btc.changePct);
+    E('ethPrice').textContent=moneyFmt(prices.eth.current);E('ethChange').textContent=pctFmt(prices.eth.changePct);E('ethChange').className='marketChange '+(prices.eth.changePct>=0?'good':'bad');drawSpark('ethChart',prices.eth.points,prices.eth.changePct);
+  }catch{}
+}
+E('refresh').addEventListener('click',load);load();setInterval(refreshPrices,10000);
+</script>
+<script>
+async function authorizeOneBaselineTrade(){
+  if(!confirm("Authorize exactly ONE governed Baseline trade, maximum $5, only at score >= .80?")) return;
+  const r=await fetch("/kalshi-authorize-one-trade",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({authorization:"AUTHORIZE_ONE_TRADE_MAX_5_USD"})});
+  const j=await r.json();
+  alert(j.ok ? "AUTHORIZED: system will wait for one legitimate >= .80 signal; the authorization is consumed before that one entry write." : "NOT AUTHORIZED: "+(j.state||r.status));
+  location.reload();
+}
+</script></body></html>`;
+}
+export default {
+  async scheduled(event, env, ctx) {
+    ctx.waitUntil((async () => {
+      await runShadow(env);
+      // One-trade controller is invoked after fresh Shadow data, but remains inert unless
+      // the separate controller switch AND an unexpired persisted Founder authorization exist.
+      await maybeRunKalshiOneTrade(env);
+    })());
+  },
+
+  async fetch(request, env) {
+    const url = new URL(request.url);
+
+    if (request.method === "POST" && url.pathname === "/kalshi-authorize-one-trade") {
+      if(!kalshiControllerSwitchEnabled(env)) return json({ok:false,state:"CONTROLLER_SWITCH_HARD_DISABLED",armed:false,submitted:false,realMoneyMoved:false},423);
+      const state=await loadRealTradeState(env);
+      if(state?.consumed||state?.entryOrderId||state?.entrySubmitStartedAt) return json({ok:false,state:"ONE_TRADE_ALREADY_USED_OR_LATCHED",armed:false},409);
+      let body={}; try{body=await request.json();}catch{}
+      if(body?.authorization!=="AUTHORIZE_ONE_TRADE_MAX_5_USD") return json({ok:false,state:"EXPLICIT_AUTHORIZATION_PHRASE_REQUIRED",armed:false},400);
+      const now=Date.now();
+      state.founderAuthorization={authorized:true,authorizedAt:now,expiresAt:null,consumed:false,scope:"ONE_TRADE_MAX_5_USD"};
+      state.status="AUTHORIZED_WAITING_FOR_QUALIFYING_SIGNAL";
+      realTradeLedger(state,"FOUNDER_ONE_TRADE_AUTHORIZED",{scope:"ONE_TRADE_MAX_5_USD",expiresAt:state.founderAuthorization.expiresAt});
+      await saveRealTradeState(env,state);
+      return json({ok:true,state:state.status,armed:true,expiresAt:state.founderAuthorization.expiresAt,submitted:false,realMoneyMoved:false});
+    }
+
+    if (request.method !== "GET") {
+      return json({
+        ok: false,
+        error: "READ_ONLY_BUILD",
+        message: "Baseline Real currently exposes GET-only validation routes. Live order submission is not implemented.",
+      }, 405);
+    }
+
+    if (url.pathname === "/") return html(dashboardHtml());
+
+    if (url.pathname === "/health") {
+      return json({
+        ok: true,
+        service: "market-edge-baseline-real",
+        mode: "READ_ONLY_ACCOUNT_VERIFICATION",
+        liveOrderSubmission: "DISABLED",
+      });
+    }
+
+    if (url.pathname === "/status") return json(statusPayload(env));
+
+    if (url.pathname === "/account") {
+      const proof = await accountProof(env);
+      const status = proof.ok ? 200 : proof.state === "SECRET_FORMAT_INVALID" ? 422 : 502;
+      return json(proof, status);
+    }
+
+    if (url.pathname === "/markets") return json(await marketSnapshot());
+
+    // Temporary read-only Polymarket US catalogue proof for the requested
+    // short-horizon BTC/ETH instrument check. No preview or order submission.
+    if (url.pathname === "/crypto-short-horizon-proof") {
+      const client = new PolymarketUS();
+      const found = [];
+      let offset = 0, pages = 0, totalEvents = 0, reachedEnd = false;
+      while (pages < 50) {
+        let result;
+        try { result = await client.events.list({ active: true, limit: 100, offset }); }
+        catch { return json({ok:false,state:"EVENT_CATALOGUE_READ_FAILED",pages,totalEvents,submitted:false}); }
+        const events = Array.isArray(result?.events) ? result.events : [];
+        for (const event of events) {
+          totalEvents++;
+          const markets = Array.isArray(event?.markets) && event.markets.length ? event.markets : [null];
+          for (const market of markets) {
+            const text=[event?.title,event?.slug,event?.description,market?.title,market?.slug,market?.outcome].filter(Boolean).join(" — ");
+            const asset=/bitcoin|\bbtc\b/i.test(text)?"BTC":/ethereum|\beth\b|\bether\b/i.test(text)?"ETH":null;
+            if(!asset) continue;
+            const is15=/15\s*(?:min|minute)|15m\b|quarter[- ]?hour/i.test(text);
+            const intraday=is15||/\b(?:5|10|30|45|60)\s*(?:min|minute)|hourly|this hour|today|daily|intraday/i.test(text);
+            if(intraday) found.push({asset,is15,eventTitle:event?.title||null,eventSlug:event?.slug||null,marketTitle:market?.title||null,marketSlug:market?.slug||null});
+          }
+        }
+        pages++;
+        if(events.length<100){reachedEnd=true;break;}
+        offset+=events.length;
+      }
+      const rows=[...new Map(found.map(x=>[(x.marketSlug||x.eventSlug||JSON.stringify(x)),x])).values()];
+      return json({ok:true,source:"POLYMARKET_US_EVENTS_LIST",pages,totalEvents,reachedEnd,btc15m:rows.filter(x=>x.asset==="BTC"&&x.is15).length,eth15m:rows.filter(x=>x.asset==="ETH"&&x.is15).length,btcIntraday:rows.filter(x=>x.asset==="BTC").length,ethIntraday:rows.filter(x=>x.asset==="ETH").length,matches:rows.slice(0,50),submitted:false,liveOrderSubmission:"DISABLED"});
+    }
+
+    // Read-only Polymarket US short-horizon catalogue diagnostic.
+    // This scans the official US event catalogue directly so fuzzy search cannot
+    // hide BTC/ETH markets. It never previews or submits an order.
+    if (url.pathname === "/crypto-short-horizon-proof") {
+      const client = new PolymarketUS();
+      const matches = [];
+      let offset = 0, pages = 0, totalEvents = 0, reachedEnd = false;
+      while (pages < 60) {
+        let result;
+        try {
+          result = await client.events.list({ active: true, limit: 100, offset });
+        } catch {
+          return json({ok:false,state:"POLYMARKET_US_EVENT_SCAN_FAILED",pages,totalEvents,matches:matches.slice(0,40),submitted:false});
+        }
+        const events = Array.isArray(result?.events) ? result.events
+          : Array.isArray(result?.data?.events) ? result.data.events
+          : Array.isArray(result?.data) ? result.data
+          : Array.isArray(result) ? result : [];
+        for (const event of events) {
+          totalEvents += 1;
+          const markets = Array.isArray(event?.markets) ? event.markets : [];
+          const rows = markets.length ? markets : [null];
+          for (const market of rows) {
+            const text = [event?.title,event?.question,event?.slug,event?.description,market?.title,market?.question,market?.slug,market?.description].filter(Boolean).join(" — ");
+            const asset = /bitcoin|\bbtc\b/i.test(text) ? "BTC" : /ethereum|\beth\b|\bether\b/i.test(text) ? "ETH" : null;
+            if (!asset) continue;
+            const short = /15\s*(?:min|minute)|quarter[- ]?hour|15m\b/i.test(text);
+            const intraday = short || /\b(?:5|10|30|45|60)\s*(?:min|minute)|hourly|this hour|today|daily|intraday/i.test(text);
+            if (!intraday) continue;
+            matches.push({
+              asset,
+              short15m: short,
+              eventTitle:event?.title||event?.question||null,
+              eventSlug:event?.slug||null,
+              marketTitle:market?.title||market?.question||null,
+              marketSlug:market?.slug||null,
+              active:market?.active??event?.active??null,
+              closed:market?.closed??event?.closed??null
+            });
+          }
+        }
+        pages += 1;
+        if (events.length < 100) { reachedEnd = true; break; }
+        offset += events.length;
+      }
+      const dedup=[...new Map(matches.map(x=>[(x.marketSlug||x.eventSlug||JSON.stringify(x)),x])).values()];
+      return json({
+        ok:true,source:"POLYMARKET_US_EVENTS_LIST",pages,totalEvents,reachedEnd,
+        btc15m:dedup.filter(x=>x.asset==="BTC"&&x.short15m).length,
+        eth15m:dedup.filter(x=>x.asset==="ETH"&&x.short15m).length,
+        btcIntraday:dedup.filter(x=>x.asset==="BTC").length,
+        ethIntraday:dedup.filter(x=>x.asset==="ETH").length,
+        matches:dedup.slice(0,40),submitted:false,liveOrderSubmission:"DISABLED"
+      });
+    }
+
+    // Read-only catalogue shape probe for Polymarket US crypto. This intentionally
+    // inspects event/market metadata without previewing or submitting any order.
+    // Read-only targeted US search summary. Keeps the browser output compact and
+    // separates short-horizon candidates from noisy fuzzy-search matches.
+    if (url.pathname === "/us-btc-eth-horizon-proof") {
+      const client = new PolymarketUS();
+      const queries = ["bitcoin today","bitcoin daily","bitcoin hourly","bitcoin 15 minute","BTC today","ethereum today","ethereum daily","ethereum hourly","ethereum 15 minute","ETH today"];
+      const dedup = new Map();
+      const queryCounts = [];
+      for (const query of queries) {
+        try {
+          const result = await client.search.query({ query, status: "active", limit: 50 });
+          const events = Array.isArray(result?.events) ? result.events : [];
+          queryCounts.push({query,count:events.length});
+          for (const event of events) {
+            const markets = Array.isArray(event?.markets)&&event.markets.length?event.markets:[null];
+            for (const market of markets) {
+              const text=[event?.title,event?.question,event?.slug,event?.description,market?.title,market?.question,market?.slug,market?.outcome].filter(Boolean).join(" — ");
+              const asset=/bitcoin|\bbtc\b/i.test(text)?"BTC":/ethereum|\beth\b|\bether\b/i.test(text)?"ETH":null;
+              if(!asset) continue;
+              const startMs=Date.parse(event?.startTime||""), endMs=Date.parse(event?.endTime||"");
+              const durationMs=Number.isFinite(startMs)&&Number.isFinite(endMs)?endMs-startMs:NaN;
+              const explicit15=/15\s*(?:min|minute)|15m\b|quarter[- ]?hour/i.test(text);
+              const explicitHour=/\b(?:hourly|this hour|1\s*hour)\b/i.test(text);
+              const explicitDay=/\b(?:daily|today|tonight|this day|24\s*hour)\b/i.test(text);
+              const timed15=Number.isFinite(durationMs)&&durationMs>=10*60e3&&durationMs<=20*60e3;
+              const timedHour=Number.isFinite(durationMs)&&durationMs>20*60e3&&durationMs<=90*60e3;
+              const timedDay=Number.isFinite(durationMs)&&durationMs>90*60e3&&durationMs<=30*60*60e3;
+              const horizon=(explicit15||timed15)?"15M":(explicitHour||timedHour)?"HOURLY":(explicitDay||timedDay)?"DAILY":null;
+              if(!horizon) continue;
+              const key=String(market?.id||market?.slug||event?.id||event?.slug||text);
+              dedup.set(key,{asset,horizon,eventId:event?.id||null,eventTitle:event?.title||null,eventSlug:event?.slug||null,startTime:event?.startTime||null,endTime:event?.endTime||null,marketId:market?.id||null,marketTitle:market?.title||null,marketSlug:market?.slug||null,active:market?.active??event?.active??null,closed:market?.closed??event?.closed??null});
+            }
+          }
+        } catch (error) { queryCounts.push({query,error:String(error?.message||"SEARCH_FAILED").slice(0,80)}); }
+      }
+      const matches=[...dedup.values()];
+      return json({ok:true,source:"POLYMARKET_US_TARGETED_SEARCH",queryCounts,eligibleShortHorizon:matches.length,btc:matches.filter(x=>x.asset==="BTC").length,eth:matches.filter(x=>x.asset==="ETH").length,matches:matches.slice(0,100),submitted:false,liveOrderSubmission:"DISABLED",realMoneyMoved:false});
+    }
+
+    // Read-only raw inspection of the fuzzy results returned specifically by the
+    // "15 minute" searches. No horizon inference here: expose timing/title/market
+    // metadata so we can determine whether the provider actually has such contracts.
+    if (url.pathname === "/us-15m-search-inspect") {
+      const client = new PolymarketUS();
+      const queries = ["bitcoin 15 minute","ethereum 15 minute"];
+      const out = [];
+      for (const query of queries) {
+        try {
+          const result = await client.search.query({ query, status: "active", limit: 50 });
+          const events = Array.isArray(result?.events) ? result.events : [];
+          out.push({query,count:events.length,events:events.map(event=>({
+            id:event?.id||null,title:event?.title||null,slug:event?.slug||null,
+            startTime:event?.startTime||null,endTime:event?.endTime||null,
+            active:event?.active??null,closed:event?.closed??null,
+            markets:(Array.isArray(event?.markets)?event.markets:[]).map(m=>({
+              id:m?.id||null,title:m?.title||null,question:m?.question||null,
+              slug:m?.slug||null,outcome:m?.outcome||null,
+              active:m?.active??null,closed:m?.closed??null
+            }))
+          }))});
+        } catch (error) {
+          out.push({query,error:String(error?.message||"SEARCH_FAILED").slice(0,100)});
+        }
+      }
+      return json({ok:true,source:"POLYMARKET_US_15M_RAW_INSPECTION",queries:out,submitted:false,liveOrderSubmission:"DISABLED",realMoneyMoved:false});
+    }
+
+    // Read-only search proof: events.list currently exposes no crypto-labelled
+    // catalogue rows, so inspect the official US search surface independently.
+    if (url.pathname === "/us-crypto-search-proof") {
+      const client = new PolymarketUS();
+      const queries = ["crypto","coin","bitcoin","BTC","ethereum","ETH"];
+      const out = [];
+      for (const query of queries) {
+        try {
+          const result = await client.search.query({ query, status: "active", limit: 50 });
+          const events = Array.isArray(result?.events) ? result.events : [];
+          out.push({query,count:events.length,events:events.slice(0,20).map(event=>({
+            id:event?.id||null,title:event?.title||null,slug:event?.slug||null,
+            active:event?.active??null,closed:event?.closed??null,
+            startTime:event?.startTime||null,endTime:event?.endTime||null,
+            markets:(Array.isArray(event?.markets)?event.markets:[]).slice(0,20).map(m=>({
+              id:m?.id||null,title:m?.title||null,slug:m?.slug||null,outcome:m?.outcome||null,
+              active:m?.active??null,closed:m?.closed??null
+            }))
+          }))});
+        } catch (error) {
+          out.push({query,error:String(error?.message||"SEARCH_FAILED").slice(0,100)});
+        }
+      }
+      return json({ok:true,source:"POLYMARKET_US_SEARCH",queries:out,submitted:false,liveOrderSubmission:"DISABLED",realMoneyMoved:false});
+    }
+
+    if (url.pathname === "/us-crypto-catalogue-proof") {
+      const client = new PolymarketUS();
+      const rows = [];
+      let offset = 0, pages = 0, totalEvents = 0, cryptoEvents = 0;
+      while (pages < 30) {
+        const result = await client.events.list({ active: true, limit: 100, offset });
+        const events = Array.isArray(result?.events) ? result.events
+          : Array.isArray(result?.data?.events) ? result.data.events
+          : Array.isArray(result?.data) ? result.data
+          : Array.isArray(result) ? result : [];
+        for (const event of events) {
+          totalEvents++;
+          const markets = Array.isArray(event?.markets) ? event.markets : [];
+          const eventText=[event?.title,event?.question,event?.slug,event?.description].filter(Boolean).join(" — ");
+          for (const market of (markets.length?markets:[null])) {
+            const text=[eventText,market?.title,market?.question,market?.slug,market?.outcome].filter(Boolean).join(" — ");
+            if (!/bitcoin|ethereum|\bbtc\b|\beth\b|\bether\b|crypto/i.test(text)) continue;
+            cryptoEvents++;
+            if (rows.length < 100) rows.push({
+              eventTitle:event?.title||event?.question||null,eventSlug:event?.slug||null,
+              eventStart:event?.startTime||null,eventEnd:event?.endTime||null,
+              marketTitle:market?.title||market?.question||null,marketSlug:market?.slug||null,
+              outcome:market?.outcome||null,active:market?.active??event?.active??null,closed:market?.closed??event?.closed??null
+            });
+          }
+        }
+        pages++;
+        if(events.length<100) break;
+        offset+=events.length;
+      }
+      return json({ok:true,source:"POLYMARKET_US_EVENTS_LIST",pages,totalEvents,cryptoMatches:cryptoEvents,sample:rows,submitted:false,liveOrderSubmission:"DISABLED",realMoneyMoved:false});
+    }
+
+    // Authenticated, read-only Kalshi proof for the unchanged Baseline Real rules.
+    // Credentials sign GET market-data requests only. No portfolio/order/write endpoint is called.
+    if (url.pathname === "/kalshi-15m-proof") {
+      const base = "https://api.elections.kalshi.com/trade-api/v2";
+      const series = [
+        {asset:"BTC", ticker:"KXBTC15M"},
+        {asset:"ETH", ticker:"KXETH15M"}
+      ];
+
+      function pemToArrayBuffer(pem) {
+        const body = String(pem || "")
+          .replace(/-----BEGIN [^-]+-----/g, "")
+          .replace(/-----END [^-]+-----/g, "")
+          .replace(/\s+/g, "");
+        if (!body) throw new Error("PRIVATE_KEY_EMPTY");
+        const raw = atob(body);
+        const bytes = new Uint8Array(raw.length);
+        for (let i=0;i<raw.length;i++) bytes[i]=raw.charCodeAt(i);
+        return bytes.buffer;
+      }
+
+      async function kalshiHeaders(method, path) {
+        if (!env.KALSHI_KEY_ID || !env.KALSHI_PRIVATE_KEY) throw new Error("KALSHI_CREDENTIALS_NOT_INSTALLED");
+        const timestamp = String(Date.now());
+        const signPath = path.split("?")[0];
+        const message = new TextEncoder().encode(timestamp + method.toUpperCase() + signPath);
+        const key = await crypto.subtle.importKey(
+          "pkcs8",
+          pemToArrayBuffer(env.KALSHI_PRIVATE_KEY),
+          {name:"RSA-PSS", hash:"SHA-256"},
+          false,
+          ["sign"]
+        );
+        const signature = await crypto.subtle.sign({name:"RSA-PSS",saltLength:32}, key, message);
+        let binary="";
+        for (const b of new Uint8Array(signature)) binary += String.fromCharCode(b);
+        return {
+          accept:"application/json",
+          "KALSHI-ACCESS-KEY":String(env.KALSHI_KEY_ID).trim(),
+          "KALSHI-ACCESS-TIMESTAMP":timestamp,
+          "KALSHI-ACCESS-SIGNATURE":btoa(binary)
+        };
+      }
+
+      async function authenticatedGet(path) {
+        const headers = await kalshiHeaders("GET", path);
+        return fetch(base + path.replace("/trade-api/v2",""), {method:"GET",headers});
+      }
+
+      const out = [];
+      for (const s of series) {
+        try {
+          const path="/trade-api/v2/markets?series_ticker="+encodeURIComponent(s.ticker)+"&status=open&limit=6";
+          const mr=await authenticatedGet(path);
+          if(!mr.ok) {
+            out.push({asset:s.asset,seriesTicker:s.ticker,ok:false,stage:"AUTHENTICATED_MARKETS",httpStatus:mr.status});
+            continue;
+          }
+          const payload=await mr.json();
+          const markets=Array.isArray(payload?.markets)?payload.markets:[];
+          const rows=[];
+          for(const m of markets.slice(0,6)) {
+            const op="/trade-api/v2/markets/"+encodeURIComponent(m.ticker)+"/orderbook?depth=3";
+            const br=await authenticatedGet(op);
+            const book=br.ok?await br.json():null;
+            rows.push({
+              ticker:m?.ticker||null,eventTicker:m?.event_ticker||null,title:m?.title||null,
+              subtitle:m?.subtitle||null,status:m?.status||null,openTime:m?.open_time||null,
+              closeTime:m?.close_time||null,expectedExpirationTime:m?.expected_expiration_time||null,
+              expirationTime:m?.expiration_time||null,canCloseEarly:m?.can_close_early??null,
+              yesBid:m?.yes_bid_dollars??m?.yes_bid??null,yesAsk:m?.yes_ask_dollars??m?.yes_ask??null,
+              noBid:m?.no_bid_dollars??m?.no_bid??null,noAsk:m?.no_ask_dollars??m?.no_ask??null,
+              lastPrice:m?.last_price_dollars??m?.last_price??null,volume:m?.volume_fp??m?.volume??null,
+              liquidity:m?.liquidity_dollars??m?.liquidity??null,rulesPrimary:m?.rules_primary||null,
+              rulesSecondary:m?.rules_secondary||null,orderbookHttpStatus:br.status,
+              orderbook:book?.orderbook_fp||book?.orderbook||null
+            });
+          }
+          out.push({asset:s.asset,seriesTicker:s.ticker,ok:true,count:markets.length,markets:rows});
+        } catch(error) {
+          const msg=String(error?.message||"READ_FAILED");
+          out.push({asset:s.asset,seriesTicker:s.ticker,ok:false,stage:"AUTH_OR_FETCH",errorCode:
+            msg.includes("PRIVATE_KEY")?"PRIVATE_KEY_FORMAT":
+            msg.includes("CREDENTIALS")?"CREDENTIALS_MISSING":"SIGNED_READ_FAILED"});
+        }
+      }
+      return json({
+        ok:out.some(x=>x.ok),source:"KALSHI_AUTHENTICATED_API_READ_ONLY",
+        baselineRules:{entryScore:0.80,exitScore:0.20,maxHoldMinutes:5,maxStakeUsd:5},
+        credentialsUsed:true,credentialValuesExposed:false,accountWriteAccessUsed:false,
+        submitted:false,liveOrderSubmission:"DISABLED_FOR_THIS_ROUTE",realMoneyMoved:false,results:out
+      });
+    }
+
+    if (url.pathname === "/kalshi-execution-credential-proof") {
+      try {
+        // Deliberately harmless authenticated GET. This route contains no POST/DELETE fetch.
+        const path="/trade-api/v2/portfolio/balance";
+        const response=await kalshiExecutionGet(env,path);
+        let body=null;
+        try { body=await response.json(); } catch {}
+        return json({
+          ok:response.ok,
+          state:response.ok?"KALSHI_EXECUTION_CREDENTIAL_AUTHENTICATED_NO_ORDER":"KALSHI_EXECUTION_CREDENTIAL_AUTH_FAILED",
+          venue:"KALSHI",
+          proof:{
+            method:"GET",
+            path,
+            httpStatus:response.status,
+            authenticated:response.ok,
+            responseShape:body&&typeof body==="object"?Object.keys(body).sort():[],
+            credentialValuesExposed:false
+          },
+          safety:{
+            credentialRole:"SEPARATE_EXECUTION_CREDENTIAL",
+            legacyExecutionControllerArmed:false,
+            postOrdersCalled:false,
+            deleteOrdersCalled:false,
+            submitted:false,
+            realMoneyMoved:false
+          }
+        },response.ok?200:502);
+      } catch(error) {
+        return json({
+          ok:false,state:"KALSHI_EXECUTION_CREDENTIAL_PROOF_FAILED",
+          errorCode:String(error?.message||"EXECUTION_CREDENTIAL_PROOF_FAILED"),
+          safety:{legacyExecutionControllerArmed:false,postOrdersCalled:false,deleteOrdersCalled:false,submitted:false,realMoneyMoved:false}
+        },500);
+      }
+    }
+
+    if (url.pathname === "/kalshi-one-trade-controller-proof") {
+      try {
+        const discovery=await discoverKalshiShadowMarkets(env);
+        const candidate=discovery.markets[0]||null;
+        if(!candidate) return json({ok:false,state:"NO_LIVE_KALSHI_15M_MARKET",submitted:false,realMoneyMoved:false},422);
+        const sizing=estimateKalshiFeeSafeSize(candidate.yes,SHADOW_CONFIG.maxStakeUsd);
+        const clientOrderId="baseline-real-one-trade-DRY-RUN";
+        const dryOrderBody={
+          ticker:candidate.marketTicker||candidate.slug,
+          client_order_id:clientOrderId,
+          side:"bid",
+          price_dollars:Number(candidate.yes).toFixed(4),
+          count_fp:String(sizing.count)
+        };
+        return json({
+          ok:true,
+          state:"KALSHI_ONE_TRADE_PATHS_IMPLEMENTED_HARD_DISABLED",
+          venue:"KALSHI",
+          currentCoverage:discovery.coverage,
+          selectedDryCandidate:{
+            ticker:candidate.marketTicker||candidate.slug,
+            asset:candidate.asset,
+            outcomeSide:candidate.outcomeSide,
+            direction:candidate.direction,
+            horizon:candidate.horizon,
+            observedEntryAsk:candidate.yes,
+            observedExitBid:candidate.bid
+          },
+          directionModel:{
+            yes:{meaning:"UP",bear:false},
+            no:{meaning:"DOWN",bear:true},
+            bothDirectionsAvailable:true
+          },
+          v2WritePath:{
+            create:{method:"POST",path:"/trade-api/v2/portfolio/events/orders",body:dryOrderBody,endpointCalled:false},
+            cancel:{method:"DELETE",pathTemplate:"/trade-api/v2/portfolio/events/orders/{order_id}",endpointCalled:false}
+          },
+          feeSafeSizing:sizing,
+          frozenRules:{entryScore:SHADOW_CONFIG.entryScore,exitScore:SHADOW_CONFIG.exitScore,maxHoldMinutes:SHADOW_CONFIG.maxHoldMs/60000,maxStakeUsd:SHADOW_CONFIG.maxStakeUsd},
+          interlocks:{
+            controllerSwitchEnabled:kalshiControllerSwitchEnabled(env),
+          oneTradeAuthorizationActive:false,
+          controllerEnabled:false,
+            controllerEnableVariablePresent:Boolean(env?.KALSHI_ONE_TRADE_CONTROLLER_ENABLED),
+            founderAuthorizationVariablePresent:Boolean(env?.KALSHI_FOUNDER_ONE_TRADE_AUTHORIZATION),
+            feeVerified:true,
+            feeScheduleEffective:"2026-07-07",
+            feeCapIncludesEntryFee:true,
+            requiresExplicitFounderAuthorization:true,
+            requiresFreshLocationVerificationAtTradeTime:true,
+            requiresScoreAtLeast:SHADOW_CONFIG.entryScore,
+            maximumHoldMinutes:SHADOW_CONFIG.maxHoldMs/60000,
+            maximumStakeUsd:SHADOW_CONFIG.maxStakeUsd,
+            postOrdersCalled:false,
+            deleteOrdersCalled:false,
+            submitted:false,
+            realMoneyMoved:false
+          }
+        });
+      } catch(error) {
+        return json({ok:false,state:"KALSHI_ONE_TRADE_CONTROLLER_PROOF_FAILED",errorCode:String(error?.message||"PROOF_FAILED"),submitted:false,realMoneyMoved:false},500);
+      }
+    }
+
+    if (url.pathname === "/kalshi-execution-readiness-proof") {
+      try {
+        const discovery = await discoverKalshiShadowMarkets(env);
+        const candidate = discovery.markets[0] || null;
+        if (!candidate) return json({ok:false,state:"NO_LIVE_KALSHI_15M_MARKET",submitted:false,realMoneyMoved:false},422);
+        const ask = Number(candidate.yes);
+        const bid = Number(candidate.bid);
+        const maxStake = SHADOW_CONFIG.maxStakeUsd;
+        const maxContracts = ask > 0 ? Math.max(0, Math.floor(maxStake / ask)) : 0;
+        const plannedNotional = Number((maxContracts * ask).toFixed(4));
+        return json({
+          ok:true,
+          state:"KALSHI_EXECUTION_MECHANICS_MODELED_NOT_SUBMITTED",
+          venue:"KALSHI",
+          market:{ticker:candidate.slug,asset:candidate.asset,ask,bid,horizon:candidate.horizon},
+          frozenRules:{entryScore:SHADOW_CONFIG.entryScore,exitScore:SHADOW_CONFIG.exitScore,maxHoldMinutes:SHADOW_CONFIG.maxHoldMs/60000,maxStakeUsd:maxStake},
+          entryPlan:{
+            method:"POST",
+            path:"/trade-api/v2/portfolio/events/orders",
+            side:"bid",
+            meaning:"LONG_YES",
+            price:ask.toFixed(4),
+            count:String(maxContracts),
+            plannedNotionalUsd:plannedNotional,
+            clientOrderIdRequiredByUs:true,
+            endpointCalled:false
+          },
+          exitPlan:{
+            method:"POST",
+            path:"/trade-api/v2/portfolio/events/orders",
+            side:"ask",
+            meaning:"OPPOSITE_DIRECTION_FOR_YES_EXIT",
+            referenceBid:bid.toFixed(4),
+            endpointCalled:false
+          },
+          cancellationPlan:{
+            method:"DELETE",
+            pathTemplate:"/trade-api/v2/portfolio/events/orders/{order_id}",
+            endpointCalled:false
+          },
+          safety:{
+            currentCredential:"READ_ONLY",
+            legacyExecutionControllerArmed:false,
+            writeEndpointPresentInThisProof:false,
+            submitted:false,
+            realMoneyMoved:false
+          }
+        });
+      } catch(error) {
+        return json({ok:false,state:"KALSHI_EXECUTION_READINESS_READ_FAILED",errorCode:String(error?.message||"READ_FAILED").slice(0,120),submitted:false,realMoneyMoved:false},422);
+      }
+    }
+
+    if (url.pathname === "/kalshi-controller-switch-readiness-proof") {
+      const state=await loadRealTradeState(env);
+      const shadow=await loadShadowState(env);
+      const switchEnabled=kalshiControllerSwitchEnabled(env);
+      const authActive=kalshiAuthorizationValid(state);
+      const effective=kalshiOneTradeEnabled(env,state);
+      return json({
+        ok:true,
+        state:switchEnabled
+          ? (authActive ? "UNEXPECTED_AUTHORIZATION_PRESENT_STOP" : "KALSHI_CONTROLLER_SWITCH_ENABLED_FOUNDER_AUTHORIZATION_ABSENT")
+          : "KALSHI_CONTROLLER_SWITCH_READY_STILL_DISABLED",
+        gateMatrix:kalshiGateMatrixProof(),
+        current:{
+          controllerSwitchEnabled:switchEnabled,
+          founderAuthorizationActive:authActive,
+          effectiveExecutionEnabled:effective,
+          shadowLive:shadow?.status==="LIVE_KALSHI_SHADOW",
+          priorTradeConsumed:Boolean(state?.consumed),
+          priorEntryPresent:Boolean(state?.entryOrderId),
+          priorSubmitLatchPresent:Boolean(state?.entrySubmitStartedAt)
+        },
+        switchOnlySafety:{
+          providerWriteAllowedWithoutFounderAuthorization:false,
+          schedulerMayObserve:true,
+          schedulerMaySubmitWithoutFounderAuthorization:false,
+          authorizationEndpointStillRequiresExplicitPhrase:true,
+          authorizationExpiresAfterMinutes:null,
+          oneTradeOnly:true,
+          maxStakeUsd:REAL_TEST_CONFIG.maxStakeUsd,
+          continuousTradingAuthorized:false
+        },
+        interlocks:{
+          postOrdersCalled:false,
+          deleteOrdersCalled:false,
+          submitted:false,
+          realMoneyMoved:false
+        },
+        nextBoundary:switchEnabled&&!authActive
+          ? "SWITCH_ONLY_PROOF_PASSED_FOUNDER_AUTHORIZATION_STILL_REQUIRED"
+          : "ENABLE_CONTROLLER_SWITCH_ONLY_THEN_RECHECK"
+      });
+    }
+
+    if (url.pathname === "/kalshi-one-trade-arming-readiness-proof") {
+      const state=await loadRealTradeState(env);
+      const shadow=await loadShadowState(env);
+      const alreadyUsed=Boolean(state?.consumed||state?.entryOrderId||state?.entrySubmitStartedAt);
+      return json({
+        ok:true,
+        state:"KALSHI_ONE_TRADE_ARMING_MECHANISM_READY_NOT_ARMED",
+        authorizationDesign:{
+          persistentKvAuthorization:true,
+          expiresAfterMinutes:null,
+          oneTradeOnly:true,
+          authorizationConsumedBeforeProviderWrite:true,
+          controllerSwitchAlsoRequired:true,
+          manualKalshiClickRequired:false,
+          continuousTradingAuthorized:false
+        },
+        current:{
+          controllerSwitchEnabled:kalshiControllerSwitchEnabled(env),
+          founderAuthorizationActive:kalshiAuthorizationValid(state),
+          priorTradeConsumed:Boolean(state?.consumed),
+          priorEntryPresent:Boolean(state?.entryOrderId),
+          priorSubmitLatchPresent:Boolean(state?.entrySubmitStartedAt),
+          shadowLive:shadow?.status==="LIVE_KALSHI_SHADOW",
+          safeToOfferFounderAuthorization:!alreadyUsed && shadow?.status==="LIVE_KALSHI_SHADOW"
+        },
+        interlocks:{postOrdersCalled:false,deleteOrdersCalled:false,submitted:false,realMoneyMoved:false},
+        nextBoundary:"FOUNDER_EXPLICIT_SINGLE_TRADE_AUTHORIZATION_REQUIRED"
+      });
+    }
+
+    if (url.pathname === "/kalshi-fee-readiness-proof") {
+      const shadow=await loadShadowState(env);
+      const sample=(shadow?.opportunities||[]).find(o=>o?.marketTicker&&(o?.outcomeSide==="YES"||o?.outcomeSide==="NO"))||null;
+      const sizing=sample?estimateKalshiFeeSafeSize(sample.yes,REAL_TEST_CONFIG.maxStakeUsd):null;
+      return json({
+        ok:true,
+        state:"KALSHI_CURRENT_FEE_MODEL_REVERIFIED_PRETRADE",
+        verifiedAt:"2026-09-19",
+        authoritativeSources:{
+          helpCenter:{
+            title:"Fees",
+            published:"2026-04-19",
+            saysTransactionFeesChargedOnExpectedEarnings:true,
+            warnsSomeMarketsHaveDifferentFees:true
+          },
+          regulatoryFeeSchedule:{
+            page:"kalshi.com/regulatory/fee-schedule",
+            currentPageReachable:true,
+            generalTakerFormula:"ceil_to_cent(0.07 * C * P * (1-P))",
+            makerFormula:"ceil_to_cent(0.0175 * C * P * (1-P))"
+          }
+        },
+        controllerInterpretation:{
+          entryUsesImmediateOrCancel:true,
+          entryThereforeModeledAsTaker:true,
+          maxStakeCapIncludesEntryFee:true,
+          entryFeeFormula:"ceil_to_cent(0.07 * C * P * (1-P))",
+          specialMarketFeeOverrideRisk:"FAIL_CLOSED_IF_A_MARKET_SPECIFIC_FEE_DIFFERS_FROM_GENERAL_SCHEDULE",
+          exitFee:"SEPARATE_REALIZED_TRADING_COST_RECORDED_ON_EXIT"
+        },
+        currentDryRun:{
+          sampleAvailable:Boolean(sample),
+          ticker:sample?.marketTicker||null,
+          outcomeSide:sample?.outcomeSide||null,
+          observedAsk:sample?.yes??null,
+          feeSafeSizing:Boolean(sizing?.ok),
+          count:sizing?.count||0,
+          premiumUsd:sizing?.premiumUsd||0,
+          estimatedEntryFeeUsd:sizing?.feeUsd||0,
+          estimatedEntryDebitUsd:sizing?.totalDebitUsd||0,
+          maxStakeUsd:REAL_TEST_CONFIG.maxStakeUsd
+        },
+        finalPretradeGates:{
+          feeModelReverified:true,
+          freshKalshiLocationVerificationRequired:true,
+          founderSingleTradeAuthorizationRequired:true,
+          continuousAutomaticTradingAuthorized:false
+        },
+        interlocks:{
+          controllerSwitchEnabled:kalshiControllerSwitchEnabled(env),
+          oneTradeAuthorizationActive:false,
+          controllerEnabled:false,
+          postOrdersCalled:false,
+          deleteOrdersCalled:false,
+          submitted:false,
+          realMoneyMoved:false
+        }
+      });
+    }
+
+    if (url.pathname === "/kalshi-live-contract-verification-proof") {
+      const shadow=await loadShadowState(env);
+      const sample=(shadow?.opportunities||[]).find(o=>o?.marketTicker&&(o?.outcomeSide==="YES"||o?.outcomeSide==="NO"))||null;
+      const sizing=sample?estimateKalshiFeeSafeSize(sample.yes,REAL_TEST_CONFIG.maxStakeUsd):null;
+      const request=(sample&&sizing?.ok)?kalshiV2EntryPayload(sample,sizing,"CONTRACT-PROOF-NO-SUBMIT"):null;
+      return json({
+        ok:true,
+        state:"KALSHI_LIVE_WRITE_CONTRACT_INDEPENDENTLY_REVERIFIED_HARD_DISABLED",
+        verifiedAt:"2026-09-19",
+        evidence:{
+          kalshiHelpCenter:{title:"Kalshi API",published:"2026-03-10",supportsAuthenticatedOrdersTradesPortfolio:true},
+          generatedSdk:{package:"kalshi-typescript",version:"3.26.0",createOrderV2:"POST /portfolio/events/orders",cancelOrderV2:"DELETE /portfolio/events/orders/{order_id}",getOrder:"GET /portfolio/orders/{order_id}"},
+          productionBase:"https://api.elections.kalshi.com/trade-api/v2"
+        },
+        contract:{
+          side:["bid","ask"],
+          bidMeaning:"BUY_YES",
+          askMeaning:"SELL_YES_EQUIVALENT_BUY_NO_AT_COMPLEMENT",
+          count:"fixed-point contract string",
+          price:"fixed-point YES-leg dollar string",
+          timeInForce:"immediate_or_cancel",
+          selfTradePreventionType:"taker_at_cross",
+          reduceOnlySupported:true,
+          cancelOrderOnPauseSupported:true,
+          createResponse:["order_id","client_order_id","fill_count","remaining_count","average_fill_price","average_fee_paid","ts_ms"],
+          fillsReconciledByOrderId:true,
+          partialFillMustBeManagedByExactFillCount:true
+        },
+        dryRun:{
+          sampleAvailable:Boolean(sample),
+          feeSafeSizing:Boolean(sizing?.ok),
+          request:request?{...request,client_order_id:"CONTRACT-PROOF-NO-SUBMIT"}:null
+        },
+        strategyUnchanged:{
+          entryScore:REAL_TEST_CONFIG.entryScore,
+          exitScore:REAL_TEST_CONFIG.exitScore,
+          maxHoldMinutes:REAL_TEST_CONFIG.maxHoldMs/60000,
+          maxStakeUsd:REAL_TEST_CONFIG.maxStakeUsd
+        },
+        remainingTradeTimeGates:{
+          freshKalshiLocationVerificationRequired:true,
+          currentFeeScheduleRecheckRequired:true,
+          founderSingleTradeAuthorizationRequired:true
+        },
+        interlocks:{
+          controllerSwitchEnabled:kalshiControllerSwitchEnabled(env),
+          oneTradeAuthorizationActive:false,
+          controllerEnabled:false,
+          postOrdersCalled:false,
+          deleteOrdersCalled:false,
+          submitted:false,
+          realMoneyMoved:false
+        }
+      });
+    }
+
+    if (url.pathname === "/kalshi-v2-zero-submit-proof") {
+      const shadow=await loadShadowState(env);
+      const sample=(shadow?.opportunities||[]).find(o=>o?.marketTicker&&(o?.outcomeSide==="YES"||o?.outcomeSide==="NO"))||null;
+      const sizing=sample?estimateKalshiFeeSafeSize(sample.yes,REAL_TEST_CONFIG.maxStakeUsd):null;
+      const entry=(sample&&sizing?.ok)?kalshiV2EntryPayload(sample,sizing,"ZERO-SUBMIT-EXAMPLE"):null;
+      const yesExample=sample?kalshiV2EntryPayload({...sample,outcomeSide:"YES",yes:sample.outcomeSide==="YES"?sample.yes:1-sample.yes},sizing||{count:1},"ZERO-SUBMIT-YES"):null;
+      const noExample=sample?kalshiV2EntryPayload({...sample,outcomeSide:"NO",yes:sample.outcomeSide==="NO"?sample.yes:1-sample.yes},sizing||{count:1},"ZERO-SUBMIT-NO"):null;
+      return json({
+        ok:true,state:"KALSHI_V2_SCHEMA_AND_RECONCILIATION_CERTIFIED_ZERO_SUBMIT",
+        officialSemantics:{
+          createPath:"POST /trade-api/v2/portfolio/events/orders",
+          yesLong:"book side bid",
+          noLong:"book side ask",
+          priceScale:"single YES-leg fixed-point dollars",
+          timeInForce:"immediate_or_cancel",
+          createResponse:["order_id","client_order_id","fill_count","remaining_count","average_fill_price","average_fee_paid"],
+          getOrderPath:"GET /trade-api/v2/portfolio/orders/{order_id}",
+          getFillsPath:"GET /trade-api/v2/portfolio/fills?order_id={order_id}",
+          cancelPath:"DELETE /trade-api/v2/portfolio/events/orders/{order_id}",
+          exit:"reverse book side + reduce_only=true"
+        },
+        dryRun:{sampleAvailable:Boolean(sample),feeSafeSizing:Boolean(sizing?.ok),entryRequest:entry?{...entry,client_order_id:"ZERO-SUBMIT-EXAMPLE"}:null,yesBookSide:yesExample?.side||"bid",noBookSide:noExample?.side||"ask"},
+        reconciliation:{
+          zeroFill:"IOC returns fill_count 0; no position opened",
+          partialFill:"record exact fill_count; only filled quantity becomes managed position",
+          fullFill:"remaining_count 0; manage exact filled quantity",
+          ambiguity:"fail closed; reconcile by order_id via Get Order and Get Fills before any further write",
+          exitPartial:"reconcile exit fill; never mark complete until filled quantity equals managed position quantity"
+        },
+        interlocks:{controllerSwitchEnabled:kalshiControllerSwitchEnabled(env),
+          oneTradeAuthorizationActive:false,
+          controllerEnabled:false,postOrdersCalled:false,deleteOrdersCalled:false,submitted:false,realMoneyMoved:false}
+      });
+    }
+
+    if (url.pathname === "/first-real-trade-evidence") {
+      const state=await loadRealTradeState(env);
+      return json({ok:true,experiment:"MARKET EDGE — BASELINE REAL",strategyUnchanged:true,entryThreshold:REAL_TEST_CONFIG.entryScore,exitThreshold:REAL_TEST_CONFIG.exitScore,maxHoldMinutes:5,maxFirstTradeExposureUsd:5,oneEntryOnly:true,evidence:publicFirstTradeEvidence(state)});
+    }
+
+    if (url.pathname === "/kalshi-five-asset-readiness-proof") {
+      try {
+        const [series,discovery]=await Promise.all([
+          resolveKalshi15mSeries(env),
+          discoverKalshiShadowMarkets(env)
+        ]);
+        const safeSeries=series.map(s=>({
+          asset:s.asset,
+          seriesTicker:s.ticker||null,
+          title:s.title||null,
+          frequency:s.frequency||null,
+          dynamicallyResolved:Boolean(s.dynamicallyResolved),
+          metadataReady:Boolean(s.metadataReady),
+          executionEligible:Boolean(s.executionEligible),
+          settlementSourceNames:(s.settlementSources||[]).map(x=>x?.name||"").filter(Boolean)
+        }));
+        const coverage=discovery.coverage||{};
+        return json({
+          ok:true,
+          state:"FIVE_ASSET_DISCOVERY_READ_ONLY",
+          assets:["BTC","ETH","SOL","XRP","HYPE"],
+          series:safeSeries,
+          coverage,
+          eligibleOpportunityCount:Number(discovery.markets?.length||0),
+          autoSelectionRule:"HIGHEST_RANKED_QUALIFYING_SCORE_AT_OR_ABOVE_0_80",
+          strategy:{entryScore:REAL_TEST_CONFIG.entryScore,exitScore:REAL_TEST_CONFIG.exitScore,maxHoldMinutes:REAL_TEST_CONFIG.maxHoldMs/60000,maxStakeUsd:REAL_TEST_CONFIG.maxStakeUsd},
+          oneTradeOnly:true,
+          submitted:false,
+          realMoneyMoved:false
+        });
+      } catch(error) {
+        return json({ok:false,state:"FIVE_ASSET_DISCOVERY_READ_FAILED",errorCode:String(error?.message||"READ_FAILED").slice(0,120),submitted:false,realMoneyMoved:false},422);
+      }
+    }
+
+    if (url.pathname === "/kalshi-final-controller-safety-proof") {
+      const shadow=await loadShadowState(env);
+      const candidates=(shadow?.opportunities||[]).filter(o=>Number(o?.score)>=REAL_TEST_CONFIG.entryScore&&Number(o?.edge)>0);
+      const candidate=candidates[0]||null;
+      const sizing=candidate?estimateKalshiFeeSafeSize(candidate.yes,REAL_TEST_CONFIG.maxStakeUsd):null;
+      return json({
+        ok:true,
+        state:"KALSHI_FINAL_CONTROLLER_HARD_DISABLED",
+        strategy:{entryScore:REAL_TEST_CONFIG.entryScore,exitScore:REAL_TEST_CONFIG.exitScore,maxHoldMinutes:REAL_TEST_CONFIG.maxHoldMs/60000,maxStakeUsd:REAL_TEST_CONFIG.maxStakeUsd},
+        safeguards:{
+          oneShotPersistentLockRequired:true,
+          opposingUnderlyingPositionGuard:true,
+          minTimeToCloseMs:KALSHI_ONE_TRADE_SAFETY.minTimeToCloseMs,
+          feeSafeSizing:Boolean(sizing?.ok),
+          liveKalshiCoverageRequired:true,
+          executionBalanceRecheckRequired:true,
+          uniqueClientOrderIdRequired:true,
+          entryPreSubmitLatchRequired:true,
+          partialFillReconciliationRequired:true,
+          pendingOrderTimeoutMs:KALSHI_ONE_TRADE_SAFETY.pendingOrderTimeoutMs,
+          v2RequestSchemaFinalProofRequired:false,
+          v2CreateSchemaCertified:true,
+          outcomeDirectionCertified:true,
+          iocPartialFillSemanticsCertified:true,
+          getOrderReconciliationCertified:true,
+          getFillsReconciliationCertified:true,
+          cancelV2Certified:true,
+          reduceOnlyExitRequired:true
+        },
+        current:{shadowStatus:shadow?.status||"UNKNOWN",qualifyingSignals:candidates.length,candidate:candidate?{marketTicker:candidate.marketTicker,outcomeSide:candidate.outcomeSide,direction:candidate.direction,score:candidate.score,closeTime:candidate.closeTime,sizing}:null},
+        interlocks:{controllerSwitchEnabled:kalshiControllerSwitchEnabled(env),
+          oneTradeAuthorizationActive:false,
+          controllerEnabled:false,postOrdersCalled:false,deleteOrdersCalled:false,submitted:false,realMoneyMoved:false}
+      });
+    }
+
+    if (url.pathname === "/price-proof") return json(await livePriceProof(env));
+
+    if (url.pathname === "/money-path-proof") return json(await moneyPathProof(env));
+
+    if (url.pathname === "/preview-proof") {
+      const proof = await previewProof(env);
+      return json(proof, proof.ok ? 200 : 422);
+    }
+
+    if (url.pathname === "/market-diagnostic") {
+      const proof = await previewProof(env);
+      return json({ok:proof.ok,state:proof.state,diagnostic:proof.diagnostic||null,discovery:proof.discovery||null,submitted:false,sensitiveTextExposed:false}, 200);
+    }
+
+    if (url.pathname === "/shadow-state") {
+      return json(publicShadowView(await loadShadowState(env)));
+    }
+
+    // Read-only diagnostic trigger. It refreshes Shadow evidence only and never
+    // invokes maybeRunOneTrade or any provider order endpoint.
+    if (url.pathname === "/shadow-refresh-proof") {
+      const refreshed = await runShadow(env);
+      return json(publicShadowView(refreshed));
+    }
+
+    // Browser-safe one-shot diagnostic: run a fresh Shadow observation and return
+    // only bounded diagnostic fields. No order controller is invoked.
+    if (url.pathname === "/shadow-refresh-diagnostic-view") {
+      const refreshed = await runShadow(env);
+      const safe = {
+        status: refreshed?.status || "UNKNOWN",
+        lastRunAt: refreshed?.lastRunAt || null,
+        errorStage: refreshed?.errorStage || null,
+        errorCode: refreshed?.errorCode || null,
+        eligibleCount: Number(refreshed?.eligibleCount || 0),
+        seenCount: Number(refreshed?.seenCount || 0),
+        rejectedCount: Number(refreshed?.rejectedCount || 0),
+        coverage: refreshed?.assetCoverage || null,
+        liveOrderSubmission: "DISABLED",
+        realMoneyMoved: false
+      };
+      return new Response("<!doctype html><meta name=viewport content='width=device-width'><title>Baseline Real Fresh Shadow Diagnostic</title><body style='font-family:system-ui;background:#07111d;color:#eef;padding:24px'><h2>Baseline Real · Fresh Shadow Diagnostic</h2><pre style='white-space:pre-wrap;font-size:16px'>"+JSON.stringify(safe,null,2).replace(/&/g,"&amp;").replace(/</g,"&lt;")+"</pre></body>", {headers:{"content-type":"text/html;charset=utf-8","cache-control":"no-store"}});
+    }
+
+    // Public, read-only diagnostic view: exposes only bounded failure stage/code.
+    // No credentials, provider payloads, order calls, or secret text are returned.
+    if (url.pathname === "/shadow-diagnostic") {
+      const state = await loadShadowState(env);
+      return json({
+        ok: state?.status !== "ERROR",
+        status: state?.status || "UNKNOWN",
+        lastRunAt: state?.lastRunAt || null,
+        errorStage: state?.errorStage || null,
+        errorCode: state?.errorCode || null,
+        eligibleCount: Number(state?.eligibleCount || 0),
+        seenCount: Number(state?.seenCount || 0),
+        rejectedCount: Number(state?.rejectedCount || 0),
+        liveOrderSubmission: "DISABLED",
+        realMoneyMoved: false
+      });
+    }
+
+    // Same safe diagnostic evidence, rendered as plain HTML so the Founder can
+    // inspect it in a browser without exposing secrets or enabling execution.
+    if (url.pathname === "/shadow-diagnostic-view") {
+      const state = await loadShadowState(env);
+      const safe = {
+        status: state?.status || "UNKNOWN",
+        lastRunAt: state?.lastRunAt || null,
+        errorStage: state?.errorStage || null,
+        errorCode: state?.errorCode || null,
+        eligibleCount: Number(state?.eligibleCount || 0),
+        seenCount: Number(state?.seenCount || 0),
+        rejectedCount: Number(state?.rejectedCount || 0),
+        liveOrderSubmission: "DISABLED",
+        realMoneyMoved: false
+      };
+      return new Response("<!doctype html><meta name=viewport content='width=device-width'><title>Baseline Real Shadow Diagnostic</title><body style='font-family:system-ui;background:#07111d;color:#eef;padding:24px'><h2>Baseline Real · Shadow Diagnostic</h2><pre style='white-space:pre-wrap;font-size:16px'>"+JSON.stringify(safe,null,2).replace(/&/g,"&amp;").replace(/</g,"&lt;")+"</pre></body>", {headers:{"content-type":"text/html;charset=utf-8","cache-control":"no-store"}});
+    }
+
+    if (url.pathname === "/real-trade-state") {
+      return json(publicRealTradeView(await loadRealTradeState(env), env));
+    }
+
+    if (url.pathname === "/shadow-run") {
+      return json(publicShadowView(await runShadow(env)));
+    }
+
+    return json({ ok: false, error: "NOT_FOUND" }, 404);
+  },
+};
++Number(v).toFixed(2):'—';
+    E('reviewTrade').textContent=pre?(pre.selected?.asset||'')+' · '+(pre.selected?.marketTicker||'')+' · '+(pre.selected?.side||''):'WAITING FOR FIRST REAL TRADE';
+    E('reviewOutcome').textContent=review?.outcome||'NOT YET OCCURRED';
+    E('reviewGross').textContent=moneyOrDash(review?.grossPnlUsd);
+    E('reviewFees').textContent=moneyOrDash(review?.totalRecordedFeesUsd);
+    E('reviewNet').textContent=moneyOrDash(review?.netPnlUsd);
+    E('reviewLearning').textContent=review?'HYPOTHESES RECORDED · PROSPECTIVE TEST REQUIRED':'WAITING';
+    const lessons=E('reviewLessons');
+    if(lessons&&review){
+      lessons.innerHTML='<b>Post-trade observations:</b> '+(review.observations||[]).map(esc).join(' · ')+'<br><b>Governance:</b> '+esc(review.learningRule||'');
+    }
+    const ledgerBox=E('tradeLedgerRows');
+    if(ledgerBox){
+      const rows=(realTrade?.recentEvidence||[]).slice(0,12);
+      ledgerBox.innerHTML=rows.length?rows.map(x=>'<div class="row"><span>'+esc(x.ts||'')+' · '+esc(x.type||'EVENT')+'</span><strong>'+esc(x.marketTicker||x.orderId||x.reason||'PRESERVED')+'</strong></div>').join(''):'<div class="row"><span>Ledger</span><strong>WAITING</strong></div>';
+    }
     const authBtn=E('authorizeTradeBtn');
     if(authBtn){
       if(managedPosition){authBtn.textContent='POSITION UNDER GOVERNED EXIT';authBtn.disabled=true;}
