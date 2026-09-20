@@ -719,7 +719,7 @@ function estimateKalshiFeeSafeSize(price, maxStakeUsd) {
   }
   return {ok:false,reason:"NO_CONTRACT_FITS_PREMIUM_PLUS_FEE_CAP",count:0,premiumUsd:0,feeUsd:0,totalDebitUsd:0,maxStakeUsd:cap,executionAllowed:false};
 }
-async function resolveKalshi15mSeries(env) {
+async function resolveKalshi15mSeries(env, priorSeries=[]) {
   const wanted={
     BTC:{coinbaseProduct:"BTC-USD"},
     ETH:{coinbaseProduct:"ETH-USD"},
@@ -732,6 +732,7 @@ async function resolveKalshi15mSeries(env) {
   if(!r.ok) throw new Error("KALSHI_SERIES_READ_FAILED_"+r.status);
   const data=await r.json();
   const rows=Array.isArray(data?.series)?data.series:[];
+  const priorByAsset=Object.fromEntries((Array.isArray(priorSeries)?priorSeries:[]).filter(x=>x?.asset&&x?.ticker).map(x=>[x.asset,x]));
   const resolved=[];
   for(const [asset,meta] of Object.entries(wanted)) {
     const exact=rows.find(s=>{
@@ -743,32 +744,31 @@ async function resolveKalshi15mSeries(env) {
       const directionMatch=/UP\s+OR\s+DOWN/i.test(title)||/UP.*DOWN/i.test(title);
       return assetMatch && shortMatch && directionMatch;
     });
-    const fallback={
-      BTC:"KXBTC15M",
-      ETH:"KXETH15M",
-      SOL:null,
-      XRP:null,
-      HYPE:null
-    }[asset];
+    const fallback={BTC:"KXBTC15M",ETH:"KXETH15M",SOL:null,XRP:null,HYPE:null}[asset];
+    const prior=priorByAsset[asset]||null;
+    const chosenTicker=String(exact?.ticker||prior?.ticker||fallback||"");
+    const chosenSources=Array.isArray(exact?.settlement_sources)&&exact.settlement_sources.length
+      ? exact.settlement_sources
+      : (Array.isArray(prior?.settlementSources)?prior.settlementSources:[]);
+    const dynamicallyResolved=Boolean(exact?.ticker||prior?.dynamicallyResolved);
+    const metadataReady=Boolean(chosenTicker) && chosenSources.length>0;
     resolved.push({
       asset,
-      ticker:String(exact?.ticker||fallback||""),
-      title:String(exact?.title||""),
-      frequency:String(exact?.frequency||""),
-      settlementSources:Array.isArray(exact?.settlement_sources)?exact.settlement_sources:[],
+      ticker:chosenTicker,
+      title:String(exact?.title||prior?.title||""),
+      frequency:String(exact?.frequency||prior?.frequency||""),
+      settlementSources:chosenSources,
       coinbaseProduct:meta.coinbaseProduct,
-      dynamicallyResolved:Boolean(exact?.ticker),
-      metadataReady:Boolean(exact?.ticker) && Array.isArray(exact?.settlement_sources) && exact.settlement_sources.length>0,
-      executionEligible:(asset==="BTC"||asset==="ETH")
-        ? true
-        : Boolean(exact?.ticker) && Array.isArray(exact?.settlement_sources) && exact.settlement_sources.length>0
+      dynamicallyResolved,
+      metadataReady,
+      executionEligible:(asset==="BTC"||asset==="ETH") ? Boolean(chosenTicker) : metadataReady
     });
   }
   return resolved;
 }
 
-async function discoverKalshiShadowMarkets(env) {
-  const series=await resolveKalshi15mSeries(env);
+async function discoverKalshiShadowMarkets(env, priorSeries=[]) {
+  const series=await resolveKalshi15mSeries(env, priorSeries);
   const candidates=[]; let seen=0,rejected=0;
   const readFailures=[];
   for(const s of series) {
@@ -829,7 +829,8 @@ async function runShadow(env) {
     const spotSources=Object.fromEntries(spotRows.map(([asset,x])=>[asset,x.source]));
     const btc=spot.BTC, eth=spot.ETH;
     stage = "KALSHI_DISCOVERY";
-    discovery = await discoverKalshiShadowMarkets(env);
+    discovery = await discoverKalshiShadowMarkets(env, state?.kalshiSeriesCache||[]);
+    state.kalshiSeriesCache=discovery.series||state?.kalshiSeriesCache||[];
     const priorCoverageProof=state?.assetCoverageProof||{};
     const currentCoverage=Object.fromEntries(trackedAssets.map(a=>[
       a, Number(discovery?.coverage?.[a]?.eligible||0)>0 && discovery?.coverage?.[a]?.executionEligible===true
@@ -2840,6 +2841,7 @@ export default {
         seenCount: Number(refreshed?.seenCount || 0),
         rejectedCount: Number(refreshed?.rejectedCount || 0),
         coverage: refreshed?.assetCoverage || null,
+        seriesResolution: (refreshed?.kalshiSeriesCache||[]).map(s=>({asset:s.asset,ticker:s.ticker||null,title:s.title||null,frequency:s.frequency||null,dynamicallyResolved:Boolean(s.dynamicallyResolved),metadataReady:Boolean(s.metadataReady),executionEligible:Boolean(s.executionEligible)})),
         liveOrderSubmission: "DISABLED",
         realMoneyMoved: false
       };
