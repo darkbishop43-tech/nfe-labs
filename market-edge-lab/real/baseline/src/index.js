@@ -731,6 +731,7 @@ function estimateKalshiFeeSafeSize(price, maxStakeUsd) {
   return {ok:false,reason:"NO_CONTRACT_FITS_PREMIUM_PLUS_FEE_CAP",count:0,premiumUsd:0,feeUsd:0,totalDebitUsd:0,maxStakeUsd:cap,executionAllowed:false};
 }
 async function discoverKalshi15mSeriesFromOpenMarkets(env, wantedAssets) {
+  const aliases={BTC:["BTC","BITCOIN"],ETH:["ETH","ETHEREUM"],SOL:["SOL","SOLANA"],XRP:["XRP","RIPPLE"],HYPE:["HYPE","HYPERLIQUID"]};
   const found={}, evidence=Object.fromEntries(wantedAssets.map(a=>[a,{textMatches:0,durationMatches:0,seriesTickers:[]}]));
   let cursor="", pages=0, scanned=0, reachedEnd=false, readError=null;
   // Exhaust the provider cursor (bounded only by a high safety ceiling) so "not found"
@@ -751,7 +752,7 @@ async function discoverKalshi15mSeriesFromOpenMarkets(env, wantedAssets) {
       const durationMatch=duration!==null&&duration>=10*60*1000&&duration<=20*60*1000;
       const shortText=/15\s*(MIN|MINUTE)|15M/.test(text);
       for(const asset of wantedAssets){
-        const assetMatch=new RegExp("(^|[^A-Z])"+asset+"([^A-Z]|$)").test(text);
+        const assetMatch=(aliases[asset]||[asset]).some(alias=>new RegExp("(^|[^A-Z])"+alias+"([^A-Z]|$)").test(text));
         if(!assetMatch) continue;
         evidence[asset].textMatches++;
         if(durationMatch||shortText) evidence[asset].durationMatches++;
@@ -771,11 +772,11 @@ async function discoverKalshi15mSeriesFromOpenMarkets(env, wantedAssets) {
 
 async function resolveKalshi15mSeries(env, priorSeries=[]) {
   const wanted={
-    BTC:{coinbaseProduct:"BTC-USD"},
-    ETH:{coinbaseProduct:"ETH-USD"},
-    SOL:{coinbaseProduct:"SOL-USD"},
-    XRP:{coinbaseProduct:"XRP-USD"},
-    HYPE:{coinbaseProduct:"HYPE-USD"},
+    BTC:{coinbaseProduct:"BTC-USD",aliases:["BTC","BITCOIN"]},
+    ETH:{coinbaseProduct:"ETH-USD",aliases:["ETH","ETHEREUM"]},
+    SOL:{coinbaseProduct:"SOL-USD",aliases:["SOL","SOLANA"]},
+    XRP:{coinbaseProduct:"XRP-USD",aliases:["XRP","RIPPLE"]},
+    HYPE:{coinbaseProduct:"HYPE-USD",aliases:["HYPE","HYPERLIQUID"]},
   };
   const path="/trade-api/v2/series?category="+encodeURIComponent("Crypto")+"&include_product_metadata=true";
   const r=await kalshiShadowGet(env,path);
@@ -786,9 +787,10 @@ async function resolveKalshi15mSeries(env, priorSeries=[]) {
   const knownFallbacks={BTC:"KXBTC15M",ETH:"KXETH15M",SOL:"KXSOL15M",XRP:"KXXRP15M",HYPE:"KXHYPE15M"};
   // Catalogue discovery is the source of truth for assets beyond the already proven
   // BTC/ETH series. A guessed fallback ticker must never suppress real discovery.
+  const assetTextMatch=(asset,text)=>wanted[asset].aliases.some(alias=>new RegExp("(^|[^A-Z])"+alias+"([^A-Z]|$)").test(text));
   const catalogueHas15m=(asset)=>rows.some(s=>{
     const title=String(s?.title||"").toUpperCase(), ticker=String(s?.ticker||"").toUpperCase(), freq=String(s?.frequency||"").toUpperCase();
-    return (title.includes(asset+" ")||title.startsWith(asset)||ticker.includes(asset)) && (/15\s*(MIN|MINUTE)/.test(title)||freq.includes("15")||ticker.includes("15M"));
+    return assetTextMatch(asset,title+" "+ticker) && (/15\s*(MIN|MINUTE)/.test(title)||freq.includes("15")||ticker.includes("15M"));
   });
   const unresolvedAssets=Object.keys(wanted).filter(asset=>!catalogueHas15m(asset) && !priorByAsset[asset]);
   const marketDiscovered=unresolvedAssets.length ? await discoverKalshi15mSeriesFromOpenMarkets(env,unresolvedAssets) : {};
@@ -799,7 +801,7 @@ async function resolveKalshi15mSeries(env, priorSeries=[]) {
       const title=String(s?.title||"").toUpperCase();
       const freq=String(s?.frequency||"").toLowerCase();
       const ticker=String(s?.ticker||"").toUpperCase();
-      const assetMatch=title.includes(asset+" ")||title.startsWith(asset)||ticker.includes(asset);
+      const assetMatch=assetTextMatch(asset,title+" "+ticker);
       const shortMatch=/15\s*(MIN|MINUTE)/i.test(title)||/15\s*m/i.test(freq)||ticker.includes("15M");
       return assetMatch && shortMatch;
     });
