@@ -2130,11 +2130,12 @@ async function load(){
     if(!opps.length){
       parts.push('<div class="opp" style="grid-column:1/-1"><div class="oppHead"><div class="q">SHORT-HORIZON SCAN COMPLETE</div><div class="tag good">LIVE · VALID ZERO RESULT</div></div><div class="meta">No eligible BTC/ETH/SOL/XRP/HYPE 15-minute opportunities were found in this successful Kalshi Shadow observation. Baseline remains waiting for the next live contract window.</div></div>');
     } else {
-      for(const o of opps){
+      for(const [oi,o] of opps.entries()){
         const ask=Number(o.observedAsk),bid=Number(o.observedBid),score=Number(o.score),move=Number(o.move),edge=Number(o.edge);
         const qualifies=Number.isFinite(score)&&score>=0.80&&edge>0;
         const horizon=esc(o.horizon||'UNCLASSIFIED');
-        parts.push('<div class="opp"><div class="oppHead"><div class="q">'+esc(o.question||o.slug||'US market')+'</div><div class="oppBadges"><div class="tag">'+horizon+'</div><div class="scoreBadge '+(qualifies?'hot':'')+'"><small>SCORE</small><strong>'+(Number.isFinite(score)?score.toFixed(2):'—')+'</strong></div><div class="tag">'+esc(o.asset||'')+' · '+((o.executionEligible===true)?(qualifies?'QUALIFIED ≥ .80':'AUTO SELECT ELIGIBLE'):'DISCOVERY HOLD')+'</div></div></div><div class="meta">'+
+        const contractKey='opp-'+oi;latestOpportunityMap[contractKey]=o;
+        parts.push('<div class="opp clickable" role="button" tabindex="0" data-contract-key="'+contractKey+'" title="Open read-only contract details"><div class="oppHead"><div class="q">'+esc(o.question||o.slug||'US market')+'</div><div class="oppBadges"><div class="tag">'+horizon+'</div><div class="scoreBadge '+(qualifies?'hot':'')+'"><small>SCORE</small><strong>'+(Number.isFinite(score)?score.toFixed(2):'—')+'</strong></div><div class="tag">'+esc(o.asset||'')+' · '+((o.executionEligible===true)?(qualifies?'QUALIFIED ≥ .80':'AUTO SELECT ELIGIBLE'):'DISCOVERY HOLD')+'</div></div></div><div class="meta">'+
           (Number.isFinite(move)?('move '+(move*100).toFixed(3)+'% · '):'')+
           (Number.isFinite(ask)?('ASK '+(ask*100).toFixed(1)+'¢ · '):'')+
           (Number.isFinite(bid)?('BID '+(bid*100).toFixed(1)+'¢ · '):'')+
@@ -2152,10 +2153,11 @@ async function load(){
         const cv=cov?.[asset]||{};
         let body='';
         if(assetOpps.length){
-          body=assetOpps.map(o=>{
+          body=assetOpps.map((o,ri)=>{
             const score=Number(o.score),ask=Number(o.observedAsk),bid=Number(o.observedBid),edge=Number(o.edge);
             const qualifies=Number.isFinite(score)&&score>=0.80&&edge>0;
-            return '<div class="meta" style="padding:5px 0;border-top:1px solid rgba(255,255,255,.07)"><b>'+esc(o.direction||o.outcomeSide||'CONTRACT')+'</b> · '+esc(o.marketTicker||o.slug||'')+
+            const contractKey='lane-'+asset+'-'+ri;latestOpportunityMap[contractKey]=o;
+            return '<div class="meta clickable" role="button" tabindex="0" data-contract-key="'+contractKey+'" title="Open read-only contract details" style="padding:8px 0;border-top:1px solid rgba(255,255,255,.07)"><b>'+esc(o.direction||o.outcomeSide||'CONTRACT')+'</b> · '+esc(o.marketTicker||o.slug||'')+
               ' · '+(Number.isFinite(ask)?'ASK '+(ask*100).toFixed(1)+'¢':'ASK —')+
               ' · '+(Number.isFinite(bid)?'BID '+(bid*100).toFixed(1)+'¢':'BID —')+
               ' · SCORE '+(Number.isFinite(score)?score.toFixed(2):'—')+
@@ -2195,6 +2197,10 @@ function paintDashboardCountdown(){
   if(left<=0){resetDashboardCountdown();load();}
 }
 E('refresh').addEventListener('click',()=>{resetDashboardCountdown();load();});
+document.addEventListener('click',e=>{const card=e.target.closest?.('[data-contract-key]');if(card)openContractInspector(card.dataset.contractKey);});
+document.addEventListener('keydown',e=>{if(e.key!=='Enter'&&e.key!==' ')return;const card=e.target.closest?.('[data-contract-key]');if(card){e.preventDefault();openContractInspector(card.dataset.contractKey);}});
+E('contractModalClose')?.addEventListener('click',closeContractInspector);
+E('contractModal')?.addEventListener('click',e=>{if(e.target===E('contractModal'))closeContractInspector();});
 load();resetDashboardCountdown();paintDashboardCountdown();setInterval(paintDashboardCountdown,1000);setInterval(refreshPrices,10000);
 </script>
 <script>
