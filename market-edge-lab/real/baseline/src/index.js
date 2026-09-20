@@ -1330,12 +1330,34 @@ async function maybeRunKalshiOneTrade(env) {
       return state;
     }
     const balance=await br.json();
-    const availableCents=Number(balance?.balance);
-    if(!Number.isFinite(availableCents) || availableCents < Math.ceil(sizing.totalDebitUsd*100)) {
-      state.status="BLOCKED_INSUFFICIENT_EXECUTION_BALANCE";
+    // Execution collateral is shard-specific on Kalshi. Never treat aggregate cash as
+    // spendable for a candidate whose market lives on another exchange_index.
+    const candidateExchangeIndex=Number(candidate?.exchangeIndex);
+    const balanceRows=Array.isArray(balance?.balance_breakdown)?balance.balance_breakdown:[];
+    const shardRow=balanceRows.find(row=>Number(row?.exchange_index)===candidateExchangeIndex);
+    const shardBalanceUsd=Number(shardRow?.balance);
+    const requiredDebitUsd=Number(sizing.totalDebitUsd);
+    if(!Number.isInteger(candidateExchangeIndex) || !Number.isFinite(shardBalanceUsd) ||
+       !Number.isFinite(requiredDebitUsd) || shardBalanceUsd + 1e-9 < requiredDebitUsd) {
+      state.status="BLOCKED_INSUFFICIENT_CANDIDATE_SHARD_BALANCE";
+      state.executionBalancePreflight={
+        checkedAt:new Date().toISOString(),
+        exchangeIndex:Number.isInteger(candidateExchangeIndex)?candidateExchangeIndex:null,
+        shardBalanceUsd:Number.isFinite(shardBalanceUsd)?shardBalanceUsd:null,
+        requiredDebitUsd:Number.isFinite(requiredDebitUsd)?requiredDebitUsd:null,
+        aggregateBalanceCents:Number.isFinite(Number(balance?.balance))?Number(balance.balance):null,
+        passed:false
+      };
+      realTradeLedger(state,"CANDIDATE_SHARD_BALANCE_PREFLIGHT_BLOCKED",state.executionBalancePreflight);
       await saveRealTradeState(env,state);
       return state;
     }
+    state.executionBalancePreflight={
+      checkedAt:new Date().toISOString(),exchangeIndex:candidateExchangeIndex,
+      shardBalanceUsd,requiredDebitUsd,
+      aggregateBalanceCents:Number.isFinite(Number(balance?.balance))?Number(balance.balance):null,
+      passed:true
+    };
 
     // Immutable BEFORE evidence. This object is write-once and is never rewritten from outcome data.
     if(!state?.firstRealTradeEvidence?.preTradeDecisionSnapshot){
@@ -3358,6 +3380,37 @@ export default {
       } catch(error) {
         return json({ok:false,readOnly:true,state:"FAILED_XRP_PROVIDER_RECONCILIATION_FAILED",errorCode:String(error?.message||"FAILED"),safety:{providerWrites:0,transfers:0,ordersCreated:0,reauthorizations:0,stateMutation:false,realMoneyMoved:false}},500);
       }
+    }
+
+    if (url.pathname === "/stale-xrp-recovery-readiness") {
+      const state=await loadRealTradeState(env);
+      const reconciledFailure=
+        !state?.entryOrderId &&
+        Number(state?.filledCount||0)===0 &&
+        Number(state?.entryProviderStatus)===404 &&
+        String(state?.entryProviderResponse?.error?.code||"")==="insufficient_shard_balance";
+      const staleLatch=Boolean(state?.entrySubmitStartedAt);
+      const evidencePreserved=Boolean(state?.firstRealTradeEvidence?.preTradeDecisionSnapshot);
+      return json({
+        ok:true,readOnly:true,state:"STALE_XRP_RECOVERY_READINESS",
+        recoveryReady:reconciledFailure&&staleLatch&&evidencePreserved,
+        observed:{
+          marketTicker:state?.marketTicker||null,
+          entryOrderId:state?.entryOrderId||null,
+          filledCount:Number(state?.filledCount||0),
+          providerHttpStatus:state?.entryProviderStatus??null,
+          providerErrorCode:state?.entryProviderResponse?.error?.code||null,
+          staleEntrySubmitLatch:staleLatch,
+          immutablePreTradeEvidencePresent:evidencePreserved,
+          founderAuthorizationConsumed:Boolean(state?.founderAuthorization?.consumed)
+        },
+        proposedRecovery:{
+          preserves:["firstRealTradeEvidence","entryProviderResponse","entryProviderStatus","entryClientOrderId","ledger"],
+          clearsOnlyOperationalLatch:["entrySubmitStartedAt","stale current candidate execution fields","consumed authorization state"],
+          reauthorizes:false,submitsOrder:false,movesMoney:false
+        },
+        safety:{providerWrites:0,transfers:0,orders:0,reauthorizations:0,stateMutation:false,realMoneyMoved:false}
+      });
     }
 
     if (url.pathname === "/first-entry-failure-proof") {
