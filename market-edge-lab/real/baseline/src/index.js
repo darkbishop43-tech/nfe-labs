@@ -1,4 +1,5 @@
 import { PolymarketUS } from "polymarket-us";
+// SHARD_ROUTING_DEPLOYMENT_MARKER_2026_09_20
 
 const JSON_HEADERS = {
   "content-type": "application/json; charset=utf-8",
