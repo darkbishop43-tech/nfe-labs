@@ -1897,6 +1897,12 @@ body{background-color:#030811;background-image:linear-gradient(rgba(31,91,137,.0
 @media(max-width:900px){.hero{grid-template-columns:1fr 150px 1fr}.hero:before,.hero:after{width:44%}}
 @media(max-width:720px){.hero{grid-template-columns:1fr 94px 1fr}.hero:before,.hero:after{width:44%;background-size:cover}.heroTools{justify-content:flex-start}}
 @media(max-width:460px){.hero:before,.hero:after{width:45%}.heroTools .pill,.heroTools .btn{font-size:8px}}
+
+/* VISUAL FREEZE: final bear framing correction only */
+.hero:after{background-size:contain!important;background-position:right center!important}
+@media(max-width:900px){.hero:after{background-size:contain!important;background-position:right center!important}}
+@media(max-width:720px){.hero:after{background-size:contain!important;background-position:right center!important}}
+@media(max-width:460px){.hero:after{background-size:contain!important;background-position:right center!important}}
 </style>
 </head>
 <body>
