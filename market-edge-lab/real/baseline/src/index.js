@@ -2603,6 +2603,31 @@ export default {
       });
     }
 
+    if (url.pathname === "/kalshi-live-market-shard-proof") {
+      try {
+        // Read-only proof that freshly discovered Kalshi contracts carry exchange_index through discovery.
+        const discovery=await discoverKalshiShadowMarkets(env);
+        const rows=(discovery?.markets||[]).slice(0,20).map(m=>({
+          asset:m.asset||null,
+          marketTicker:m.marketTicker||m.slug||null,
+          outcomeSide:m.outcomeSide||null,
+          score:safeFinite(m.score),
+          executionEligible:m.executionEligible===true,
+          exchangeIndex:m.exchangeIndex??null,
+          closeTime:m.closeTime||null
+        }));
+        return json({
+          ok:true,readOnly:true,state:"KALSHI_LIVE_MARKET_SHARD_PROOF",
+          marketCount:rows.length,
+          marketsWithExchangeIndex:rows.filter(x=>Number.isInteger(Number(x.exchangeIndex))).length,
+          markets:rows,
+          safety:{providerWrites:0,transfers:0,reauthorizations:0,stateMutation:false,realMoneyMoved:false}
+        });
+      } catch(error) {
+        return json({ok:false,readOnly:true,state:"KALSHI_LIVE_MARKET_SHARD_PROOF_FAILED",errorCode:String(error?.message||"FAILED"),safety:{providerWrites:0,transfers:0,reauthorizations:0,stateMutation:false,realMoneyMoved:false}},500);
+      }
+    }
+
     if (url.pathname === "/kalshi-balance-shard-proof") {
       try {
         // Read-only shard diagnostic: authenticated GET only. Never moves funds or creates orders.
