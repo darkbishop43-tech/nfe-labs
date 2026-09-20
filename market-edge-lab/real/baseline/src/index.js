@@ -1170,8 +1170,8 @@ function publicFirstTradeEvidence(state){
   return {stage:firstTradeEvidenceStage(state),preTradeDecisionSnapshot:e.preTradeDecisionSnapshot||null,postTradeOutcomeEvidence:e.postTradeOutcomeEvidence||null,postTradeResearchReview:e.postTradeResearchReview||null,chain:{
     discovered:Boolean(e.preTradeDecisionSnapshot),qualified:Boolean(e.preTradeDecisionSnapshot?.qualification?.score>=REAL_TEST_CONFIG.entryScore),
     compared:Array.isArray(e.preTradeDecisionSnapshot?.eligibleCandidatesConsidered),selected:Boolean(e.preTradeDecisionSnapshot?.selected),
-    authorized:Boolean(e.preTradeDecisionSnapshot?.authorization?.oneTradeAuthorized),submitted:Boolean(state?.entrySubmitStartedAt),
-    filled:Number(state?.filledCount||0)>0,exitedOrSettled:Boolean(state?.consumed),
+    authorized:Boolean(e.preTradeDecisionSnapshot?.authorization?.oneTradeAuthorized),submitted:Boolean(state?.entryOrderId),
+    submissionAttempted:Boolean(state?.entrySubmitStartedAt),filled:Number(state?.filledCount||0)>0,exitedOrSettled:Boolean(state?.consumed),
     accounted:e.postTradeOutcomeEvidence?.resultingCashBalanceUsd!=null
   }};
 }
@@ -1246,6 +1246,15 @@ async function maybeRunKalshiOneTrade(env) {
 
   if(state.consumed) {
     state.status="ONE_TRADE_COMPLETE";
+    await saveRealTradeState(env,state);
+    return state;
+  }
+  // Once a provider submission latch exists, never overwrite its failure/reconciliation
+  // evidence with the generic authorization-disabled state on later scheduler cycles.
+  if(!state.entryOrderId && state.entrySubmitStartedAt) {
+    if(state.entryProviderStatus!=null) state.status="BLOCKED_ENTRY_PROVIDER_REJECTED";
+    else if(state.entryWriteError) state.status="BLOCKED_ENTRY_WRITE_ERROR";
+    else if(!String(state.status||"").startsWith("BLOCKED_ENTRY_") && state.status!=="BLOCKED_V2_REQUEST_BUILD") state.status="BLOCKED_ENTRY_RECONCILIATION";
     await saveRealTradeState(env,state);
     return state;
   }
@@ -1691,6 +1700,13 @@ function publicRealTradeView(state, env) {
     marketSlug: state?.marketSlug || null,
     question: state?.question || null,
     entryOrderPresent: Boolean(state?.entryOrderId),
+    entrySubmitAttempted: Boolean(state?.entrySubmitStartedAt),
+    entryFailureStatus: !state?.entryOrderId && state?.entrySubmitStartedAt
+      ? (state?.entryProviderStatus!=null ? "BLOCKED_ENTRY_PROVIDER_REJECTED" : state?.entryWriteError ? "BLOCKED_ENTRY_WRITE_ERROR" : "BLOCKED_ENTRY_RECONCILIATION")
+      : null,
+    entryProviderStatus: state?.entryProviderStatus ?? null,
+    entryProviderResponse: state?.entryProviderResponse ?? null,
+    entryWriteError: state?.entryWriteError ?? null,
     exitOrderPresent: Boolean(state?.exitOrderId),
     openedAt: state?.openedAt || null,
     closedAt: state?.closedAt || null,
