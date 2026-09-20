@@ -740,7 +740,10 @@ async function resolveKalshi15mSeries(env) {
       settlementSources:Array.isArray(exact?.settlement_sources)?exact.settlement_sources:[],
       coinbaseProduct:meta.coinbaseProduct,
       dynamicallyResolved:Boolean(exact?.ticker),
-      executionEligible:Boolean(exact?.ticker)||asset==="BTC"||asset==="ETH"
+      metadataReady:Boolean(exact?.ticker) && Array.isArray(exact?.settlement_sources) && exact.settlement_sources.length>0,
+      executionEligible:(asset==="BTC"||asset==="ETH")
+        ? true
+        : Boolean(exact?.ticker) && Array.isArray(exact?.settlement_sources) && exact.settlement_sources.length>0
     });
   }
   return resolved;
@@ -805,21 +808,20 @@ async function runShadow(env) {
     const btc=spot.BTC, eth=spot.ETH;
     stage = "KALSHI_DISCOVERY";
     discovery = await discoverKalshiShadowMarkets(env);
-    const priorCoverageProof = state?.assetCoverageProof || { BTC:false, ETH:false };
-    const currentBTC = Number(discovery?.coverage?.BTC?.eligible || 0) > 0;
-    const currentETH = Number(discovery?.coverage?.ETH?.eligible || 0) > 0;
-    state.assetCoverageProof = {
-      BTC: Boolean(priorCoverageProof.BTC || currentBTC),
-      ETH: Boolean(priorCoverageProof.ETH || currentETH),
-      bothEverProven: Boolean((priorCoverageProof.BTC || currentBTC) && (priorCoverageProof.ETH || currentETH)),
-      currentBothLive: Boolean(currentBTC && currentETH),
-      currentBTC,
-      currentETH,
-      updatedAt: new Date(now).toISOString()
+    const trackedAssets=["BTC","ETH","SOL","XRP","HYPE"];
+    const priorCoverageProof=state?.assetCoverageProof||{};
+    const currentCoverage=Object.fromEntries(trackedAssets.map(a=>[
+      a, Number(discovery?.coverage?.[a]?.eligible||0)>0 && discovery?.coverage?.[a]?.executionEligible===true
+    ]));
+    state.assetCoverageProof={
+      ...Object.fromEntries(trackedAssets.map(a=>[a,Boolean(priorCoverageProof?.[a]||currentCoverage[a])])),
+      current:currentCoverage,
+      anyValidatedAssetLive:Object.values(currentCoverage).some(Boolean),
+      updatedAt:new Date(now).toISOString()
     };
-    state.firstTradeCoverageGate = state.assetCoverageProof.bothEverProven
-      ? "BOTH_ASSETS_PROVEN_HISTORICALLY"
-      : "HOLD_UNTIL_BTC_AND_ETH_EACH_PROVEN";
+    state.firstTradeCoverageGate=state.assetCoverageProof.anyValidatedAssetLive
+      ? "AT_LEAST_ONE_VALIDATED_ASSET_LIVE"
+      : "HOLD_UNTIL_A_VALIDATED_ASSET_IS_LIVE";
     stage = "SCORING";
 
     const previous = state.prices || {};
@@ -2547,6 +2549,41 @@ export default {
           oneTradeAuthorizationActive:false,
           controllerEnabled:false,postOrdersCalled:false,deleteOrdersCalled:false,submitted:false,realMoneyMoved:false}
       });
+    }
+
+    if (url.pathname === "/kalshi-five-asset-readiness-proof") {
+      try {
+        const [series,discovery]=await Promise.all([
+          resolveKalshi15mSeries(env),
+          discoverKalshiShadowMarkets(env)
+        ]);
+        const safeSeries=series.map(s=>({
+          asset:s.asset,
+          seriesTicker:s.ticker||null,
+          title:s.title||null,
+          frequency:s.frequency||null,
+          dynamicallyResolved:Boolean(s.dynamicallyResolved),
+          metadataReady:Boolean(s.metadataReady),
+          executionEligible:Boolean(s.executionEligible),
+          settlementSourceNames:(s.settlementSources||[]).map(x=>x?.name||"").filter(Boolean)
+        }));
+        const coverage=discovery.coverage||{};
+        return json({
+          ok:true,
+          state:"FIVE_ASSET_DISCOVERY_READ_ONLY",
+          assets:["BTC","ETH","SOL","XRP","HYPE"],
+          series:safeSeries,
+          coverage,
+          eligibleOpportunityCount:Number(discovery.markets?.length||0),
+          autoSelectionRule:"HIGHEST_RANKED_QUALIFYING_SCORE_AT_OR_ABOVE_0_80",
+          strategy:{entryScore:REAL_TEST_CONFIG.entryScore,exitScore:REAL_TEST_CONFIG.exitScore,maxHoldMinutes:REAL_TEST_CONFIG.maxHoldMs/60000,maxStakeUsd:REAL_TEST_CONFIG.maxStakeUsd},
+          oneTradeOnly:true,
+          submitted:false,
+          realMoneyMoved:false
+        });
+      } catch(error) {
+        return json({ok:false,state:"FIVE_ASSET_DISCOVERY_READ_FAILED",errorCode:String(error?.message||"READ_FAILED").slice(0,120),submitted:false,realMoneyMoved:false},422);
+      }
     }
 
     if (url.pathname === "/kalshi-final-controller-safety-proof") {
