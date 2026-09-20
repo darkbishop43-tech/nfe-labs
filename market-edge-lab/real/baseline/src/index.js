@@ -1798,7 +1798,7 @@ function dashboardHtml() {
       <div class="card" style="margin-top:12px">
         <div style="display:flex;justify-content:space-between;gap:10px;align-items:center;flex-wrap:wrap">
           <b>Available 15-Minute Contracts · Five-Asset Pool</b>
-          <span class="tag">AUTO-REFRESH · <span id="refreshCountdown">05:00</span></span>
+          <span class="tag" title="Dashboard view refreshes every 5 minutes. The server scheduler observes independently.">AUTO-REFRESH IN <span id="refreshCountdown">05:00</span></span>
         </div>
         <div id="contractPool" class="opps" style="margin-top:10px"><div class="m">Loading BTC / ETH / SOL / XRP / HYPE contract lanes…</div></div>
       </div>
@@ -1822,7 +1822,7 @@ function dashboardHtml() {
       <div class="miniBox"><div class="label">Runs / eligible</div><div class="miniVal"><span id="shadowRuns">0</span> runs · <span id="shadowEligible">0</span> markets</div><div class="miniSub">Five-asset validated Kalshi scope</div></div>
       <div class="miniBox"><div class="label">Persistence</div><div id="shadowPersistence" class="miniVal">—</div><div class="miniSub">Isolated from paper experiments</div></div>
       <div class="miniBox"><div class="label">Started</div><div id="shadowStarted" class="miniVal">—</div></div>
-      <div class="miniBox"><div class="label">Last observation</div><div id="shadowLast" class="miniVal">—</div></div>
+      <div class="miniBox"><div class="label">Last observation</div><div id="shadowLast" class="miniVal">—</div><div class="miniSub">Dashboard refresh in <span id="refreshCountdownRuntime">05:00</span></div></div>
       <div class="miniBox"><div class="label">Trading rule</div><div class="miniVal">≥ .80 ENTRY · ≤ .20 EXIT</div><div class="miniSub">5 min max hold · $5 max stake</div></div>
     </div>
   </div>
@@ -2134,7 +2134,9 @@ E('contractModal')?.addEventListener('click',e=>{if(e.target===E('contractModal'
 const AUTO_REFRESH_MS=5*60*1000;let autoRefreshDeadline=Date.now()+AUTO_REFRESH_MS;
 function tickRefreshCountdown(){
   const remaining=Math.max(0,autoRefreshDeadline-Date.now()),m=Math.floor(remaining/60000),s=Math.floor((remaining%60000)/1000),el=E('refreshCountdown');
-  if(el)el.textContent=String(m).padStart(2,'0')+':'+String(s).padStart(2,'0');
+  const value=String(m).padStart(2,'0')+':'+String(s).padStart(2,'0');
+  if(el)el.textContent=value;
+  const runtimeEl=E('refreshCountdownRuntime');if(runtimeEl)runtimeEl.textContent=value;
   if(remaining<=0){autoRefreshDeadline=Date.now()+AUTO_REFRESH_MS;load();}
 }
 load();refreshPrices();setInterval(refreshPrices,10000);setInterval(tickRefreshCountdown,1000);tickRefreshCountdown();
