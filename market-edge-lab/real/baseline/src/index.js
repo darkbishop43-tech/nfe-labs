@@ -1018,6 +1018,26 @@ function realTradeLedger(state, type, payload = {}) {
   state.ledger.unshift({ ts: new Date().toISOString(), type, ...payload });
   state.ledger = state.ledger.slice(0, 80);
 }
+function safeFinite(v){const n=Number(v);return Number.isFinite(n)?n:null;}
+function firstTradeEvidenceStage(state){
+  const pre=state?.firstRealTradeEvidence?.preTradeDecisionSnapshot;
+  if(!pre)return "WAITING_FOR_QUALIFYING_DECISION";
+  if(!state?.entrySubmitStartedAt)return "SELECTED_PRE_SUBMIT";
+  if(!state?.entryOrderId)return "SUBMITTED_OR_PROVIDER_RESPONSE_PENDING";
+  if(!(Number(state?.filledCount)>0))return "SUBMITTED_NOT_FILLED";
+  if(!state?.consumed)return "FILLED_POSITION_OPEN";
+  return "EXITED_OR_SETTLED_ACCOUNTING_PENDING";
+}
+function publicFirstTradeEvidence(state){
+  const e=state?.firstRealTradeEvidence||{};
+  return {stage:firstTradeEvidenceStage(state),preTradeDecisionSnapshot:e.preTradeDecisionSnapshot||null,postTradeOutcomeEvidence:e.postTradeOutcomeEvidence||null,chain:{
+    discovered:Boolean(e.preTradeDecisionSnapshot),qualified:Boolean(e.preTradeDecisionSnapshot?.qualification?.score>=REAL_TEST_CONFIG.entryScore),
+    compared:Array.isArray(e.preTradeDecisionSnapshot?.eligibleCandidatesConsidered),selected:Boolean(e.preTradeDecisionSnapshot?.selected),
+    authorized:Boolean(e.preTradeDecisionSnapshot?.authorization?.oneTradeAuthorized),submitted:Boolean(state?.entrySubmitStartedAt),
+    filled:Number(state?.filledCount||0)>0,exitedOrSettled:Boolean(state?.consumed),
+    accounted:e.postTradeOutcomeEvidence?.resultingCashBalanceUsd!=null
+  }};
+}
 
 function realTradeArmed(env) {
   // Safety interlock: the legacy Polymarket execution controller is intentionally disabled.
@@ -1086,13 +1106,14 @@ async function maybeRunKalshiOneTrade(env) {
       await saveRealTradeState(env,state);
       return state;
     }
-    const candidate=(shadow.opportunities||[]).find(o =>
+    const qualifyingCandidates=(shadow.opportunities||[]).filter(o =>
       Number(o?.score)>=REAL_TEST_CONFIG.entryScore && Number(o?.edge)>0 &&
       Number(o?.yes)>0.01 && Number(o?.yes)<0.99 && o?.marketTicker &&
       o?.executionEligible===true &&
       ["BTC","ETH","SOL","XRP","HYPE"].includes(String(o?.asset||"")) &&
       (o?.outcomeSide==="YES"||o?.outcomeSide==="NO") && kalshiCandidateTimeSafe(o,now)
     );
+    const candidate=qualifyingCandidates.slice().sort((a,b)=>Number(b?.score||0)-Number(a?.score||0))[0]||null;
     if(!candidate) {
       state.status="SHADOW_WAITING_FOR_SIGNAL";
       await saveRealTradeState(env,state);
@@ -1124,6 +1145,25 @@ async function maybeRunKalshiOneTrade(env) {
       state.status="BLOCKED_INSUFFICIENT_EXECUTION_BALANCE";
       await saveRealTradeState(env,state);
       return state;
+    }
+
+    // Immutable BEFORE evidence. This object is write-once and is never rewritten from outcome data.
+    if(!state?.firstRealTradeEvidence?.preTradeDecisionSnapshot){
+      const ranked=qualifyingCandidates.slice().sort((a,b)=>Number(b?.score||0)-Number(a?.score||0));
+      const grossPayout=Number(Number(sizing.count||0).toFixed(4));
+      state.firstRealTradeEvidence={...(state.firstRealTradeEvidence||{}),preTradeDecisionSnapshot:{
+        schema:"BASELINE_REAL_FIRST_TRADE_DECISION_V1",immutable:true,capturedAt:new Date(now).toISOString(),
+        selected:{asset:candidate.asset||null,marketTicker:candidate.marketTicker||null,question:candidate.question||null,side:candidate.outcomeSide||null,direction:candidate.direction||null},
+        qualification:{score:safeFinite(candidate.score),threshold:REAL_TEST_CONFIG.entryScore,edge:safeFinite(candidate.edge),movement:safeFinite(candidate.move),observedAsk:safeFinite(candidate.yes),observedBid:safeFinite(candidate.bid)},
+        capital:{startingResearchCapitalUsd:10,intendedContractCount:safeFinite(sizing.count),intendedPremiumUsd:safeFinite(sizing.premiumUsd),estimatedEntryFeeUsd:safeFinite(sizing.feeUsd),maximumEntryDebitUsd:safeFinite(sizing.totalDebitUsd),maximumPossibleDollarLossUsd:safeFinite(sizing.totalDebitUsd),maximumPossibleGrossPayoutUsd:grossPayout,maximumPossibleGrossProfitUsd:Number((grossPayout-Number(sizing.premiumUsd||0)-Number(sizing.feeUsd||0)).toFixed(4)),untouchedReserveMinimumUsd:5},
+        settlement:{seriesTicker:candidate.seriesTicker||null,seriesTitle:candidate.seriesTitle||null,seriesFrequency:candidate.seriesFrequency||null,settlementSources:Array.isArray(candidate.settlementSources)?candidate.settlementSources:[],openTime:candidate.openTime||null,closeTime:candidate.closeTime||null},
+        baselineInputs:{assetSpotUsd:safeFinite(shadow?.prices?.[candidate.asset]),assetSpotSource:shadow?.priceSources?.[candidate.asset]||null,movement:safeFinite(candidate.move),marketAsk:safeFinite(candidate.yes),marketBid:safeFinite(candidate.bid),edge:safeFinite(candidate.edge),score:safeFinite(candidate.score)},
+        eligibleCandidatesConsidered:ranked.map((o,index)=>({rank:index+1,asset:o.asset||null,marketTicker:o.marketTicker||null,question:o.question||null,side:o.outcomeSide||null,direction:o.direction||null,score:safeFinite(o.score),edge:safeFinite(o.edge),movement:safeFinite(o.move),observedAsk:safeFinite(o.yes),observedBid:safeFinite(o.bid)})),
+        selectionExplanation:{rule:"HIGHEST EXISTING BASELINE SCORE AMONG CURRENTLY ELIGIBLE CANDIDATES MEETING >= 0.80",selectedScore:safeFinite(candidate.score),alternativeCount:Math.max(0,ranked.length-1),noNewReasoningIntroduced:true},
+        authorization:{oneTradeAuthorized:kalshiAuthorizationValid(state),scope:state?.founderAuthorization?.scope||null,authorizedAt:state?.founderAuthorization?.authorizedAt||null,expiresAt:state?.founderAuthorization?.expiresAt??null}
+      },postTradeOutcomeEvidence:state?.firstRealTradeEvidence?.postTradeOutcomeEvidence||null};
+      realTradeLedger(state,"FIRST_REAL_TRADE_DECISION_SNAPSHOT_CAPTURED",{marketTicker:candidate.marketTicker,asset:candidate.asset,score:safeFinite(candidate.score)});
+      await saveRealTradeState(env,state);
     }
 
     // One-way latch BEFORE any provider write. A crash after this point blocks replay.
@@ -1197,6 +1237,8 @@ async function maybeRunKalshiOneTrade(env) {
       return state;
     }
     state.status="POSITION_OPEN";
+    state.firstRealTradeEvidence=state.firstRealTradeEvidence||{};
+    state.firstRealTradeEvidence.postTradeOutcomeEvidence={...(state.firstRealTradeEvidence.postTradeOutcomeEvidence||{}),entry:{submittedAt:state.entrySubmitStartedAt||null,orderId:state.entryOrderId||null,requestedPrice:state.entryObservedAsk??null,filledAt:state.entryFilledAt||null,actualFillPrice:state.entryAverageFillPrice??null,quantity:state.filledCount??null,entryFeeUsd:state.entryAverageFeePaid??null,status:"FILLED"},positionState:"OPEN"};
     realTradeLedger(state,"KALSHI_ENTRY_FILLED",{orderId:state.entryOrderId,filledCount:state.filledCount,averageFillPrice:state.entryAverageFillPrice});
     await saveRealTradeState(env,state);
     return state;
@@ -1282,6 +1324,8 @@ async function maybeRunKalshiOneTrade(env) {
     state.status="ONE_TRADE_COMPLETE";
     state.consumed=true;
     state.completedAt=Date.now();
+    state.firstRealTradeEvidence=state.firstRealTradeEvidence||{};
+    state.firstRealTradeEvidence.postTradeOutcomeEvidence={...(state.firstRealTradeEvidence.postTradeOutcomeEvidence||{}),exit:{orderId:state.exitOrderId||null,reason:state.exitReason||null,filledCount:state.exitFilledTotal??null,averageFillPrice:state.exitAverageFillPrice??null,exitFeeUsd:state.exitAverageFeePaid??null,completedAt:new Date(state.completedAt).toISOString()},positionState:"CLOSED",realizedPnlUsd:null,resultingCashBalanceUsd:null,accountingStatus:"WAITING_FOR_FINAL_BALANCE_RECONCILIATION"};
     realTradeLedger(state,"KALSHI_EXIT_FILLED",{orderId:state.exitOrderId,reason:state.exitReason,filledCount:state.exitFilledTotal});
   } else {
     state.status="POSITION_OPEN_EXIT_RETRY_REQUIRED";
@@ -1481,6 +1525,7 @@ function publicRealTradeView(state, env) {
     closedAt: state?.closedAt || null,
     exitReason: state?.exitReason || null,
     recentEvidence: (state?.ledger || []).slice(0, 20),
+    firstRealTradeEvidence: publicFirstTradeEvidence(state),
     actualProviderBalanceAmountsExposed: false,
   };
 }
@@ -1647,6 +1692,21 @@ function dashboardHtml() {
     <div id="realAuthorizationNote" class="notice">Authorization is persistent for exactly one qualifying entry. It does not expire after 15 minutes. Once used, it cannot authorize a second entry; the exact filled position remains eligible only for its governed reduce-only exit.</div>
   </div>
 
+  <details class="card section" open><summary><b>FIRST REAL TRADE EVIDENCE</b> · immutable BEFORE / separate AFTER</summary>
+    <div class="compactGrid" style="margin-top:10px">
+      <div class="miniBox"><div class="label">DISCOVERED</div><div id="evDiscovered" class="miniVal">WAITING</div></div>
+      <div class="miniBox"><div class="label">QUALIFIED</div><div id="evQualified" class="miniVal">WAITING</div></div>
+      <div class="miniBox"><div class="label">COMPARED</div><div id="evCompared" class="miniVal">WAITING</div></div>
+      <div class="miniBox"><div class="label">SELECTED</div><div id="evSelected" class="miniVal">WAITING</div></div>
+      <div class="miniBox"><div class="label">AUTHORIZED</div><div id="evAuthorized" class="miniVal">WAITING</div></div>
+      <div class="miniBox"><div class="label">SUBMITTED</div><div id="evSubmitted" class="miniVal">NOT YET OCCURRED</div></div>
+      <div class="miniBox"><div class="label">FILLED</div><div id="evFilled" class="miniVal">NOT YET OCCURRED</div></div>
+      <div class="miniBox"><div class="label">EXITED / SETTLED</div><div id="evExited" class="miniVal">NOT YET OCCURRED</div></div>
+      <div class="miniBox"><div class="label">ACCOUNTED</div><div id="evAccounted" class="miniVal">NOT YET OCCURRED</div></div>
+    </div>
+    <div id="evSummary" class="notice">Waiting for a naturally occurring qualifying decision. No evidence is fabricated before it exists.</div>
+  </details>
+
   <details class="card section"><summary><b>Setup / Validation Proof</b> · completed evidence</summary>
     <div style="margin-top:8px">
       <div class="gate"><span>1. Secure API credentials</span><strong class="good">PASS</strong></div>
@@ -1727,6 +1787,11 @@ async function load(){
     E('realEntryOrder').className=realTrade?.entryOrderPresent?'good':'';
     E('realExitOrder').textContent=realTrade?.exitOrderPresent?'SUBMITTED / PRESENT':'NOT SUBMITTED';
     E('realExitOrder').className=realTrade?.exitOrderPresent?'good':'';
+    const ev=realTrade?.firstRealTradeEvidence||{},chain=ev?.chain||{},pre=ev?.preTradeDecisionSnapshot||null;
+    const setEv=(id,on,waiting='WAITING')=>{const el=E(id);if(!el)return;el.textContent=on?'PRESERVED':waiting;el.className='miniVal '+(on?'good':'');};
+    setEv('evDiscovered',chain.discovered);setEv('evQualified',chain.qualified);setEv('evCompared',chain.compared);setEv('evSelected',chain.selected);setEv('evAuthorized',chain.authorized);
+    setEv('evSubmitted',chain.submitted,'NOT YET OCCURRED');setEv('evFilled',chain.filled,'NOT YET OCCURRED');setEv('evExited',chain.exitedOrSettled,'NOT YET OCCURRED');setEv('evAccounted',chain.accounted,'NOT YET OCCURRED');
+    const evSummary=E('evSummary');if(evSummary&&pre)evSummary.textContent='BEFORE SNAPSHOT LOCKED · '+(pre.selected?.asset||'')+' · '+(pre.selected?.marketTicker||'')+' · '+(pre.selected?.side||'')+' · score '+Number(pre.qualification?.score||0).toFixed(2)+' · captured '+(pre.capturedAt||'');
     E('realConsumed').textContent=realTrade?.consumed?'YES · COMPLETE':'NO';
     E('realConsumed').className=realTrade?.consumed?'good':'';
     const authBtn=E('authorizeTradeBtn');
@@ -2608,6 +2673,11 @@ export default {
           oneTradeAuthorizationActive:false,
           controllerEnabled:false,postOrdersCalled:false,deleteOrdersCalled:false,submitted:false,realMoneyMoved:false}
       });
+    }
+
+    if (url.pathname === "/first-real-trade-evidence") {
+      const state=await loadRealTradeState(env);
+      return json({ok:true,experiment:"MARKET EDGE — BASELINE REAL",strategyUnchanged:true,entryThreshold:REAL_TEST_CONFIG.entryScore,exitThreshold:REAL_TEST_CONFIG.exitScore,maxHoldMinutes:5,maxFirstTradeExposureUsd:5,oneEntryOnly:true,evidence:publicFirstTradeEvidence(state)});
     }
 
     if (url.pathname === "/kalshi-five-asset-readiness-proof") {
