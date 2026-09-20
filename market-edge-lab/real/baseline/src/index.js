@@ -883,12 +883,30 @@ async function runShadow(env) {
   let discovery;
   try {
     const trackedAssets=["BTC","ETH","SOL","XRP","HYPE"];
-    const spotRows=await Promise.all(trackedAssets.map(async asset=>[asset,await assetSpot(asset)]));
-    const spot=Object.fromEntries(spotRows.map(([asset,x])=>[asset,x.price]));
-    const spotSources=Object.fromEntries(spotRows.map(([asset,x])=>[asset,x.source]));
-    const btc=spot.BTC, eth=spot.ETH;
     stage = "KALSHI_DISCOVERY";
     discovery = await discoverKalshiShadowMarkets(env, state?.kalshiSeriesCache||[]);
+    stage = "MULTI_ASSET_SPOT";
+    const liveAssets=[...new Set((discovery.markets||[]).map(m=>m.asset).filter(a=>trackedAssets.includes(a)))];
+    const spotResults=await Promise.all(liveAssets.map(async asset=>{
+      try{return [asset,await assetSpot(asset),null];}
+      catch(error){return [asset,null,String(error?.message||"SPOT_READ_FAILED").slice(0,80)];}
+    }));
+    const spot={...Object.fromEntries(trackedAssets.map(a=>[a,Number(state?.prices?.[a])||null]))};
+    const spotSources={...Object.fromEntries(trackedAssets.map(a=>[a,state?.priceSources?.[a]||null]))};
+    const spotReadFailures=[];
+    for(const [asset,x,error] of spotResults){
+      if(x){spot[asset]=x.price;spotSources[asset]=x.source;}
+      else spotReadFailures.push({asset,reason:error});
+    }
+    const scorableAssets=new Set(liveAssets.filter(asset=>Number.isFinite(Number(spot[asset]))&&Number(spot[asset])>0));
+    discovery.markets=(discovery.markets||[]).filter(m=>scorableAssets.has(m.asset));
+    for(const asset of liveAssets){
+      if(!scorableAssets.has(asset)){
+        discovery.coverage[asset]={...(discovery.coverage?.[asset]||{}),eligible:0,up:0,down:0,executionEligible:false,spotSignalReady:false};
+      } else if(discovery.coverage?.[asset]) discovery.coverage[asset].spotSignalReady=true;
+    }
+    state.spotReadFailures=spotReadFailures;
+    const btc=spot.BTC, eth=spot.ETH;
     state.kalshiSeriesCache=discovery.series||state?.kalshiSeriesCache||[];
     const priorCoverageProof=state?.assetCoverageProof||{};
     const currentCoverage=Object.fromEntries(trackedAssets.map(a=>[
@@ -907,7 +925,9 @@ async function runShadow(env) {
 
     const previous = state.prices || {};
     const moves=Object.fromEntries(Object.entries(spot).map(([asset,price])=>[
-      asset, previous[asset] ? (price-previous[asset])/previous[asset] : 0
+      asset, Number.isFinite(Number(price))&&Number(price)>0&&Number.isFinite(Number(previous[asset]))&&Number(previous[asset])>0
+        ? (Number(price)-Number(previous[asset]))/Number(previous[asset])
+        : 0
     ]));
 
     const horizonRank = { "15M": 0, "HOURLY": 1, "DAILY": 2 };
@@ -1643,6 +1663,10 @@ function publicShadowView(state) {
     assetCoverage: state?.assetCoverage || { BTC:{eligible:0,up:0,down:0}, ETH:{eligible:0,up:0,down:0} },
     assetCoverageReady: Boolean(state?.assetCoverageReady),
     priceSources: state?.priceSources || {},
+    spotReadFailures: Array.isArray(state?.spotReadFailures)?state.spotReadFailures:[],
+    consecutiveObservationFailures: Number(state?.consecutiveObservationFailures||0),
+    lastSuccessfulObservationAt: state?.lastSuccessfulObservationAt||null,
+    lastObservationFailureAt: state?.lastObservationFailureAt||null,
     rejectedCount: state?.rejectedCount || 0,
     seenCount: state?.seenCount || 0,
     errorCode: state?.errorCode || null,
