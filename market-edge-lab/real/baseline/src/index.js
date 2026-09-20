@@ -2037,7 +2037,7 @@ async function load(){
     E('realConsumed').textContent=realTrade?.consumed?'YES · COMPLETE':'NO';
     E('realConsumed').className=realTrade?.consumed?'good':'';
     const review=ev?.postTradeResearchReview||null,post=ev?.postTradeOutcomeEvidence||null;
-    const moneyOrDash=v=>Number.isFinite(Number(v))?'+Number(v).toFixed(2):'—';
+    const moneyOrDash=v=>Number.isFinite(Number(v))?'USD '+Number(v).toFixed(2):'—';
     E('reviewTrade').textContent=pre?(pre.selected?.asset||'')+' · '+(pre.selected?.marketTicker||'')+' · '+(pre.selected?.side||''):'WAITING FOR FIRST REAL TRADE';
     E('reviewOutcome').textContent=review?.outcome||'NOT YET OCCURRED';
     E('reviewGross').textContent=moneyOrDash(review?.grossPnlUsd);
@@ -2119,8 +2119,9 @@ async function load(){
     const cov=shadow?.assetCoverage||{};
     const coverageReady=Boolean(shadow?.assetCoverageReady);
     const coverageAssets=['BTC','ETH','SOL','XRP','HYPE'];
-    const coverageText=coverageAssets.map(a=>a+': '+Number(cov?.[a]?.eligible||0)+' eligible · '+Number(cov?.[a]?.up||0)+' up · '+Number(cov?.[a]?.down||0)+' down'+(cov?.[a]?.executionEligible?' · VALIDATED':' · DISCOVERY HOLD')).join(' &nbsp; | &nbsp; ');
-    parts.push('<div class="opp" style="grid-column:1/-1"><div class="oppHead"><div class="q">LIVE ASSET COVERAGE · 5-ASSET OBSERVATION</div><div class="tag '+(coverageReady?'good':'warn')+'">'+(coverageReady?'5-ASSET AUTO-SELECTION READY':'FIRST TRADE HOLD')+'</div></div><div class="meta">'+coverageText+(coverageReady?'':' · Controller will not submit the first real order until BTC and ETH are discovered live.')+'</div></div>');
+    const fiveAssetReady=coverageAssets.every(a=>Boolean(cov?.[a]?.seriesTicker)&&cov?.[a]?.executionEligible===true);
+    const coverageText=coverageAssets.map(a=>a+': '+Number(cov?.[a]?.eligible||0)+' eligible · '+Number(cov?.[a]?.up||0)+' up · '+Number(cov?.[a]?.down||0)+' down'+(cov?.[a]?.executionEligible?' · VALIDATED':(cov?.[a]?.seriesTicker?' · METADATA HOLD':' · DISCOVERY HOLD'))).join(' &nbsp; | &nbsp; ');
+    parts.push('<div class="opp" style="grid-column:1/-1"><div class="oppHead"><div class="q">LIVE ASSET COVERAGE · 5-ASSET OBSERVATION</div><div class="tag '+(fiveAssetReady?'good':'warn')+'">'+(fiveAssetReady?'5-ASSET POOL READY':(coverageReady?'PARTIAL POOL · VALIDATED LANES ACTIVE':'FIRST TRADE HOLD'))+'</div></div><div class="meta">'+coverageText+(fiveAssetReady?' · All five 15-minute series are provider-resolved and metadata-ready.':' · Only validated live lanes can enter auto-selection; unresolved lanes remain fail-closed.')+'</div></div>');
     if(!opps.length){
       parts.push('<div class="opp" style="grid-column:1/-1"><div class="oppHead"><div class="q">SHORT-HORIZON SCAN COMPLETE</div><div class="tag good">LIVE · VALID ZERO RESULT</div></div><div class="meta">No eligible BTC/ETH/SOL/XRP/HYPE 15-minute opportunities were found in this successful Kalshi Shadow observation. Baseline remains waiting for the next live contract window.</div></div>');
     } else {
@@ -2180,7 +2181,16 @@ async function refreshPrices(){
     E('ethPrice').textContent=moneyFmt(prices.eth.current);E('ethChange').textContent=pctFmt(prices.eth.changePct);E('ethChange').className='marketChange '+(prices.eth.changePct>=0?'good':'bad');drawSpark('ethChart',prices.eth.points,prices.eth.changePct);
   }catch{}
 }
-E('refresh').addEventListener('click',load);load();setInterval(refreshPrices,10000);
+const AUTO_REFRESH_MS=5*60*1000;
+let nextDashboardRefresh=Date.now()+AUTO_REFRESH_MS;
+function resetDashboardCountdown(){nextDashboardRefresh=Date.now()+AUTO_REFRESH_MS;}
+function paintDashboardCountdown(){
+  const left=Math.max(0,nextDashboardRefresh-Date.now()),secs=Math.ceil(left/1000),mm=String(Math.floor(secs/60)).padStart(2,'0'),ss=String(secs%60).padStart(2,'0');
+  const el=E('refreshCountdown');if(el)el.textContent=mm+':'+ss;
+  if(left<=0){resetDashboardCountdown();load();}
+}
+E('refresh').addEventListener('click',()=>{resetDashboardCountdown();load();});
+load();resetDashboardCountdown();paintDashboardCountdown();setInterval(paintDashboardCountdown,1000);setInterval(refreshPrices,10000);
 </script>
 <script>
 async function authorizeOneBaselineTrade(){
