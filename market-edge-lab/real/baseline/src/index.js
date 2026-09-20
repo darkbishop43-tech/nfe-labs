@@ -1903,6 +1903,12 @@ body{background-color:#030811;background-image:linear-gradient(rgba(31,91,137,.0
 @media(max-width:900px){.hero:after{background-size:contain!important;background-position:right center!important}}
 @media(max-width:720px){.hero:after{background-size:contain!important;background-position:right center!important}}
 @media(max-width:460px){.hero:after{background-size:contain!important;background-position:right center!important}}
+
+/* FINAL BEAR HEAD FRAMING — implementation only; visual freeze follows */
+.hero:after{background-size:auto 100%!important;background-position:74% center!important}
+@media(max-width:900px){.hero:after{background-size:auto 100%!important;background-position:72% center!important}}
+@media(max-width:720px){.hero:after{background-size:auto 100%!important;background-position:70% center!important}}
+@media(max-width:460px){.hero:after{background-size:auto 100%!important;background-position:68% center!important}}
 </style>
 </head>
 <body>
