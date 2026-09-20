@@ -793,8 +793,37 @@ async function resolveKalshi15mSeries(env, priorSeries=[]) {
     return assetTextMatch(asset,title+" "+ticker) && (/15\s*(MIN|MINUTE)/.test(title)||freq.includes("15")||ticker.includes("15M"));
   });
   const unresolvedAssets=Object.keys(wanted).filter(asset=>!catalogueHas15m(asset) && !priorByAsset[asset]);
-  const marketDiscovered=unresolvedAssets.length ? await discoverKalshi15mSeriesFromOpenMarkets(env,unresolvedAssets) : {};
-  const discoveryProof=marketDiscovered?._proof||{pages:0,scanned:0,reachedEnd:true,readError:null,evidence:{}};
+  // The Crypto series catalogue above is the bounded primary source. Before walking
+  // the entire open-market catalogue, probe only candidate 15m series tickers and
+  // accept one solely when Kalshi itself returns a matching series record.
+  const candidate15mTickers={SOL:["KXSOL15M"],XRP:["KXXRP15M"],HYPE:["KXHYPE15M"]};
+  const targetedDiscovered={};
+  for(const asset of unresolvedAssets){
+    for(const ticker of (candidate15mTickers[asset]||[])){
+      let tr; try{tr=await kalshiShadowGet(env,"/trade-api/v2/series/"+encodeURIComponent(ticker));}catch{continue;}
+      if(!tr.ok) continue;
+      let td; try{td=await tr.json();}catch{continue;}
+      const s=td?.series||td;
+      const actualTicker=String(s?.ticker||"").toUpperCase();
+      const title=String(s?.title||"");
+      const frequency=String(s?.frequency||"");
+      const text=(actualTicker+" "+title+" "+frequency).toUpperCase();
+      const assetMatch=assetTextMatch(asset,text);
+      const shortMatch=/15\s*(MIN|MINUTE)/i.test(title)||/15\s*M/i.test(frequency)||actualTicker.includes("15M");
+      if(actualTicker===ticker && assetMatch && shortMatch){
+        targetedDiscovered[asset]={
+          ticker:actualTicker,title,frequency:frequency||"15m",
+          settlementSources:Array.isArray(s?.settlement_sources)?s.settlement_sources:[],
+          dynamicallyResolved:true,discoveredFrom:"TARGETED_SERIES_API"
+        };
+        break;
+      }
+    }
+  }
+  const stillUnresolved=unresolvedAssets.filter(asset=>!targetedDiscovered[asset]);
+  const broadDiscovered=stillUnresolved.length ? await discoverKalshi15mSeriesFromOpenMarkets(env,stillUnresolved) : {};
+  const marketDiscovered={...broadDiscovered,...targetedDiscovered};
+  const discoveryProof=broadDiscovered?._proof||{pages:0,scanned:0,reachedEnd:true,readError:null,evidence:{}};
   const resolved=[];
   for(const [asset,meta] of Object.entries(wanted)) {
     const exact=rows.find(s=>{
