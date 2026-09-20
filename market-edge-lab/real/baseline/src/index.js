@@ -1601,7 +1601,14 @@ function dashboardHtml() {
   <div class="section wide">
     <div>
       <b>Current Opportunities · Kalshi</b>
-      <div id="markets" class="opps"><div class="m">Loading public Polymarket US markets…</div></div>
+      <div id="markets" class="opps"><div class="m">Loading live Kalshi opportunities…</div></div>
+      <div class="card" style="margin-top:12px">
+        <div style="display:flex;justify-content:space-between;gap:10px;align-items:center;flex-wrap:wrap">
+          <b>Available 15-Minute Contracts · Five-Asset Pool</b>
+          <span class="tag">AUTO REFRESH</span>
+        </div>
+        <div id="contractPool" class="opps" style="margin-top:10px"><div class="m">Loading BTC / ETH / SOL / XRP / HYPE contract lanes…</div></div>
+      </div>
     </div>
     <div class="card">
       <b>Governance Status</b>
@@ -1806,8 +1813,34 @@ async function load(){
       }
     }
     markets.innerHTML=parts.join('');
+
+    const contractPool=E('contractPool');
+    if(contractPool){
+      const lanes=[];
+      for(const asset of coverageAssets){
+        const assetOpps=opps.filter(o=>String(o?.asset||'')===asset);
+        const cv=cov?.[asset]||{};
+        let body='';
+        if(assetOpps.length){
+          body=assetOpps.map(o=>{
+            const score=Number(o.score),ask=Number(o.observedAsk),bid=Number(o.observedBid),edge=Number(o.edge);
+            const qualifies=Number.isFinite(score)&&score>=0.80&&edge>0;
+            return '<div class="meta" style="padding:5px 0;border-top:1px solid rgba(255,255,255,.07)"><b>'+esc(o.direction||o.outcomeSide||'CONTRACT')+'</b> · '+esc(o.marketTicker||o.slug||'')+
+              ' · '+(Number.isFinite(ask)?'ASK '+(ask*100).toFixed(1)+'¢':'ASK —')+
+              ' · '+(Number.isFinite(bid)?'BID '+(bid*100).toFixed(1)+'¢':'BID —')+
+              ' · SCORE '+(Number.isFinite(score)?score.toFixed(2):'—')+
+              (qualifies?' · <span class="good">QUALIFIED ≥ .80</span>':'')+'</div>';
+          }).join('');
+        }else{
+          body='<div class="meta" style="padding-top:6px">Waiting for a live validated 15-minute '+asset+' contract. Lane is already reserved and will populate automatically when discovery succeeds.</div>';
+        }
+        lanes.push('<div class="opp"><div class="oppHead"><div class="q">'+asset+'</div><div class="tag '+(cv.executionEligible?'good':'warn')+'">'+(cv.executionEligible?'VALIDATED':'DISCOVERY HOLD')+'</div></div>'+
+          '<div class="meta">'+Number(cv.eligible||0)+' eligible · '+Number(cv.up||0)+' up · '+Number(cv.down||0)+' down</div>'+body+'</div>');
+      }
+      contractPool.innerHTML=lanes.join('');
+    }
   }catch{
-    conn.textContent='CHECK FAILED';conn.className='val bad';connSub.textContent='Dashboard proof request failed; no secret details are displayed.';bal.textContent='UNAVAILABLE';statusDot.className='dot bad';statusText.innerHTML='<b class="bad">PROOF REFRESH FAILED</b>';markets.innerHTML='<div class="opp"><div class="meta">Market observation check failed.</div></div>';
+    conn.textContent='CHECK FAILED';conn.className='val bad';connSub.textContent='Dashboard proof request failed; no secret details are displayed.';bal.textContent='UNAVAILABLE';statusDot.className='dot bad';statusText.innerHTML='<b class="bad">PROOF REFRESH FAILED</b>';markets.innerHTML='<div class="opp"><div class="meta">Market observation check failed.</div></div>';const cp=E('contractPool');if(cp)cp.innerHTML='<div class="opp"><div class="meta">Contract discovery refresh failed. Existing authorization remains unchanged.</div></div>';
   }finally{
     refresh.disabled=false;refresh.textContent='REFRESH PROOF · '+new Date().toLocaleTimeString();
   }
