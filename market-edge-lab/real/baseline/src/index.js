@@ -1669,23 +1669,28 @@ async function load(){
     const account=await readJson(0),status=await readJson(1),market=await readJson(2),preview=await readJson(3),money=await readJson(4),shadow=await readJson(5),prices=await readJson(6),realTrade=await readJson(7);
     const shadowLive=shadow.status==='LIVE_KALSHI_SHADOW';
     const liveOrdersState=E('liveOrdersState'),liveOrdersSub=E('liveOrdersSub');
-    if(realTrade?.armed){
-      liveOrdersState.textContent='EXECUTION DISABLED';liveOrdersState.className='val good';
-      liveOrdersSub.textContent='Shadow validation only. No Kalshi real order can execute from this build.';
+    const armed=Boolean(realTrade?.armed);
+    const managedPosition=Boolean(realTrade?.managedPositionOpen);
+    const controllerLive=Boolean(realTrade?.controllerSwitchEnabled);
+    if(managedPosition){
+      liveOrdersState.textContent='MANAGING ONE POSITION';liveOrdersState.className='val good';
+      liveOrdersSub.textContent='No second entry is allowed. Only the exact reduce-only exit remains enabled.';
+    }else if(armed){
+      liveOrdersState.textContent='AUTHORIZED · WAITING';liveOrdersState.className='val good';
+      liveOrdersSub.textContent='Exactly one trade may be selected automatically from the validated five-asset universe at score ≥ .80.';
     }else{
       liveOrdersState.textContent='DISABLED';liveOrdersState.className='val warn';
-      liveOrdersSub.textContent='Kalshi one-trade controller paths are implemented but HARD DISABLED.';
+      liveOrdersSub.textContent='No new real entry is currently authorized.';
     }
 
-    const armed=Boolean(realTrade?.armed);
     const modePill=E('modePill'),statusSub=E('statusSub'),executionGov=E('executionGov'),moneyLiveOrders=E('moneyLiveOrders');
-    modePill.textContent=armed?'REAL · EXECUTION DISABLED':'REAL · EXECUTION HARD DISABLED';
-    executionGov.textContent=armed?'SHADOW ONLY · EXECUTION DISABLED':'HARD DISABLED';
-    executionGov.className=armed?'good':'warn';
-    moneyLiveOrders.textContent=armed?'EXECUTION DISABLED':'DISABLED';
-    moneyLiveOrders.className=armed?'good':'warn';
-    E('realController').textContent=armed?'DISABLED · SHADOW ONLY':'DISARMED';
-    E('realController').className=armed?'good':'warn';
+    modePill.textContent=managedPosition?'REAL · MANAGED EXIT':(armed?'REAL · ONE TRADE AUTHORIZED':'REAL · ENTRY DISABLED');
+    executionGov.textContent=managedPosition?'EXACT POSITION EXIT ONLY':(armed?'ONE TRADE · AUTO SELECT':'ENTRY DISABLED');
+    executionGov.className=(managedPosition||armed)?'good':'warn';
+    moneyLiveOrders.textContent=managedPosition?'POSITION OPEN':(armed?'ONE TRADE AUTHORIZED':'DISABLED');
+    moneyLiveOrders.className=(managedPosition||armed)?'good':'warn';
+    E('realController').textContent=managedPosition?'MANAGED EXIT ACTIVE':(armed?'AUTHORIZED · WAITING FOR ≥ .80':'DISARMED');
+    E('realController').className=(managedPosition||armed)?'good':'warn';
     E('realTradeStatus').textContent=realTrade?.status||'UNKNOWN';
     E('realTradeStatus').className=(realTrade?.status==='ONE_TRADE_COMPLETE')?'good':(armed?'good':'warn');
     E('realTradeMarket').textContent=realTrade?.question||realTrade?.marketSlug||'WAITING FOR ≥ .80 SIGNAL';
@@ -1695,10 +1700,14 @@ async function load(){
     E('realExitOrder').className=realTrade?.exitOrderPresent?'good':'';
     E('realConsumed').textContent=realTrade?.consumed?'YES · COMPLETE':'NO';
     E('realConsumed').className=realTrade?.consumed?'good':'';
-    if(armed){
+    if(managedPosition){
       statusDot.className='dot good';
-      statusText.innerHTML='<b>AUTHENTICATED · ONE-TRADE CONTROLLER ARMED</b>';
-      statusSub.textContent='Kalshi market data is authenticated and read-only. Real execution remains disabled.';
+      statusText.innerHTML='<b>AUTHENTICATED · GOVERNED POSITION OPEN</b>';
+      statusSub.textContent='Entry authorization is consumed. Exact reduce-only exit management remains active.';
+    }else if(armed){
+      statusDot.className='dot good';
+      statusText.innerHTML='<b>AUTHENTICATED · ONE-TRADE AUTO-SELECTION AUTHORIZED</b>';
+      statusSub.textContent='System is waiting for a validated BTC/ETH/SOL/XRP/HYPE opportunity at score ≥ .80.';
     }
     const moneyFmt=n=>Number(n).toLocaleString(undefined,{style:'currency',currency:'USD',maximumFractionDigits:2});
     const pctFmt=n=>(Number(n)>=0?'+':'')+Number(n).toFixed(2)+'%';
