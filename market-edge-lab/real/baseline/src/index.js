@@ -1804,7 +1804,7 @@ function dashboardHtml() {
   <div class="grid">
     <div class="card"><div class="label">Polymarket Connection</div><div id="conn" class="val">CHECKING…</div><div id="connSub" class="m"></div></div>
     <div class="card"><div class="label">Account State</div><div id="bal" class="val">CHECKING…</div><div id="balSub" class="m"></div></div>
-    <div class="card"><div class="label">Additional Funding</div><div class="val good">NO MORE NEEDED</div><div class="m">$10 experiment bankroll funded. Additional deposits are locked for this one-trade test. Maximum real trade stake remains $5.</div></div>
+    <div class="card"><div class="label">Additional Funding</div><div class="val good">NO MORE NEEDED</div><div class="m">$10 experiment bankroll funded. Additional deposits are locked for this one-trade test. Maximum real trade stake remains $5.</div><div style="margin-top:10px;padding-top:9px;border-top:1px solid #28405b"><div class="label">NEXT DASHBOARD REFRESH</div><div id="refreshCountdownTop" class="val warn" style="font-size:24px;letter-spacing:.06em">05:00</div></div></div>
     <div class="card"><div class="label">Live Orders</div><div id="liveOrdersState" class="val warn">CHECKING…</div><div id="liveOrdersSub" class="m">One-trade execution controller status loading.</div></div>
   </div>
 
@@ -2191,7 +2191,7 @@ let nextDashboardRefresh=Date.now()+AUTO_REFRESH_MS;
 function resetDashboardCountdown(){nextDashboardRefresh=Date.now()+AUTO_REFRESH_MS;}
 function paintDashboardCountdown(){
   const left=Math.max(0,nextDashboardRefresh-Date.now()),secs=Math.ceil(left/1000),mm=String(Math.floor(secs/60)).padStart(2,'0'),ss=String(secs%60).padStart(2,'0');
-  const el=E('refreshCountdown');if(el)el.textContent=mm+':'+ss;
+  const el=E('refreshCountdown');if(el)el.textContent=mm+':'+ss;const top=E('refreshCountdownTop');if(top)top.textContent=mm+':'+ss;
   if(left<=0){resetDashboardCountdown();load();}
 }
 E('refresh').addEventListener('click',()=>{resetDashboardCountdown();load();});
