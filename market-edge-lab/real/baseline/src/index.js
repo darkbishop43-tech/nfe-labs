@@ -3168,6 +3168,26 @@ export default {
       return json(publicRealTradeView(await loadRealTradeState(env), env));
     }
 
+    if (url.pathname === "/first-entry-failure-proof") {
+      const state=await loadRealTradeState(env);
+      return json({
+        ok:true,
+        readOnly:true,
+        status:state?.status||"UNKNOWN",
+        marketTicker:state?.marketTicker||null,
+        outcomeSide:state?.outcomeSide||null,
+        entryScore:state?.entryScore??null,
+        entrySubmitStartedAt:state?.entrySubmitStartedAt||null,
+        entryOrderPresent:Boolean(state?.entryOrderId),
+        filledCount:Number(state?.filledCount||0),
+        providerHttpStatus:state?.entryProviderStatus??null,
+        providerResponse:state?.entryProviderResponse??null,
+        writeError:state?.entryWriteError??null,
+        authorizationConsumed:Boolean(state?.founderAuthorization?.consumed),
+        evidenceOnly:"NO STATE MUTATION / NO PROVIDER WRITE / NO REAUTHORIZATION"
+      });
+    }
+
     if (url.pathname === "/shadow-run") {
       return json(publicShadowView(await runShadow(env)));
     }
