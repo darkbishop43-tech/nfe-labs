@@ -664,7 +664,8 @@ function kalshiV2EntryPayload(candidate,sizing,clientOrderId) {
     self_trade_prevention_type:"taker_at_cross",
     post_only:false,
     cancel_order_on_pause:true,
-    reduce_only:false
+    reduce_only:false,
+    ...(Number.isInteger(Number(candidate?.exchangeIndex)) ? {exchange_index:Number(candidate.exchangeIndex)} : {})
   };
 }
 function kalshiV2ExitPayload(state,currentBid,clientOrderId) {
@@ -685,7 +686,8 @@ function kalshiV2ExitPayload(state,currentBid,clientOrderId) {
     self_trade_prevention_type:"taker_at_cross",
     post_only:false,
     cancel_order_on_pause:true,
-    reduce_only:true
+    reduce_only:true,
+    ...(Number.isInteger(Number(state?.exchangeIndex)) ? {exchange_index:Number(state.exchangeIndex)} : {})
   };
 }
 function summarizeKalshiV2CreateResponse(x) {
@@ -890,6 +892,7 @@ async function discoverKalshiShadowMarkets(env, priorSeries=[]) {
       const executionEligible=Boolean(s.executionEligible && durationSafe);
       const base={
         marketTicker:m.ticker,slug:m.ticker,question:m.title||s.title||s.ticker,
+        exchangeIndex:Number.isInteger(Number(m?.exchange_index))?Number(m.exchange_index):null,
         subtitle:m?.subtitle||null,yesSubTitle:m?.yes_sub_title||null,noSubTitle:m?.no_sub_title||null,
         floorStrike:m?.floor_strike??null,capStrike:m?.cap_strike??null,functionalStrike:m?.functional_strike||null,
         expectedExpirationTime:m?.expected_expiration_time||null,expirationTime:m?.expiration_time||null,
@@ -1340,7 +1343,7 @@ async function maybeRunKalshiOneTrade(env) {
         selectionExplanation:{rule:"HIGHEST EXISTING BASELINE SCORE AMONG CURRENTLY ELIGIBLE CANDIDATES MEETING >= 0.80",selectedScore:safeFinite(candidate.score),alternativeCount:Math.max(0,ranked.length-1),noNewReasoningIntroduced:true},
         authorization:{oneTradeAuthorized:kalshiAuthorizationValid(state),scope:state?.founderAuthorization?.scope||null,authorizedAt:state?.founderAuthorization?.authorizedAt||null,expiresAt:state?.founderAuthorization?.expiresAt??null}
       },postTradeOutcomeEvidence:state?.firstRealTradeEvidence?.postTradeOutcomeEvidence||null};
-      realTradeLedger(state,"FIRST_REAL_TRADE_DECISION_SNAPSHOT_CAPTURED",{marketTicker:candidate.marketTicker,asset:candidate.asset,score:safeFinite(candidate.score)});
+      realTradeLedger(state,"FIRST_REAL_TRADE_DECISION_SNAPSHOT_CAPTURED",{marketTicker:candidate.marketTicker,asset:candidate.asset,score:safeFinite(candidate.score),exchangeIndex:candidate.exchangeIndex??null});
       await saveRealTradeState(env,state);
     }
 
@@ -1348,6 +1351,7 @@ async function maybeRunKalshiOneTrade(env) {
     state.authorizationNonce=state.authorizationNonce||crypto.randomUUID();
     state.marketSlug=candidate.marketTicker;
     state.marketTicker=candidate.marketTicker;
+    state.exchangeIndex=Number.isInteger(Number(candidate?.exchangeIndex))?Number(candidate.exchangeIndex):null;
     state.outcomeSide=candidate.outcomeSide;
     state.direction=candidate.direction;
     state.question=candidate.question||null;
@@ -1361,7 +1365,7 @@ async function maybeRunKalshiOneTrade(env) {
     state.entrySubmitStartedAt=now;
     state.status="ENTRY_SUBMITTING";
     realTradeLedger(state,"KALSHI_ENTRY_PRE_SUBMIT_LATCHED",{
-      marketTicker:state.marketTicker,outcomeSide:state.outcomeSide,score:state.entryScore,
+      marketTicker:state.marketTicker,outcomeSide:state.outcomeSide,score:state.entryScore,exchangeIndex:state.exchangeIndex??null,
       count:state.entryCount,totalDebitCapUsd:state.entryTotalDebitCapUsd,clientOrderId:state.entryClientOrderId
     });
     await saveRealTradeState(env,state);
@@ -1746,6 +1750,7 @@ function publicShadowView(state) {
     opportunities: (state?.opportunities || []).map((o) => ({
       slug: o.slug,
       marketTicker: o.marketTicker || o.slug,
+      exchangeIndex: o.exchangeIndex ?? null,
       outcomeSide: o.outcomeSide || null,
       direction: o.direction || null,
       closeTime: o.closeTime || null,
