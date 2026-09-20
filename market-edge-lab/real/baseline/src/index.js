@@ -1885,6 +1885,18 @@ body{background-color:#030811;background-image:linear-gradient(rgba(31,91,137,.0
 @media(max-width:900px){.hero{grid-template-columns:1fr 150px 1fr;min-height:170px}.brand .logo{width:130px;height:92px}.hero:before,.hero:after{width:43%}.pnlSystem{grid-template-columns:1fr}.wide{grid-template-columns:1fr}.marketGrid{grid-template-columns:repeat(2,1fr)}}
 @media(max-width:720px){.hero{min-height:132px;grid-template-columns:1fr 94px 1fr;padding:8px}.hero:before,.hero:after{width:42%;background-size:cover;opacity:1}.brand .logo{width:86px;height:60px}.actions{max-width:155px;gap:3px}.actions .pill,.actions .btn{font-size:7px;padding:4px 6px}.grid{grid-template-columns:repeat(2,1fr)}.realStatus{grid-template-columns:1fr}.statusTimer{text-align:left;border-left:0;border-top:1px solid #254a69;padding:8px 0 0}.marketGrid{grid-template-columns:repeat(2,1fr)}.opps{grid-template-columns:1fr}.pnlGrid{grid-template-columns:1fr}.footer{flex-direction:column;gap:7px;text-align:left}}
 @media(max-width:460px){.hero{min-height:116px}.hero:before,.hero:after{width:43%}.grid,.marketGrid{grid-template-columns:1fr}.actions{max-width:125px}.brand .logo{width:72px;height:52px}}
+
+/* FINAL LOCKED HERO CORRECTION — presentation only */
+.hero{grid-template-columns:1fr 280px 1fr;align-items:center}
+.hero .actions{display:none}
+.hero:before,.hero:after{width:43%;background-size:cover}
+.hero:before{background-position:left center}
+.hero:after{background-position:right center}
+.heroTools{display:flex;align-items:center;justify-content:flex-end;gap:6px;flex-wrap:wrap;margin-top:6px}
+.heroTools .pill,.heroTools .btn{font-size:9px;padding:5px 8px}
+@media(max-width:900px){.hero{grid-template-columns:1fr 150px 1fr}.hero:before,.hero:after{width:44%}}
+@media(max-width:720px){.hero{grid-template-columns:1fr 94px 1fr}.hero:before,.hero:after{width:44%;background-size:cover}.heroTools{justify-content:flex-start}}
+@media(max-width:460px){.hero:before,.hero:after{width:45%}.heroTools .pill,.heroTools .btn{font-size:8px}}
 </style>
 </head>
 <body>
@@ -1894,7 +1906,6 @@ body{background-color:#030811;background-image:linear-gradient(rgba(31,91,137,.0
       <img class="logo" alt="NFE-OS" src="https://raw.githubusercontent.com/darkbishop43-tech/nfe-labs/main/market-edge-lab/public/nfe-os-logo-market-edge.webp">
       <div><div class="k">NFE-OS Research Lab · Polymarket US</div><h1>Market Edge — Baseline Real</h1><div class="sub">Real account validation · BTC/ETH/SOL/XRP/HYPE · governed test environment</div></div>
     </div>
-    <div class="actions"><button id="refresh" class="btn" type="button">REFRESH PROOF</button><div id="modePill" class="pill real">REAL · CHECKING</div><div class="pill">BANKROLL FUNDED · NO ADDITIONAL DEPOSIT</div></div>
   </div>
   <div class="heroCopy"><div class="k">NFE-OS Research Lab · Polymarket US</div><h1>Market Edge — Baseline Real</h1><div class="sub">Real account validation · BTC/ETH/SOL/XRP/HYPE · governed test environment</div></div>
 
@@ -1907,7 +1918,7 @@ body{background-color:#030811;background-image:linear-gradient(rgba(31,91,137,.0
 
   <div class="card section realStatus">
     <div><b>Real-System Status</b><div class="statusline"><span id="statusDot" class="dot warn"></span><div><div id="statusText"><b>CHECKING REAL CONTROLLER…</b></div><div id="statusSub" class="m">Loading governed execution state.</div></div></div></div>
-    <div class="statusTimer"><div class="label">NEXT DASHBOARD REFRESH</div><div id="refreshCountdownTop" class="val warn">05:00</div></div>
+    <div class="statusTimer"><div class="label">NEXT DASHBOARD REFRESH</div><div id="refreshCountdownTop" class="val warn">05:00</div><div class="heroTools"><button id="refresh" class="btn" type="button">REFRESH PROOF</button><div id="modePill" class="pill real">REAL · CHECKING</div><div class="pill">BANKROLL FUNDED · NO ADDITIONAL DEPOSIT</div></div></div>
   </div>
 
   <div class="card section">
