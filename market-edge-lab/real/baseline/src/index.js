@@ -3006,6 +3006,34 @@ export default {
       return json(publicShadowView(refreshed));
     }
 
+    // Read-only provider catalogue probe for the three unresolved 15-minute lanes.
+    // It reports raw Kalshi market/series identifiers only; it cannot invoke the trade controller.
+    if (url.pathname === "/kalshi-15m-ticker-proof") {
+      const wanted=["SOL","XRP","HYPE"], matches=[];
+      let cursor="", pages=0, scanned=0, reachedEnd=false, readError=null;
+      while(pages<100) {
+        const path="/trade-api/v2/markets?status=open&limit=200"+(cursor?"&cursor="+encodeURIComponent(cursor):"");
+        let r; try{r=await kalshiShadowGet(env,path);}catch{readError="NETWORK_OR_SIGNING_READ_FAILED";break;}
+        if(!r.ok){readError="MARKETS_READ_FAILED_"+r.status;break;}
+        const data=await r.json(), markets=Array.isArray(data?.markets)?data.markets:[];
+        scanned+=markets.length;
+        for(const m of markets){
+          const title=String(m?.title||""), subtitle=String(m?.subtitle||"");
+          const ticker=String(m?.ticker||""), seriesTicker=String(m?.series_ticker||m?.seriesTicker||"");
+          const text=(title+" "+subtitle+" "+ticker+" "+seriesTicker).toUpperCase();
+          for(const asset of wanted){
+            if(!new RegExp("(^|[^A-Z])"+asset+"([^A-Z]|$)").test(text)) continue;
+            const shortText=/15\s*(MIN|MINUTE)|15M/.test(text);
+            if(shortText && matches.filter(x=>x.asset===asset).length<12) matches.push({asset,marketTicker:ticker||null,seriesTicker:seriesTicker||null,title:title||null,subtitle:subtitle||null,openTime:m?.open_time||null,closeTime:m?.close_time||null,status:m?.status||null});
+          }
+        }
+        cursor=String(data?.cursor||""); pages++;
+        if(!cursor){reachedEnd=true;break;}
+        if(wanted.every(a=>matches.some(x=>x.asset===a&&x.seriesTicker))) break;
+      }
+      return json({ok:!readError,readOnly:true,pages,scanned,reachedEnd,readError,matches,liveOrderSubmission:"DISABLED",realMoneyMoved:false});
+    }
+
     // Browser-safe one-shot diagnostic: run a fresh Shadow observation and return
     // only bounded diagnostic fields. No order controller is invoked.
     if (url.pathname === "/shadow-refresh-diagnostic-view") {
