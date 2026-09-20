@@ -2064,8 +2064,9 @@ async function load(){
     const cov=shadow?.assetCoverage||{};
     const coverageReady=Boolean(shadow?.assetCoverageReady);
     const coverageAssets=['BTC','ETH','SOL','XRP','HYPE'];
+    const fiveAssetReady=coverageAssets.every(a=>Number(cov?.[a]?.eligible||0)>0 && cov?.[a]?.executionEligible===true);
     const coverageText=coverageAssets.map(a=>a+': '+Number(cov?.[a]?.eligible||0)+' eligible · '+Number(cov?.[a]?.up||0)+' up · '+Number(cov?.[a]?.down||0)+' down'+(cov?.[a]?.executionEligible?' · VALIDATED':' · DISCOVERY HOLD')).join(' &nbsp; | &nbsp; ');
-    parts.push('<div class="opp" style="grid-column:1/-1"><div class="oppHead"><div class="q">LIVE ASSET COVERAGE · 5-ASSET OBSERVATION</div><div class="tag '+(coverageReady?'good':'warn')+'">'+(coverageReady?'5-ASSET AUTO-SELECTION READY':'FIRST TRADE HOLD')+'</div></div><div class="meta">'+coverageText+(coverageReady?'':' · Controller will not submit the first real order until BTC and ETH are discovered live.')+'</div></div>');
+    parts.push('<div class="opp" style="grid-column:1/-1"><div class="oppHead"><div class="q">LIVE ASSET COVERAGE · 5-ASSET OBSERVATION</div><div class="tag '+(coverageReady?'good':'warn')+'">'+(fiveAssetReady?'5-ASSET POOL READY':coverageReady?'PARTIAL POOL · VALIDATED LANES ACTIVE':'FIRST TRADE HOLD')+'</div></div><div class="meta">'+coverageText+(coverageReady?'':' · Controller will not submit the first real order until BTC and ETH are discovered live.')+'</div></div>');
     if(!opps.length){
       parts.push('<div class="opp" style="grid-column:1/-1"><div class="oppHead"><div class="q">SHORT-HORIZON SCAN COMPLETE</div><div class="tag good">LIVE · VALID ZERO RESULT</div></div><div class="meta">No eligible BTC/ETH/SOL/XRP/HYPE 15-minute opportunities were found in this successful Kalshi Shadow observation. Baseline remains waiting for the next live contract window.</div></div>');
     } else {
@@ -2081,7 +2082,7 @@ async function load(){
           (Number.isFinite(ask)?('ASK '+(ask*100).toFixed(1)+'¢ · '):'')+
           (Number.isFinite(bid)?('BID '+(bid*100).toFixed(1)+'¢ · '):'')+
           (Number.isFinite(edge)?('edge '+(edge*100).toFixed(3)+'%'):'' )+
-          '<br><span class="m">Click to inspect contract · no trade action</span></div></div>');
+          '<br><span class="m" style="font-weight:800">🔎 CLICK CARD TO VIEW CONTRACT DETAILS · READ ONLY</span></div></div>');
       }
     }
     markets.innerHTML=parts.join('');
@@ -2099,12 +2100,14 @@ async function load(){
             const qualifies=Number.isFinite(score)&&score>=0.80&&edge>0;
             const key=String(o.marketTicker||o.slug||'')+'|'+String(o.direction||o.outcomeSide||'');
             latestOpportunityMap[key]=o;
-            return '<div class="contractRow clickable" tabindex="0" role="button" data-contract-key="'+esc(key)+'"><b>'+esc(o.direction||o.outcomeSide||'CONTRACT')+'</b><div><div class="contractTicker">'+esc(o.marketTicker||o.slug||'')+'</div><div class="m">'+esc(contractTarget(o))+'</div></div><div style="text-align:right"><b>SCORE '+(Number.isFinite(score)?score.toFixed(2):'—')+'</b><div class="m">'+(Number.isFinite(ask)?'ASK '+(ask*100).toFixed(1)+'¢':'ASK —')+' · '+(Number.isFinite(bid)?'BID '+(bid*100).toFixed(1)+'¢':'BID —')+'</div>'+(qualifies?'<div class="good" style="font-size:9px;font-weight:800">QUALIFIED ≥ .80</div>':'')+'</div></div>';
+            return '<div class="contractRow clickable" tabindex="0" role="button" data-contract-key="'+esc(key)+'"><b>'+esc(o.direction||o.outcomeSide||'CONTRACT')+'</b><div><div class="contractTicker">'+esc(o.marketTicker||o.slug||'')+'</div><div class="m">'+esc(contractTarget(o))+'</div></div><div style="text-align:right"><b>SCORE '+(Number.isFinite(score)?score.toFixed(2):'—')+'</b><div class="m">'+(Number.isFinite(ask)?'ASK '+(ask*100).toFixed(1)+'¢':'ASK —')+' · '+(Number.isFinite(bid)?'BID '+(bid*100).toFixed(1)+'¢':'BID —')+'</div>'+(qualifies?'<div class="good" style="font-size:9px;font-weight:800">QUALIFIED ≥ .80</div>':'')+'<div class="m" style="margin-top:4px;font-weight:800">🔎 VIEW DETAILS</div></div></div>';
           }).join('');
         }else{
-          body='<div class="meta" style="padding-top:6px">Waiting for a live validated 15-minute '+asset+' contract. Lane is already reserved and will populate automatically when discovery succeeds.</div>';
+          body='<div class="meta" style="padding-top:6px">'+(cv.seriesTicker
+            ? '15-minute series found: '+esc(cv.seriesTicker)+'. Waiting for required settlement metadata / a live executable contract before this lane can participate.'
+            : 'No validated live 15-minute '+asset+' series has been resolved yet. Lane is reserved and will populate automatically when discovery succeeds.')+'</div>';
         }
-        lanes.push('<div class="opp"><div class="oppHead"><div class="q">'+asset+'</div><div class="tag '+(cv.executionEligible?'good':'warn')+'">'+(cv.executionEligible?'VALIDATED':'DISCOVERY HOLD')+'</div></div>'+
+        lanes.push('<div class="opp"><div class="oppHead"><div class="q">'+asset+'</div><div class="tag '+(cv.executionEligible?'good':'warn')+'">'+(cv.executionEligible?'VALIDATED':(cv.seriesTicker?'METADATA HOLD':'DISCOVERY HOLD'))+'</div></div>'+
           '<div class="meta">'+Number(cv.eligible||0)+' eligible · '+Number(cv.up||0)+' up · '+Number(cv.down||0)+' down</div>'+body+'</div>');
       }
       contractPool.innerHTML=lanes.join('');
@@ -3186,7 +3189,7 @@ export default {
         }else{
           body='<div class="meta" style="padding-top:6px">Waiting for a live validated 15-minute '+asset+' contract. Lane is already reserved and will populate automatically when discovery succeeds.</div>';
         }
-        lanes.push('<div class="opp"><div class="oppHead"><div class="q">'+asset+'</div><div class="tag '+(cv.executionEligible?'good':'warn')+'">'+(cv.executionEligible?'VALIDATED':'DISCOVERY HOLD')+'</div></div>'+
+        lanes.push('<div class="opp"><div class="oppHead"><div class="q">'+asset+'</div><div class="tag '+(cv.executionEligible?'good':'warn')+'">'+(cv.executionEligible?'VALIDATED':(cv.seriesTicker?'METADATA HOLD':'DISCOVERY HOLD'))+'</div></div>'+
           '<div class="meta">'+Number(cv.eligible||0)+' eligible · '+Number(cv.up||0)+' up · '+Number(cv.down||0)+' down</div>'+body+'</div>');
       }
       contractPool.innerHTML=lanes.join('');
