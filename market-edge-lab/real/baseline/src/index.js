@@ -783,10 +783,13 @@ async function resolveKalshi15mSeries(env, priorSeries=[]) {
   const rows=Array.isArray(data?.series)?data.series:[];
   const priorByAsset=Object.fromEntries((Array.isArray(priorSeries)?priorSeries:[]).filter(x=>x?.asset&&x?.ticker).map(x=>[x.asset,x]));
   const knownFallbacks={BTC:"KXBTC15M",ETH:"KXETH15M",SOL:"KXSOL15M",XRP:"KXXRP15M",HYPE:"KXHYPE15M"};
-  const unresolvedAssets=Object.keys(wanted).filter(asset=>!rows.some(s=>{
+  // Catalogue discovery is the source of truth for assets beyond the already proven
+  // BTC/ETH series. A guessed fallback ticker must never suppress real discovery.
+  const catalogueHas15m=(asset)=>rows.some(s=>{
     const title=String(s?.title||"").toUpperCase(), ticker=String(s?.ticker||"").toUpperCase(), freq=String(s?.frequency||"").toUpperCase();
     return (title.includes(asset+" ")||title.startsWith(asset)||ticker.includes(asset)) && (/15\s*(MIN|MINUTE)/.test(title)||freq.includes("15")||ticker.includes("15M"));
-  }) && !priorByAsset[asset] && !knownFallbacks[asset]);
+  });
+  const unresolvedAssets=Object.keys(wanted).filter(asset=>!catalogueHas15m(asset) && !priorByAsset[asset]);
   const marketDiscovered=unresolvedAssets.length ? await discoverKalshi15mSeriesFromOpenMarkets(env,unresolvedAssets) : {};
   const resolved=[];
   for(const [asset,meta] of Object.entries(wanted)) {
@@ -798,7 +801,9 @@ async function resolveKalshi15mSeries(env, priorSeries=[]) {
       const shortMatch=/15\s*(MIN|MINUTE)/i.test(title)||/15\s*m/i.test(freq)||ticker.includes("15M");
       return assetMatch && shortMatch;
     });
-    const fallback={BTC:"KXBTC15M",ETH:"KXETH15M",SOL:"KXSOL15M",XRP:"KXXRP15M",HYPE:"KXHYPE15M"}[asset];
+    // Only BTC/ETH have independently proven 15-minute series fallbacks.
+    // SOL/XRP/HYPE must be discovered from Kalshi evidence, not ticker guesses.
+    const fallback={BTC:"KXBTC15M",ETH:"KXETH15M"}[asset]||null;
     const prior=priorByAsset[asset]||null;
     const marketFound=marketDiscovered[asset]||null;
     const chosenTicker=String(exact?.ticker||prior?.ticker||marketFound?.ticker||fallback||"");
