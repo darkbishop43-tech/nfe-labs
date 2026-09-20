@@ -427,8 +427,10 @@ async function livePriceProof(env) {
       const changePct = Number.isFinite(open) && open > 0 && Number.isFinite(last) ? ((last-open)/open)*100 : 0;
       return { product, current, changePct, points: closes, source: "COINBASE_EXCHANGE_24H", window: "24H" };
     };
-    const [btc, eth] = await Promise.all([make("BTC"), make("ETH")]);
-    return { ok: true, window: "24H", btc, eth, note: "Display-only Coinbase 24-hour trend, matching the frozen Paper Baseline monitor. Shadow trading state is unchanged." };
+    const assets=["BTC","ETH","SOL","XRP","HYPE"];
+    const values=await Promise.all(assets.map(make));
+    const byAsset=Object.fromEntries(assets.map((a,i)=>[a.toLowerCase(),values[i]]));
+    return { ok: true, window: "24H", ...byAsset, note: "Display-only Coinbase 24-hour trend for the five-asset Baseline Real universe. Shadow trading state is unchanged." };
   } catch {
     return { ok: false, state: "PRICE_SERIES_UNAVAILABLE", window: "24H" };
   }
@@ -1517,18 +1519,15 @@ function dashboardHtml() {
   </div>
 
   <div class="card section">
-    <b>BTC / ETH · Live 24-Hour Market Display</b>
+    <b>BTC / ETH / SOL / XRP / HYPE · Live 24-Hour Market Display</b>
     <div class="marketGrid">
-      <div class="marketCard">
-        <div class="marketTop"><div><div class="label">Bitcoin</div><div id="btcPrice" class="marketPrice">CHECKING…</div></div><div id="btcChange" class="marketChange">—</div></div>
-        <svg id="btcChart" class="spark" viewBox="0 0 100 30" preserveAspectRatio="none" aria-label="Bitcoin 24 hour price chart"></svg>
-      </div>
-      <div class="marketCard">
-        <div class="marketTop"><div><div class="label">Ethereum</div><div id="ethPrice" class="marketPrice">CHECKING…</div></div><div id="ethChange" class="marketChange">—</div></div>
-        <svg id="ethChart" class="spark" viewBox="0 0 100 30" preserveAspectRatio="none" aria-label="Ethereum 24 hour price chart"></svg>
-      </div>
+      <div class="marketCard"><div class="marketTop"><div><div class="label">Bitcoin</div><div id="btcPrice" class="marketPrice">CHECKING…</div></div><div id="btcChange" class="marketChange">—</div></div><svg id="btcChart" class="spark" viewBox="0 0 100 30" preserveAspectRatio="none"></svg></div>
+      <div class="marketCard"><div class="marketTop"><div><div class="label">Ethereum</div><div id="ethPrice" class="marketPrice">CHECKING…</div></div><div id="ethChange" class="marketChange">—</div></div><svg id="ethChart" class="spark" viewBox="0 0 100 30" preserveAspectRatio="none"></svg></div>
+      <div class="marketCard"><div class="marketTop"><div><div class="label">Solana</div><div id="solPrice" class="marketPrice">CHECKING…</div></div><div id="solChange" class="marketChange">—</div></div><svg id="solChart" class="spark" viewBox="0 0 100 30" preserveAspectRatio="none"></svg></div>
+      <div class="marketCard"><div class="marketTop"><div><div class="label">XRP</div><div id="xrpPrice" class="marketPrice">CHECKING…</div></div><div id="xrpChange" class="marketChange">—</div></div><svg id="xrpChart" class="spark" viewBox="0 0 100 30" preserveAspectRatio="none"></svg></div>
+      <div class="marketCard"><div class="marketTop"><div><div class="label">HYPE</div><div id="hypePrice" class="marketPrice">CHECKING…</div></div><div id="hypeChange" class="marketChange">—</div></div><svg id="hypeChart" class="spark" viewBox="0 0 100 30" preserveAspectRatio="none"></svg></div>
     </div>
-    <div class="notice">Live display mirrors Paper Baseline: Coinbase spot refresh plus Coinbase Exchange 24-hour candles. Display only; it does not change Shadow decisions and does not represent Kalshi contract prices.</div>
+    <div class="notice">Five-asset Coinbase spot + 24-hour trend display. Kalshi opportunity cards below use the same frozen Baseline score. The controller automatically chooses the strongest qualifying validated asset; no threshold or stake rule is loosened.</div>
   </div>
 
   <div class="card section">
@@ -1677,10 +1676,19 @@ async function load(){
       svg.innerHTML='<line class="base" x1="0" y1="28" x2="100" y2="28"></line><polyline points="'+coords+'"></polyline>';
     };
     if(prices?.ok){
-      E('btcPrice').textContent=moneyFmt(prices.btc.current); E('btcChange').textContent=pctFmt(prices.btc.changePct); E('btcChange').className='marketChange '+(prices.btc.changePct>=0?'good':'bad'); drawSpark('btcChart',prices.btc.points,prices.btc.changePct);
-      E('ethPrice').textContent=moneyFmt(prices.eth.current); E('ethChange').textContent=pctFmt(prices.eth.changePct); E('ethChange').className='marketChange '+(prices.eth.changePct>=0?'good':'bad'); drawSpark('ethChart',prices.eth.points,prices.eth.changePct);
+      for(const a of ['btc','eth','sol','xrp','hype']){
+        const p=prices?.[a], priceEl=E(a+'Price'), changeEl=E(a+'Change');
+        if(p && Number.isFinite(Number(p.current))){
+          priceEl.textContent=moneyFmt(p.current);
+          changeEl.textContent=pctFmt(p.changePct);
+          changeEl.className='marketChange '+(p.changePct>=0?'good':'bad');
+          drawSpark(a+'Chart',p.points,p.changePct);
+        }else{
+          priceEl.textContent='UNAVAILABLE'; changeEl.textContent='—';
+        }
+      }
     }else{
-      E('btcPrice').textContent='UNAVAILABLE'; E('ethPrice').textContent='UNAVAILABLE';
+      for(const a of ['btc','eth','sol','xrp','hype']) E(a+'Price').textContent='UNAVAILABLE';
     }
     E('shadowRuntime').textContent=shadowLive?(Number(shadow.eligibleCount||0)>0?'LIVE':'LIVE · NO ELIGIBLE SHORT-HORIZON MARKETS'):(shadow.status||'UNKNOWN');E('shadowRuntime').className=shadowLive?'good':'warn';
     E('shadowStarted').textContent=shadow.startedAt?new Date(shadow.startedAt).toLocaleString():'NOT STARTED';
