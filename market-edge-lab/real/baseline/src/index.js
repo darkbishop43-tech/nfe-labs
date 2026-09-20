@@ -385,6 +385,24 @@ async function coinbaseSpot(product) {
   return price;
 }
 
+const ASSET_PRICE_META={
+  BTC:{coinbase:"BTC-USD",coingecko:"bitcoin"},
+  ETH:{coinbase:"ETH-USD",coingecko:"ethereum"},
+  SOL:{coinbase:"SOL-USD",coingecko:"solana"},
+  XRP:{coinbase:"XRP-USD",coingecko:"ripple"},
+  HYPE:{coinbase:"HYPE-USD",coingecko:"hyperliquid"}
+};
+async function assetSpot(asset) {
+  const meta=ASSET_PRICE_META[asset];
+  if(!meta) throw new Error("UNSUPPORTED_ASSET");
+  try { return {price:await coinbaseSpot(meta.coinbase),source:"COINBASE"}; } catch {}
+  const r=await fetch("https://api.coingecko.com/api/v3/simple/price?ids="+encodeURIComponent(meta.coingecko)+"&vs_currencies=usd",{headers:{accept:"application/json"}});
+  if(!r.ok) throw new Error("PUBLIC_SPOT_READ_FAILED_"+r.status);
+  const data=await r.json(), price=Number(data?.[meta.coingecko]?.usd);
+  if(!Number.isFinite(price)||price<=0) throw new Error("PUBLIC_SPOT_PRICE_INVALID");
+  return {price,source:"COINGECKO_FALLBACK"};
+}
+
 function shadowPriceSeries(asset) {
   return loadShadowState(globalThis.__baselineRealEnv || {}).then((state) => {
     const ledger = Array.isArray(state?.ledger) ? state.ledger : [];
@@ -405,35 +423,35 @@ function shadowPriceSeries(asset) {
 }
 
 async function livePriceProof(env) {
-  // Display-only market monitor. This intentionally mirrors the frozen Paper Baseline:
-  // live Coinbase spot + Coinbase Exchange 24h stats/candles. It does not mutate Shadow state.
-  try {
-    const make = async (asset) => {
-      const product = asset + "-USD";
-      const [current, statsRes, candlesRes] = await Promise.all([
+  const assets=["BTC","ETH","SOL","XRP","HYPE"];
+  const shadow=await loadShadowState(env);
+  const make=async asset=>{
+    const product=ASSET_PRICE_META[asset]?.coinbase||asset+"-USD";
+    try {
+      const [current,statsRes,candlesRes]=await Promise.all([
         coinbaseSpot(product),
-        fetch("https://api.exchange.coinbase.com/products/" + product + "/stats", { headers: { accept: "application/json" } }),
-        fetch("https://api.exchange.coinbase.com/products/" + product + "/candles?granularity=3600", { headers: { accept: "application/json" } }),
+        fetch("https://api.exchange.coinbase.com/products/"+product+"/stats",{headers:{accept:"application/json"}}),
+        fetch("https://api.exchange.coinbase.com/products/"+product+"/candles?granularity=3600",{headers:{accept:"application/json"}})
       ]);
-      if (!statsRes.ok || !candlesRes.ok) throw new Error("COINBASE_TREND_UNAVAILABLE");
-      const [stats, candles] = await Promise.all([statsRes.json(), candlesRes.json()]);
-      const open = Number(stats?.open);
-      const last = Number(stats?.last);
-      const closes = (Array.isArray(candles) ? candles : [])
-        .filter((x) => Array.isArray(x) && Number.isFinite(Number(x[0])) && Number.isFinite(Number(x[4])))
-        .sort((a,b) => Number(a[0]) - Number(b[0]))
-        .slice(-24)
-        .map((x) => ({ ts: Number(x[0]) * 1000, price: Number(x[4]) }));
-      const changePct = Number.isFinite(open) && open > 0 && Number.isFinite(last) ? ((last-open)/open)*100 : 0;
-      return { product, current, changePct, points: closes, source: "COINBASE_EXCHANGE_24H", window: "24H" };
-    };
-    const assets=["BTC","ETH","SOL","XRP","HYPE"];
-    const values=await Promise.all(assets.map(make));
-    const byAsset=Object.fromEntries(assets.map((a,i)=>[a.toLowerCase(),values[i]]));
-    return { ok: true, window: "24H", ...byAsset, note: "Display-only Coinbase 24-hour trend for the five-asset Baseline Real universe. Shadow trading state is unchanged." };
-  } catch {
-    return { ok: false, state: "PRICE_SERIES_UNAVAILABLE", window: "24H" };
-  }
+      if(!statsRes.ok||!candlesRes.ok) throw new Error("COINBASE_TREND_UNAVAILABLE");
+      const [stats,candles]=await Promise.all([statsRes.json(),candlesRes.json()]);
+      const open=Number(stats?.open),last=Number(stats?.last);
+      const points=(Array.isArray(candles)?candles:[]).filter(x=>Array.isArray(x)&&Number.isFinite(Number(x[0]))&&Number.isFinite(Number(x[4]))).sort((a,b)=>Number(a[0])-Number(b[0])).slice(-24).map(x=>({ts:Number(x[0])*1000,price:Number(x[4])}));
+      const changePct=Number.isFinite(open)&&open>0&&Number.isFinite(last)?((last-open)/open)*100:0;
+      return {product,current,changePct,points,source:"COINBASE_EXCHANGE_24H",window:"24H"};
+    } catch {
+      try {
+        const x=await assetSpot(asset);
+        const current=Number(x.price);
+        const prior=Number(shadow?.prices?.[asset]);
+        const changePct=Number.isFinite(prior)&&prior>0?((current-prior)/prior)*100:0;
+        const points=Number.isFinite(prior)&&prior>0?[{ts:Date.now()-60000,price:prior},{ts:Date.now(),price:current}]:[];
+        return {product,current,changePct,points,source:x.source,window:"LIVE_FALLBACK"};
+      } catch { return {product,current:null,changePct:null,points:[],source:"UNAVAILABLE",window:"UNAVAILABLE"}; }
+    }
+  };
+  const values=await Promise.all(assets.map(make));
+  return {ok:values.some(x=>Number.isFinite(Number(x.current))),window:"MIXED",...Object.fromEntries(assets.map((a,i)=>[a.toLowerCase(),values[i]])),note:"Per-asset live display; Coinbase is preferred and public fallback is used where Coinbase lacks a product."};
 }
 function shadowRelevant(text) {
   const q = String(text || "").toLowerCase();
@@ -802,13 +820,13 @@ async function runShadow(env) {
   let stage = "MULTI_ASSET_SPOT";
   let discovery;
   try {
-    const assetProducts={BTC:"BTC-USD",ETH:"ETH-USD",SOL:"SOL-USD",XRP:"XRP-USD",HYPE:"HYPE-USD"};
-    const spotPairs=await Promise.all(Object.entries(assetProducts).map(async ([asset,product])=>[asset,await coinbaseSpot(product)]));
-    const spot=Object.fromEntries(spotPairs);
+    const trackedAssets=["BTC","ETH","SOL","XRP","HYPE"];
+    const spotRows=await Promise.all(trackedAssets.map(async asset=>[asset,await assetSpot(asset)]));
+    const spot=Object.fromEntries(spotRows.map(([asset,x])=>[asset,x.price]));
+    const spotSources=Object.fromEntries(spotRows.map(([asset,x])=>[asset,x.source]));
     const btc=spot.BTC, eth=spot.ETH;
     stage = "KALSHI_DISCOVERY";
     discovery = await discoverKalshiShadowMarkets(env);
-    const trackedAssets=["BTC","ETH","SOL","XRP","HYPE"];
     const priorCoverageProof=state?.assetCoverageProof||{};
     const currentCoverage=Object.fromEntries(trackedAssets.map(a=>[
       a, Number(discovery?.coverage?.[a]?.eligible||0)>0 && discovery?.coverage?.[a]?.executionEligible===true
@@ -881,6 +899,7 @@ async function runShadow(env) {
 
     state.prices = spot;
     state.moves = moves;
+    state.priceSources = spotSources;
     state.opportunities = opportunities.slice(0, 20);
     state.eligibleCount = discovery.markets.length;
     state.assetCoverage = discovery.coverage;
@@ -1479,6 +1498,7 @@ function publicShadowView(state) {
     eligibleCount: state?.eligibleCount || 0,
     assetCoverage: state?.assetCoverage || { BTC:{eligible:0,up:0,down:0}, ETH:{eligible:0,up:0,down:0} },
     assetCoverageReady: Boolean(state?.assetCoverageReady),
+    priceSources: state?.priceSources || {},
     rejectedCount: state?.rejectedCount || 0,
     seenCount: state?.seenCount || 0,
     errorCode: state?.errorCode || null,
@@ -1599,7 +1619,7 @@ function dashboardHtml() {
     <b>Baseline Real Shadow Runtime</b>
     <div class="compactGrid">
       <div class="miniBox"><div class="label">Signal engine</div><div id="shadowRuntime" class="miniVal">CHECKING…</div><div class="miniSub">LIVE observation only</div></div>
-      <div class="miniBox"><div class="label">Runs / eligible</div><div class="miniVal"><span id="shadowRuns">0</span> runs · <span id="shadowEligible">0</span> markets</div><div class="miniSub">BTC / ETH US scope</div></div>
+      <div class="miniBox"><div class="label">Runs / eligible</div><div class="miniVal"><span id="shadowRuns">0</span> runs · <span id="shadowEligible">0</span> markets</div><div class="miniSub">Five-asset validated Kalshi scope</div></div>
       <div class="miniBox"><div class="label">Persistence</div><div id="shadowPersistence" class="miniVal">—</div><div class="miniSub">Isolated from paper experiments</div></div>
       <div class="miniBox"><div class="label">Started</div><div id="shadowStarted" class="miniVal">—</div></div>
       <div class="miniBox"><div class="label">Last observation</div><div id="shadowLast" class="miniVal">—</div></div>
@@ -1608,7 +1628,7 @@ function dashboardHtml() {
   </div>
 
   <div class="card section">
-    <b>Real Orders · One-Trade Acceptance Test <button onclick="authorizeOneBaselineTrade()" style="float:right;padding:7px 12px;border-radius:8px;cursor:pointer">Authorize ONE ≤$5 Trade</button></b>
+    <div style="display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap"><b>Real Orders · One-Trade Acceptance Test</b><button id="authorizeTradeBtn" class="btn" onclick="authorizeOneBaselineTrade()">AUTHORIZE ONE ≤ $5 TRADE</button></div>
     <div class="compactGrid">
       <div class="miniBox"><div class="label">Orders waiting</div><div id="realController" class="miniVal">CHECKING…</div><div id="realTradeStatus" class="miniSub">CHECKING…</div></div>
       <div class="miniBox"><div class="label">Current position</div><div id="realTradeMarket" class="miniVal">WAITING</div><div class="miniSub">No manual order required</div></div>
@@ -1617,7 +1637,7 @@ function dashboardHtml() {
       <div class="miniBox"><div class="label">Test complete</div><div id="realConsumed" class="miniVal">NO</div></div>
       <div class="miniBox"><div class="label">Live ability</div><div class="miniVal good">DISABLED · NO REAL ORDERS</div><div class="miniSub">One trade · premium + entry fee ≤ $5</div></div>
     </div>
-    <div class="notice">WAITING is a valid Shadow state. Baseline observes Kalshi only; no real order endpoint is enabled in this build.</div>
+    <div id="realAuthorizationNote" class="notice">Authorization is persistent for exactly one qualifying entry. It does not expire after 15 minutes. Once used, it cannot authorize a second entry; the exact filled position remains eligible only for its governed reduce-only exit.</div>
   </div>
 
   <details class="card section"><summary><b>Setup / Validation Proof</b> · completed evidence</summary>
@@ -1702,6 +1722,12 @@ async function load(){
     E('realExitOrder').className=realTrade?.exitOrderPresent?'good':'';
     E('realConsumed').textContent=realTrade?.consumed?'YES · COMPLETE':'NO';
     E('realConsumed').className=realTrade?.consumed?'good':'';
+    const authBtn=E('authorizeTradeBtn');
+    if(authBtn){
+      if(managedPosition){authBtn.textContent='POSITION UNDER GOVERNED EXIT';authBtn.disabled=true;}
+      else if(armed){authBtn.textContent='ONE TRADE AUTHORIZED · WAITING';authBtn.disabled=true;}
+      else if(realTrade?.consumed){authBtn.textContent='ONE-TRADE TEST COMPLETE';authBtn.disabled=true;}
+    }
     if(managedPosition){
       statusDot.className='dot good';
       statusText.innerHTML='<b>AUTHENTICATED · GOVERNED POSITION OPEN</b>';
