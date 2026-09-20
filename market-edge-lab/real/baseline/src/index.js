@@ -719,6 +719,45 @@ function estimateKalshiFeeSafeSize(price, maxStakeUsd) {
   }
   return {ok:false,reason:"NO_CONTRACT_FITS_PREMIUM_PLUS_FEE_CAP",count:0,premiumUsd:0,feeUsd:0,totalDebitUsd:0,maxStakeUsd:cap,executionAllowed:false};
 }
+async function discoverKalshi15mSeriesFromOpenMarkets(env, wantedAssets) {
+  const found={};
+  const paths=[
+    "/trade-api/v2/markets?status=open&limit=100",
+    "/trade-api/v2/markets?status=open&limit=100&cursor="
+  ];
+  let cursor="", pages=0;
+  while(pages<4) {
+    const path="/trade-api/v2/markets?status=open&limit=100"+(cursor?"&cursor="+encodeURIComponent(cursor):"");
+    let r; try{r=await kalshiShadowGet(env,path);}catch{break;}
+    if(!r.ok) break;
+    const data=await r.json();
+    const markets=Array.isArray(data?.markets)?data.markets:[];
+    for(const m of markets){
+      const title=String(m?.title||"").toUpperCase();
+      const subtitle=String(m?.subtitle||"").toUpperCase();
+      const ticker=String(m?.ticker||"").toUpperCase();
+      const seriesTicker=String(m?.series_ticker||m?.seriesTicker||"").toUpperCase();
+      const text=title+" "+subtitle+" "+ticker+" "+seriesTicker;
+      for(const asset of wantedAssets){
+        if(found[asset]) continue;
+        const assetMatch=new RegExp("(^|[^A-Z])"+asset+"([^A-Z]|$)").test(text);
+        const directionMatch=/UP\s+OR\s+DOWN|UP.*DOWN/.test(text);
+        const open=Date.parse(m?.open_time||""), close=Date.parse(m?.close_time||"");
+        const duration=Number.isFinite(open)&&Number.isFinite(close)?close-open:null;
+        const durationMatch=duration!==null&&duration>=10*60*1000&&duration<=20*60*1000;
+        const shortText=/15\s*(MIN|MINUTE)|15M/.test(text);
+        if(assetMatch&&directionMatch&&(durationMatch||shortText)&&seriesTicker){
+          found[asset]={ticker:seriesTicker,title:m?.title||"",frequency:"15m",settlementSources:[],dynamicallyResolved:true,discoveredFrom:"OPEN_MARKET_CATALOGUE"};
+        }
+      }
+    }
+    cursor=String(data?.cursor||"");
+    pages++;
+    if(!cursor||Object.keys(found).length>=wantedAssets.length) break;
+  }
+  return found;
+}
+
 async function resolveKalshi15mSeries(env, priorSeries=[]) {
   const wanted={
     BTC:{coinbaseProduct:"BTC-USD"},
@@ -733,6 +772,11 @@ async function resolveKalshi15mSeries(env, priorSeries=[]) {
   const data=await r.json();
   const rows=Array.isArray(data?.series)?data.series:[];
   const priorByAsset=Object.fromEntries((Array.isArray(priorSeries)?priorSeries:[]).filter(x=>x?.asset&&x?.ticker).map(x=>[x.asset,x]));
+  const unresolvedAssets=Object.keys(wanted).filter(asset=>!rows.some(s=>{
+    const title=String(s?.title||"").toUpperCase(), ticker=String(s?.ticker||"").toUpperCase(), freq=String(s?.frequency||"").toUpperCase();
+    return (title.includes(asset+" ")||title.startsWith(asset)||ticker.includes(asset)) && (/15\s*(MIN|MINUTE)/.test(title)||freq.includes("15")||ticker.includes("15M")) && (/UP\s+OR\s+DOWN/.test(title)||/UP.*DOWN/.test(title));
+  }) && !priorByAsset[asset]);
+  const marketDiscovered=unresolvedAssets.length ? await discoverKalshi15mSeriesFromOpenMarkets(env,unresolvedAssets) : {};
   const resolved=[];
   for(const [asset,meta] of Object.entries(wanted)) {
     const exact=rows.find(s=>{
@@ -746,20 +790,22 @@ async function resolveKalshi15mSeries(env, priorSeries=[]) {
     });
     const fallback={BTC:"KXBTC15M",ETH:"KXETH15M",SOL:null,XRP:null,HYPE:null}[asset];
     const prior=priorByAsset[asset]||null;
-    const chosenTicker=String(exact?.ticker||prior?.ticker||fallback||"");
+    const marketFound=marketDiscovered[asset]||null;
+    const chosenTicker=String(exact?.ticker||prior?.ticker||marketFound?.ticker||fallback||"");
     const chosenSources=Array.isArray(exact?.settlement_sources)&&exact.settlement_sources.length
       ? exact.settlement_sources
-      : (Array.isArray(prior?.settlementSources)?prior.settlementSources:[]);
-    const dynamicallyResolved=Boolean(exact?.ticker||prior?.dynamicallyResolved);
+      : (Array.isArray(prior?.settlementSources)&&prior.settlementSources.length?prior.settlementSources:(marketFound?.settlementSources||[]));
+    const dynamicallyResolved=Boolean(exact?.ticker||prior?.dynamicallyResolved||marketFound?.dynamicallyResolved);
     const metadataReady=Boolean(chosenTicker) && chosenSources.length>0;
     resolved.push({
       asset,
       ticker:chosenTicker,
-      title:String(exact?.title||prior?.title||""),
-      frequency:String(exact?.frequency||prior?.frequency||""),
+      title:String(exact?.title||prior?.title||marketFound?.title||""),
+      frequency:String(exact?.frequency||prior?.frequency||marketFound?.frequency||""),
       settlementSources:chosenSources,
       coinbaseProduct:meta.coinbaseProduct,
       dynamicallyResolved,
+      discoveredFrom: exact?.ticker?"SERIES_CATALOGUE":prior?.discoveredFrom||marketFound?.discoveredFrom||(fallback?"KNOWN_VALIDATED_FALLBACK":null),
       metadataReady,
       executionEligible:(asset==="BTC"||asset==="ETH") ? Boolean(chosenTicker) : metadataReady
     });
@@ -2841,7 +2887,7 @@ export default {
         seenCount: Number(refreshed?.seenCount || 0),
         rejectedCount: Number(refreshed?.rejectedCount || 0),
         coverage: refreshed?.assetCoverage || null,
-        seriesResolution: (refreshed?.kalshiSeriesCache||[]).map(s=>({asset:s.asset,ticker:s.ticker||null,title:s.title||null,frequency:s.frequency||null,dynamicallyResolved:Boolean(s.dynamicallyResolved),metadataReady:Boolean(s.metadataReady),executionEligible:Boolean(s.executionEligible)})),
+        seriesResolution: (refreshed?.kalshiSeriesCache||[]).map(s=>({asset:s.asset,ticker:s.ticker||null,title:s.title||null,frequency:s.frequency||null,dynamicallyResolved:Boolean(s.dynamicallyResolved),metadataReady:Boolean(s.metadataReady),executionEligible:Boolean(s.executionEligible),discoveredFrom:s.discoveredFrom||null})),
         liveOrderSubmission: "DISABLED",
         realMoneyMoved: false
       };
