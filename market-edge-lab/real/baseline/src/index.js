@@ -987,6 +987,8 @@ async function runShadow(env) {
     state.eligibleCount = discovery.markets.length;
     state.assetCoverage = discovery.coverage;
     state.assetCoverageReady = Object.values(discovery.coverage||{}).some(v=>Number(v?.eligible||0)>0 && v?.executionEligible===true);
+    state.currentObservationExecutionEligible = state.assetCoverageReady;
+    state.failedObservation = null;
     state.rejectedCount = discovery.rejected;
     state.seenCount = discovery.seen;
     state.lastRunAt = new Date(now).toISOString();
@@ -1020,20 +1022,26 @@ async function runShadow(env) {
       realMoneyMoved: false,
     });
   } catch (error) {
-    // A failed discovery must fail closed: stale long-duration cards are not evidence.
-    state.opportunities = [];
-    state.eligibleCount = 0;
-    state.assetCoverage = Object.fromEntries(["BTC","ETH","SOL","XRP","HYPE"].map(asset=>[asset,{eligible:0,up:0,down:0,executionEligible:asset==="BTC"||asset==="ETH"}]));
-    state.assetCoverageReady = false;
+    // Fail closed for execution, but preserve the last successful observation separately
+    // so one transient provider failure does not visually erase known-good evidence.
     state.lastRunAt = new Date(now).toISOString();
     state.status = "ERROR";
     state.errorCode = String(error?.message || "SHADOW_OBSERVATION_FAILED").slice(0, 120);
     state.errorStage = stage;
     state.consecutiveObservationFailures = Number(state.consecutiveObservationFailures||0)+1;
     state.lastObservationFailureAt = new Date(now).toISOString();
+    state.assetCoverageReady = false;
+    state.currentObservationExecutionEligible = false;
+    state.failedObservation = {
+      at: state.lastObservationFailureAt,
+      stage,
+      code: state.errorCode,
+      consecutiveFailures: state.consecutiveObservationFailures
+    };
     shadowLedger(state, "SHADOW_ERROR", {
       errorType: error?.name || "Error",
-      message: "Shadow observation failed; provider details suppressed.",
+      message: "Shadow observation failed; last successful display evidence preserved; execution held closed.",
+      stage,
       realMoneyMoved: false,
     });
   }
@@ -1662,6 +1670,9 @@ function publicShadowView(state) {
     eligibleCount: state?.eligibleCount || 0,
     assetCoverage: state?.assetCoverage || { BTC:{eligible:0,up:0,down:0}, ETH:{eligible:0,up:0,down:0} },
     assetCoverageReady: Boolean(state?.assetCoverageReady),
+    currentObservationExecutionEligible: Boolean(state?.currentObservationExecutionEligible),
+    lastSuccessfulObservationAt: state?.lastSuccessfulObservationAt||null,
+    failedObservation: state?.failedObservation||null,
     priceSources: state?.priceSources || {},
     spotReadFailures: Array.isArray(state?.spotReadFailures)?state.spotReadFailures:[],
     consecutiveObservationFailures: Number(state?.consecutiveObservationFailures||0),
@@ -2028,7 +2039,7 @@ async function load(){
     }else{
       for(const a of ['btc','eth','sol','xrp','hype']) E(a+'Price').textContent='UNAVAILABLE';
     }
-    E('shadowRuntime').textContent=shadowLive?(Number(shadow.eligibleCount||0)>0?'LIVE':'LIVE · NO ELIGIBLE SHORT-HORIZON MARKETS'):(shadow.status||'UNKNOWN');E('shadowRuntime').className=shadowLive?'good':'warn';
+    E('shadowRuntime').textContent=shadowLive?(Number(shadow.eligibleCount||0)>0?'LIVE':'LIVE · NO ELIGIBLE SHORT-HORIZON MARKETS'):(shadow.status==='ERROR'?('OBSERVATION HOLD · '+(shadow.errorStage||'PROVIDER READ')):(shadow.status||'UNKNOWN'));E('shadowRuntime').className=shadowLive?'good':'warn';
     E('shadowStarted').textContent=shadow.startedAt?new Date(shadow.startedAt).toLocaleString():'NOT STARTED';
     E('shadowLast').textContent=shadow.lastRunAt?new Date(shadow.lastRunAt).toLocaleString():'—';
     E('shadowRuns').textContent=String(shadow.runs||0);E('shadowEligible').textContent=String(shadow.eligibleCount||0);E('shadowPersistence').textContent=shadow.persistence||'—';
@@ -2141,9 +2152,10 @@ async function authorizeOneBaselineTrade(){
 export default {
   async scheduled(event, env, ctx) {
     ctx.waitUntil((async () => {
-      await runShadow(env);
-      // One-trade controller is invoked after fresh Shadow data, but remains inert unless
-      // the separate controller switch AND an unexpired persisted Founder authorization exist.
+      const fresh=await runShadow(env);
+      // Hard freshness boundary: a failed/partial/zero observation never reaches the
+      // real-order controller. Founder authorization remains persisted and untouched.
+      if(fresh?.status!=="LIVE_KALSHI_SHADOW" || fresh?.currentObservationExecutionEligible!==true) return;
       await maybeRunKalshiOneTrade(env);
     })());
   },
