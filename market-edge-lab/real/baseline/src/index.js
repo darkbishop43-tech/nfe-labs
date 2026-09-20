@@ -2652,6 +2652,35 @@ export default {
       }
     }
 
+    if (url.pathname === "/kalshi-shard-transfer-readiness") {
+      try {
+        // READ ONLY. This route proves the exact bounded transfer request without sending it.
+        const path="/trade-api/v2/portfolio/balance";
+        const response=await kalshiExecutionGet(env,path);
+        let body=null; try { body=await response.json(); } catch {}
+        const breakdown=Array.isArray(body?.balance_breakdown)?body.balance_breakdown:[];
+        const byIndex=Object.fromEntries(breakdown.map(x=>[String(x?.exchange_index),x?.balance??null]));
+        const sourceRaw=byIndex["0"], destinationRaw=byIndex["2"];
+        const sourceUsd=Number(sourceRaw), destinationUsd=Number(destinationRaw);
+        const ready=response.ok && Number.isFinite(sourceUsd) && sourceUsd>=10 && Number.isFinite(destinationUsd) && destinationUsd===0;
+        return json({
+          ok:response.ok,readOnly:true,state:"KALSHI_SHARD_TRANSFER_READINESS",
+          currentBalance:{totalBalance:body?.balance??null,index0:sourceRaw,index2:destinationRaw},
+          proposedTransfer:{
+            method:"POST",path:"/trade-api/v2/portfolio/intra_exchange_instance_transfer",
+            body:{source:"event_contract",destination:"event_contract",amount:50000,source_exchange_shard:0,destination_exchange_shard:2,source_subaccount:0,destination_subaccount:0},
+            amountExplanation:"50000 centicents = $5.00"
+          },
+          expectedAfterCompletion:{index0:"5.0000",index2:"5.0000",total:"10.00"},
+          transferReady:ready,
+          note:"NO TRANSFER SENT. Founder approval is required before any money-moving POST.",
+          safety:{providerWrites:0,transfers:0,orders:0,reauthorizations:0,stateMutation:false,realMoneyMoved:false}
+        },response.ok?200:502);
+      } catch(error) {
+        return json({ok:false,readOnly:true,state:"KALSHI_SHARD_TRANSFER_READINESS_FAILED",errorCode:String(error?.message||"FAILED"),safety:{providerWrites:0,transfers:0,orders:0,reauthorizations:0,stateMutation:false,realMoneyMoved:false}},500);
+      }
+    }
+
     if (url.pathname === "/kalshi-balance-shard-proof") {
       try {
         // Read-only shard diagnostic: authenticated GET only. Never moves funds or creates orders.
