@@ -770,11 +770,14 @@ async function resolveKalshi15mSeries(env) {
 async function discoverKalshiShadowMarkets(env) {
   const series=await resolveKalshi15mSeries(env);
   const candidates=[]; let seen=0,rejected=0;
+  const readFailures=[];
   for(const s of series) {
     if(!s.ticker) continue;
     const path="/trade-api/v2/markets?series_ticker="+encodeURIComponent(s.ticker)+"&status=open&limit=12";
-    const r=await kalshiShadowGet(env,path);
-    if(!r.ok) throw new Error("KALSHI_MARKETS_READ_FAILED_"+r.status);
+    let r;
+    try { r=await kalshiShadowGet(env,path); }
+    catch(error){ readFailures.push({asset:s.asset,seriesTicker:s.ticker,reason:"NETWORK_OR_SIGNING_READ_FAILED"}); continue; }
+    if(!r.ok) { readFailures.push({asset:s.asset,seriesTicker:s.ticker,status:r.status,reason:"MARKETS_READ_FAILED"}); continue; }
     const data=await r.json(), markets=Array.isArray(data?.markets)?data.markets:[];
     seen+=markets.length;
     for(const m of markets) {
@@ -810,7 +813,7 @@ async function discoverKalshiShadowMarkets(env) {
     seriesTicker:s.ticker||null,
     dynamicallyResolved:Boolean(s.dynamicallyResolved)
   }]));
-  return {markets:candidates,seen,rejected,coverage,pages:1,reachedEnd:true,source:"KALSHI_AUTHENTICATED_READ_ONLY",series};
+  return {markets:candidates,seen,rejected,coverage,pages:1,reachedEnd:true,source:"KALSHI_AUTHENTICATED_READ_ONLY",series,readFailures,partialReadFailure:readFailures.length>0};
 }
 
 async function runShadow(env) {
@@ -909,10 +912,13 @@ async function runShadow(env) {
     state.lastRunAt = new Date(now).toISOString();
     state.startedAt = state.startedAt || state.lastRunAt;
     state.runs = Number(state.runs || 0) + 1;
-    state.status = "LIVE_KALSHI_SHADOW";
+    state.status = discovery.partialReadFailure
+      ? (discovery.markets.length>0 ? "LIVE_KALSHI_SHADOW_PARTIAL" : "LIVE_KALSHI_ZERO_RESULT")
+      : "LIVE_KALSHI_SHADOW";
     state.venue = "KALSHI";
-    state.errorCode = null;
-    state.errorStage = null;
+    state.errorCode = discovery.partialReadFailure ? "PARTIAL_KALSHI_READ_FAILURE" : null;
+    state.errorStage = discovery.partialReadFailure ? "KALSHI_DISCOVERY_PARTIAL" : null;
+    state.discoveryReadFailures = discovery.readFailures || [];
     state.liveOrderSubmission = "DISABLED";
     state.strategy = {
       entryScore: SHADOW_CONFIG.entryScore,
@@ -1577,6 +1583,7 @@ function publicShadowView(state) {
     seenCount: state?.seenCount || 0,
     errorCode: state?.errorCode || null,
     errorStage: state?.errorStage || null,
+    discoveryReadFailures: Array.isArray(state?.discoveryReadFailures)?state.discoveryReadFailures:[],
     opportunities: (state?.opportunities || []).map((o) => ({
       slug: o.slug,
       marketTicker: o.marketTicker || o.slug,
@@ -1716,7 +1723,7 @@ function dashboardHtml() {
       <div class="miniBox"><div class="label">Entry order</div><div id="realEntryOrder" class="miniVal">NOT SUBMITTED</div></div>
       <div class="miniBox"><div class="label">Exit order</div><div id="realExitOrder" class="miniVal">NOT SUBMITTED</div></div>
       <div class="miniBox"><div class="label">Test complete</div><div id="realConsumed" class="miniVal">NO</div></div>
-      <div class="miniBox"><div class="label">Live ability</div><div class="miniVal good">DISABLED · NO REAL ORDERS</div><div class="miniSub">One trade · premium + entry fee ≤ $5</div></div>
+      <div class="miniBox"><div class="label">Live ability</div><div id="realLiveAbility" class="miniVal good">ONE TRADE · AUTHORIZED</div><div class="miniSub">One entry only · premium + entry fee ≤ $5</div></div>
     </div>
     <div id="realAuthorizationNote" class="notice">Authorization is persistent for exactly one qualifying entry. It does not expire after 15 minutes. Once used, it cannot authorize a second entry; the exact filled position remains eligible only for its governed reduce-only exit.</div>
   </div>
