@@ -2628,6 +2628,29 @@ export default {
       }
     }
 
+    if (url.pathname === "/kalshi-shard-allocation-proof") {
+      try {
+        // Read-only inspection of Kalshi's automatic target balance allocation.
+        const candidates=[
+          "/trade-api/v2/portfolio/target_balance_allocation",
+          "/trade-api/v2/portfolio/target-balance-allocation"
+        ];
+        const attempts=[];
+        for(const path of candidates){
+          const response=await kalshiExecutionGet(env,path);
+          let body=null; try { body=await response.json(); } catch {}
+          attempts.push({path,httpStatus:response.status,ok:response.ok,body});
+          if(response.ok) break;
+        }
+        return json({ok:true,readOnly:true,state:"KALSHI_SHARD_ALLOCATION_PROOF",attempts,
+          observedNeed:{fundedExchangeIndex:0,liveMarketExchangeIndex:2},
+          safety:{providerWrites:0,transfers:0,orders:0,reauthorizations:0,stateMutation:false,realMoneyMoved:false}});
+      } catch(error){
+        return json({ok:false,readOnly:true,state:"KALSHI_SHARD_ALLOCATION_PROOF_FAILED",errorCode:String(error?.message||"FAILED"),
+          safety:{providerWrites:0,transfers:0,orders:0,reauthorizations:0,stateMutation:false,realMoneyMoved:false}},500);
+      }
+    }
+
     if (url.pathname === "/kalshi-balance-shard-proof") {
       try {
         // Read-only shard diagnostic: authenticated GET only. Never moves funds or creates orders.
