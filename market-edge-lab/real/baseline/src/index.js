@@ -54,7 +54,7 @@ function statusPayload(env) {
     ok: true,
     experiment: env.EXPERIMENT_NAME || "MARKET EDGE — BASELINE REAL",
     isolation: "DEDICATED_WORKER",
-    marketScope: env.MARKET_SCOPE || "BTC_ETH_ONLY",
+    marketScope: env.MARKET_SCOPE || "BTC_ETH_SOL_XRP_HYPE",
     executionMode: env.EXECUTION_MODE || "LOCKED",
     liveOrderSubmission: env.LIVE_ORDER_SUBMISSION || "DISABLED",
     fundingAuthorized: true,
@@ -343,7 +343,7 @@ async function marketSnapshot() {
   return {
     ok: true,
     source: "POLYMARKET_US_PUBLIC_API",
-    marketScope: "BTC_ETH_ONLY",
+    marketScope: "BTC_ETH_SOL_XRP_HYPE",
     bitcoin,
     ethereum,
     liveOrderSubmission: "DISABLED",
@@ -684,17 +684,57 @@ function estimateKalshiFeeSafeSize(price, maxStakeUsd) {
   }
   return {ok:false,reason:"NO_CONTRACT_FITS_PREMIUM_PLUS_FEE_CAP",count:0,premiumUsd:0,feeUsd:0,totalDebitUsd:0,maxStakeUsd:cap,executionAllowed:false};
 }
+async function resolveKalshi15mSeries(env) {
+  const wanted={
+    BTC:{coinbaseProduct:"BTC-USD"},
+    ETH:{coinbaseProduct:"ETH-USD"},
+    SOL:{coinbaseProduct:"SOL-USD"},
+    XRP:{coinbaseProduct:"XRP-USD"},
+    HYPE:{coinbaseProduct:"HYPE-USD"},
+  };
+  const path="/trade-api/v2/series?category="+encodeURIComponent("Crypto")+"&include_product_metadata=true";
+  const r=await kalshiShadowGet(env,path);
+  if(!r.ok) throw new Error("KALSHI_SERIES_READ_FAILED_"+r.status);
+  const data=await r.json();
+  const rows=Array.isArray(data?.series)?data.series:[];
+  const resolved=[];
+  for(const [asset,meta] of Object.entries(wanted)) {
+    const exact=rows.find(s=>{
+      const title=String(s?.title||"").toUpperCase();
+      const freq=String(s?.frequency||"").toLowerCase();
+      const ticker=String(s?.ticker||"").toUpperCase();
+      const assetMatch=title.includes(asset+" ")||title.startsWith(asset)||ticker.includes(asset);
+      const shortMatch=/15\s*(MIN|MINUTE)/i.test(title)||/15\s*m/i.test(freq)||ticker.includes("15M");
+      const directionMatch=/UP\s+OR\s+DOWN/i.test(title)||/UP.*DOWN/i.test(title);
+      return assetMatch && shortMatch && directionMatch;
+    });
+    const fallback={
+      BTC:"KXBTC15M",
+      ETH:"KXETH15M",
+      SOL:null,
+      XRP:null,
+      HYPE:null
+    }[asset];
+    resolved.push({
+      asset,
+      ticker:String(exact?.ticker||fallback||""),
+      title:String(exact?.title||""),
+      frequency:String(exact?.frequency||""),
+      settlementSources:Array.isArray(exact?.settlement_sources)?exact.settlement_sources:[],
+      coinbaseProduct:meta.coinbaseProduct,
+      dynamicallyResolved:Boolean(exact?.ticker),
+      executionEligible:Boolean(exact?.ticker)||asset==="BTC"||asset==="ETH"
+    });
+  }
+  return resolved;
+}
+
 async function discoverKalshiShadowMarkets(env) {
-  const series=[
-    {asset:"BTC",ticker:"KXBTC15M",coinbaseProduct:"BTC-USD",executionEligible:true},
-    {asset:"ETH",ticker:"KXETH15M",coinbaseProduct:"ETH-USD",executionEligible:true},
-    {asset:"SOL",ticker:"KXSOL15M",coinbaseProduct:"SOL-USD",executionEligible:false},
-    {asset:"XRP",ticker:"KXXRP15M",coinbaseProduct:"XRP-USD",executionEligible:false},
-    {asset:"HYPE",ticker:"KXHYPE15M",coinbaseProduct:"HYPE-USD",executionEligible:false},
-  ];
+  const series=await resolveKalshi15mSeries(env);
   const candidates=[]; let seen=0,rejected=0;
   for(const s of series) {
-    const path="/trade-api/v2/markets?series_ticker="+encodeURIComponent(s.ticker)+"&status=open&limit=6";
+    if(!s.ticker) continue;
+    const path="/trade-api/v2/markets?series_ticker="+encodeURIComponent(s.ticker)+"&status=open&limit=12";
     const r=await kalshiShadowGet(env,path);
     if(!r.ok) throw new Error("KALSHI_MARKETS_READ_FAILED_"+r.status);
     const data=await r.json(), markets=Array.isArray(data?.markets)?data.markets:[];
@@ -710,7 +750,16 @@ async function discoverKalshiShadowMarkets(env) {
       if(yesAsk<=0.01 || yesAsk>=0.99 || noAsk<=0.01 || noAsk>=0.99){rejected++;continue;}
       const open=Date.parse(m?.open_time||""), close=Date.parse(m?.close_time||"");
       const durationMs=Number.isFinite(open)&&Number.isFinite(close)?close-open:15*60*1000;
-      const base={marketTicker:m.ticker,slug:m.ticker,question:m.title||s.ticker,asset:s.asset,source:"KALSHI",horizon:"15M",durationMs,openTime:m?.open_time||null,closeTime:m?.close_time||null,executionEligible:Boolean(s.executionEligible)};
+      const durationSafe=durationMs>=10*60*1000 && durationMs<=20*60*1000;
+      const executionEligible=Boolean(s.executionEligible && durationSafe);
+      const base={
+        marketTicker:m.ticker,slug:m.ticker,question:m.title||s.title||s.ticker,
+        asset:s.asset,source:"KALSHI",horizon:"15M",durationMs,
+        openTime:m?.open_time||null,closeTime:m?.close_time||null,
+        executionEligible,seriesTicker:s.ticker,seriesTitle:s.title,
+        seriesFrequency:s.frequency,dynamicallyResolved:s.dynamicallyResolved,
+        settlementSources:s.settlementSources
+      };
       candidates.push({...base,id:m.ticker+":YES",outcomeSide:"YES",direction:"UP",bear:false,yes:yesAsk,bid:yesBid});
       candidates.push({...base,id:m.ticker+":NO",outcomeSide:"NO",direction:"DOWN",bear:true,yes:noAsk,bid:noBid});
     }
@@ -719,9 +768,11 @@ async function discoverKalshiShadowMarkets(env) {
     eligible:candidates.filter(x=>x.asset===s.asset).length,
     up:candidates.filter(x=>x.asset===s.asset&&x.direction==="UP").length,
     down:candidates.filter(x=>x.asset===s.asset&&x.direction==="DOWN").length,
-    executionEligible:Boolean(s.executionEligible)
+    executionEligible:candidates.some(x=>x.asset===s.asset&&x.executionEligible===true),
+    seriesTicker:s.ticker||null,
+    dynamicallyResolved:Boolean(s.dynamicallyResolved)
   }]));
-  return {markets:candidates,seen,rejected,coverage,pages:1,reachedEnd:true,source:"KALSHI_AUTHENTICATED_READ_ONLY"};
+  return {markets:candidates,seen,rejected,coverage,pages:1,reachedEnd:true,source:"KALSHI_AUTHENTICATED_READ_ONLY",series};
 }
 
 async function runShadow(env) {
@@ -814,7 +865,7 @@ async function runShadow(env) {
     state.opportunities = opportunities.slice(0, 20);
     state.eligibleCount = discovery.markets.length;
     state.assetCoverage = discovery.coverage;
-    state.assetCoverageReady = Number(discovery.coverage?.BTC?.eligible || 0) > 0 && Number(discovery.coverage?.ETH?.eligible || 0) > 0;
+    state.assetCoverageReady = Object.values(discovery.coverage||{}).some(v=>Number(v?.eligible||0)>0 && v?.executionEligible===true);
     state.rejectedCount = discovery.rejected;
     state.seenCount = discovery.seen;
     state.lastRunAt = new Date(now).toISOString();
@@ -998,7 +1049,8 @@ async function maybeRunKalshiOneTrade(env) {
     const candidate=(shadow.opportunities||[]).find(o =>
       Number(o?.score)>=REAL_TEST_CONFIG.entryScore && Number(o?.edge)>0 &&
       Number(o?.yes)>0.01 && Number(o?.yes)<0.99 && o?.marketTicker &&
-      o?.executionEligible===true && (o?.asset==="BTC"||o?.asset==="ETH") &&
+      o?.executionEligible===true &&
+      ["BTC","ETH","SOL","XRP","HYPE"].includes(String(o?.asset||"")) &&
       (o?.outcomeSide==="YES"||o?.outcomeSide==="NO") && kalshiCandidateTimeSafe(o,now)
     );
     if(!candidate) {
@@ -1447,7 +1499,7 @@ function dashboardHtml() {
   <div class="hero">
     <div class="brand">
       <img class="logo" alt="NFE-OS" src="https://raw.githubusercontent.com/darkbishop43-tech/nfe-labs/main/market-edge-lab/public/nfe-os-logo-market-edge.webp">
-      <div><div class="k">NFE-OS Research Lab · Polymarket US</div><h1>Market Edge — Baseline Real</h1><div class="sub">Real account validation · BTC/ETH only · governed test environment</div></div>
+      <div><div class="k">NFE-OS Research Lab · Polymarket US</div><h1>Market Edge — Baseline Real</h1><div class="sub">Real account validation · BTC/ETH/SOL/XRP/HYPE · governed test environment</div></div>
     </div>
     <div class="actions"><button id="refresh" class="btn" type="button">REFRESH PROOF</button><div id="modePill" class="pill real">REAL · CHECKING</div><div class="pill">BANKROLL FUNDED · NO ADDITIONAL DEPOSIT</div></div>
   </div>
@@ -1500,7 +1552,7 @@ function dashboardHtml() {
         <div class="row"><span>Credentials</span><strong id="creds">CHECKING…</strong></div>
         <div class="row"><span>Secret exposure</span><strong class="good">NONE</strong></div>
         <div class="row"><span>Shadow experiment</span><strong id="shadowGov">CHECKING…</strong></div>
-        <div class="row"><span>Market scope</span><strong>BTC / ETH ONLY</strong></div>
+        <div class="row"><span>Market scope</span><strong>BTC / ETH / SOL / XRP / HYPE</strong></div>
         <div class="row"><span>Execution mode</span><strong id="executionGov">CHECKING…</strong></div>
       </div>
     </div>
@@ -1655,8 +1707,8 @@ async function load(){
     const cov=shadow?.assetCoverage||{};
     const coverageReady=Boolean(shadow?.assetCoverageReady);
     const coverageAssets=['BTC','ETH','SOL','XRP','HYPE'];
-    const coverageText=coverageAssets.map(a=>a+': '+Number(cov?.[a]?.eligible||0)+' eligible · '+Number(cov?.[a]?.up||0)+' up · '+Number(cov?.[a]?.down||0)+' down'+((a==='BTC'||a==='ETH')?'':' · OBSERVE ONLY')).join(' &nbsp; | &nbsp; ');
-    parts.push('<div class="opp" style="grid-column:1/-1"><div class="oppHead"><div class="q">LIVE ASSET COVERAGE · 5-ASSET OBSERVATION</div><div class="tag '+(coverageReady?'good':'warn')+'">'+(coverageReady?'BTC + ETH EXECUTION GATE PROVEN':'FIRST TRADE HOLD')+'</div></div><div class="meta">'+coverageText+(coverageReady?'':' · Controller will not submit the first real order until BTC and ETH are discovered live.')+'</div></div>');
+    const coverageText=coverageAssets.map(a=>a+': '+Number(cov?.[a]?.eligible||0)+' eligible · '+Number(cov?.[a]?.up||0)+' up · '+Number(cov?.[a]?.down||0)+' down'+(cov?.[a]?.executionEligible?' · VALIDATED':' · DISCOVERY HOLD')).join(' &nbsp; | &nbsp; ');
+    parts.push('<div class="opp" style="grid-column:1/-1"><div class="oppHead"><div class="q">LIVE ASSET COVERAGE · 5-ASSET OBSERVATION</div><div class="tag '+(coverageReady?'good':'warn')+'">'+(coverageReady?'5-ASSET AUTO-SELECTION READY':'FIRST TRADE HOLD')+'</div></div><div class="meta">'+coverageText+(coverageReady?'':' · Controller will not submit the first real order until BTC and ETH are discovered live.')+'</div></div>');
     if(!opps.length){
       parts.push('<div class="opp" style="grid-column:1/-1"><div class="oppHead"><div class="q">SHORT-HORIZON SCAN COMPLETE</div><div class="tag good">LIVE · VALID ZERO RESULT</div></div><div class="meta">No eligible BTC/ETH/SOL/XRP/HYPE 15-minute opportunities were found in this successful Kalshi Shadow observation. Baseline remains waiting for the next live contract window.</div></div>');
     } else {
@@ -1664,7 +1716,7 @@ async function load(){
         const ask=Number(o.observedAsk),bid=Number(o.observedBid),score=Number(o.score),move=Number(o.move),edge=Number(o.edge);
         const qualifies=Number.isFinite(score)&&score>=0.80&&edge>0;
         const horizon=esc(o.horizon||'UNCLASSIFIED');
-        parts.push('<div class="opp"><div class="oppHead"><div class="q">'+esc(o.question||o.slug||'US market')+'</div><div class="oppBadges"><div class="tag">'+horizon+'</div><div class="scoreBadge '+(qualifies?'hot':'')+'"><small>SCORE</small><strong>'+(Number.isFinite(score)?score.toFixed(2):'—')+'</strong></div><div class="tag">'+esc(o.asset||'')+' · '+((o.executionEligible===true)?(qualifies?'ENTRY ≥ .80':'OBSERVE'):'OBSERVE ONLY')+'</div></div></div><div class="meta">'+
+        parts.push('<div class="opp"><div class="oppHead"><div class="q">'+esc(o.question||o.slug||'US market')+'</div><div class="oppBadges"><div class="tag">'+horizon+'</div><div class="scoreBadge '+(qualifies?'hot':'')+'"><small>SCORE</small><strong>'+(Number.isFinite(score)?score.toFixed(2):'—')+'</strong></div><div class="tag">'+esc(o.asset||'')+' · '+((o.executionEligible===true)?(qualifies?'QUALIFIED ≥ .80':'AUTO SELECT ELIGIBLE'):'DISCOVERY HOLD')+'</div></div></div><div class="meta">'+
           (Number.isFinite(move)?('move '+(move*100).toFixed(3)+'% · '):'')+
           (Number.isFinite(ask)?('ASK '+(ask*100).toFixed(1)+'¢ · '):'')+
           (Number.isFinite(bid)?('BID '+(bid*100).toFixed(1)+'¢ · '):'')+
