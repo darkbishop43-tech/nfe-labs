@@ -2319,7 +2319,16 @@ export default {
         entryClientOrderId:state.entryClientOrderId,
         entryWriteError:state.entryWriteError??null
       };
-      state.failedXrpAttemptEvidence={...(state.failedXrpAttemptEvidence||{}),...preserved,recoveredAt:new Date().toISOString()};
+      // Keep the recovery record bounded: the full immutable decision snapshot already
+      // remains in firstRealTradeEvidence. Do not duplicate that large object in KV.
+      state.failedXrpAttemptEvidence={
+        preserved:true,
+        recoveredAt:new Date().toISOString(),
+        entryProviderStatus:preserved.entryProviderStatus,
+        entryClientOrderId:preserved.entryClientOrderId,
+        entryWriteError:preserved.entryWriteError,
+        providerErrorCode:preserved.entryProviderResponse?.error?.code||null
+      };
       state.entrySubmitStartedAt=null;
       state.marketTicker=null;
       state.marketSlug=null;
