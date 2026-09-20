@@ -1855,6 +1855,36 @@ function dashboardHtml() {
 .clickable{cursor:pointer;transition:transform .12s ease,border-color .12s ease,background .12s ease}.clickable:hover{transform:translateY(-1px);border-color:#6d8fb5;background:#101d2c}.contractRow{display:grid;grid-template-columns:56px minmax(0,1fr) auto;gap:8px;align-items:center;padding:8px 0;border-top:1px solid rgba(255,255,255,.07)}.contractRow:first-of-type{margin-top:6px}.contractTicker{font-size:10px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.refreshClock{font-size:10px;color:var(--gold2);font-weight:800}.modalBack{position:fixed;inset:0;background:#000b;display:none;align-items:center;justify-content:center;padding:18px;z-index:9999}.modalBack.open{display:flex}.modalCard{width:min(760px,100%);max-height:88vh;overflow:auto;background:linear-gradient(180deg,#132238,#0b1522);border:1px solid #38516e;border-radius:18px;box-shadow:0 25px 80px #000;padding:18px}.modalHead{display:flex;justify-content:space-between;gap:12px;align-items:flex-start}.modalClose{border:1px solid #536d8b;background:#0a1421;color:#fff;border-radius:10px;padding:7px 10px;cursor:pointer}.detailGrid{display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin-top:12px}.detailBox{background:#09131f;border:1px solid #20364f;border-radius:12px;padding:10px}.detailBox .label{margin-bottom:4px}@media(max-width:650px){.detailGrid{grid-template-columns:1fr}.contractRow{grid-template-columns:52px minmax(0,1fr)}}
 @media(min-width:1100px){.opps{grid-template-columns:repeat(3,1fr)}}@media(max-width:1050px){.marketGrid{grid-template-columns:repeat(3,1fr)}}@media(max-width:820px){.marketGrid{grid-template-columns:repeat(2,1fr)}}
 @media(max-width:720px){.hero{min-height:126px}.hero:before,.hero:after{width:38%;opacity:.94;background-size:contain}.hero:before{background-position:left center}.hero:after{background-position:right center}.grid{grid-template-columns:repeat(2,1fr)}.compactGrid{grid-template-columns:repeat(2,1fr)}.wide{grid-template-columns:1fr}.opps{grid-template-columns:1fr}.marketGrid{grid-template-columns:1fr}.pnlGrid{grid-template-columns:1fr}.logo{width:100px;height:58px}h1{font-size:23px}.hero{align-items:flex-start}}@media(max-width:460px){.hero{min-height:118px}.hero:before,.hero:after{width:40%;opacity:.92;background-size:contain}.grid{grid-template-columns:1fr}.compactGrid{grid-template-columns:1fr}.brand{gap:8px}.logo{width:78px;height:48px}.k{font-size:8px}.sub{font-size:10px}.pill,.btn{font-size:9px;padding:6px 8px}.val{font-size:20px}.hero{padding:12px}}
+
+/* LOCKED BASELINE REAL PRESENTATION PASS — behavior/data hooks preserved */
+body{background-color:#030811;background-image:linear-gradient(rgba(31,91,137,.045) 1px,transparent 1px),linear-gradient(90deg,rgba(31,91,137,.045) 1px,transparent 1px),radial-gradient(circle at 50% -15%,#0d2944 0,transparent 42%);background-size:28px 28px,28px 28px,auto}
+.w{max-width:1536px;padding:10px 14px 32px}
+.hero{min-height:205px;padding:12px 18px;grid-template-columns:1fr 280px 1fr;border-radius:10px;border-color:#315777;background:#050b13}
+.hero:before,.hero:after{width:41%;background-size:cover;opacity:1}
+.hero:before{background-position:left center;background-image:linear-gradient(90deg,rgba(3,8,14,0),rgba(3,8,14,.04) 72%,rgba(3,8,14,.78)),url("https://raw.githubusercontent.com/darkbishop43-tech/nfe-labs/market-edge-baseline-real/market-edge-lab/public/market-edge-bull-canon.webp")}
+.hero:after{background-position:right center;background-image:linear-gradient(270deg,rgba(3,8,14,0),rgba(3,8,14,.04) 72%,rgba(3,8,14,.78)),url("https://raw.githubusercontent.com/darkbishop43-tech/nfe-labs/market-edge-baseline-real/market-edge-lab/public/market-edge-bear-canon.webp")}
+.brand .logo{width:200px;height:132px;grid-column:2;align-self:center;background:#07101a;border-color:#6e5b31}
+.actions{align-self:end;justify-self:end;max-width:270px;flex-direction:column;align-items:flex-end;gap:5px}
+.actions .pill,.actions .btn{background:#07101acc}
+.heroCopy{display:none}
+.card,.opp{border-radius:10px;border-color:#244d70;background:linear-gradient(180deg,#0b1b2b,#07131f);box-shadow:inset 0 1px 0 #ffffff08,0 0 18px #0077cc0a}
+.grid{grid-template-columns:repeat(4,1fr);gap:7px}.grid>.card{min-height:108px}
+.statusline{margin-top:6px}.section{margin-top:8px}
+.realStatus{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:16px}
+.statusTimer{min-width:180px;text-align:right;border-left:1px solid #254a69;padding-left:16px}
+.statusTimer .val{font-size:27px}
+.marketGrid{grid-template-columns:repeat(5,minmax(0,1fr));gap:7px}
+.marketCard{border-radius:9px;padding:10px}.spark{height:82px}.marketPrice{font-size:22px}
+.pnlSystem{display:grid;grid-template-columns:minmax(0,2.3fr) minmax(260px,.9fr);gap:8px;margin-top:8px}
+.pnlSystem>.section{margin-top:0}.systemPanel .statusline{margin-top:16px}
+.wide{grid-template-columns:minmax(0,2.3fr) minmax(280px,.9fr)}
+.opps{grid-template-columns:repeat(2,minmax(0,1fr));gap:7px}
+.opp{min-height:112px}
+.footer{border-top:1px solid #244d70;margin-top:18px;padding:16px 4px 0;display:flex;justify-content:space-between;gap:18px;color:#8da4bb;letter-spacing:.12em;text-transform:uppercase}
+.footer strong{color:var(--gold2)}
+@media(max-width:900px){.hero{grid-template-columns:1fr 150px 1fr;min-height:170px}.brand .logo{width:130px;height:92px}.hero:before,.hero:after{width:43%}.pnlSystem{grid-template-columns:1fr}.wide{grid-template-columns:1fr}.marketGrid{grid-template-columns:repeat(2,1fr)}}
+@media(max-width:720px){.hero{min-height:132px;grid-template-columns:1fr 94px 1fr;padding:8px}.hero:before,.hero:after{width:42%;background-size:cover;opacity:1}.brand .logo{width:86px;height:60px}.actions{max-width:155px;gap:3px}.actions .pill,.actions .btn{font-size:7px;padding:4px 6px}.grid{grid-template-columns:repeat(2,1fr)}.realStatus{grid-template-columns:1fr}.statusTimer{text-align:left;border-left:0;border-top:1px solid #254a69;padding:8px 0 0}.marketGrid{grid-template-columns:repeat(2,1fr)}.opps{grid-template-columns:1fr}.pnlGrid{grid-template-columns:1fr}.footer{flex-direction:column;gap:7px;text-align:left}}
+@media(max-width:460px){.hero{min-height:116px}.hero:before,.hero:after{width:43%}.grid,.marketGrid{grid-template-columns:1fr}.actions{max-width:125px}.brand .logo{width:72px;height:52px}}
 </style>
 </head>
 <body>
@@ -1869,15 +1899,15 @@ function dashboardHtml() {
   <div class="heroCopy"><div class="k">NFE-OS Research Lab · Polymarket US</div><h1>Market Edge — Baseline Real</h1><div class="sub">Real account validation · BTC/ETH/SOL/XRP/HYPE · governed test environment</div></div>
 
   <div class="grid">
-    <div class="card"><div class="label">Polymarket Connection</div><div id="conn" class="val">CHECKING…</div><div id="connSub" class="m"></div></div>
+    <div class="card"><div class="label">Kalshi Connection</div><div id="conn" class="val">CHECKING…</div><div id="connSub" class="m"></div></div>
     <div class="card"><div class="label">Account State</div><div id="bal" class="val">CHECKING…</div><div id="balSub" class="m"></div></div>
-    <div class="card"><div class="label">Additional Funding</div><div class="val good">NO MORE NEEDED</div><div class="m">$10 experiment bankroll funded. Additional deposits are locked for this one-trade test. Maximum real trade stake remains $5.</div><div style="margin-top:10px;padding-top:9px;border-top:1px solid #28405b"><div class="label">NEXT DASHBOARD REFRESH</div><div id="refreshCountdownTop" class="val warn" style="font-size:24px;letter-spacing:.06em">05:00</div></div></div>
+    <div class="card"><div class="label">Additional Funding</div><div class="val good">NO MORE NEEDED</div><div class="m">$10 experiment bankroll funded. Additional deposits are locked for this one-trade test. Maximum real trade stake remains $5.</div></div>
     <div class="card"><div class="label">Live Orders</div><div id="liveOrdersState" class="val warn">CHECKING…</div><div id="liveOrdersSub" class="m">One-trade execution controller status loading.</div></div>
   </div>
 
-  <div class="card section">
-    <b>Real-System Status</b>
-    <div class="statusline"><span id="statusDot" class="dot warn"></span><div><div id="statusText"><b>CHECKING REAL CONTROLLER…</b></div><div id="statusSub" class="m">Loading governed execution state.</div></div></div>
+  <div class="card section realStatus">
+    <div><b>Real-System Status</b><div class="statusline"><span id="statusDot" class="dot warn"></span><div><div id="statusText"><b>CHECKING REAL CONTROLLER…</b></div><div id="statusSub" class="m">Loading governed execution state.</div></div></div></div>
+    <div class="statusTimer"><div class="label">NEXT DASHBOARD REFRESH</div><div id="refreshCountdownTop" class="val warn">05:00</div></div>
   </div>
 
   <div class="card section">
@@ -1892,6 +1922,7 @@ function dashboardHtml() {
     <div class="notice">Five-asset Coinbase spot + 24-hour trend display. Kalshi opportunity cards below use the same frozen Baseline score. The controller automatically chooses the strongest qualifying validated asset; no threshold or stake rule is loosened.</div>
   </div>
 
+  <div class="pnlSystem">
   <div class="card section">
     <b>Profit / Loss</b>
     <div class="pnlGrid">
@@ -1900,6 +1931,8 @@ function dashboardHtml() {
       <div class="pnlBox"><div class="label">Total Real P/L</div><div class="pnlNum">$0.00</div><div class="m">REAL P/L · NOT STARTED</div></div>
     </div>
     <div class="notice"><b>REAL MONEY ONLY:</b> Shadow observations never count as real P/L.</div>
+  </div>
+  <div class="card section systemPanel"><b>System Status</b><div class="statusline"><span class="dot"></span><div><div><b class="good">OPERATIONAL</b></div><div class="m">Live market data · Controller status remains governed by the application.</div></div></div></div>
   </div>
 
   <div class="section wide">
