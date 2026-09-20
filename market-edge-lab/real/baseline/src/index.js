@@ -589,6 +589,21 @@ async function kalshiExecutionWrite(env, state, method, path, payload) {
 async function kalshiCreateOrderV2(env,state,payload) {
   return kalshiExecutionWrite(env,state,"POST","/trade-api/v2/portfolio/events/orders",payload);
 }
+async function kalshiCreateManagedExitV2(env,state,payload) {
+  const ticker=String(state?.marketTicker||"");
+  const filled=Number(state?.filledCount||0);
+  const alreadyExited=Number(state?.exitFilledTotal||0);
+  const remaining=Math.max(0,filled-alreadyExited);
+  const requested=Number(payload?.count||0);
+  if(!ticker || !(filled>0) || !(remaining>0)) throw new Error("MANAGED_EXIT_POSITION_INVALID");
+  if(payload?.reduce_only!==true || String(payload?.ticker||"")!==ticker) throw new Error("MANAGED_EXIT_SCOPE_INVALID");
+  if(!(requested>0) || requested>remaining+1e-9) throw new Error("MANAGED_EXIT_COUNT_INVALID");
+  const headers=await kalshiExecutionHeaders(env,"POST","/trade-api/v2/portfolio/events/orders");
+  headers["content-type"]="application/json";
+  return fetch("https://api.elections.kalshi.com/trade-api/v2/portfolio/events/orders",{
+    method:"POST",headers,body:JSON.stringify(payload)
+  });
+}
 async function kalshiCancelOrderV2(env,state,orderId) {
   return kalshiExecutionWrite(env,state,"DELETE","/trade-api/v2/portfolio/events/orders/"+encodeURIComponent(orderId));
 }
@@ -635,7 +650,7 @@ function kalshiV2ExitPayload(state,currentBid,clientOrderId) {
     ticker:String(state.marketTicker),
     client_order_id:String(clientOrderId),
     side,
-    count:Number(state.filledCount||state.entryCount||0).toFixed(2),
+    count:Number(state.remainingExitCount||state.filledCount||state.entryCount||0).toFixed(2),
     price:yesLegPrice.toFixed(4),
     time_in_force:"immediate_or_cancel",
     self_trade_prevention_type:"taker_at_cross",
@@ -1019,13 +1034,15 @@ async function maybeRunKalshiOneTrade(env) {
   const state=await loadRealTradeState(env);
   const now=Date.now();
 
-  if(!kalshiOneTradeEnabled(env,state)) {
-    if(!state.consumed && !state.entryOrderId) state.status="KALSHI_READY_HARD_DISABLED";
+  if(state.consumed) {
+    state.status="ONE_TRADE_COMPLETE";
     await saveRealTradeState(env,state);
     return state;
   }
-  if(state.consumed) {
-    state.status="ONE_TRADE_COMPLETE";
+  // Founder authorization gates the single ENTRY only. Once an entry exists,
+  // the exact filled position remains under managed reduce-only exit control.
+  if(!state.entryOrderId && !kalshiOneTradeEnabled(env,state)) {
+    state.status="KALSHI_READY_HARD_DISABLED";
     await saveRealTradeState(env,state);
     return state;
   }
@@ -1185,12 +1202,24 @@ async function maybeRunKalshiOneTrade(env) {
     await saveRealTradeState(env,state);
     return state;
   }
-  if(state.exitSubmitStartedAt) {
+  if(state.exitSubmitStartedAt && (now-Number(state.exitSubmitStartedAt))<KALSHI_ONE_TRADE_SAFETY.pendingOrderTimeoutMs) {
     state.status="BLOCKED_EXIT_RECONCILIATION";
     await saveRealTradeState(env,state);
     return state;
   }
-  state.exitClientOrderId=kalshiClientOrderId(state,"exit");
+  if(state.exitSubmitStartedAt) state.exitSubmitStartedAt=null;
+  const alreadyExited=Number(state.exitFilledTotal||0);
+  const remaining=Math.max(0,Number(state.filledCount)-alreadyExited);
+  if(!(remaining>0)) {
+    state.status="ONE_TRADE_COMPLETE";
+    state.consumed=true;
+    state.completedAt=Date.now();
+    await saveRealTradeState(env,state);
+    return state;
+  }
+  state.exitAttempt=Number(state.exitAttempt||0)+1;
+  state.remainingExitCount=remaining;
+  state.exitClientOrderId=kalshiClientOrderId(state,"exit"+state.exitAttempt);
   state.exitSubmitStartedAt=Date.now();
   state.exitReason=exitByScore?"SCORE_EXIT":"MAX_HOLD_EXIT";
   await saveRealTradeState(env,state);
@@ -1200,38 +1229,42 @@ async function maybeRunKalshiOneTrade(env) {
     await saveRealTradeState(env,state);
     return state;
   }
-  // Exit is allowed only for the already-open governed position; no new exposure can be created.
-  // Reuse a synthetic active authorization solely for reduce_only exit of the exact filled quantity.
-  const exitGateState={...state,founderAuthorization:{authorized:true,consumed:false,expiresAt:Date.now()+60000}};
+  // Managed exits do not reuse entry authorization. They are restricted to the
+  // exact live ticker, exact remaining filled quantity, and reduce_only=true.
   let xr;
-  try { xr=await kalshiCreateOrderV2(env,exitGateState,exitPayload); }
+  try { xr=await kalshiCreateManagedExitV2(env,state,exitPayload); }
   catch(e) {
-    state.status="EXIT_WRITE_ERROR_RETRY_BLOCKED";
+    state.status="EXIT_WRITE_ERROR_RETRY_PENDING";
     state.exitWriteError=String(e?.message||e);
+    state.exitSubmitStartedAt=null;
     await saveRealTradeState(env,state);
     return state;
   }
   const exitBody=await xr.json().catch(()=>({}));
   if(!xr.ok) {
-    state.status="EXIT_PROVIDER_REJECTED_RETRY_BLOCKED";
+    state.status="EXIT_PROVIDER_REJECTED_RETRY_PENDING";
     state.exitProviderStatus=xr.status;
     state.exitProviderResponse=exitBody;
+    state.exitSubmitStartedAt=null;
     await saveRealTradeState(env,state);
     return state;
   }
   const xs=summarizeKalshiV2CreateResponse(exitBody);
   state.exitOrderId=xs.orderId;
   state.exitFilledCount=xs.fillCount;
-  state.exitRemainingCount=xs.remainingCount;
+  state.exitFilledTotal=Number((alreadyExited+Number(xs.fillCount||0)).toFixed(4));
+  state.exitRemainingCount=Math.max(0,Number(state.filledCount)-state.exitFilledTotal);
   state.exitAverageFillPrice=xs.averageFillPrice;
   state.exitAverageFeePaid=xs.averageFeePaid;
-  if(Number(state.exitFilledCount)>=Number(state.filledCount)) {
+  state.exitSubmitStartedAt=null;
+  if(state.exitRemainingCount<=1e-9) {
     state.status="ONE_TRADE_COMPLETE";
     state.consumed=true;
     state.completedAt=Date.now();
-    realTradeLedger(state,"KALSHI_EXIT_FILLED",{orderId:state.exitOrderId,reason:state.exitReason,filledCount:state.exitFilledCount});
+    realTradeLedger(state,"KALSHI_EXIT_FILLED",{orderId:state.exitOrderId,reason:state.exitReason,filledCount:state.exitFilledTotal});
   } else {
-    state.status="EXIT_PARTIAL_FILL_RECONCILIATION_REQUIRED";
+    state.status="POSITION_OPEN_EXIT_RETRY_REQUIRED";
+    realTradeLedger(state,"KALSHI_EXIT_PARTIAL",{orderId:state.exitOrderId,attempt:state.exitAttempt,filledThisAttempt:Number(xs.fillCount||0),remaining:state.exitRemainingCount});
   }
   await saveRealTradeState(env,state);
   return state;
@@ -1408,7 +1441,10 @@ function publicRealTradeView(state, env) {
   return {
     ok: true,
     controller: "ONE_GOVERNED_REAL_TRADE",
-    armed: kalshiOneTradeEnabled(env),
+    armed: kalshiOneTradeEnabled(env,state),
+    controllerSwitchEnabled: kalshiControllerSwitchEnabled(env),
+    founderAuthorizationActive: kalshiAuthorizationValid(state),
+    managedPositionOpen: Boolean(state?.entryOrderId && Number(state?.filledCount)>Number(state?.exitFilledTotal||0)),
     status: state?.status || "UNKNOWN",
     consumed: Boolean(state?.consumed),
     initialBankrollUsd: REAL_TEST_CONFIG.initialBankrollUsd,
