@@ -485,8 +485,8 @@ async function loadShadowState(env) {
     mode: "REAL_KALSHI_SHADOW",
     startedAt: null,
     lastRunAt: null,
-    prices: { BTC: null, ETH: null },
-    moves: { BTC: 0, ETH: 0 },
+    prices: { BTC: null, ETH: null, SOL: null, XRP: null, HYPE: null },
+    moves: { BTC: 0, ETH: 0, SOL: 0, XRP: 0, HYPE: 0 },
     positions: [],
     opportunities: [],
     ledger: [],
@@ -685,7 +685,13 @@ function estimateKalshiFeeSafeSize(price, maxStakeUsd) {
   return {ok:false,reason:"NO_CONTRACT_FITS_PREMIUM_PLUS_FEE_CAP",count:0,premiumUsd:0,feeUsd:0,totalDebitUsd:0,maxStakeUsd:cap,executionAllowed:false};
 }
 async function discoverKalshiShadowMarkets(env) {
-  const series=[{asset:"BTC",ticker:"KXBTC15M"},{asset:"ETH",ticker:"KXETH15M"}];
+  const series=[
+    {asset:"BTC",ticker:"KXBTC15M",coinbaseProduct:"BTC-USD",executionEligible:true},
+    {asset:"ETH",ticker:"KXETH15M",coinbaseProduct:"ETH-USD",executionEligible:true},
+    {asset:"SOL",ticker:"KXSOL15M",coinbaseProduct:"SOL-USD",executionEligible:false},
+    {asset:"XRP",ticker:"KXXRP15M",coinbaseProduct:"XRP-USD",executionEligible:false},
+    {asset:"HYPE",ticker:"KXHYPE15M",coinbaseProduct:"HYPE-USD",executionEligible:false},
+  ];
   const candidates=[]; let seen=0,rejected=0;
   for(const s of series) {
     const path="/trade-api/v2/markets?series_ticker="+encodeURIComponent(s.ticker)+"&status=open&limit=6";
@@ -704,15 +710,17 @@ async function discoverKalshiShadowMarkets(env) {
       if(yesAsk<=0.01 || yesAsk>=0.99 || noAsk<=0.01 || noAsk>=0.99){rejected++;continue;}
       const open=Date.parse(m?.open_time||""), close=Date.parse(m?.close_time||"");
       const durationMs=Number.isFinite(open)&&Number.isFinite(close)?close-open:15*60*1000;
-      const base={marketTicker:m.ticker,slug:m.ticker,question:m.title||s.ticker,asset:s.asset,source:"KALSHI",horizon:"15M",durationMs,openTime:m?.open_time||null,closeTime:m?.close_time||null};
+      const base={marketTicker:m.ticker,slug:m.ticker,question:m.title||s.ticker,asset:s.asset,source:"KALSHI",horizon:"15M",durationMs,openTime:m?.open_time||null,closeTime:m?.close_time||null,executionEligible:Boolean(s.executionEligible)};
       candidates.push({...base,id:m.ticker+":YES",outcomeSide:"YES",direction:"UP",bear:false,yes:yesAsk,bid:yesBid});
       candidates.push({...base,id:m.ticker+":NO",outcomeSide:"NO",direction:"DOWN",bear:true,yes:noAsk,bid:noBid});
     }
   }
-  const coverage={
-    BTC:{eligible:candidates.filter(x=>x.asset==="BTC").length,up:candidates.filter(x=>x.asset==="BTC"&&x.direction==="UP").length,down:candidates.filter(x=>x.asset==="BTC"&&x.direction==="DOWN").length},
-    ETH:{eligible:candidates.filter(x=>x.asset==="ETH").length,up:candidates.filter(x=>x.asset==="ETH"&&x.direction==="UP").length,down:candidates.filter(x=>x.asset==="ETH"&&x.direction==="DOWN").length}
-  };
+  const coverage=Object.fromEntries(series.map(s=>[s.asset,{
+    eligible:candidates.filter(x=>x.asset===s.asset).length,
+    up:candidates.filter(x=>x.asset===s.asset&&x.direction==="UP").length,
+    down:candidates.filter(x=>x.asset===s.asset&&x.direction==="DOWN").length,
+    executionEligible:Boolean(s.executionEligible)
+  }]));
   return {markets:candidates,seen,rejected,coverage,pages:1,reachedEnd:true,source:"KALSHI_AUTHENTICATED_READ_ONLY"};
 }
 
@@ -720,12 +728,13 @@ async function runShadow(env) {
   const state = await loadShadowState(env);
   const now = Date.now();
 
-  let stage = "BTC_SPOT";
-  let btc, eth, discovery;
+  let stage = "MULTI_ASSET_SPOT";
+  let discovery;
   try {
-    btc = await coinbaseSpot("BTC-USD");
-    stage = "ETH_SPOT";
-    eth = await coinbaseSpot("ETH-USD");
+    const assetProducts={BTC:"BTC-USD",ETH:"ETH-USD",SOL:"SOL-USD",XRP:"XRP-USD",HYPE:"HYPE-USD"};
+    const spotPairs=await Promise.all(Object.entries(assetProducts).map(async ([asset,product])=>[asset,await coinbaseSpot(product)]));
+    const spot=Object.fromEntries(spotPairs);
+    const btc=spot.BTC, eth=spot.ETH;
     stage = "KALSHI_DISCOVERY";
     discovery = await discoverKalshiShadowMarkets(env);
     const priorCoverageProof = state?.assetCoverageProof || { BTC:false, ETH:false };
@@ -746,10 +755,9 @@ async function runShadow(env) {
     stage = "SCORING";
 
     const previous = state.prices || {};
-    const moves = {
-      BTC: previous.BTC ? (btc - previous.BTC) / previous.BTC : 0,
-      ETH: previous.ETH ? (eth - previous.ETH) / previous.ETH : 0,
-    };
+    const moves=Object.fromEntries(Object.entries(spot).map(([asset,price])=>[
+      asset, previous[asset] ? (price-previous[asset])/previous[asset] : 0
+    ]));
 
     const horizonRank = { "15M": 0, "HOURLY": 1, "DAILY": 2 };
     const opportunities = discovery.markets
@@ -801,7 +809,7 @@ async function runShadow(env) {
       });
     }
 
-    state.prices = { BTC: btc, ETH: eth };
+    state.prices = spot;
     state.moves = moves;
     state.opportunities = opportunities.slice(0, 20);
     state.eligibleCount = discovery.markets.length;
@@ -838,7 +846,7 @@ async function runShadow(env) {
     // A failed discovery must fail closed: stale long-duration cards are not evidence.
     state.opportunities = [];
     state.eligibleCount = 0;
-    state.assetCoverage = { BTC: { eligible: 0, up: 0, down: 0 }, ETH: { eligible: 0, up: 0, down: 0 } };
+    state.assetCoverage = Object.fromEntries(["BTC","ETH","SOL","XRP","HYPE"].map(asset=>[asset,{eligible:0,up:0,down:0,executionEligible:asset==="BTC"||asset==="ETH"}]));
     state.assetCoverageReady = false;
     state.lastRunAt = new Date(now).toISOString();
     state.status = "ERROR";
@@ -990,6 +998,7 @@ async function maybeRunKalshiOneTrade(env) {
     const candidate=(shadow.opportunities||[]).find(o =>
       Number(o?.score)>=REAL_TEST_CONFIG.entryScore && Number(o?.edge)>0 &&
       Number(o?.yes)>0.01 && Number(o?.yes)<0.99 && o?.marketTicker &&
+      o?.executionEligible===true && (o?.asset==="BTC"||o?.asset==="ETH") &&
       (o?.outcomeSide==="YES"||o?.outcomeSide==="NO") && kalshiCandidateTimeSafe(o,now)
     );
     if(!candidate) {
@@ -1390,6 +1399,7 @@ function publicShadowView(state) {
       closeTime: o.closeTime || null,
       question: o.question,
       asset: o.asset,
+      executionEligible: o.executionEligible===true,
       observedAsk: o.yes,
       observedBid: o.bid,
       score: o.score,
@@ -1644,15 +1654,17 @@ async function load(){
     const opps=Array.isArray(shadow?.opportunities)?shadow.opportunities:[],parts=[];
     const cov=shadow?.assetCoverage||{};
     const coverageReady=Boolean(shadow?.assetCoverageReady);
-    parts.push('<div class="opp" style="grid-column:1/-1"><div class="oppHead"><div class="q">LIVE ASSET COVERAGE</div><div class="tag '+(coverageReady?'good':'warn')+'">'+(coverageReady?'BTC + ETH PROVEN':'FIRST TRADE HOLD')+'</div></div><div class="meta">BTC: '+Number(cov?.BTC?.eligible||0)+' eligible · '+Number(cov?.BTC?.up||0)+' up · '+Number(cov?.BTC?.down||0)+' down &nbsp; | &nbsp; ETH: '+Number(cov?.ETH?.eligible||0)+' eligible · '+Number(cov?.ETH?.up||0)+' up · '+Number(cov?.ETH?.down||0)+' down'+(coverageReady?'':' · Controller will not submit the first real order until both assets are discovered live.')+'</div></div>');
+    const coverageAssets=['BTC','ETH','SOL','XRP','HYPE'];
+    const coverageText=coverageAssets.map(a=>a+': '+Number(cov?.[a]?.eligible||0)+' eligible · '+Number(cov?.[a]?.up||0)+' up · '+Number(cov?.[a]?.down||0)+' down'+((a==='BTC'||a==='ETH')?'':' · OBSERVE ONLY')).join(' &nbsp; | &nbsp; ');
+    parts.push('<div class="opp" style="grid-column:1/-1"><div class="oppHead"><div class="q">LIVE ASSET COVERAGE · 5-ASSET OBSERVATION</div><div class="tag '+(coverageReady?'good':'warn')+'">'+(coverageReady?'BTC + ETH EXECUTION GATE PROVEN':'FIRST TRADE HOLD')+'</div></div><div class="meta">'+coverageText+(coverageReady?'':' · Controller will not submit the first real order until BTC and ETH are discovered live.')+'</div></div>');
     if(!opps.length){
-      parts.push('<div class="opp" style="grid-column:1/-1"><div class="oppHead"><div class="q">SHORT-HORIZON SCAN COMPLETE</div><div class="tag good">LIVE · VALID ZERO RESULT</div></div><div class="meta">No eligible BTC/ETH 15-minute opportunities were found in this successful Kalshi Shadow observation. Baseline remains waiting for the next live contract window.</div></div>');
+      parts.push('<div class="opp" style="grid-column:1/-1"><div class="oppHead"><div class="q">SHORT-HORIZON SCAN COMPLETE</div><div class="tag good">LIVE · VALID ZERO RESULT</div></div><div class="meta">No eligible BTC/ETH/SOL/XRP/HYPE 15-minute opportunities were found in this successful Kalshi Shadow observation. Baseline remains waiting for the next live contract window.</div></div>');
     } else {
       for(const o of opps){
         const ask=Number(o.observedAsk),bid=Number(o.observedBid),score=Number(o.score),move=Number(o.move),edge=Number(o.edge);
         const qualifies=Number.isFinite(score)&&score>=0.80&&edge>0;
         const horizon=esc(o.horizon||'UNCLASSIFIED');
-        parts.push('<div class="opp"><div class="oppHead"><div class="q">'+esc(o.question||o.slug||'US market')+'</div><div class="oppBadges"><div class="tag">'+horizon+'</div><div class="scoreBadge '+(qualifies?'hot':'')+'"><small>SCORE</small><strong>'+(Number.isFinite(score)?score.toFixed(2):'—')+'</strong></div><div class="tag">'+esc(o.asset||'')+' · '+(qualifies?'ENTRY ≥ .80':'OBSERVE')+'</div></div></div><div class="meta">'+
+        parts.push('<div class="opp"><div class="oppHead"><div class="q">'+esc(o.question||o.slug||'US market')+'</div><div class="oppBadges"><div class="tag">'+horizon+'</div><div class="scoreBadge '+(qualifies?'hot':'')+'"><small>SCORE</small><strong>'+(Number.isFinite(score)?score.toFixed(2):'—')+'</strong></div><div class="tag">'+esc(o.asset||'')+' · '+((o.executionEligible===true)?(qualifies?'ENTRY ≥ .80':'OBSERVE'):'OBSERVE ONLY')+'</div></div></div><div class="meta">'+
           (Number.isFinite(move)?('move '+(move*100).toFixed(3)+'% · '):'')+
           (Number.isFinite(ask)?('ASK '+(ask*100).toFixed(1)+'¢ · '):'')+
           (Number.isFinite(bid)?('BID '+(bid*100).toFixed(1)+'¢ · '):'')+
