@@ -2597,6 +2597,47 @@ export default {
       });
     }
 
+    if (url.pathname === "/kalshi-balance-shard-proof") {
+      try {
+        // Read-only shard diagnostic: authenticated GET only. Never moves funds or creates orders.
+        const path="/trade-api/v2/portfolio/balance";
+        const response=await kalshiExecutionGet(env,path);
+        let body=null;
+        try { body=await response.json(); } catch {}
+        const breakdown=body?.balance_breakdown ?? body?.balanceBreakdown ?? null;
+        return json({
+          ok:response.ok,
+          readOnly:true,
+          state:response.ok?"KALSHI_BALANCE_SHARD_PROOF":"KALSHI_BALANCE_SHARD_READ_FAILED",
+          venue:"KALSHI",
+          proof:{
+            method:"GET",
+            path,
+            httpStatus:response.status,
+            totalBalance:body?.balance ?? null,
+            portfolioValue:body?.portfolio_value ?? body?.portfolioValue ?? null,
+            balanceBreakdown:breakdown,
+            responseKeys:body&&typeof body==="object"?Object.keys(body).sort():[],
+            rawBalanceResponse:body
+          },
+          safety:{
+            postOrdersCalled:false,
+            transferCalled:false,
+            deleteOrdersCalled:false,
+            submitted:false,
+            realMoneyMoved:false,
+            stateMutation:false
+          }
+        },response.ok?200:502);
+      } catch(error) {
+        return json({
+          ok:false,readOnly:true,state:"KALSHI_BALANCE_SHARD_PROOF_FAILED",
+          errorCode:String(error?.message||"KALSHI_BALANCE_SHARD_PROOF_FAILED"),
+          safety:{postOrdersCalled:false,transferCalled:false,deleteOrdersCalled:false,submitted:false,realMoneyMoved:false,stateMutation:false}
+        },500);
+      }
+    }
+
     if (url.pathname === "/kalshi-execution-credential-proof") {
       try {
         // Deliberately harmless authenticated GET. This route contains no POST/DELETE fetch.
