@@ -484,24 +484,26 @@ function scoreShadowMarket(market, moves) {
 }
 
 async function loadShadowState(env) {
-  if (env?.BASELINE_REAL_SHADOW_STATE) {
-    try {
-      const raw = await env.BASELINE_REAL_SHADOW_STATE.get("baseline-real-shadow-v1");
-      if (raw) {
-        const parsed = JSON.parse(raw);
-        if (parsed && typeof parsed === "object") {
-          parsed.persistence = "ISOLATED_KV";
-          return parsed;
-        }
-      }
-    } catch {}
-  }
+  // Read the current high-frequency observation from edge cache first. The old KV
+  // snapshot is migration fallback only and is no longer refreshed every five minutes.
   const cache = caches.default;
   const hit = await cache.match(shadowCacheRequest());
   if (hit) {
     try {
       const parsed = await hit.json();
       if (parsed && typeof parsed === "object") return parsed;
+    } catch {}
+  }
+  if (env?.BASELINE_REAL_SHADOW_STATE) {
+    try {
+      const raw = await env.BASELINE_REAL_SHADOW_STATE.get("baseline-real-shadow-v1");
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (parsed && typeof parsed === "object") {
+          parsed.persistence = "LEGACY_KV_MIGRATION_FALLBACK";
+          return parsed;
+        }
+      }
     } catch {}
   }
   return {
