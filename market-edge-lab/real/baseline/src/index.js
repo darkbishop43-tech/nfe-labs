@@ -522,20 +522,18 @@ async function loadShadowState(env) {
 
 async function saveShadowState(env, state) {
   state.updatedAt = new Date().toISOString();
-  if (env?.BASELINE_REAL_SHADOW_STATE) {
-    await env.BASELINE_REAL_SHADOW_STATE.put("baseline-real-shadow-v1", JSON.stringify({ ...state, persistence: "ISOLATED_KV" }));
-    state.persistence = "ISOLATED_KV";
-    return;
-  }
+  // High-frequency observation snapshots belong in edge cache. KV is reserved for
+  // governed one-trade state/evidence so the 5-minute observer cannot exhaust KV writes.
   await caches.default.put(
     shadowCacheRequest(),
-    new Response(JSON.stringify(state), {
+    new Response(JSON.stringify({ ...state, persistence: "EDGE_CACHE" }), {
       headers: {
         "content-type": "application/json; charset=utf-8",
         "cache-control": "public, max-age=31536000",
       },
     })
   );
+  state.persistence = "EDGE_CACHE";
 }
 
 function shadowLedger(state, type, payload = {}) {
