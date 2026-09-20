@@ -2296,6 +2296,26 @@ export default {
       return json({ok:true,state:state.status,armed:true,expiresAt:state.founderAuthorization.expiresAt,submitted:false,realMoneyMoved:false});
     }
 
+    if (url.pathname === "/xrp-recovery-deployment-proof") {
+      const state=await loadRealTradeState(env);
+      return json({
+        ok:true,readOnly:true,state:"XRP_RECOVERY_DEPLOYMENT_PROOF_V2",
+        build:"ce2252b-minimal-observable-recovery",
+        recoveryRoutePresent:true,
+        mutationModel:"MINIMAL_LATCH_ONLY",
+        opaque1101Guard:"POST_WRITE_EXCEPTION_RETURNED_AS_JSON",
+        current:{
+          recoveryReady:!state?.entryOrderId && Number(state?.filledCount||0)===0 && Number(state?.entryProviderStatus)===404 && String(state?.entryProviderResponse?.error?.code||"")==="insufficient_shard_balance" && Boolean(state?.entrySubmitStartedAt),
+          entryOrderId:state?.entryOrderId||null,
+          filledCount:Number(state?.filledCount||0),
+          staleEntrySubmitLatch:Boolean(state?.entrySubmitStartedAt),
+          providerErrorCode:state?.entryProviderResponse?.error?.code||null,
+          authorizationActive:Boolean(state?.founderAuthorization?.authorized)&&!Boolean(state?.founderAuthorization?.consumed)
+        },
+        safety:{stateMutation:false,providerWrites:0,transfers:0,orders:0,reauthorizations:0,realMoneyMoved:false}
+      });
+    }
+
     if (url.pathname === "/recover-failed-xrp-latch") {
       const state=await loadRealTradeState(env);
       const failedXrp=
