@@ -2296,6 +2296,49 @@ export default {
       return json({ok:true,state:state.status,armed:true,expiresAt:state.founderAuthorization.expiresAt,submitted:false,realMoneyMoved:false});
     }
 
+    if (url.pathname === "/recover-failed-xrp-latch") {
+      const state=await loadRealTradeState(env);
+      const failedXrp=
+        !state?.entryOrderId &&
+        Number(state?.filledCount||0)===0 &&
+        Number(state?.entryProviderStatus)===404 &&
+        String(state?.entryProviderResponse?.error?.code||"")==="insufficient_shard_balance" &&
+        Boolean(state?.entrySubmitStartedAt) &&
+        Boolean(state?.firstRealTradeEvidence?.preTradeDecisionSnapshot);
+      if(request.method==="GET"){
+        return new Response("<!doctype html><meta name=viewport content='width=device-width'><title>Recover Failed XRP Latch</title><body style='font-family:system-ui;background:#07111d;color:#eef;padding:24px;max-width:720px;margin:auto'><h2>Failed XRP Latch Recovery</h2><p><b>Recovery ready:</b> "+(failedXrp?"YES":"NO")+"</p><p>This preserves the failed XRP decision/provider evidence and ledger. It clears only the dead operational latch and stale candidate fields. It does <b>not</b> authorize a trade, submit an order, or move money.</p>"+(failedXrp?"<form method=post><button style='font-size:18px;padding:14px 20px' type=submit>Recover failed XRP latch</button></form>":"<p>No recovery action is available.</p>")+"</body>",{headers:{"content-type":"text/html;charset=utf-8","cache-control":"no-store"}});
+      }
+      if(request.method!=="POST") return json({ok:false,error:"METHOD_NOT_ALLOWED"},405);
+      if(!failedXrp) return json({ok:false,state:"FAILED_XRP_RECOVERY_PRECONDITION_FAILED",reauthorized:false,submitted:false,realMoneyMoved:false},409);
+
+      // Preserve immutable research/provider evidence before clearing only operational fields.
+      const preserved={
+        firstRealTradeEvidence:state.firstRealTradeEvidence,
+        entryProviderResponse:state.entryProviderResponse,
+        entryProviderStatus:state.entryProviderStatus,
+        entryClientOrderId:state.entryClientOrderId,
+        entryWriteError:state.entryWriteError??null
+      };
+      state.failedXrpAttemptEvidence={...(state.failedXrpAttemptEvidence||{}),...preserved,recoveredAt:new Date().toISOString()};
+      state.entrySubmitStartedAt=null;
+      state.marketTicker=null;
+      state.marketSlug=null;
+      state.asset=null;
+      state.outcomeSide=null;
+      state.direction=null;
+      state.entryScore=null;
+      state.exchangeIndex=null;
+      state.openedAt=null;
+      state.entryOrderId=null;
+      state.filledCount=0;
+      state.consumed=false;
+      state.founderAuthorization={...(state.founderAuthorization||{}),authorized:false,consumed:false,recoveredFromFailedAttempt:true};
+      state.status="RECOVERED_DISARMED_AWAITING_SHARD_FUNDING_AND_FOUNDER_REAUTHORIZATION";
+      realTradeLedger(state,"FAILED_XRP_OPERATIONAL_LATCH_RECOVERED",{preservedProviderStatus:preserved.entryProviderStatus,preservedClientOrderId:preserved.entryClientOrderId,reauthorized:false,submitted:false,realMoneyMoved:false});
+      await saveRealTradeState(env,state);
+      return json({ok:true,state:state.status,preservedEvidence:true,operationalLatchCleared:true,reauthorized:false,submitted:false,realMoneyMoved:false,next:"PROVE SHARD 2 FUNDING BEFORE SEPARATE FOUNDER REAUTHORIZATION"});
+    }
+
     if (url.pathname === "/kalshi-approved-5-dollar-shard-transfer") {
       if(request.method==="GET"){
         const state=await loadRealTradeState(env);
