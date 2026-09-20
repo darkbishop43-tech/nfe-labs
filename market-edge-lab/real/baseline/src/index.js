@@ -2313,7 +2313,6 @@ export default {
 
       // Preserve immutable research/provider evidence before clearing only operational fields.
       const preserved={
-        firstRealTradeEvidence:state.firstRealTradeEvidence,
         entryProviderResponse:state.entryProviderResponse,
         entryProviderStatus:state.entryProviderStatus,
         entryClientOrderId:state.entryClientOrderId,
