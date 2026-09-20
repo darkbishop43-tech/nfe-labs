@@ -1229,7 +1229,12 @@ function hasOpposingUnderlyingPosition(shadow, candidate) {
   if(!ticker) return true;
   return (shadow?.positions||[]).some(p => {
     const pt=String(p?.marketTicker||p?.slug||"").split(":")[0];
-    return pt===ticker && String(p?.outcomeSide||"")!==String(candidate?.outcomeSide||"");
+    // Shadow positions are observation-only and historically did not persist
+    // outcomeSide. Missing side must never be interpreted as an opposing REAL
+    // position; only an explicit opposite YES/NO side can trip this interlock.
+    const ps=String(p?.outcomeSide||"").toUpperCase();
+    const cs=String(candidate?.outcomeSide||"").toUpperCase();
+    return pt===ticker && (ps==="YES"||ps==="NO") && (cs==="YES"||cs==="NO") && ps!==cs;
   });
 }
 
