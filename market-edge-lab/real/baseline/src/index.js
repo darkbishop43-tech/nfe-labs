@@ -552,8 +552,19 @@ async function kalshiShadowHeaders(env, method, path) {
   return {accept:"application/json","KALSHI-ACCESS-KEY":String(env.KALSHI_KEY_ID).trim(),"KALSHI-ACCESS-TIMESTAMP":ts,"KALSHI-ACCESS-SIGNATURE":btoa(binary)};
 }
 async function kalshiShadowGet(env,path) {
-  const headers=await kalshiShadowHeaders(env,"GET",path);
-  return fetch("https://api.elections.kalshi.com"+path,{method:"GET",headers});
+  let last=null;
+  for(let attempt=0;attempt<2;attempt++){
+    const headers=await kalshiShadowHeaders(env,"GET",path);
+    try{
+      const r=await fetch("https://api.elections.kalshi.com"+path,{method:"GET",headers});
+      last=r;
+      if(r.ok || ![429,500,502,503,504].includes(r.status)) return r;
+    }catch(error){
+      if(attempt===1) throw error;
+    }
+    if(attempt===0) await new Promise(resolve=>setTimeout(resolve,350));
+  }
+  return last;
 }
 
 async function kalshiExecutionHeaders(env, method, path) {
@@ -771,10 +782,11 @@ async function resolveKalshi15mSeries(env, priorSeries=[]) {
   const data=await r.json();
   const rows=Array.isArray(data?.series)?data.series:[];
   const priorByAsset=Object.fromEntries((Array.isArray(priorSeries)?priorSeries:[]).filter(x=>x?.asset&&x?.ticker).map(x=>[x.asset,x]));
+  const knownFallbacks={BTC:"KXBTC15M",ETH:"KXETH15M",SOL:"KXSOL15M",XRP:"KXXRP15M",HYPE:"KXHYPE15M"};
   const unresolvedAssets=Object.keys(wanted).filter(asset=>!rows.some(s=>{
     const title=String(s?.title||"").toUpperCase(), ticker=String(s?.ticker||"").toUpperCase(), freq=String(s?.frequency||"").toUpperCase();
-    return (title.includes(asset+" ")||title.startsWith(asset)||ticker.includes(asset)) && (/15\s*(MIN|MINUTE)/.test(title)||freq.includes("15")||ticker.includes("15M")) && (/UP\s+OR\s+DOWN/.test(title)||/UP.*DOWN/.test(title));
-  }) && !priorByAsset[asset]);
+    return (title.includes(asset+" ")||title.startsWith(asset)||ticker.includes(asset)) && (/15\s*(MIN|MINUTE)/.test(title)||freq.includes("15")||ticker.includes("15M"));
+  }) && !priorByAsset[asset] && !knownFallbacks[asset]);
   const marketDiscovered=unresolvedAssets.length ? await discoverKalshi15mSeriesFromOpenMarkets(env,unresolvedAssets) : {};
   const resolved=[];
   for(const [asset,meta] of Object.entries(wanted)) {
@@ -784,10 +796,9 @@ async function resolveKalshi15mSeries(env, priorSeries=[]) {
       const ticker=String(s?.ticker||"").toUpperCase();
       const assetMatch=title.includes(asset+" ")||title.startsWith(asset)||ticker.includes(asset);
       const shortMatch=/15\s*(MIN|MINUTE)/i.test(title)||/15\s*m/i.test(freq)||ticker.includes("15M");
-      const directionMatch=/UP\s+OR\s+DOWN/i.test(title)||/UP.*DOWN/i.test(title);
-      return assetMatch && shortMatch && directionMatch;
+      return assetMatch && shortMatch;
     });
-    const fallback={BTC:"KXBTC15M",ETH:"KXETH15M",SOL:null,XRP:null,HYPE:null}[asset];
+    const fallback={BTC:"KXBTC15M",ETH:"KXETH15M",SOL:"KXSOL15M",XRP:"KXXRP15M",HYPE:"KXHYPE15M"}[asset];
     const prior=priorByAsset[asset]||null;
     const marketFound=marketDiscovered[asset]||null;
     const chosenTicker=String(exact?.ticker||prior?.ticker||marketFound?.ticker||fallback||"");
@@ -964,6 +975,8 @@ async function runShadow(env) {
     state.status = discovery.partialReadFailure
       ? (discovery.markets.length>0 ? "LIVE_KALSHI_SHADOW_PARTIAL" : "LIVE_KALSHI_ZERO_RESULT")
       : "LIVE_KALSHI_SHADOW";
+    state.lastSuccessfulObservationAt = new Date(now).toISOString();
+    state.consecutiveObservationFailures = 0;
     state.venue = "KALSHI";
     state.errorCode = discovery.partialReadFailure ? "PARTIAL_KALSHI_READ_FAILURE" : null;
     state.errorStage = discovery.partialReadFailure ? "KALSHI_DISCOVERY_PARTIAL" : null;
@@ -996,6 +1009,8 @@ async function runShadow(env) {
     state.status = "ERROR";
     state.errorCode = String(error?.message || "SHADOW_OBSERVATION_FAILED").slice(0, 120);
     state.errorStage = stage;
+    state.consecutiveObservationFailures = Number(state.consecutiveObservationFailures||0)+1;
+    state.lastObservationFailureAt = new Date(now).toISOString();
     shadowLedger(state, "SHADOW_ERROR", {
       errorType: error?.name || "Error",
       message: "Shadow observation failed; provider details suppressed.",
@@ -2951,6 +2966,9 @@ export default {
         lastRunAt: refreshed?.lastRunAt || null,
         errorStage: refreshed?.errorStage || null,
         errorCode: refreshed?.errorCode || null,
+        consecutiveObservationFailures: Number(refreshed?.consecutiveObservationFailures||0),
+        lastSuccessfulObservationAt: refreshed?.lastSuccessfulObservationAt||null,
+        lastObservationFailureAt: refreshed?.lastObservationFailureAt||null,
         eligibleCount: Number(refreshed?.eligibleCount || 0),
         seenCount: Number(refreshed?.seenCount || 0),
         rejectedCount: Number(refreshed?.rejectedCount || 0),
