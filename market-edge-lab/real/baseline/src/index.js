@@ -726,8 +726,8 @@ async function discoverKalshi15mSeriesFromOpenMarkets(env, wantedAssets) {
     "/trade-api/v2/markets?status=open&limit=100&cursor="
   ];
   let cursor="", pages=0;
-  while(pages<4) {
-    const path="/trade-api/v2/markets?status=open&limit=100"+(cursor?"&cursor="+encodeURIComponent(cursor):"");
+  while(pages<12) {
+    const path="/trade-api/v2/markets?status=open&limit=200"+(cursor?"&cursor="+encodeURIComponent(cursor):"");
     let r; try{r=await kalshiShadowGet(env,path);}catch{break;}
     if(!r.ok) break;
     const data=await r.json();
@@ -741,12 +741,11 @@ async function discoverKalshi15mSeriesFromOpenMarkets(env, wantedAssets) {
       for(const asset of wantedAssets){
         if(found[asset]) continue;
         const assetMatch=new RegExp("(^|[^A-Z])"+asset+"([^A-Z]|$)").test(text);
-        const directionMatch=/UP\s+OR\s+DOWN|UP.*DOWN/.test(text);
         const open=Date.parse(m?.open_time||""), close=Date.parse(m?.close_time||"");
         const duration=Number.isFinite(open)&&Number.isFinite(close)?close-open:null;
         const durationMatch=duration!==null&&duration>=10*60*1000&&duration<=20*60*1000;
         const shortText=/15\s*(MIN|MINUTE)|15M/.test(text);
-        if(assetMatch&&directionMatch&&(durationMatch||shortText)&&seriesTicker){
+        if(assetMatch&&(durationMatch||shortText)&&seriesTicker){
           found[asset]={ticker:seriesTicker,title:m?.title||"",frequency:"15m",settlementSources:[],dynamicallyResolved:true,discoveredFrom:"OPEN_MARKET_CATALOGUE"};
         }
       }
@@ -841,6 +840,9 @@ async function discoverKalshiShadowMarkets(env, priorSeries=[]) {
       const executionEligible=Boolean(s.executionEligible && durationSafe);
       const base={
         marketTicker:m.ticker,slug:m.ticker,question:m.title||s.title||s.ticker,
+        subtitle:m?.subtitle||null,yesSubTitle:m?.yes_sub_title||null,noSubTitle:m?.no_sub_title||null,
+        floorStrike:m?.floor_strike??null,capStrike:m?.cap_strike??null,functionalStrike:m?.functional_strike||null,
+        expectedExpirationTime:m?.expected_expiration_time||null,expirationTime:m?.expiration_time||null,
         asset:s.asset,source:"KALSHI",horizon:"15M",durationMs,
         openTime:m?.open_time||null,closeTime:m?.close_time||null,
         executionEligible,seriesTicker:s.ticker,seriesTitle:s.title,
@@ -1638,6 +1640,18 @@ function publicShadowView(state) {
       direction: o.direction || null,
       closeTime: o.closeTime || null,
       question: o.question,
+      subtitle: o.subtitle || null,
+      yesSubTitle: o.yesSubTitle || null,
+      noSubTitle: o.noSubTitle || null,
+      floorStrike: o.floorStrike ?? null,
+      capStrike: o.capStrike ?? null,
+      functionalStrike: o.functionalStrike || null,
+      openTime: o.openTime || null,
+      closeTime: o.closeTime || null,
+      expectedExpirationTime: o.expectedExpirationTime || null,
+      expirationTime: o.expirationTime || null,
+      settlementSources: Array.isArray(o.settlementSources)?o.settlementSources:[],
+      seriesTicker: o.seriesTicker || null,
       asset: o.asset,
       executionEligible: o.executionEligible===true,
       observedAsk: o.yes,
@@ -1678,6 +1692,7 @@ function dashboardHtml() {
 <style>
 :root{--bg:#050a11;--p:#0d1724;--p2:#111e2d;--line:#243a55;--gold:#d8b15e;--gold2:#f3d58a;--blue:#3479e8;--text:#f5f7fb;--muted:#91a6be;--green:#67e49b;--yellow:#f0c75e;--red:#ff8585;--shadow:0 14px 38px #0007}
 *{box-sizing:border-box}html{scroll-behavior:smooth}body{margin:0;background:radial-gradient(circle at 80% 0,#0d2440 0,transparent 35%),var(--bg);color:var(--text);font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial;min-height:100vh}.w{max-width:1320px;margin:auto;padding:12px 14px 36px}.hero,.card,.opp{background:linear-gradient(180deg,var(--p2),var(--p));border:1px solid var(--line);border-radius:16px}.hero{padding:11px 16px;display:flex;align-items:center;justify-content:space-between;gap:15px}.brand{display:flex;align-items:center;gap:14px}.logo{width:112px;height:64px;object-fit:contain;border-radius:10px}.k{font-size:10px;letter-spacing:.16em;text-transform:uppercase;color:var(--gold)}h1{font-size:25px;margin:2px 0}.sub,.m{font-size:12px;color:var(--muted)}.actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:flex-end}.pill,.btn{border:1px solid #725f34;color:var(--gold2);background:#0b1421;border-radius:999px;padding:8px 11px;font-size:11px;font-weight:800}.pill.real{border-color:#315a8c;color:#a9d0ff}.btn{cursor:pointer}.btn:hover{border-color:var(--gold2);background:#121e2c}.grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:8px}.card{padding:11px 13px}.label{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.08em}.val{font-size:24px;font-weight:850;margin-top:5px}.good{color:var(--green)}.warn{color:var(--yellow)}.bad{color:var(--red)}.section{margin-top:8px}.statusline{display:flex;align-items:center;gap:9px;margin-top:8px}.dot{width:10px;height:10px;border-radius:50%;background:var(--green);box-shadow:0 0 0 5px #67e49b18}.dot.warn{background:var(--yellow);box-shadow:0 0 0 5px #f0c75e18}.dot.bad{background:var(--red);box-shadow:none}.wide{display:grid;grid-template-columns:minmax(0,1.65fr) minmax(280px,.55fr);gap:8px}.rows{display:grid}.row{display:flex;justify-content:space-between;gap:14px;padding:7px 0;border-top:1px solid #1b2d42;font-size:12px}.row:first-child{border-top:0}.opps{display:grid;grid-template-columns:repeat(2,1fr);gap:7px;margin-top:7px}.opp{padding:9px}.oppHead{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;align-items:start}.q{font-size:13px;font-weight:700;line-height:1.35}.tag{border:1px solid #725f34;background:#0a1421;color:var(--gold2);border-radius:10px;padding:6px 8px;font-size:9px;font-weight:900;white-space:nowrap}.oppBadges{display:flex;gap:6px;align-items:flex-start}.scoreBadge{min-width:58px;text-align:center;border:1px solid #725f34;background:#0a1421;color:var(--gold2);border-radius:10px;padding:4px 7px;font-weight:900;line-height:1}.scoreBadge small{display:block;font-size:7px;letter-spacing:.12em;color:var(--muted);margin-bottom:4px}.scoreBadge strong{font-size:16px}.scoreBadge.hot{border-color:#3b9d6c;color:var(--green)}.meta{font-size:11px;color:var(--muted);margin-top:7px}.gate{display:grid;grid-template-columns:1fr auto;gap:10px;align-items:center;padding:10px 0;border-top:1px solid #1b2d42;font-size:12px}.gate:first-child{border-top:0}.marketGrid{display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin-top:7px}.marketCard{background:#0a1421;border:1px solid #1f344d;border-radius:14px;padding:10px 12px}.marketTop{display:flex;justify-content:space-between;gap:12px;align-items:end}.marketPrice{font-size:25px;font-weight:850}.marketChange{font-size:15px;font-weight:850}.spark{width:100%;height:70px;margin-top:6px;display:block}.spark polyline{fill:none;stroke:currentColor;stroke-width:2;vector-effect:non-scaling-stroke}.spark .base{stroke:#486079;stroke-width:1}.pnlGrid{display:grid;grid-template-columns:repeat(3,1fr);gap:7px;margin-top:7px}.pnlBox,.miniBox{background:#0a1421;border:1px solid #1f344d;border-radius:12px;padding:9px 11px}.compactGrid{display:grid;grid-template-columns:repeat(3,1fr);gap:7px;margin-top:7px}.miniVal{font-size:14px;font-weight:850;margin-top:4px;line-height:1.25}.miniSub{font-size:10px;color:var(--muted);margin-top:3px}.pnlNum{font-size:22px;font-weight:850;margin-top:4px}.footer{text-align:center;color:#62778e;font-size:10px;margin-top:18px}.notice{border-left:3px solid var(--gold);padding:7px 9px;background:#0a1421;color:var(--muted);font-size:11px;line-height:1.45;margin-top:10px}
+.clickable{cursor:pointer;transition:transform .12s ease,border-color .12s ease,background .12s ease}.clickable:hover{transform:translateY(-1px);border-color:#6d8fb5;background:#101d2c}.contractRow{display:grid;grid-template-columns:56px minmax(0,1fr) auto;gap:8px;align-items:center;padding:8px 0;border-top:1px solid rgba(255,255,255,.07)}.contractRow:first-of-type{margin-top:6px}.contractTicker{font-size:10px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.refreshClock{font-size:10px;color:var(--gold2);font-weight:800}.modalBack{position:fixed;inset:0;background:#000b;display:none;align-items:center;justify-content:center;padding:18px;z-index:9999}.modalBack.open{display:flex}.modalCard{width:min(760px,100%);max-height:88vh;overflow:auto;background:linear-gradient(180deg,#132238,#0b1522);border:1px solid #38516e;border-radius:18px;box-shadow:0 25px 80px #000;padding:18px}.modalHead{display:flex;justify-content:space-between;gap:12px;align-items:flex-start}.modalClose{border:1px solid #536d8b;background:#0a1421;color:#fff;border-radius:10px;padding:7px 10px;cursor:pointer}.detailGrid{display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin-top:12px}.detailBox{background:#09131f;border:1px solid #20364f;border-radius:12px;padding:10px}.detailBox .label{margin-bottom:4px}@media(max-width:650px){.detailGrid{grid-template-columns:1fr}.contractRow{grid-template-columns:52px minmax(0,1fr)}}
 @media(min-width:1100px){.opps{grid-template-columns:repeat(3,1fr)}}
 @media(max-width:720px){.grid{grid-template-columns:repeat(2,1fr)}.compactGrid{grid-template-columns:repeat(2,1fr)}.wide{grid-template-columns:1fr}.opps{grid-template-columns:1fr}.marketGrid{grid-template-columns:1fr}.pnlGrid{grid-template-columns:1fr}.logo{width:100px;height:58px}h1{font-size:23px}.hero{align-items:flex-start}}@media(max-width:460px){.grid{grid-template-columns:1fr}.compactGrid{grid-template-columns:1fr}.brand{gap:8px}.logo{width:78px;height:48px}.k{font-size:8px}.sub{font-size:10px}.pill,.btn{font-size:9px;padding:6px 8px}.val{font-size:20px}.hero{padding:12px}}
 </style>
@@ -1733,7 +1748,7 @@ function dashboardHtml() {
       <div class="card" style="margin-top:12px">
         <div style="display:flex;justify-content:space-between;gap:10px;align-items:center;flex-wrap:wrap">
           <b>Available 15-Minute Contracts · Five-Asset Pool</b>
-          <span class="tag">AUTO REFRESH</span>
+          <span class="tag">AUTO-REFRESH · <span id="refreshCountdown">05:00</span></span>
         </div>
         <div id="contractPool" class="opps" style="margin-top:10px"><div class="m">Loading BTC / ETH / SOL / XRP / HYPE contract lanes…</div></div>
       </div>
@@ -1838,11 +1853,52 @@ function dashboardHtml() {
     </div>
     <div class="notice">A displayed unfunded state is not withdrawal proof. Funding remains locked until the remaining execution, rules, settlement, recordkeeping, and cash-out gates are independently verified.</div>
   </details>
+  <div id="contractModal" class="modalBack" role="dialog" aria-modal="true" aria-labelledby="contractModalTitle">
+    <div class="modalCard">
+      <div class="modalHead"><div><div class="k">READ-ONLY CONTRACT INSPECTOR</div><h2 id="contractModalTitle" style="margin:4px 0 0">Contract</h2></div><button id="contractModalClose" class="modalClose" type="button">CLOSE</button></div>
+      <div id="contractModalBody"></div>
+      <div class="notice"><b>Inspection only.</b> Opening a card cannot submit, authorize, modify, or cancel a trade.</div>
+    </div>
+  </div>
   <div class="footer">NFE-OS · MARKET EDGE — BASELINE REAL · GOVERNED VALIDATION · ONE-TRADE TEST</div>
 </div>
 <script>
 const E=id=>document.getElementById(id);
 const esc=s=>String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
+let latestOpportunityMap={};
+function fmtContractTime(v){if(!v)return '—';const d=new Date(v);return Number.isNaN(d.getTime())?'—':d.toLocaleString();}
+function fmtPrice(v){const n=Number(v);return Number.isFinite(n)?(n*100).toFixed(1)+'¢':'—';}
+function fmtNum(v,d=3){const n=Number(v);return Number.isFinite(n)?n.toFixed(d):'—';}
+function contractTarget(o){
+  if(o?.floorStrike!=null)return 'Target / floor strike: '+o.floorStrike;
+  if(o?.functionalStrike)return 'Contract strike: '+o.functionalStrike;
+  if(o?.subtitle)return o.subtitle;
+  if(o?.yesSubTitle||o?.noSubTitle)return [o.yesSubTitle,o.noSubTitle].filter(Boolean).join(' / ');
+  return 'Target is defined by the Kalshi contract; detailed strike field was not returned in this observation.';
+}
+function openContractInspector(key){
+  const o=latestOpportunityMap[key];if(!o)return;
+  const modal=E('contractModal'),body=E('contractModalBody'),title=E('contractModalTitle');
+  title.textContent=(o.asset||'')+' · '+(o.direction||o.outcomeSide||'')+' · 15-minute contract';
+  const score=Number(o.score),move=Number(o.move),edge=Number(o.edge),fair=Number(o.fair);
+  body.innerHTML='<div style="margin-top:8px;font-size:16px;font-weight:800">'+esc(o.question||o.marketTicker||'')+'</div>'+
+    '<div class="m" style="margin-top:5px">'+esc(contractTarget(o))+'</div>'+
+    '<div class="detailGrid">'+
+      '<div class="detailBox"><div class="label">Direction Baseline is evaluating</div><b>'+esc(o.direction||o.outcomeSide||'—')+'</b></div>'+
+      '<div class="detailBox"><div class="label">Baseline score</div><b class="'+(score>=.80&&edge>0?'good':'')+'">'+(Number.isFinite(score)?score.toFixed(2):'—')+'</b> · entry requires ≥ .80</div>'+
+      '<div class="detailBox"><div class="label">Kalshi ask / bid</div><b>'+fmtPrice(o.observedAsk)+' / '+fmtPrice(o.observedBid)+'</b></div>'+
+      '<div class="detailBox"><div class="label">Coinbase movement input</div><b>'+(Number.isFinite(move)?(move*100).toFixed(3)+'%':'—')+'</b></div>'+
+      '<div class="detailBox"><div class="label">Baseline fair / edge</div><b>'+(Number.isFinite(fair)?(fair*100).toFixed(1)+'¢':'—')+' / '+(Number.isFinite(edge)?(edge*100).toFixed(3)+'%':'—')+'</b></div>'+
+      '<div class="detailBox"><div class="label">Execution eligibility</div><b class="'+(o.executionEligible?'good':'warn')+'">'+(o.executionEligible?'VALIDATED':'DISCOVERY HOLD')+'</b></div>'+
+      '<div class="detailBox"><div class="label">Kalshi market ticker</div><b>'+esc(o.marketTicker||'—')+'</b></div>'+
+      '<div class="detailBox"><div class="label">Series</div><b>'+esc(o.seriesTicker||'—')+'</b></div>'+
+      '<div class="detailBox"><div class="label">Window closes</div><b>'+esc(fmtContractTime(o.closeTime||o.expirationTime||o.expectedExpirationTime))+'</b></div>'+
+      '<div class="detailBox"><div class="label">Settlement source</div><b>'+esc((o.settlementSources||[]).join(', ')||'Not returned in this observation')+'</b></div>'+
+    '</div>';
+  modal.classList.add('open');
+}
+function closeContractInspector(){E('contractModal')?.classList.remove('open');}
+
 async function load(){
   const conn=E('conn'),connSub=E('connSub'),bal=E('bal'),balSub=E('balSub'),creds=E('creds'),gateAccount=E('gateAccount'),gateBalance=E('gateBalance'),gatePreview=E('gatePreview'),markets=E('markets'),statusDot=E('statusDot'),statusText=E('statusText'),refresh=E('refresh');
   refresh.disabled=true;refresh.textContent='CHECKING…';gatePreview.textContent='CHECKING LIVE PROOF…';gatePreview.className='m';
@@ -1853,7 +1909,7 @@ async function load(){
     ]);
     const readJson=async(i,fallback={})=>{try{if(reqs[i].status!=='fulfilled')return fallback;return await reqs[i].value.json();}catch{return fallback;}};
     const account=await readJson(0),status=await readJson(1),market=await readJson(2),preview=await readJson(3),money=await readJson(4),shadow=await readJson(5),prices=await readJson(6),realTrade=await readJson(7);
-    const shadowLive=shadow.status==='LIVE_KALSHI_SHADOW';
+    const shadowLive=['LIVE_KALSHI_SHADOW','LIVE_KALSHI_SHADOW_PARTIAL','LIVE_KALSHI_ZERO_RESULT'].includes(shadow.status);
     const liveOrdersState=E('liveOrdersState'),liveOrdersSub=E('liveOrdersSub');
     const armed=Boolean(realTrade?.armed);
     const managedPosition=Boolean(realTrade?.managedPositionOpen);
@@ -1963,16 +2019,19 @@ async function load(){
     if(!opps.length){
       parts.push('<div class="opp" style="grid-column:1/-1"><div class="oppHead"><div class="q">SHORT-HORIZON SCAN COMPLETE</div><div class="tag good">LIVE · VALID ZERO RESULT</div></div><div class="meta">No eligible BTC/ETH/SOL/XRP/HYPE 15-minute opportunities were found in this successful Kalshi Shadow observation. Baseline remains waiting for the next live contract window.</div></div>');
     } else {
+      latestOpportunityMap={};
       for(const o of opps){
         const ask=Number(o.observedAsk),bid=Number(o.observedBid),score=Number(o.score),move=Number(o.move),edge=Number(o.edge);
         const qualifies=Number.isFinite(score)&&score>=0.80&&edge>0;
         const horizon=esc(o.horizon||'UNCLASSIFIED');
-        parts.push('<div class="opp"><div class="oppHead"><div class="q">'+esc(o.question||o.slug||'US market')+'</div><div class="oppBadges"><div class="tag">'+horizon+'</div><div class="scoreBadge '+(qualifies?'hot':'')+'"><small>SCORE</small><strong>'+(Number.isFinite(score)?score.toFixed(2):'—')+'</strong></div><div class="tag">'+esc(o.asset||'')+' · '+((o.executionEligible===true)?(qualifies?'QUALIFIED ≥ .80':'AUTO SELECT ELIGIBLE'):'DISCOVERY HOLD')+'</div></div></div><div class="meta">'+
-          (Number.isFinite(move)?('move '+(move*100).toFixed(3)+'% · '):'')+
+        const key=String(o.marketTicker||o.slug||'')+'|'+String(o.direction||o.outcomeSide||'');
+        latestOpportunityMap[key]=o;
+        parts.push('<div class="opp clickable" tabindex="0" role="button" data-contract-key="'+esc(key)+'"><div class="oppHead"><div><div class="q">'+esc(o.asset||'')+' · '+esc(o.direction||o.outcomeSide||'')+'</div><div class="m" style="margin-top:3px">'+esc(o.question||o.slug||'Kalshi market')+'</div></div><div class="oppBadges"><div class="tag">'+horizon+'</div><div class="scoreBadge '+(qualifies?'hot':'')+'"><small>SCORE</small><strong>'+(Number.isFinite(score)?score.toFixed(2):'—')+'</strong></div><div class="tag">'+((o.executionEligible===true)?(qualifies?'QUALIFIED ≥ .80':'AUTO SELECT ELIGIBLE'):'DISCOVERY HOLD')+'</div></div></div><div class="meta"><b>'+esc(contractTarget(o))+'</b><br>'+
+          (Number.isFinite(move)?('Coinbase move '+(move*100).toFixed(3)+'% · '):'')+
           (Number.isFinite(ask)?('ASK '+(ask*100).toFixed(1)+'¢ · '):'')+
           (Number.isFinite(bid)?('BID '+(bid*100).toFixed(1)+'¢ · '):'')+
-          (Number.isFinite(edge)?('edge '+(edge*100).toFixed(3)+'% · '):'')+
-          'SHADOW ONLY</div></div>');
+          (Number.isFinite(edge)?('edge '+(edge*100).toFixed(3)+'%'):'' )+
+          '<br><span class="m">Click to inspect contract · no trade action</span></div></div>');
       }
     }
     markets.innerHTML=parts.join('');
@@ -1988,11 +2047,9 @@ async function load(){
           body=assetOpps.map(o=>{
             const score=Number(o.score),ask=Number(o.observedAsk),bid=Number(o.observedBid),edge=Number(o.edge);
             const qualifies=Number.isFinite(score)&&score>=0.80&&edge>0;
-            return '<div class="meta" style="padding:5px 0;border-top:1px solid rgba(255,255,255,.07)"><b>'+esc(o.direction||o.outcomeSide||'CONTRACT')+'</b> · '+esc(o.marketTicker||o.slug||'')+
-              ' · '+(Number.isFinite(ask)?'ASK '+(ask*100).toFixed(1)+'¢':'ASK —')+
-              ' · '+(Number.isFinite(bid)?'BID '+(bid*100).toFixed(1)+'¢':'BID —')+
-              ' · SCORE '+(Number.isFinite(score)?score.toFixed(2):'—')+
-              (qualifies?' · <span class="good">QUALIFIED ≥ .80</span>':'')+'</div>';
+            const key=String(o.marketTicker||o.slug||'')+'|'+String(o.direction||o.outcomeSide||'');
+            latestOpportunityMap[key]=o;
+            return '<div class="contractRow clickable" tabindex="0" role="button" data-contract-key="'+esc(key)+'"><b>'+esc(o.direction||o.outcomeSide||'CONTRACT')+'</b><div><div class="contractTicker">'+esc(o.marketTicker||o.slug||'')+'</div><div class="m">'+esc(contractTarget(o))+'</div></div><div style="text-align:right"><b>SCORE '+(Number.isFinite(score)?score.toFixed(2):'—')+'</b><div class="m">'+(Number.isFinite(ask)?'ASK '+(ask*100).toFixed(1)+'¢':'ASK —')+' · '+(Number.isFinite(bid)?'BID '+(bid*100).toFixed(1)+'¢':'BID —')+'</div>'+(qualifies?'<div class="good" style="font-size:9px;font-weight:800">QUALIFIED ≥ .80</div>':'')+'</div></div>';
           }).join('');
         }else{
           body='<div class="meta" style="padding-top:6px">Waiting for a live validated 15-minute '+asset+' contract. Lane is already reserved and will populate automatically when discovery succeeds.</div>';
@@ -2019,7 +2076,18 @@ async function refreshPrices(){
     E('ethPrice').textContent=moneyFmt(prices.eth.current);E('ethChange').textContent=pctFmt(prices.eth.changePct);E('ethChange').className='marketChange '+(prices.eth.changePct>=0?'good':'bad');drawSpark('ethChart',prices.eth.points,prices.eth.changePct);
   }catch{}
 }
-E('refresh').addEventListener('click',load);load();setInterval(refreshPrices,10000);
+E('refresh').addEventListener('click',()=>{autoRefreshDeadline=Date.now()+AUTO_REFRESH_MS;load();});
+document.addEventListener('click',e=>{const el=e.target.closest?.('[data-contract-key]');if(el)openContractInspector(el.getAttribute('data-contract-key'));});
+document.addEventListener('keydown',e=>{if((e.key==='Enter'||e.key===' ')&&e.target?.matches?.('[data-contract-key]')){e.preventDefault();openContractInspector(e.target.getAttribute('data-contract-key'));}if(e.key==='Escape')closeContractInspector();});
+E('contractModalClose')?.addEventListener('click',closeContractInspector);
+E('contractModal')?.addEventListener('click',e=>{if(e.target===E('contractModal'))closeContractInspector();});
+const AUTO_REFRESH_MS=5*60*1000;let autoRefreshDeadline=Date.now()+AUTO_REFRESH_MS;
+function tickRefreshCountdown(){
+  const remaining=Math.max(0,autoRefreshDeadline-Date.now()),m=Math.floor(remaining/60000),s=Math.floor((remaining%60000)/1000),el=E('refreshCountdown');
+  if(el)el.textContent=String(m).padStart(2,'0')+':'+String(s).padStart(2,'0');
+  if(remaining<=0){autoRefreshDeadline=Date.now()+AUTO_REFRESH_MS;load();}
+}
+load();refreshPrices();setInterval(refreshPrices,10000);setInterval(tickRefreshCountdown,1000);tickRefreshCountdown();
 </script>
 <script>
 async function authorizeOneBaselineTrade(){
