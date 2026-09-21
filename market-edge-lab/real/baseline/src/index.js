@@ -1957,6 +1957,13 @@ body{background-color:#030811;background-image:linear-gradient(rgba(31,91,137,.0
   .wide{grid-template-columns:minmax(0,3fr) minmax(340px,1fr)}
   .pnlSystem{grid-template-columns:minmax(0,3fr) minmax(340px,1fr)}
 }
+/* LOCKED TARGET POLISH — compact professional chart framing only */
+@media(min-width:1200px){
+  .focusChartTop{align-items:center}
+  .focusChartControls{margin-top:6px}
+  .focusChart svg{height:clamp(235px,16vw,300px);margin-top:6px}
+  .notice{margin-top:6px;padding-top:5px;padding-bottom:5px}
+}
 .chartCtl:disabled{opacity:.42;cursor:not-allowed}
 </style>
 </head>
