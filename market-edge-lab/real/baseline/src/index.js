@@ -1129,6 +1129,21 @@ const REAL_TEST_CONFIG = {
 };
 
 const REAL_TRADE_STATE_KEY = "baseline-real-one-trade-v1";
+const SCHEDULER_PROOF_KEY = "baseline-real-scheduler-proof-v1";
+
+async function loadSchedulerProof(env) {
+  if (!env?.BASELINE_REAL_SHADOW_STATE) return null;
+  try {
+    const raw=await env.BASELINE_REAL_SHADOW_STATE.get(SCHEDULER_PROOF_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch { return null; }
+}
+
+async function saveSchedulerProof(env, proof) {
+  if (!env?.BASELINE_REAL_SHADOW_STATE) return false;
+  await env.BASELINE_REAL_SHADOW_STATE.put(SCHEDULER_PROOF_KEY, JSON.stringify(proof));
+  return true;
+}
 
 async function loadRealTradeState(env) {
   if (!env?.BASELINE_REAL_SHADOW_STATE) {
@@ -2213,7 +2228,7 @@ async function load(){
   try{
     const reqs=await Promise.allSettled([
       fetch('/account',{cache:'no-store'}),fetch('/status',{cache:'no-store'}),fetch('/markets',{cache:'no-store'}),fetch('/preview-proof',{cache:'no-store'}),
-      fetch('/money-path-proof',{cache:'no-store'}),fetch('/shadow-state',{cache:'no-store'}),fetch('/price-proof',{cache:'no-store'}),fetch('/real-trade-state',{cache:'no-store'})
+      fetch('/money-path-proof',{cache:'no-store'}),fetch('/shadow-refresh-proof',{cache:'no-store'}),fetch('/price-proof',{cache:'no-store'}),fetch('/real-trade-state',{cache:'no-store'})
     ]);
     const readJson=async(i,fallback={})=>{try{if(reqs[i].status!=='fulfilled')return fallback;return await reqs[i].value.json();}catch{return fallback;}};
     const account=await readJson(0),status=await readJson(1),market=await readJson(2),preview=await readJson(3),money=await readJson(4),shadow=await readJson(5),prices=await readJson(6),realTrade=await readJson(7);
@@ -2498,10 +2513,27 @@ async function authorizeOneBaselineTrade(){
 export default {
   async scheduled(event, env, ctx) {
     ctx.waitUntil((async () => {
+      const invokedAt=Date.now();
       const freshShadow=await runShadow(env);
-      // Pass the exact fresh observation into the controller. This preserves every
-      // existing execution gate while removing a cache-boundary mismatch.
-      await maybeRunKalshiOneTrade(env, freshShadow);
+      let controllerState=null;
+      let controllerError=null;
+      try {
+        // Pass the exact fresh observation into the controller. This preserves every
+        // existing execution gate while removing a cache-boundary mismatch.
+        controllerState=await maybeRunKalshiOneTrade(env, freshShadow);
+      } catch(error) {
+        controllerError=String(error?.message||error||"CONTROLLER_RUNTIME_ERROR").slice(0,160);
+      }
+      await saveSchedulerProof(env,{
+        invokedAt:new Date(invokedAt).toISOString(),
+        completedAt:new Date().toISOString(),
+        shadowLastRunAt:freshShadow?.lastRunAt||null,
+        shadowStatus:freshShadow?.status||"UNKNOWN",
+        eligibleCount:Number(freshShadow?.eligibleCount||0),
+        controllerStatus:controllerState?.status||null,
+        controllerError
+      });
+      if(controllerError) throw new Error(controllerError);
     })());
   },
 
@@ -3711,7 +3743,7 @@ export default {
     }
 
     if (url.pathname === "/controller-gate-proof") {
-      const [state,shadow]=await Promise.all([loadRealTradeState(env),loadShadowState(env)]);
+      const [state,shadow,schedulerProof]=await Promise.all([loadRealTradeState(env),loadShadowState(env),loadSchedulerProof(env)]);
       const now=Date.now();
       const scoreCandidates=(shadow?.opportunities||[]).filter(o =>
         Number(o?.score)>=REAL_TEST_CONFIG.entryScore && Number(o?.edge)>0 &&
@@ -3749,6 +3781,14 @@ export default {
         shadowStatus:shadow?.status||"UNKNOWN",
         shadowLastRunAt:shadow?.lastRunAt||null,
         shadowAgeMs:shadow?.lastRunAt?Math.max(0,now-Date.parse(shadow.lastRunAt)):null,
+        schedulerLastInvokedAt:schedulerProof?.invokedAt||null,
+        schedulerLastCompletedAt:schedulerProof?.completedAt||null,
+        schedulerAgeMs:schedulerProof?.invokedAt?Math.max(0,now-Date.parse(schedulerProof.invokedAt)):null,
+        schedulerShadowLastRunAt:schedulerProof?.shadowLastRunAt||null,
+        schedulerShadowStatus:schedulerProof?.shadowStatus||null,
+        schedulerEligibleCount:schedulerProof?.eligibleCount??null,
+        schedulerControllerStatus:schedulerProof?.controllerStatus||null,
+        schedulerControllerError:schedulerProof?.controllerError||null,
         scoreQualifyingCandidateCount:scoreCandidates.length,
         timeSafeQualifyingCandidateCount:timeSafeCandidates.length,
         selectedCandidate:selected?{
