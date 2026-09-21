@@ -2418,6 +2418,44 @@ export default {
       }
     }
 
+    if (url.pathname === "/kalshi-approved-target-allocation-0-2") {
+      const allocationPath="/trade-api/v2/portfolio/target_balance_allocation";
+      if(request.method==="GET"){
+        return new Response("<!doctype html><meta name=viewport content='width=device-width'><title>Approved Kalshi 50/50 Allocation</title><body style='font-family:system-ui;background:#07111d;color:#eef;padding:24px;max-width:720px;margin:auto'><h2>Founder-approved 50/50 Kalshi allocation</h2><p>Approved scope: set target allocation to <b>50% Exchange 0</b> and <b>50% Exchange 2</b>. This does not authorize or submit a trade.</p><form method=post><button style='font-size:18px;padding:14px 20px' type=submit>Apply approved 50/50 allocation</button></form><p>The action first rechecks that the total is $10, Index 0 is $10, Index 2 is $0, and no target allocation is already configured. It sends exactly one allocation POST if those guards pass.</p></body>",{headers:{"content-type":"text/html;charset=utf-8","cache-control":"no-store"}});
+      }
+      if(request.method!=="POST") return json({ok:false,error:"METHOD_NOT_ALLOWED"},405);
+
+      // Recheck both account balance and allocation immediately before the single approved write.
+      const [br,ar]=await Promise.all([
+        kalshiExecutionGet(env,"/trade-api/v2/portfolio/balance"),
+        kalshiExecutionGet(env,allocationPath)
+      ]);
+      let bb={},ab={}; try{bb=await br.json();}catch{} try{ab=await ar.json();}catch{}
+      if(!br.ok||!ar.ok) return json({ok:false,state:"TARGET_ALLOCATION_PREFLIGHT_READ_FAILED",balanceHttpStatus:br.status,allocationHttpStatus:ar.status},502);
+      const rows=Array.isArray(bb?.balance_breakdown)?bb.balance_breakdown:[];
+      const map=Object.fromEntries(rows.map(x=>[String(x?.exchange_index),Number(x?.balance)]));
+      const existing=Array.isArray(ab?.allocations)?ab.allocations:[];
+      if(!(Number(bb?.balance)===1000&&map["0"]===10&&map["2"]===0&&existing.length===0)){
+        return json({ok:false,state:"TARGET_ALLOCATION_PRECONDITION_FAILED",observed:{totalBalance:bb?.balance??null,index0:map["0"]??null,index2:map["2"]??null,allocations:existing},providerWrites:0,orders:0,reauthorized:false},409);
+      }
+
+      const payload={allocations:[{exchange_index:0,percent:50},{exchange_index:2,percent:50}]};
+      const headers=await kalshiExecutionHeaders(env,"POST",allocationPath);
+      headers["content-type"]="application/json";
+      const wr=await fetch("https://api.elections.kalshi.com"+allocationPath,{method:"POST",headers,body:JSON.stringify(payload)});
+      let wb=null; try{wb=await wr.json();}catch{}
+      return json({
+        ok:wr.ok,
+        state:wr.ok?"TARGET_ALLOCATION_PROVIDER_ACCEPTED":"TARGET_ALLOCATION_PROVIDER_REJECTED",
+        httpStatus:wr.status,
+        providerResponse:wb,
+        requestedAllocation:payload.allocations,
+        orderCreated:false,
+        tradeAuthorizationChanged:false,
+        next:wr.ok?"VERIFY SHARD BALANCES; DO NOT REAUTHORIZE YET":"STOP; PRESERVE PROVIDER REJECTION; DO NOT RETRY"
+      },wr.ok?200:502);
+    }
+
     if (url.pathname === "/kalshi-approved-5-dollar-shard-transfer") {
       if(request.method==="GET"){
         const state=await loadRealTradeState(env);
