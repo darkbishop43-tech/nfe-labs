@@ -2518,19 +2518,23 @@ async function refreshPrices(){
   }catch{}
 }
 const AUTO_REFRESH_MS=5*60*1000;
-let nextDashboardRefresh=Date.now()+AUTO_REFRESH_MS;
-function resetDashboardCountdown(){nextDashboardRefresh=Date.now()+AUTO_REFRESH_MS;}
+// Display-only clock: align to the same absolute UTC 5-minute boundaries used by
+// the Worker cron (*/5). Reloading the browser can no longer restart this clock.
+let lastDashboardBoundary=null;
+function nextCronBoundary(now=Date.now()){return (Math.floor(now/AUTO_REFRESH_MS)+1)*AUTO_REFRESH_MS;}
 function paintDashboardCountdown(){
-  const left=Math.max(0,nextDashboardRefresh-Date.now()),secs=Math.ceil(left/1000),mm=String(Math.floor(secs/60)).padStart(2,'0'),ss=String(secs%60).padStart(2,'0');
+  const now=Date.now(),next=nextCronBoundary(now),boundary=next-AUTO_REFRESH_MS;
+  if(lastDashboardBoundary!==null&&boundary>lastDashboardBoundary) load();
+  lastDashboardBoundary=boundary;
+  const left=Math.max(0,next-now),secs=Math.ceil(left/1000),mm=String(Math.floor(secs/60)).padStart(2,'0'),ss=String(secs%60).padStart(2,'0');
   const el=E('refreshCountdown');if(el)el.textContent=mm+':'+ss;const top=E('refreshCountdownTop');if(top)top.textContent=mm+':'+ss;
-  if(left<=0){resetDashboardCountdown();load();}
 }
-E('refresh').addEventListener('click',()=>{resetDashboardCountdown();load();});
+E('refresh').addEventListener('click',()=>{load();});
 document.addEventListener('click',e=>{const card=e.target.closest?.('[data-contract-key]');if(card)openContractInspector(card.dataset.contractKey);});
 document.addEventListener('keydown',e=>{if(e.key!=='Enter'&&e.key!==' ')return;const card=e.target.closest?.('[data-contract-key]');if(card){e.preventDefault();openContractInspector(card.dataset.contractKey);}});
 E('contractModalClose')?.addEventListener('click',closeContractInspector);
 E('contractModal')?.addEventListener('click',e=>{if(e.target===E('contractModal'))closeContractInspector();});
-load();resetDashboardCountdown();paintDashboardCountdown();setInterval(paintDashboardCountdown,1000);setInterval(refreshPrices,10000);
+load();paintDashboardCountdown();setInterval(paintDashboardCountdown,1000);setInterval(refreshPrices,10000);
 </script>
 <script>
 async function founderRunQualifiedTradeNow(){
