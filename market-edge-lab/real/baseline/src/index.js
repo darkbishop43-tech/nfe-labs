@@ -2031,7 +2031,7 @@ body{background-color:#030811;background-image:linear-gradient(rgba(31,91,137,.0
 
   <div class="card section realStatus">
     <div><b>Real-System Status</b><div class="statusline"><span id="statusDot" class="dot warn"></span><div><div id="statusText"><b>CHECKING REAL CONTROLLER…</b></div><div id="statusSub" class="m">Loading governed execution state.</div></div></div></div>
-    <div class="statusTimer"><div class="label">NEXT DASHBOARD REFRESH</div><div id="refreshCountdownTop" class="val warn">05:00</div><div class="heroTools"><button id="refresh" class="btn" type="button">REFRESH PROOF</button><div id="modePill" class="pill real">REAL · CHECKING</div><div class="pill">BANKROLL FUNDED · NO ADDITIONAL DEPOSIT</div></div></div>
+    <div class="statusTimer"><div class="label">KALSHI 15M WINDOW</div><div id="kalshiWindowCountdown" class="val warn">WAITING</div><div class="label" style="margin-top:4px">NEXT DASHBOARD REFRESH</div><div id="refreshCountdownTop" class="val warn">05:00</div><div class="heroTools"><button id="refresh" class="btn" type="button">REFRESH PROOF</button><div id="modePill" class="pill real">REAL · CHECKING</div><div class="pill">BANKROLL FUNDED · NO ADDITIONAL DEPOSIT</div></div></div>
   </div>
 
   <div class="card section">
@@ -2232,6 +2232,14 @@ async function load(){
     ]);
     const readJson=async(i,fallback={})=>{try{if(reqs[i].status!=='fulfilled')return fallback;return await reqs[i].value.json();}catch{return fallback;}};
     const account=await readJson(0),status=await readJson(1),market=await readJson(2),preview=await readJson(3),money=await readJson(4),shadow=await readJson(5),prices=await readJson(6),realTrade=await readJson(7);
+    // Kalshi window display is sourced from the actual live contract close_time
+    // returned in the shadow observation. No browser-created 15-minute clock.
+    const nowForKalshiWindow=Date.now();
+    const kalshiCloses=(shadow?.opportunities||[])
+      .map(o=>Date.parse(o?.closeTime||o?.expirationTime||o?.expectedExpirationTime||''))
+      .filter(t=>Number.isFinite(t)&&t>nowForKalshiWindow)
+      .sort((a,b)=>a-b);
+    window.__kalshiWindowCloseAt=kalshiCloses[0]||null;
     const shadowLive=['LIVE_KALSHI_SHADOW','LIVE_KALSHI_SHADOW_PARTIAL','LIVE_KALSHI_ZERO_RESULT'].includes(shadow.status);
     const liveOrdersState=E('liveOrdersState'),liveOrdersSub=E('liveOrdersSub');
     const armed=Boolean(realTrade?.armed);
@@ -2522,12 +2530,20 @@ const AUTO_REFRESH_MS=5*60*1000;
 // the Worker cron (*/5). Reloading the browser can no longer restart this clock.
 let lastDashboardBoundary=null;
 function nextCronBoundary(now=Date.now()){return (Math.floor(now/AUTO_REFRESH_MS)+1)*AUTO_REFRESH_MS;}
+function paintKalshiWindowCountdown(now=Date.now()){
+  const el=E('kalshiWindowCountdown');if(!el)return;
+  const close=Number(window.__kalshiWindowCloseAt);
+  if(!Number.isFinite(close)||close<=0){el.textContent='WAITING';return;}
+  const left=Math.max(0,close-now),secs=Math.ceil(left/1000),mm=String(Math.floor(secs/60)).padStart(2,'0'),ss=String(secs%60).padStart(2,'0');
+  el.textContent=mm+':'+ss;
+}
 function paintDashboardCountdown(){
   const now=Date.now(),next=nextCronBoundary(now),boundary=next-AUTO_REFRESH_MS;
   if(lastDashboardBoundary!==null&&boundary>lastDashboardBoundary) load();
   lastDashboardBoundary=boundary;
   const left=Math.max(0,next-now),secs=Math.ceil(left/1000),mm=String(Math.floor(secs/60)).padStart(2,'0'),ss=String(secs%60).padStart(2,'0');
   const el=E('refreshCountdown');if(el)el.textContent=mm+':'+ss;const top=E('refreshCountdownTop');if(top)top.textContent=mm+':'+ss;
+  paintKalshiWindowCountdown(now);
 }
 E('refresh').addEventListener('click',()=>{load();});
 document.addEventListener('click',e=>{const card=e.target.closest?.('[data-contract-key]');if(card)openContractInspector(card.dataset.contractKey);});
