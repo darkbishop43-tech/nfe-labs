@@ -2602,6 +2602,39 @@ export default {
       } catch(error) {
         controllerError=String(error?.message||error||"CONTROLLER_RUNTIME_ERROR").slice(0,160);
       }
+      // Preserve a bounded trace inside the existing single scheduler-proof KV write.
+      // This is diagnostic only: it does not alter scoring, selection, authorization,
+      // provider writes, or controller behavior.
+      const priorSchedulerProof=await loadSchedulerProof(env);
+      const controllerEligible=(freshShadow?.opportunities||[]).filter(o =>
+        Number(o?.score)>=REAL_TEST_CONFIG.entryScore && Number(o?.edge)>0 &&
+        Number(o?.yes)>0.01 && Number(o?.yes)<0.99 && o?.marketTicker &&
+        o?.executionEligible===true &&
+        ["BTC","ETH","SOL","XRP","HYPE"].includes(String(o?.asset||"")) &&
+        (o?.outcomeSide==="YES"||o?.outcomeSide==="NO")
+      );
+      const controllerTimeSafe=controllerEligible.filter(o=>kalshiCandidateTimeSafe(o,invokedAt));
+      const traceEntry={
+        invokedAt:new Date(invokedAt).toISOString(),
+        shadowLastRunAt:freshShadow?.lastRunAt||null,
+        eligibleCount:Number(freshShadow?.eligibleCount||0),
+        scoreQualifyingCandidateCount:controllerEligible.length,
+        timeSafeQualifyingCandidateCount:controllerTimeSafe.length,
+        candidates:controllerEligible.slice(0,5).map(o=>({
+          asset:o.asset||null,marketTicker:o.marketTicker||null,outcomeSide:o.outcomeSide||null,
+          score:o.score??null,edge:o.edge??null,observedAsk:o.yes??null,
+          closeTime:o.closeTime||null,exchangeIndex:o.exchangeIndex??null,
+          timeSafe:kalshiCandidateTimeSafe(o,invokedAt)
+        })),
+        controllerStatus:controllerState?.status||null,
+        controllerError,
+        executionBalancePreflight:controllerState?.executionBalancePreflight||null,
+        entrySubmitLatched:Boolean(controllerState?.entrySubmitStartedAt),
+        entryOrderPresent:Boolean(controllerState?.entryOrderId),
+        authorizationConsumed:Boolean(controllerState?.founderAuthorization?.consumed)
+      };
+      const priorHistory=Array.isArray(priorSchedulerProof?.controllerTraceHistory)
+        ? priorSchedulerProof.controllerTraceHistory : [];
       await saveSchedulerProof(env,{
         invokedAt:new Date(invokedAt).toISOString(),
         completedAt:new Date().toISOString(),
@@ -2610,6 +2643,7 @@ export default {
         eligibleCount:Number(freshShadow?.eligibleCount||0),
         controllerStatus:controllerState?.status||null,
         controllerError,
+        controllerTraceHistory:[traceEntry,...priorHistory].slice(0,12),
         // Same single scheduler KV write now also carries the authoritative fresh
         // observation across POPs so every validated contract reaches the dashboard.
         shadowSnapshot:freshShadow
@@ -3893,6 +3927,9 @@ export default {
         schedulerEligibleCount:schedulerProof?.eligibleCount??null,
         schedulerControllerStatus:schedulerProof?.controllerStatus||null,
         schedulerControllerError:schedulerProof?.controllerError||null,
+        schedulerControllerTraceHistory:Array.isArray(schedulerProof?.controllerTraceHistory)?schedulerProof.controllerTraceHistory:[],
+        executionBalancePreflight:state?.executionBalancePreflight||null,
+        recentControllerEvidence:(state?.ledger||[]).filter(x=>String(x?.type||"").includes("KALSHI_")||String(x?.type||"").includes("CANDIDATE_SHARD")).slice(0,12),
         scoreQualifyingCandidateCount:scoreCandidates.length,
         timeSafeQualifyingCandidateCount:timeSafeCandidates.length,
         selectedCandidate:selected?{
