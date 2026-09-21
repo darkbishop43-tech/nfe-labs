@@ -2145,7 +2145,7 @@ function openContractInspector(key){
       '<div class="detailBox"><div class="label">Kalshi market ticker</div><b>'+esc(o.marketTicker||'—')+'</b></div>'+
       '<div class="detailBox"><div class="label">Series</div><b>'+esc(o.seriesTicker||'—')+'</b></div>'+
       '<div class="detailBox"><div class="label">Window closes</div><b>'+esc(fmtContractTime(o.closeTime||o.expirationTime||o.expectedExpirationTime))+'</b></div>'+
-      '<div class="detailBox"><div class="label">Settlement source</div><b>'+esc((o.settlementSources||[]).join(', ')||'Not returned in this observation')+'</b></div>'+
+      '<div class="detailBox"><div class="label">Settlement source</div><b>'+esc(((o.settlementSources||[]).map(s=>typeof s==='string'?s:(s?.name||s?.url||s?.source||s?.title||'')).filter(Boolean).join(', '))||'Not returned in this observation')+'</b></div>'+
     '</div>';
   modal.classList.add('open');
 }
