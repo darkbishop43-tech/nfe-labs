@@ -21,4 +21,4 @@ binding = "BASELINE_REAL_SHADOW_STATE"
 id = "d110292129c94b26942c25d0c462a17b"
 
 [triggers]
-crons = ["*/5 * * * *"]
+crons = ["* * * * *"]
