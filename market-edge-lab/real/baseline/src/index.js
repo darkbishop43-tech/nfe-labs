@@ -2487,9 +2487,34 @@ async function refreshPrices(){
     if(!prices?.ok)return;
     const moneyFmt=n=>Number(n).toLocaleString(undefined,{style:'currency',currency:'USD',maximumFractionDigits:2});
     const pctFmt=n=>(Number(n)>=0?'+':'')+Number(n).toFixed(2)+'%';
-    const drawSpark=(id,points,change)=>{const svg=E(id);if(!svg)return;const vals=(Array.isArray(points)?points:[]).map(p=>Number(p.price)).filter(Number.isFinite);if(vals.length<2){svg.innerHTML='';return;}const lo=Math.min(...vals),hi=Math.max(...vals),span=(hi-lo)||1;const coords=vals.map((v,i)=>((i/(vals.length-1))*100).toFixed(2)+','+(28-((v-lo)/span)*26).toFixed(2)).join(' ');svg.className='spark '+(Number(change)>=0?'good':'bad');svg.innerHTML='<line class="base" x1="0" y1="28" x2="100" y2="28"></line><polyline points="'+coords+'"></polyline>';};
-    E('btcPrice').textContent=moneyFmt(prices.btc.current);E('btcChange').textContent=pctFmt(prices.btc.changePct);E('btcChange').className='marketChange '+(prices.btc.changePct>=0?'good':'bad');drawSpark('btcChart',prices.btc.points,prices.btc.changePct);
-    E('ethPrice').textContent=moneyFmt(prices.eth.current);E('ethChange').textContent=pctFmt(prices.eth.changePct);E('ethChange').className='marketChange '+(prices.eth.changePct>=0?'good':'bad');drawSpark('ethChart',prices.eth.points,prices.eth.changePct);
+    const liveAssets=['btc','eth','sol','xrp','hype'];
+    for(const asset of liveAssets){
+      const p=prices?.[asset],priceEl=E(asset+'Price'),changeEl=E(asset+'Change');
+      if(!p||!priceEl||!changeEl||!Number.isFinite(Number(p.current)))continue;
+      const current=Number(p.current),previous=Number(priceEl.dataset.price);
+      if(Number.isFinite(previous)&&previous!==current){
+        priceEl.classList.add(current>previous?'tickUp':'tickDown');
+        setTimeout(()=>priceEl.classList.remove('tickUp','tickDown'),700);
+      }
+      priceEl.dataset.price=String(current);
+      priceEl.textContent=moneyFmt(current);
+      changeEl.textContent=Number.isFinite(Number(p.changePct))?pctFmt(p.changePct):'—';
+      changeEl.className='marketChange '+(Number(p.changePct)>=0?'good':'bad');
+    }
+    const selected=window.__marketEdgeSelectedChartAsset||'btc',p=prices?.[selected],focus=E('focusChartPrice'),focusChange=E('focusChartChange');
+    if(p&&focus&&Number.isFinite(Number(p.current))){
+      const current=Number(p.current),previous=Number(focus.dataset.price);
+      if(Number.isFinite(previous)&&previous!==current){
+        focus.classList.add(current>previous?'tickUp':'tickDown');
+        setTimeout(()=>focus.classList.remove('tickUp','tickDown'),700);
+      }
+      focus.dataset.price=String(current);
+      focus.textContent=moneyFmt(current);
+      if(focusChange){
+        focusChange.textContent=Number.isFinite(Number(p.changePct))?pctFmt(p.changePct):'—';
+        focusChange.className='marketChange '+(Number(p.changePct)>=0?'good':'bad');
+      }
+    }
   }catch{}
 }
 const AUTO_REFRESH_MS=5*60*1000;
