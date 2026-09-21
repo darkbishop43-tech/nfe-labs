@@ -1290,7 +1290,7 @@ function hasOpposingUnderlyingPosition(shadow, candidate) {
 
 // Final Kalshi controller is invoked by the scheduler but remains fail-closed until BOTH
 // the controller switch and an unexpired persisted Founder one-trade authorization exist.
-async function maybeRunKalshiOneTrade(env, freshShadow=null) {
+async function maybeRunKalshiOneTrade(env, freshShadow=null, triggerSource="SCHEDULED_AUTO") {
   const state=await loadRealTradeState(env);
   const persistedState=JSON.parse(JSON.stringify(state));
   const persistIfChanged=()=>saveRealTradeStateIfChanged(env,state,persistedState);
@@ -1448,10 +1448,10 @@ async function maybeRunKalshiOneTrade(env, freshShadow=null) {
         settlement:{seriesTicker:candidate.seriesTicker||null,seriesTitle:candidate.seriesTitle||null,seriesFrequency:candidate.seriesFrequency||null,settlementSources:Array.isArray(candidate.settlementSources)?candidate.settlementSources:[],openTime:candidate.openTime||null,closeTime:candidate.closeTime||null},
         baselineInputs:{assetSpotUsd:safeFinite(shadow?.prices?.[candidate.asset]),assetSpotSource:shadow?.priceSources?.[candidate.asset]||null,movement:safeFinite(candidate.move),marketAsk:safeFinite(candidate.yes),marketBid:safeFinite(candidate.bid),edge:safeFinite(candidate.edge),score:safeFinite(candidate.score)},
         eligibleCandidatesConsidered:ranked.map((o,index)=>({rank:index+1,asset:o.asset||null,marketTicker:o.marketTicker||null,question:o.question||null,side:o.outcomeSide||null,direction:o.direction||null,score:safeFinite(o.score),edge:safeFinite(o.edge),movement:safeFinite(o.move),observedAsk:safeFinite(o.yes),observedBid:safeFinite(o.bid)})),
-        selectionExplanation:{rule:"HIGHEST EXISTING BASELINE SCORE AMONG CURRENTLY ELIGIBLE CANDIDATES MEETING >= 0.80",selectedScore:safeFinite(candidate.score),alternativeCount:Math.max(0,ranked.length-1),noNewReasoningIntroduced:true},
+        selectionExplanation:{rule:"HIGHEST EXISTING BASELINE SCORE AMONG CURRENTLY ELIGIBLE CANDIDATES MEETING >= 0.80",selectedScore:safeFinite(candidate.score),alternativeCount:Math.max(0,ranked.length-1),noNewReasoningIntroduced:true,triggerSource},
         authorization:{oneTradeAuthorized:kalshiAuthorizationValid(state),scope:state?.founderAuthorization?.scope||null,authorizedAt:state?.founderAuthorization?.authorizedAt||null,expiresAt:state?.founderAuthorization?.expiresAt??null}
       },postTradeOutcomeEvidence:state?.firstRealTradeEvidence?.postTradeOutcomeEvidence||null};
-      realTradeLedger(state,"FIRST_REAL_TRADE_DECISION_SNAPSHOT_CAPTURED",{marketTicker:candidate.marketTicker,asset:candidate.asset,score:safeFinite(candidate.score),exchangeIndex:candidate.exchangeIndex??null});
+      realTradeLedger(state,"FIRST_REAL_TRADE_DECISION_SNAPSHOT_CAPTURED",{marketTicker:candidate.marketTicker,asset:candidate.asset,score:safeFinite(candidate.score),exchangeIndex:candidate.exchangeIndex??null,triggerSource});
       await persistIfChanged();
     }
 
@@ -1474,7 +1474,7 @@ async function maybeRunKalshiOneTrade(env, freshShadow=null) {
     state.status="ENTRY_SUBMITTING";
     realTradeLedger(state,"KALSHI_ENTRY_PRE_SUBMIT_LATCHED",{
       marketTicker:state.marketTicker,outcomeSide:state.outcomeSide,score:state.entryScore,exchangeIndex:state.exchangeIndex??null,
-      count:state.entryCount,totalDebitCapUsd:state.entryTotalDebitCapUsd,clientOrderId:state.entryClientOrderId
+      count:state.entryCount,totalDebitCapUsd:state.entryTotalDebitCapUsd,clientOrderId:state.entryClientOrderId,triggerSource
     });
     await persistIfChanged();
 
@@ -2101,7 +2101,7 @@ body{background-color:#030811;background-image:linear-gradient(rgba(31,91,137,.0
   </div>
 
   <div class="card section">
-    <div style="display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap"><b>Real Orders · One-Trade Acceptance Test</b><button id="authorizeTradeBtn" class="btn" onclick="authorizeOneBaselineTrade()">AUTHORIZE ONE ≤ $5 TRADE</button></div>
+    <div style="display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap"><b>Real Orders · One-Trade Acceptance Test</b><div style="display:flex;gap:8px;flex-wrap:wrap"><button id="founderRunNowBtn" class="btn" onclick="founderRunQualifiedTradeNow()">FOUNDER RUN NOW</button><button id="authorizeTradeBtn" class="btn" onclick="authorizeOneBaselineTrade()">AUTHORIZE ONE ≤ $5 TRADE</button></div></div>
     <div class="compactGrid">
       <div class="miniBox"><div class="label">Orders waiting</div><div id="realController" class="miniVal">CHECKING…</div><div id="realTradeStatus" class="miniSub">CHECKING…</div></div>
       <div class="miniBox"><div class="label">Current position</div><div id="realTradeMarket" class="miniVal">WAITING</div><div class="miniSub">No manual order required</div></div>
@@ -2292,6 +2292,13 @@ async function load(){
       if(managedPosition){authBtn.textContent='POSITION UNDER GOVERNED EXIT';authBtn.disabled=true;}
       else if(armed){authBtn.textContent='ONE TRADE AUTHORIZED · WAITING';authBtn.disabled=true;}
       else if(realTrade?.consumed){authBtn.textContent='ONE-TRADE TEST COMPLETE';authBtn.disabled=true;}
+    }
+    const founderRunBtn=E('founderRunNowBtn');
+    if(founderRunBtn){
+      if(managedPosition){founderRunBtn.textContent='POSITION OPEN';founderRunBtn.disabled=true;}
+      else if(realTrade?.consumed){founderRunBtn.textContent='TEST COMPLETE';founderRunBtn.disabled=true;}
+      else if(armed){founderRunBtn.textContent='FOUNDER RUN NOW · SAME GATES';founderRunBtn.disabled=false;}
+      else{founderRunBtn.textContent='FOUNDER RUN NOW · NOT ARMED';founderRunBtn.disabled=true;}
     }
     if(managedPosition){
       statusDot.className='dot good';
@@ -2501,6 +2508,14 @@ E('contractModal')?.addEventListener('click',e=>{if(e.target===E('contractModal'
 load();resetDashboardCountdown();paintDashboardCountdown();setInterval(paintDashboardCountdown,1000);setInterval(refreshPrices,10000);
 </script>
 <script>
+async function founderRunQualifiedTradeNow(){
+  if(!confirm("Run the SAME governed Kalshi controller NOW? This can place the one already-authorized trade, up to $5, only if a fresh live candidate still meets every existing gate including score >= .80 and time safety.")) return;
+  const r=await fetch("/founder-run-qualified-trade-now",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({authorization:"FOUNDER_RUN_QUALIFYING_ONE_TRADE_NOW"})});
+  const j=await r.json().catch(()=>({}));
+  const outcome=j?.entryOrderPresent?"ORDER SUBMITTED / PRESENT":(j?.status||j?.state||("HTTP "+r.status));
+  alert((r.ok?"FOUNDER RUN RESULT: ":"FOUNDER RUN BLOCKED: ")+outcome);
+  location.reload();
+}
 async function authorizeOneBaselineTrade(){
   if(!confirm("Authorize exactly ONE governed Baseline trade, maximum $5, only at score >= .80?")) return;
   const r=await fetch("/kalshi-authorize-one-trade",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({authorization:"AUTHORIZE_ONE_TRADE_MAX_5_USD"})});
@@ -2539,6 +2554,29 @@ export default {
 
   async fetch(request, env) {
     const url = new URL(request.url);
+
+    if (request.method === "POST" && url.pathname === "/founder-run-qualified-trade-now") {
+      let body={}; try{body=await request.json();}catch{}
+      if(body?.authorization!=="FOUNDER_RUN_QUALIFYING_ONE_TRADE_NOW") return json({ok:false,state:"EXPLICIT_FOUNDER_RUN_PHRASE_REQUIRED",submitted:false,realMoneyMoved:false},400);
+      const before=await loadRealTradeState(env);
+      if(!kalshiControllerSwitchEnabled(env)) return json({ok:false,state:"CONTROLLER_SWITCH_HARD_DISABLED",submitted:false,realMoneyMoved:false},423);
+      if(!kalshiAuthorizationValid(before)) return json({ok:false,state:"FOUNDER_AUTHORIZATION_NOT_ACTIVE",submitted:false,realMoneyMoved:false},423);
+      if(before?.consumed||before?.entryOrderId||before?.entrySubmitStartedAt) return json({ok:false,state:"ONE_TRADE_ALREADY_USED_OR_LATCHED",submitted:Boolean(before?.entryOrderId),realMoneyMoved:Boolean(before?.entryOrderId)},409);
+      const freshShadow=await runShadow(env);
+      const after=await maybeRunKalshiOneTrade(env,freshShadow,"FOUNDER_MANUAL_TRIGGER");
+      const view=publicRealTradeView(after,env);
+      return json({
+        ...view,
+        ok:true,
+        state:"FOUNDER_MANUAL_CONTROLLER_RUN_COMPLETE",
+        triggerSource:"FOUNDER_MANUAL_TRIGGER",
+        freshShadowLastRunAt:freshShadow?.lastRunAt||null,
+        freshShadowStatus:freshShadow?.status||null,
+        freshEligibleCount:Number(freshShadow?.eligibleCount||0),
+        submitted:Boolean(after?.entryOrderId),
+        realMoneyMoved:Boolean(after?.entryOrderId)
+      });
+    }
 
     if (request.method === "POST" && url.pathname === "/kalshi-authorize-one-trade") {
       if(!kalshiControllerSwitchEnabled(env)) return json({ok:false,state:"CONTROLLER_SWITCH_HARD_DISABLED",armed:false,submitted:false,realMoneyMoved:false},423);
