@@ -1945,8 +1945,18 @@ body{background-color:#030811;background-image:linear-gradient(rgba(31,91,137,.0
 @media(max-width:900px){.hero:after{background-size:auto 100%!important;background-position:72% center!important}}
 @media(max-width:720px){.hero:after{background-size:auto 100%!important;background-position:70% center!important}}
 @media(max-width:460px){.hero:after{background-size:auto 100%!important;background-position:68% center!important}}
-/* BUILDER FULL-WIDTH REPAIR — presentation only */
-@media(min-width:901px){.w{width:100%;max-width:none;margin:0;padding-left:14px;padding-right:14px}.wide{grid-template-columns:minmax(0,3fr) minmax(340px,1fr)}.pnlSystem{grid-template-columns:minmax(0,3fr) minmax(340px,1fr)}}
+/* OFFICIAL LOCKED DESKTOP FRAME — match accepted visual authority */
+@media(min-width:901px){
+  .w{width:calc(100% - 20px);max-width:none;margin:0 auto;padding:10px 0 32px}
+  .hero{min-height:92px}
+  .grid>.card{min-height:78px}
+  .marketCard{padding:9px 10px}
+  .spark{height:58px}
+  .focusChart{padding:10px 12px}
+  .focusChart svg{height:clamp(250px,18vw,330px)}
+  .wide{grid-template-columns:minmax(0,3fr) minmax(340px,1fr)}
+  .pnlSystem{grid-template-columns:minmax(0,3fr) minmax(340px,1fr)}
+}
 .chartCtl:disabled{opacity:.42;cursor:not-allowed}
 </style>
 </head>
