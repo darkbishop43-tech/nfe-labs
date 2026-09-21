@@ -2596,16 +2596,13 @@ export default {
       let controllerState=null;
       let controllerError=null;
       try {
-        // Pass the exact fresh observation into the controller. This preserves every
-        // existing execution gate while removing a cache-boundary mismatch.
+        // Run the exact same governed controller against every fresh scheduled observation.
+        // Strategy, threshold, sizing, authorization and provider-write gates remain unchanged.
         controllerState=await maybeRunKalshiOneTrade(env, freshShadow);
       } catch(error) {
         controllerError=String(error?.message||error||"CONTROLLER_RUNTIME_ERROR").slice(0,160);
       }
-      // Preserve a bounded trace inside the existing single scheduler-proof KV write.
-      // This is diagnostic only: it does not alter scoring, selection, authorization,
-      // provider writes, or controller behavior.
-      const priorSchedulerProof=await loadSchedulerProof(env);
+
       const controllerEligible=(freshShadow?.opportunities||[]).filter(o =>
         Number(o?.score)>=REAL_TEST_CONFIG.entryScore && Number(o?.edge)>0 &&
         Number(o?.yes)>0.01 && Number(o?.yes)<0.99 && o?.marketTicker &&
@@ -2633,21 +2630,34 @@ export default {
         entryOrderPresent:Boolean(controllerState?.entryOrderId),
         authorizationConsumed:Boolean(controllerState?.founderAuthorization?.consumed)
       };
-      const priorHistory=Array.isArray(priorSchedulerProof?.controllerTraceHistory)
-        ? priorSchedulerProof.controllerTraceHistory : [];
-      await saveSchedulerProof(env,{
-        invokedAt:new Date(invokedAt).toISOString(),
-        completedAt:new Date().toISOString(),
-        shadowLastRunAt:freshShadow?.lastRunAt||null,
-        shadowStatus:freshShadow?.status||"UNKNOWN",
-        eligibleCount:Number(freshShadow?.eligibleCount||0),
-        controllerStatus:controllerState?.status||null,
-        controllerError,
-        controllerTraceHistory:[traceEntry,...priorHistory].slice(0,12),
-        // Same single scheduler KV write now also carries the authoritative fresh
-        // observation across POPs so every validated contract reaches the dashboard.
-        shadowSnapshot:freshShadow
-      });
+
+      // The controller now observes once per minute so short-lived >= .80 signals are not
+      // routinely missed between 5-minute samples. Keep KV bounded: persist the ordinary
+      // cross-POP/dashboard heartbeat every 5 minutes, but persist immediately on a
+      // qualifying signal, controller error, latch, order, or consumed authorization.
+      const minute=new Date(invokedAt).getUTCMinutes();
+      const significant=controllerEligible.length>0 || Boolean(controllerError) ||
+        Boolean(controllerState?.entrySubmitStartedAt) || Boolean(controllerState?.entryOrderId) ||
+        Boolean(controllerState?.founderAuthorization?.consumed);
+      const heartbeat=(minute%5===0);
+      if(significant||heartbeat){
+        const priorSchedulerProof=await loadSchedulerProof(env);
+        const priorHistory=Array.isArray(priorSchedulerProof?.controllerTraceHistory)
+          ? priorSchedulerProof.controllerTraceHistory : [];
+        await saveSchedulerProof(env,{
+          invokedAt:new Date(invokedAt).toISOString(),
+          completedAt:new Date().toISOString(),
+          shadowLastRunAt:freshShadow?.lastRunAt||null,
+          shadowStatus:freshShadow?.status||"UNKNOWN",
+          eligibleCount:Number(freshShadow?.eligibleCount||0),
+          controllerStatus:controllerState?.status||null,
+          controllerError,
+          observerCadenceSeconds:60,
+          dashboardHeartbeatSeconds:300,
+          controllerTraceHistory:[traceEntry,...priorHistory].slice(0,12),
+          shadowSnapshot:freshShadow
+        });
+      }
       if(controllerError) throw new Error(controllerError);
     })());
   },
