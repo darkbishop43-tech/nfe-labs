@@ -1980,7 +1980,7 @@ body{background-color:#030811;background-image:linear-gradient(rgba(31,91,137,.0
     </div>
     <div class="focusChart" aria-live="polite">
       <div class="focusChartTop"><div><div class="label">SELECTED MARKET CHART · COINBASE</div><div id="focusChartAsset" class="q">BITCOIN · BTC</div></div><div><div id="focusChartPrice" class="focusChartPrice">CHECKING…</div><div id="focusChartChange" class="marketChange">—</div></div></div>
-      <div class="focusChartControls"><button type="button" class="chartCtl active" data-chart-mode="line">LINE</button><button type="button" class="chartCtl" data-chart-mode="candles">CANDLES</button><button type="button" class="chartCtl" data-chart-ema="200">EMA 200</button><span class="chartCtl active" aria-label="Current chart interval">1H · 24H</span></div>
+      <div class="focusChartControls"><button type="button" class="chartCtl active" data-chart-mode="line">LINE</button><button type="button" class="chartCtl" data-chart-mode="candles">CANDLES</button><button type="button" class="chartCtl" data-chart-ema="200">EMA 200</button><button type="button" class="chartCtl active" data-chart-range="day">DAILY</button><button type="button" class="chartCtl" data-chart-range="hour">HOURLY</button><button type="button" class="chartCtl" data-chart-range="week">WEEKLY</button><button type="button" class="chartCtl" data-chart-range="month">MONTHLY</button></div>
       <div id="focusChartStage" class="chartStage"><svg id="focusChartSvg" viewBox="0 0 100 40" preserveAspectRatio="none" aria-label="Selected asset Coinbase price chart"></svg><div id="focusChartTooltip" class="chartTooltip"></div></div>
     </div>
     <div class="notice">Five-asset Coinbase spot + 24-hour trend display. Kalshi opportunity cards below use the same frozen Baseline score. The controller automatically chooses the strongest qualifying validated asset; no threshold or stake rule is loosened.</div>
@@ -2253,6 +2253,7 @@ async function load(){
     const chartNames={btc:'BITCOIN · BTC',eth:'ETHEREUM · ETH',sol:'SOLANA · SOL',xrp:'XRP',hype:'HYPE'};
     let selectedChartAsset=window.__marketEdgeSelectedChartAsset||'btc';
     let focusChartMode=window.__marketEdgeChartMode||'line';
+    let focusChartRange=window.__marketEdgeChartRange||'day';
     let focusEma=Boolean(window.__marketEdgeChartEma);
     let focusPlot=[];
     const emaSeries=(vals,period=200)=>{if(vals.length<period)return [];const k=2/(period+1);let e=vals.slice(0,period).reduce((a,b)=>a+b,0)/period;const out=Array(period-1).fill(null).concat([e]);for(let i=period;i<vals.length;i++){e=vals[i]*k+e*(1-k);out.push(e);}return out;};
@@ -2261,7 +2262,9 @@ async function load(){
       const p=prices?.[asset],svg=E('focusChartSvg');
       if(!p||!svg) return;
       window.__marketEdgeSelectedChartAsset=asset; selectedChartAsset=asset;
-      const raw=(Array.isArray(p.candles)&&p.candles.length?p.candles:(Array.isArray(p.points)?p.points:[]).map(x=>({ts:x.ts,open:x.price,high:x.price,low:x.price,close:x.price}))).filter(x=>Number.isFinite(Number(x.ts))&&Number.isFinite(Number(x.close??x.price)));
+      const allRaw=(Array.isArray(p.candles)&&p.candles.length?p.candles:(Array.isArray(p.points)?p.points:[]).map(x=>({ts:x.ts,open:x.price,high:x.price,low:x.price,close:x.price}))).filter(x=>Number.isFinite(Number(x.ts))&&Number.isFinite(Number(x.close??x.price)));
+      const rangeCount={hour:24,day:24,week:168,month:300}[focusChartRange]||24;
+      const raw=allRaw.slice(-Math.min(rangeCount,allRaw.length));
       const vals=raw.map(x=>Number(x.close??x.price));
       E('focusChartAsset').textContent=chartNames[asset]||asset.toUpperCase();
       const current=Number(p.current), priceEl=E('focusChartPrice'), prev=Number(priceEl.dataset.price);
@@ -2271,6 +2274,7 @@ async function load(){
       E('focusChartChange').className='marketChange '+(Number(p.changePct)>=0?'good':'bad');
       document.querySelectorAll('[data-chart-asset]').forEach(btn=>{const active=btn.dataset.chartAsset===asset;btn.classList.toggle('active',active);btn.setAttribute('aria-pressed',active?'true':'false');});
       document.querySelectorAll('[data-chart-mode]').forEach(btn=>btn.classList.toggle('active',btn.dataset.chartMode===focusChartMode));
+      document.querySelectorAll('[data-chart-range]').forEach(btn=>btn.classList.toggle('active',btn.dataset.chartRange===focusChartRange));
       const emaBtn=document.querySelector('[data-chart-ema]');if(emaBtn)emaBtn.classList.toggle('active',focusEma);
       if(vals.length<2){svg.innerHTML='';return;}
       const lows=raw.map(x=>Number(x.low??x.close??x.price)).filter(Number.isFinite), highs=raw.map(x=>Number(x.high??x.close??x.price)).filter(Number.isFinite);
@@ -2287,6 +2291,7 @@ async function load(){
     };
     document.querySelectorAll('[data-chart-asset]').forEach(btn=>{if(!btn.dataset.chartBound){btn.dataset.chartBound='1';btn.addEventListener('click',()=>drawFocusChart(btn.dataset.chartAsset));}});
     document.querySelectorAll('[data-chart-mode]').forEach(btn=>btn.addEventListener('click',()=>{focusChartMode=btn.dataset.chartMode;window.__marketEdgeChartMode=focusChartMode;drawFocusChart(selectedChartAsset);}));
+    document.querySelectorAll('[data-chart-range]').forEach(btn=>btn.addEventListener('click',()=>{focusChartRange=btn.dataset.chartRange;window.__marketEdgeChartRange=focusChartRange;drawFocusChart(selectedChartAsset);}));
     const emaBtn=document.querySelector('[data-chart-ema]');if(emaBtn)emaBtn.addEventListener('click',()=>{focusEma=!focusEma;window.__marketEdgeChartEma=focusEma;drawFocusChart(selectedChartAsset);});
     const stage=E('focusChartStage'), tip=E('focusChartTooltip'), chartSvg=E('focusChartSvg');
     const track=e=>{if(!focusPlot.length||!stage||!tip||!chartSvg)return;const r=chartSvg.getBoundingClientRect(),clientX=e.touches?.[0]?.clientX??e.clientX,rel=Math.max(0,Math.min(1,(clientX-r.left)/r.width)),idx=Math.round(rel*(focusPlot.length-1)),p=focusPlot[idx],price=Number(p.close??p.price),ts=Number(p.ts);if(!Number.isFinite(price))return;tip.textContent=moneyFmt(price)+' · '+(Number.isFinite(ts)?new Date(ts).toLocaleString():'');tip.style.left=Math.min(Math.max(4,rel*r.width+8),Math.max(4,r.width-tip.offsetWidth-8))+'px';tip.style.top='8px';stage.classList.add('tracking');};
