@@ -881,7 +881,11 @@ async function discoverKalshiShadowMarkets(env, priorSeries=[]) {
   const readFailures=[];
   for(const s of series) {
     if(!s.ticker) continue;
-    const path="/trade-api/v2/markets?series_ticker="+encodeURIComponent(s.ticker)+"&status=open&limit=12";
+    // Freshness is enforced by close time, not provider status alone. Kalshi's Get Markets
+    // supports min_close_ts when status is omitted; this prevents an old still-labelled-open
+    // 15-minute market from re-entering the dashboard/opportunity pool.
+    const discoveryNow=Date.now();
+    const path="/trade-api/v2/markets?series_ticker="+encodeURIComponent(s.ticker)+"&min_close_ts="+Math.floor(discoveryNow/1000)+"&limit=12";
     let r;
     try { r=await kalshiShadowGet(env,path); }
     catch(error){ readFailures.push({asset:s.asset,seriesTicker:s.ticker,reason:"NETWORK_OR_SIGNING_READ_FAILED"}); continue; }
@@ -895,12 +899,18 @@ async function discoverKalshiShadowMarkets(env, priorSeries=[]) {
       const directNoBid=normalizeProbability(m?.no_bid_dollars??m?.no_bid);
       const noAsk=directNoAsk!==null?directNoAsk:(yesBid!==null?Number((1-yesBid).toFixed(4)):null);
       const noBid=directNoBid!==null?directNoBid:(yesAsk!==null?Number((1-yesAsk).toFixed(4)):null);
-      if(!m?.ticker || m?.status!=="active" || yesAsk===null || yesBid===null || noAsk===null || noBid===null){rejected++;continue;}
+      const providerStatus=String(m?.status||"").toLowerCase();
+      if(!m?.ticker || !["active","open"].includes(providerStatus) || yesAsk===null || yesBid===null || noAsk===null || noBid===null){rejected++;continue;}
       if(yesAsk<=0.01 || yesAsk>=0.99 || noAsk<=0.01 || noAsk>=0.99){rejected++;continue;}
       const open=Date.parse(m?.open_time||""), close=Date.parse(m?.close_time||"");
       const durationMs=Number.isFinite(open)&&Number.isFinite(close)?close-open:15*60*1000;
       const durationSafe=durationMs>=10*60*1000 && durationMs<=20*60*1000;
-      const executionEligible=Boolean(s.executionEligible && durationSafe);
+      // A 15-minute opportunity must have a real future close and be in the current
+      // rolling window. This is defense-in-depth for both display and controller input.
+      const freshnessMs=Number.isFinite(close)?close-discoveryNow:NaN;
+      const freshnessSafe=Number.isFinite(freshnessMs) && freshnessMs>0 && freshnessMs<=20*60*1000;
+      if(!freshnessSafe){rejected++;continue;}
+      const executionEligible=Boolean(s.executionEligible && durationSafe && freshnessSafe);
       const base={
         marketTicker:m.ticker,slug:m.ticker,question:m.title||s.title||s.ticker,
         exchangeIndex:Number.isInteger(Number(m?.exchange_index))?Number(m.exchange_index):null,
