@@ -2672,20 +2672,50 @@ export default {
       if(!kalshiControllerSwitchEnabled(env)) return json({ok:false,state:"CONTROLLER_SWITCH_HARD_DISABLED",submitted:false,realMoneyMoved:false},423);
       if(!kalshiAuthorizationValid(before)) return json({ok:false,state:"FOUNDER_AUTHORIZATION_NOT_ACTIVE",submitted:false,realMoneyMoved:false},423);
       if(before?.consumed||before?.entryOrderId||before?.entrySubmitStartedAt) return json({ok:false,state:"ONE_TRADE_ALREADY_USED_OR_LATCHED",submitted:Boolean(before?.entryOrderId),realMoneyMoved:Boolean(before?.entryOrderId)},409);
-      const freshShadow=await runShadow(env);
-      const after=await maybeRunKalshiOneTrade(env,freshShadow,"FOUNDER_MANUAL_TRIGGER");
-      const view=publicRealTradeView(after,env);
-      return json({
-        ...view,
-        ok:true,
-        state:"FOUNDER_MANUAL_CONTROLLER_RUN_COMPLETE",
-        triggerSource:"FOUNDER_MANUAL_TRIGGER",
-        freshShadowLastRunAt:freshShadow?.lastRunAt||null,
-        freshShadowStatus:freshShadow?.status||null,
-        freshEligibleCount:Number(freshShadow?.eligibleCount||0),
-        submitted:Boolean(after?.entryOrderId),
-        realMoneyMoved:Boolean(after?.entryOrderId)
-      });
+      let freshShadow=null;
+      try {
+        freshShadow=await runShadow(env);
+      } catch(error) {
+        return json({
+          ok:false,state:"FOUNDER_MANUAL_FRESH_SHADOW_FAILED",failureStage:"RUN_SHADOW",
+          errorName:String(error?.name||"Error"),
+          errorCode:String(error?.message||error||"UNKNOWN").slice(0,220),
+          authorizationStillActive:kalshiAuthorizationValid(await loadRealTradeState(env)),
+          submitted:false,realMoneyMoved:false
+        },500);
+      }
+      try {
+        const after=await maybeRunKalshiOneTrade(env,freshShadow,"FOUNDER_MANUAL_TRIGGER");
+        const view=publicRealTradeView(after,env);
+        return json({
+          ...view,
+          ok:true,
+          state:"FOUNDER_MANUAL_CONTROLLER_RUN_COMPLETE",
+          triggerSource:"FOUNDER_MANUAL_TRIGGER",
+          freshShadowLastRunAt:freshShadow?.lastRunAt||null,
+          freshShadowStatus:freshShadow?.status||null,
+          freshEligibleCount:Number(freshShadow?.eligibleCount||0),
+          submitted:Boolean(after?.entryOrderId),
+          realMoneyMoved:Boolean(after?.entryOrderId)
+        });
+      } catch(error) {
+        const afterFailure=await loadRealTradeState(env);
+        return json({
+          ok:false,state:"FOUNDER_MANUAL_CONTROLLER_FAILED",failureStage:"MAYBE_RUN_KALSHI_ONE_TRADE",
+          errorName:String(error?.name||"Error"),
+          errorCode:String(error?.message||error||"UNKNOWN").slice(0,220),
+          freshShadowLastRunAt:freshShadow?.lastRunAt||null,
+          freshShadowStatus:freshShadow?.status||null,
+          freshEligibleCount:Number(freshShadow?.eligibleCount||0),
+          controllerStatus:afterFailure?.status||null,
+          authorizationStillActive:kalshiAuthorizationValid(afterFailure),
+          authorizationConsumed:Boolean(afterFailure?.founderAuthorization?.consumed),
+          entrySubmitLatched:Boolean(afterFailure?.entrySubmitStartedAt),
+          entryOrderPresent:Boolean(afterFailure?.entryOrderId),
+          submitted:Boolean(afterFailure?.entryOrderId),
+          realMoneyMoved:Boolean(afterFailure?.entryOrderId)
+        },500);
+      }
     }
 
     if (request.method === "POST" && url.pathname === "/kalshi-authorize-one-trade") {
