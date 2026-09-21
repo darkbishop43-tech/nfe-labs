@@ -1373,7 +1373,42 @@ async function maybeRunKalshiOneTrade(env) {
       passed:true
     };
 
-    // Immutable BEFORE evidence. This object is write-once and is never rewritten from outcome data.
+    // Immutable BEFORE evidence for the next executable attempt.
+    // A provider-rejected attempt remains preserved as a failed specimen, but it must
+    // not occupy the write-once slot needed by a later, separately authorized attempt.
+    const priorPre=state?.firstRealTradeEvidence?.preTradeDecisionSnapshot||null;
+    const priorFailedWithoutOrder=Boolean(
+      priorPre &&
+      !state?.entryOrderId &&
+      Number(state?.filledCount||0)===0 &&
+      (state?.entryProviderStatus!=null || state?.entryWriteError)
+    );
+    if(priorFailedWithoutOrder){
+      state.failedRealTradeAttempts=Array.isArray(state.failedRealTradeAttempts)?state.failedRealTradeAttempts:[];
+      const priorKey=String(priorPre?.capturedAt||"")+"|"+String(priorPre?.selected?.marketTicker||"");
+      const alreadyArchived=state.failedRealTradeAttempts.some(x=>
+        String(x?.preTradeDecisionSnapshot?.capturedAt||"")+"|"+String(x?.preTradeDecisionSnapshot?.selected?.marketTicker||"")===priorKey
+      );
+      if(!alreadyArchived){
+        state.failedRealTradeAttempts.push({
+          schema:"BASELINE_REAL_FAILED_ATTEMPT_V1",immutable:true,archivedAt:new Date(now).toISOString(),
+          preTradeDecisionSnapshot:priorPre,
+          providerFailure:{status:state?.entryProviderStatus??null,response:state?.entryProviderResponse??null,writeError:state?.entryWriteError??null},
+          entryClientOrderId:state?.entryClientOrderId||null,
+          entryOrderId:state?.entryOrderId||null,
+          filledCount:Number(state?.filledCount||0)
+        });
+        realTradeLedger(state,"FAILED_REAL_TRADE_ATTEMPT_ARCHIVED",{marketTicker:priorPre?.selected?.marketTicker||null,capturedAt:priorPre?.capturedAt||null});
+      }
+      state.firstRealTradeEvidence={
+        preTradeDecisionSnapshot:null,
+        postTradeOutcomeEvidence:null,
+        postTradeResearchReview:null
+      };
+      await persistIfChanged();
+    }
+
+    // Write-once for this attempt; never reconstructed from AFTER data.
     if(!state?.firstRealTradeEvidence?.preTradeDecisionSnapshot){
       const ranked=qualifyingCandidates.slice().sort((a,b)=>Number(b?.score||0)-Number(a?.score||0));
       const grossPayout=Number(Number(sizing.count||0).toFixed(4));
