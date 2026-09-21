@@ -431,11 +431,10 @@ async function livePriceProof(env) {
   const make=async asset=>{
     const product=ASSET_PRICE_META[asset]?.coinbase||asset+"-USD";
     try {
-      const historyEnd=new Date(),historyStart=new Date(historyEnd.getTime()-30*24*60*60*1000);
       const [current,statsRes,candlesRes]=await Promise.all([
         coinbaseSpot(product),
         fetch("https://api.exchange.coinbase.com/products/"+product+"/stats",{headers:{accept:"application/json"}}),
-        fetch("https://api.exchange.coinbase.com/products/"+product+"/candles?granularity=3600&start="+encodeURIComponent(historyStart.toISOString())+"&end="+encodeURIComponent(historyEnd.toISOString()),{headers:{accept:"application/json"}})
+        fetch("https://api.exchange.coinbase.com/products/"+product+"/candles?granularity=3600",{headers:{accept:"application/json"}})
       ]);
       if(!statsRes.ok||!candlesRes.ok) throw new Error("COINBASE_TREND_UNAVAILABLE");
       const [stats,candles]=await Promise.all([statsRes.json(),candlesRes.json()]);
@@ -443,7 +442,7 @@ async function livePriceProof(env) {
       const points=(Array.isArray(candles)?candles:[]).filter(x=>Array.isArray(x)&&Number.isFinite(Number(x[0]))&&Number.isFinite(Number(x[4]))).sort((a,b)=>Number(a[0])-Number(b[0])).slice(-24).map(x=>({ts:Number(x[0])*1000,price:Number(x[4])}));
       const changePct=Number.isFinite(open)&&open>0&&Number.isFinite(last)?((last-open)/open)*100:0;
       const fullCandles=(Array.isArray(candles)?candles:[]).filter(x=>Array.isArray(x)&&x.length>=5&&[0,1,2,3,4].every(i=>Number.isFinite(Number(x[i])))).sort((a,b)=>Number(a[0])-Number(b[0])).map(x=>({ts:Number(x[0])*1000,low:Number(x[1]),high:Number(x[2]),open:Number(x[3]),close:Number(x[4])}));
-      return {product,current,changePct,points,candles:fullCandles,source:"COINBASE_EXCHANGE_HISTORY",window:"30D"};
+      return {product,current,changePct,points,candles:fullCandles,source:"COINBASE_EXCHANGE_HISTORY",window:"AVAILABLE_HOURLY"};
     } catch {
       try {
         const x=await assetSpot(asset);
@@ -1946,6 +1945,9 @@ body{background-color:#030811;background-image:linear-gradient(rgba(31,91,137,.0
 @media(max-width:900px){.hero:after{background-size:auto 100%!important;background-position:72% center!important}}
 @media(max-width:720px){.hero:after{background-size:auto 100%!important;background-position:70% center!important}}
 @media(max-width:460px){.hero:after{background-size:auto 100%!important;background-position:68% center!important}}
+/* BUILDER FULL-WIDTH REPAIR — presentation only */
+@media(min-width:901px){.w{width:100%;max-width:none;margin:0;padding-left:14px;padding-right:14px}.wide{grid-template-columns:minmax(0,3fr) minmax(340px,1fr)}.pnlSystem{grid-template-columns:minmax(0,3fr) minmax(340px,1fr)}}
+.chartCtl:disabled{opacity:.42;cursor:not-allowed}
 </style>
 </head>
 <body>
@@ -1981,7 +1983,7 @@ body{background-color:#030811;background-image:linear-gradient(rgba(31,91,137,.0
     </div>
     <div class="focusChart" aria-live="polite">
       <div class="focusChartTop"><div><div class="label">SELECTED MARKET CHART · COINBASE</div><div id="focusChartAsset" class="q">BITCOIN · BTC</div></div><div><div id="focusChartPrice" class="focusChartPrice">CHECKING…</div><div id="focusChartChange" class="marketChange">—</div></div></div>
-      <div class="focusChartControls"><button type="button" class="chartCtl active" data-chart-mode="line">LINE</button><button type="button" class="chartCtl" data-chart-mode="candles">CANDLES</button><button type="button" class="chartCtl" data-chart-ema="200">EMA 200</button><button type="button" class="chartCtl active" data-chart-range="day">DAILY</button><button type="button" class="chartCtl" data-chart-range="hour">HOURLY</button><button type="button" class="chartCtl" data-chart-range="week">WEEKLY</button><button type="button" class="chartCtl" data-chart-range="month">MONTHLY</button></div>
+      <div class="focusChartControls"><button type="button" class="chartCtl active" data-chart-mode="line">LINE</button><button type="button" class="chartCtl" data-chart-mode="candles">CANDLES</button><button type="button" class="chartCtl" data-chart-ema="200">EMA 200</button><button type="button" class="chartCtl active" data-chart-range="day">DAILY</button><button type="button" class="chartCtl" data-chart-range="hour">HOURLY</button><button type="button" class="chartCtl" data-chart-range="week" disabled title="Extended history loading is not enabled yet">WEEKLY</button><button type="button" class="chartCtl" data-chart-range="month" disabled title="Extended history loading is not enabled yet">MONTHLY</button></div>
       <div id="focusChartStage" class="chartStage"><svg id="focusChartSvg" viewBox="0 0 100 40" preserveAspectRatio="none" aria-label="Selected asset Coinbase price chart"></svg><div id="focusChartTooltip" class="chartTooltip"></div></div>
     </div>
     <div class="notice">Five-asset Coinbase spot + 24-hour trend display. Kalshi opportunity cards below use the same frozen Baseline score. The controller automatically chooses the strongest qualifying validated asset; no threshold or stake rule is loosened.</div>
