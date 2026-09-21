@@ -1965,6 +1965,24 @@ body{background-color:#030811;background-image:linear-gradient(rgba(31,91,137,.0
   .notice{margin-top:6px;padding-top:5px;padding-bottom:5px}
 }
 .chartCtl:disabled{opacity:.42;cursor:not-allowed}
+
+/* LOCKED CHART TERMINAL PASS 2026-09-21 — presentation only; trading/data/timer untouched */
+@media(min-width:901px){
+  .focusChart{padding:10px 12px 9px;border-radius:10px;background:linear-gradient(180deg,#071421,#06111c);box-shadow:inset 0 1px 0 #ffffff08}
+  .focusChartTop{align-items:center;min-height:52px}
+  .focusChartControls{margin-top:6px;gap:6px}
+  .chartCtl{padding:6px 10px;border-radius:8px;letter-spacing:.02em}
+  .focusChartPrice{font-size:24px;letter-spacing:-.025em}
+  .chartStage{margin-top:7px;border-top:1px solid #17314a;border-bottom:1px solid #17314a;background-image:linear-gradient(rgba(53,91,124,.16) 1px,transparent 1px),linear-gradient(90deg,rgba(53,91,124,.13) 1px,transparent 1px);background-size:100% 20%,8.333% 100%;background-position:0 0;overflow:hidden}
+  .focusChart svg{height:300px;margin-top:0;filter:none}
+  .focusChart svg polyline{stroke-width:1.75;filter:drop-shadow(0 0 3px currentColor)}
+  .focusChart svg .ema{stroke-width:1.35;filter:drop-shadow(0 0 2px #d9b85f66)}
+  .focusChart svg .reference{opacity:.7;stroke-width:.32;stroke-dasharray:.8 .8}
+  .focusChart svg .base{opacity:.42;stroke-width:.45}
+  .focusChart svg .zoneUp,.focusChart svg .zoneDown{opacity:.025}
+  .chartTooltip{background:#0b1a29;border-color:#456b8d;padding:7px 9px;font-size:10px}
+}
+@media(min-width:1400px){.focusChart svg{height:318px}}
 </style>
 </head>
 <body>
