@@ -605,6 +605,30 @@ async function kalshiExecutionGet(env,path) {
   return fetch("https://api.elections.kalshi.com"+path,{method:"GET",headers});
 }
 
+// Cold-path execution readiness: perform the slow authenticated balance read in parallel
+// with market discovery. This does NOT weaken or bypass any gate; the controller still
+// validates the candidate-specific shard and required debit from this same-cycle snapshot.
+async function kalshiExecutionBalanceSnapshot(env) {
+  const startedAt=Date.now();
+  try {
+    const response=await kalshiExecutionGet(env,"/trade-api/v2/portfolio/balance");
+    const body=await response.json().catch(()=>({}));
+    return {
+      ok:response.ok,
+      httpStatus:response.status,
+      body,
+      checkedAt:new Date().toISOString(),
+      latencyMs:Date.now()-startedAt
+    };
+  } catch(error) {
+    return {
+      ok:false,httpStatus:null,body:null,checkedAt:new Date().toISOString(),
+      latencyMs:Date.now()-startedAt,
+      error:String(error?.message||error||"EXECUTION_BALANCE_PREFLIGHT_FAILED").slice(0,160)
+    };
+  }
+}
+
 async function kalshiApprovedShardTransfer(env,payload) {
   const path="/trade-api/v2/portfolio/intra_exchange_instance_transfer";
   const headers=await kalshiExecutionHeaders(env,"POST",path);
@@ -1308,7 +1332,7 @@ function hasOpposingUnderlyingPosition(shadow, candidate) {
 
 // Final Kalshi controller is invoked by the scheduler but remains fail-closed until BOTH
 // the controller switch and an unexpired persisted Founder one-trade authorization exist.
-async function maybeRunKalshiOneTrade(env, freshShadow=null, triggerSource="SCHEDULED_AUTO") {
+async function maybeRunKalshiOneTrade(env, freshShadow=null, triggerSource="SCHEDULED_AUTO", preparedBalance=null) {
   const state=await loadRealTradeState(env);
   const persistedState=JSON.parse(JSON.stringify(state));
   const persistIfChanged=()=>saveRealTradeStateIfChanged(env,state,persistedState);
@@ -1382,14 +1406,23 @@ async function maybeRunKalshiOneTrade(env, freshShadow=null, triggerSource="SCHE
       return state;
     }
 
-    // Re-check execution credential and available balance immediately before a future POST.
-    const br=await kalshiExecutionGet(env,"/trade-api/v2/portfolio/balance");
-    if(!br.ok) {
+    // Consume the same-cycle cold-path balance/auth proof when the scheduler prepared it.
+    // Manual/legacy callers still fall back to an immediate authenticated read.
+    const balanceProof=preparedBalance && typeof preparedBalance==="object"
+      ? preparedBalance : await kalshiExecutionBalanceSnapshot(env);
+    if(!balanceProof.ok || !balanceProof.body) {
       state.status="BLOCKED_EXECUTION_BALANCE_READ";
+      state.executionBalancePreflight={
+        checkedAt:balanceProof?.checkedAt||new Date().toISOString(),
+        passed:false,httpStatus:balanceProof?.httpStatus??null,
+        latencyMs:balanceProof?.latencyMs??null,
+        error:balanceProof?.error||null,
+        source:preparedBalance?"COLD_PATH_SAME_CYCLE":"HOT_PATH_FALLBACK"
+      };
       await persistIfChanged();
       return state;
     }
-    const balance=await br.json();
+    const balance=balanceProof.body;
     // Execution collateral is shard-specific on Kalshi. Never treat aggregate cash as
     // spendable for a candidate whose market lives on another exchange_index.
     const candidateExchangeIndex=Number(candidate?.exchangeIndex);
@@ -1413,10 +1446,11 @@ async function maybeRunKalshiOneTrade(env, freshShadow=null, triggerSource="SCHE
       return state;
     }
     state.executionBalancePreflight={
-      checkedAt:new Date().toISOString(),exchangeIndex:candidateExchangeIndex,
+      checkedAt:balanceProof.checkedAt||new Date().toISOString(),exchangeIndex:candidateExchangeIndex,
       shardBalanceUsd,requiredDebitUsd,
       aggregateBalanceCents:Number.isFinite(Number(balance?.balance))?Number(balance.balance):null,
-      passed:true
+      passed:true,latencyMs:balanceProof.latencyMs??null,
+      source:preparedBalance?"COLD_PATH_SAME_CYCLE":"HOT_PATH_FALLBACK"
     };
 
     // Immutable BEFORE evidence for the next executable attempt.
@@ -2597,13 +2631,19 @@ export default {
   async scheduled(event, env, ctx) {
     ctx.waitUntil((async () => {
       const invokedAt=Date.now();
-      const freshShadow=await runShadow(env);
+      // Open the slow read-only execution gate while market discovery is running.
+      // The hot path therefore does not wait to begin credential/balance verification
+      // after a >= .80 signal has already appeared.
+      const [freshShadow,preparedBalance]=await Promise.all([
+        runShadow(env),
+        kalshiExecutionBalanceSnapshot(env)
+      ]);
       let controllerState=null;
       let controllerError=null;
       try {
         // Run the exact same governed controller against every fresh scheduled observation.
         // Strategy, threshold, sizing, authorization and provider-write gates remain unchanged.
-        controllerState=await maybeRunKalshiOneTrade(env, freshShadow);
+        controllerState=await maybeRunKalshiOneTrade(env, freshShadow, "SCHEDULED_AUTO", preparedBalance);
       } catch(error) {
         controllerError=String(error?.message||error||"CONTROLLER_RUNTIME_ERROR").slice(0,160);
       }
@@ -2631,6 +2671,9 @@ export default {
         controllerStatus:controllerState?.status||null,
         controllerError,
         executionBalancePreflight:controllerState?.executionBalancePreflight||null,
+        coldPathBalanceReady:Boolean(preparedBalance?.ok),
+        coldPathBalanceHttpStatus:preparedBalance?.httpStatus??null,
+        coldPathBalanceLatencyMs:preparedBalance?.latencyMs??null,
         entrySubmitLatched:Boolean(controllerState?.entrySubmitStartedAt),
         entryOrderPresent:Boolean(controllerState?.entryOrderId),
         authorizationConsumed:Boolean(controllerState?.founderAuthorization?.consumed)
