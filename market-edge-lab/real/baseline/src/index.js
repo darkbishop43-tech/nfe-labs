@@ -3708,6 +3708,67 @@ export default {
       return new Response("<!doctype html><meta name=viewport content='width=device-width'><title>Baseline Real Shadow Diagnostic</title><body style='font-family:system-ui;background:#07111d;color:#eef;padding:24px'><h2>Baseline Real · Shadow Diagnostic</h2><pre style='white-space:pre-wrap;font-size:16px'>"+JSON.stringify(safe,null,2).replace(/&/g,"&amp;").replace(/</g,"&lt;")+"</pre></body>", {headers:{"content-type":"text/html;charset=utf-8","cache-control":"no-store"}});
     }
 
+    if (url.pathname === "/controller-gate-proof") {
+      const [state,shadow]=await Promise.all([loadRealTradeState(env),loadShadowState(env)]);
+      const now=Date.now();
+      const scoreCandidates=(shadow?.opportunities||[]).filter(o =>
+        Number(o?.score)>=REAL_TEST_CONFIG.entryScore && Number(o?.edge)>0 &&
+        Number(o?.yes)>0.01 && Number(o?.yes)<0.99 && o?.marketTicker &&
+        o?.executionEligible===true &&
+        ["BTC","ETH","SOL","XRP","HYPE"].includes(String(o?.asset||"")) &&
+        (o?.outcomeSide==="YES"||o?.outcomeSide==="NO")
+      );
+      const timeSafeCandidates=scoreCandidates.filter(o=>kalshiCandidateTimeSafe(o,now));
+      const selected=timeSafeCandidates.slice().sort((a,b)=>Number(b?.score||0)-Number(a?.score||0))[0]||null;
+      let blockReason="READY_FOR_EXECUTION_PREFLIGHT";
+      if(state?.consumed) blockReason="ONE_TRADE_ALREADY_COMPLETE";
+      else if(!state?.entryOrderId && state?.entrySubmitStartedAt) blockReason=state?.entryProviderStatus!=null?"BLOCKED_ENTRY_PROVIDER_REJECTED":state?.entryWriteError?"BLOCKED_ENTRY_WRITE_ERROR":"BLOCKED_ENTRY_RECONCILIATION";
+      else if(!kalshiControllerSwitchEnabled(env)) blockReason="CONTROLLER_SWITCH_HARD_DISABLED";
+      else if(!kalshiAuthorizationValid(state)) blockReason="FOUNDER_AUTHORIZATION_NOT_ACTIVE";
+      else if(!env?.BASELINE_REAL_SHADOW_STATE) blockReason="PERSISTENT_ONE_SHOT_LOCK_MISSING";
+      else if(!shadow?.assetCoverageReady || shadow?.status!=="LIVE_KALSHI_SHADOW") blockReason="LIVE_KALSHI_COVERAGE_NOT_READY";
+      else if(!selected) blockReason=scoreCandidates.length?"QUALIFYING_SCORE_PRESENT_BUT_TIME_GATE_FAILED":"NO_CONTROLLER_QUALIFYING_CANDIDATE";
+      else if(hasOpposingUnderlyingPosition(shadow,selected)) blockReason="BLOCKED_OPPOSING_POSITION";
+      else {
+        const sizing=estimateKalshiFeeSafeSize(selected.yes,REAL_TEST_CONFIG.maxStakeUsd);
+        if(!sizing.ok || sizing.totalDebitUsd>REAL_TEST_CONFIG.maxStakeUsd || sizing.count<1) blockReason="BLOCKED_FEE_SAFE_SIZE";
+      }
+      return json({
+        ok:true,readOnly:true,state:"CONTROLLER_GATE_PROOF",
+        now:new Date(now).toISOString(),
+        controllerSwitchEnabled:kalshiControllerSwitchEnabled(env),
+        founderAuthorizationActive:kalshiAuthorizationValid(state),
+        authorizationConsumed:Boolean(state?.founderAuthorization?.consumed),
+        authorizationScope:state?.founderAuthorization?.scope||null,
+        entrySubmitLatched:Boolean(state?.entrySubmitStartedAt),
+        entryOrderPresent:Boolean(state?.entryOrderId),
+        filledCount:Number(state?.filledCount||0),
+        controllerStatus:state?.status||"UNKNOWN",
+        shadowStatus:shadow?.status||"UNKNOWN",
+        shadowLastRunAt:shadow?.lastRunAt||null,
+        shadowAgeMs:shadow?.lastRunAt?Math.max(0,now-Date.parse(shadow.lastRunAt)):null,
+        scoreQualifyingCandidateCount:scoreCandidates.length,
+        timeSafeQualifyingCandidateCount:timeSafeCandidates.length,
+        selectedCandidate:selected?{
+          asset:selected.asset||null,marketTicker:selected.marketTicker||null,outcomeSide:selected.outcomeSide||null,
+          score:selected.score??null,closeTime:selected.closeTime||null,executionEligible:selected.executionEligible===true,
+          exchangeIndex:selected.exchangeIndex??null,edge:selected.edge??null,observedAsk:selected.yes??null,
+          timeToCloseMs:selected.closeTime?Date.parse(selected.closeTime)-now:null
+        }:null,
+        scoreCandidates:scoreCandidates.map(o=>({
+          asset:o.asset||null,marketTicker:o.marketTicker||null,outcomeSide:o.outcomeSide||null,
+          score:o.score??null,closeTime:o.closeTime||null,executionEligible:o.executionEligible===true,
+          exchangeIndex:o.exchangeIndex??null,timeSafe:kalshiCandidateTimeSafe(o,now),
+          timeToCloseMs:o.closeTime?Date.parse(o.closeTime)-now:null
+        })),
+        blockReason,
+        lastProviderStatus:state?.entryProviderStatus??null,
+        lastProviderError:state?.entryProviderResponse?.error?.code||state?.entryWriteError||null,
+        freshEvidenceReady:Boolean(state?.firstRealTradeEvidence?.preTradeDecisionSnapshot),
+        safety:{stateMutation:false,providerWrites:0,ordersCreated:0,transfers:0,reauthorizations:0,realMoneyMoved:false}
+      });
+    }
+
     if (url.pathname === "/real-trade-state") {
       return json(publicRealTradeView(await loadRealTradeState(env), env));
     }
