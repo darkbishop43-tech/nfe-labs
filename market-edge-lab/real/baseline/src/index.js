@@ -1307,7 +1307,10 @@ async function maybeRunKalshiOneTrade(env, freshShadow=null) {
     return state;
   }
 
-  // Use the exact successful observation from this scheduler invocation when available.\n  // Re-reading caches.default here can surface an older POP/isolate snapshot.\n  const shadow=freshShadow && typeof freshShadow==="object" ? freshShadow : await loadShadowState(env);\n  if(!shadow?.assetCoverageReady || shadow?.status!=="LIVE_KALSHI_SHADOW") {
+  // Use the exact successful observation from this scheduler invocation when available.
+  // Re-reading caches.default here can surface an older POP/isolate snapshot.
+  const shadow=freshShadow && typeof freshShadow==="object" ? freshShadow : await loadShadowState(env);
+  if(!shadow?.assetCoverageReady || shadow?.status!=="LIVE_KALSHI_SHADOW") {
     state.status="HOLD_LIVE_KALSHI_COVERAGE_REQUIRED";
     await persistIfChanged();
     return state;
