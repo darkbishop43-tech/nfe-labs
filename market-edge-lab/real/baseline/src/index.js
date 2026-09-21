@@ -485,15 +485,33 @@ function scoreShadowMarket(market, moves) {
 }
 
 async function loadShadowState(env) {
-  // Read the current high-frequency observation from edge cache first. The old KV
-  // snapshot is migration fallback only and is no longer refreshed every five minutes.
+  // Edge cache is POP-local, while the scheduler can run in a different POP.
+  // Compare the local cache with the globally visible scheduler snapshot and use
+  // whichever successful observation is newer. Browser refresh never creates data.
+  let edgeState=null, scheduledState=null;
   const cache = caches.default;
   const hit = await cache.match(shadowCacheRequest());
   if (hit) {
     try {
       const parsed = await hit.json();
-      if (parsed && typeof parsed === "object") return parsed;
+      if (parsed && typeof parsed === "object") edgeState=parsed;
     } catch {}
+  }
+  if (env?.BASELINE_REAL_SHADOW_STATE) {
+    try {
+      const raw=await env.BASELINE_REAL_SHADOW_STATE.get(SCHEDULER_PROOF_KEY);
+      if(raw){
+        const proof=JSON.parse(raw);
+        if(proof?.shadowSnapshot && typeof proof.shadowSnapshot==="object"){
+          scheduledState={...proof.shadowSnapshot,persistence:"SCHEDULER_KV_SNAPSHOT"};
+        }
+      }
+    } catch {}
+  }
+  if(edgeState||scheduledState){
+    const edgeTs=Date.parse(edgeState?.lastRunAt||"")||0;
+    const scheduledTs=Date.parse(scheduledState?.lastRunAt||"")||0;
+    return scheduledTs>edgeTs ? scheduledState : edgeState;
   }
   if (env?.BASELINE_REAL_SHADOW_STATE) {
     try {
@@ -2591,7 +2609,10 @@ export default {
         shadowStatus:freshShadow?.status||"UNKNOWN",
         eligibleCount:Number(freshShadow?.eligibleCount||0),
         controllerStatus:controllerState?.status||null,
-        controllerError
+        controllerError,
+        // Same single scheduler KV write now also carries the authoritative fresh
+        // observation across POPs so every validated contract reaches the dashboard.
+        shadowSnapshot:freshShadow
       });
       if(controllerError) throw new Error(controllerError);
     })());
