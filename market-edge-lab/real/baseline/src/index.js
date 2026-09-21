@@ -2292,18 +2292,32 @@ async function load(){
     if(!opps.length){
       parts.push('<div class="opp" style="grid-column:1/-1"><div class="oppHead"><div class="q">SHORT-HORIZON SCAN COMPLETE</div><div class="tag good">LIVE · VALID ZERO RESULT</div></div><div class="meta">No eligible BTC/ETH/SOL/XRP/HYPE 15-minute opportunities were found in this successful Kalshi Shadow observation. Baseline remains waiting for the next live contract window.</div></div>');
     } else {
-      for(const [oi,o] of opps.entries()){
+      const renderDirectionalCard=(o,oi,sideLabel)=>{
         const ask=Number(o.observedAsk),bid=Number(o.observedBid),score=Number(o.score),move=Number(o.move),edge=Number(o.edge);
         const qualifies=Number.isFinite(score)&&score>=0.80&&edge>0;
         const horizon=esc(o.horizon||'UNCLASSIFIED');
         const contractKey='opp-'+oi;latestOpportunityMap[contractKey]=o;
-        parts.push('<div class="opp clickable" role="button" tabindex="0" data-contract-key="'+contractKey+'" title="Open read-only contract details"><div class="oppHead"><div class="q">'+esc(o.question||o.slug||'US market')+'</div><div class="oppBadges"><div class="tag">'+horizon+'</div><div class="scoreBadge '+(qualifies?'hot':'')+'"><small>SCORE</small><strong>'+(Number.isFinite(score)?score.toFixed(2):'—')+'</strong></div><div class="tag">'+esc(o.asset||'')+' · '+((o.executionEligible===true)?(qualifies?'QUALIFIED ≥ .80':'AUTO SELECT ELIGIBLE'):'DISCOVERY HOLD')+'</div></div></div><div class="meta">'+
+        const sideText=sideLabel==='DOWN'?'DOWN / NO':'UP / YES';
+        return '<div class="opp clickable" role="button" tabindex="0" data-contract-key="'+contractKey+'" title="Open read-only contract details">'+
+          '<div class="oppHead"><div><div class="q">'+esc(o.asset||'ASSET')+' · '+sideText+'</div><div class="meta" style="margin-top:3px">Market: '+esc(o.question||o.slug||'US market')+'</div></div>'+
+          '<div class="oppBadges"><div class="tag">'+horizon+'</div><div class="scoreBadge '+(qualifies?'hot':'')+'"><small>SCORE</small><strong>'+(Number.isFinite(score)?score.toFixed(2):'—')+'</strong></div><div class="tag">'+esc(o.asset||'')+' · '+((o.executionEligible===true)?(qualifies?'QUALIFIED ≥ .80':'AUTO SELECT ELIGIBLE'):'DISCOVERY HOLD')+'</div></div></div><div class="meta">'+
           (Number.isFinite(move)?('move '+(move*100).toFixed(3)+'% · '):'')+
           (Number.isFinite(ask)?('ASK '+(ask*100).toFixed(1)+'¢ · '):'')+
           (Number.isFinite(bid)?('BID '+(bid*100).toFixed(1)+'¢ · '):'')+
           (Number.isFinite(edge)?('edge '+(edge*100).toFixed(3)+'% · '):'')+
-          'SHADOW ONLY</div></div>');
+          'SHADOW ONLY</div></div>';
+      };
+      const upCards=[],downCards=[];
+      for(const [oi,o] of opps.entries()){
+        const dir=String(o?.direction||'').toUpperCase();
+        const outcome=String(o?.outcomeSide||'').toUpperCase();
+        const isDown=dir==='DOWN'||outcome==='NO';
+        (isDown?downCards:upCards).push(renderDirectionalCard(o,oi,isDown?'DOWN':'UP'));
       }
+      parts.push('<div style="grid-column:1/-1;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px">'+
+        '<div><div class="opp" style="margin-bottom:8px"><div class="oppHead"><div class="q">⬆ UP / YES OPPORTUNITIES</div><div class="tag">'+upCards.length+' LIVE</div></div><div class="meta">Five-asset upward / YES side. Same frozen Baseline scoring and ≥ .80 qualification rule.</div></div>'+upCards.join('')+'</div>'+
+        '<div><div class="opp" style="margin-bottom:8px"><div class="oppHead"><div class="q">⬇ DOWN / NO OPPORTUNITIES</div><div class="tag">'+downCards.length+' LIVE</div></div><div class="meta">Five-asset downward / NO side. Same frozen Baseline scoring and ≥ .80 qualification rule.</div></div>'+downCards.join('')+'</div>'+
+      '</div>');
     }
     markets.innerHTML=parts.join('');
 
