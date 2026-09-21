@@ -1275,7 +1275,7 @@ function hasOpposingUnderlyingPosition(shadow, candidate) {
 
 // Final Kalshi controller is invoked by the scheduler but remains fail-closed until BOTH
 // the controller switch and an unexpired persisted Founder one-trade authorization exist.
-async function maybeRunKalshiOneTrade(env) {
+async function maybeRunKalshiOneTrade(env, freshShadow=null) {
   const state=await loadRealTradeState(env);
   const persistedState=JSON.parse(JSON.stringify(state));
   const persistIfChanged=()=>saveRealTradeStateIfChanged(env,state,persistedState);
@@ -1307,8 +1307,7 @@ async function maybeRunKalshiOneTrade(env) {
     return state;
   }
 
-  const shadow=await loadShadowState(env);
-  if(!shadow?.assetCoverageReady || shadow?.status!=="LIVE_KALSHI_SHADOW") {
+  // Use the exact successful observation from this scheduler invocation when available.\n  // Re-reading caches.default here can surface an older POP/isolate snapshot.\n  const shadow=freshShadow && typeof freshShadow==="object" ? freshShadow : await loadShadowState(env);\n  if(!shadow?.assetCoverageReady || shadow?.status!=="LIVE_KALSHI_SHADOW") {
     state.status="HOLD_LIVE_KALSHI_COVERAGE_REQUIRED";
     await persistIfChanged();
     return state;
@@ -2496,10 +2495,10 @@ async function authorizeOneBaselineTrade(){
 export default {
   async scheduled(event, env, ctx) {
     ctx.waitUntil((async () => {
-      await runShadow(env);
-      // One-trade controller is invoked after fresh Shadow data, but remains inert unless
-      // the separate controller switch AND an unexpired persisted Founder authorization exist.
-      await maybeRunKalshiOneTrade(env);
+      const freshShadow=await runShadow(env);
+      // Pass the exact fresh observation into the controller. This preserves every
+      // existing execution gate while removing a cache-boundary mismatch.
+      await maybeRunKalshiOneTrade(env, freshShadow);
     })());
   },
 
