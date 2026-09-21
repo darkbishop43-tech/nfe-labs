@@ -2836,6 +2836,50 @@ export default {
       }
     }
 
+    if (url.pathname === "/kalshi-target-allocation-readiness") {
+      try {
+        // READ ONLY. Proves the exact proposed 50/50 target allocation; sends no provider write.
+        const allocationPath="/trade-api/v2/portfolio/target_balance_allocation";
+        const balancePath="/trade-api/v2/portfolio/balance";
+        const [allocationResponse,balanceResponse]=await Promise.all([
+          kalshiExecutionGet(env,allocationPath),
+          kalshiExecutionGet(env,balancePath)
+        ]);
+        let allocationBody=null,balanceBody=null;
+        try { allocationBody=await allocationResponse.json(); } catch {}
+        try { balanceBody=await balanceResponse.json(); } catch {}
+        const breakdown=Array.isArray(balanceBody?.balance_breakdown)?balanceBody.balance_breakdown:[];
+        const byIndex=Object.fromEntries(breakdown.map(x=>[String(x?.exchange_index),x?.balance??null]));
+        return json({
+          ok:allocationResponse.ok&&balanceResponse.ok,
+          readOnly:true,
+          state:"KALSHI_TARGET_ALLOCATION_READINESS",
+          current:{
+            targetAllocationHttpStatus:allocationResponse.status,
+            targetAllocation:allocationBody,
+            totalBalance:balanceBody?.balance??null,
+            index0:byIndex["0"]??null,
+            index2:byIndex["2"]??null
+          },
+          proposed:{
+            method:"POST",
+            path:allocationPath,
+            intent:"50% Exchange 0 / 50% Exchange 2",
+            allocationPercentages:{"0":50,"2":50},
+            expectedAtCurrentTenDollarBalance:{index0:"~$5.00",index2:"~$5.00",total:"$10.00"}
+          },
+          credentialCapability:{
+            authenticatedReadProven:allocationResponse.ok,
+            writeCapabilityProven:false,
+            reason:"No write is sent by this readiness route; write permission can only be established by documented scope or an authorized provider write."
+          },
+          safety:{providerWrites:0,transfers:0,orders:0,reauthorizations:0,stateMutation:false,realMoneyMoved:false}
+        },allocationResponse.ok&&balanceResponse.ok?200:502);
+      } catch(error) {
+        return json({ok:false,readOnly:true,state:"KALSHI_TARGET_ALLOCATION_READINESS_FAILED",errorCode:String(error?.message||"FAILED"),safety:{providerWrites:0,transfers:0,orders:0,reauthorizations:0,stateMutation:false,realMoneyMoved:false}},500);
+      }
+    }
+
     if (url.pathname === "/kalshi-shard-transfer-readiness") {
       try {
         // READ ONLY. This route proves the exact bounded transfer request without sending it.
