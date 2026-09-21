@@ -885,7 +885,7 @@ async function discoverKalshiShadowMarkets(env, priorSeries=[]) {
     // supports min_close_ts when status is omitted; this prevents an old still-labelled-open
     // 15-minute market from re-entering the dashboard/opportunity pool.
     const discoveryNow=Date.now();
-    const path="/trade-api/v2/markets?series_ticker="+encodeURIComponent(s.ticker)+"&min_close_ts="+Math.floor(discoveryNow/1000)+"&limit=12";
+    const path="/trade-api/v2/markets?series_ticker="+encodeURIComponent(s.ticker)+"&status=open&limit=200";
     let r;
     try { r=await kalshiShadowGet(env,path); }
     catch(error){ readFailures.push({asset:s.asset,seriesTicker:s.ticker,reason:"NETWORK_OR_SIGNING_READ_FAILED"}); continue; }
