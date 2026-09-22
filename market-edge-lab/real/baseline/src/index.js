@@ -2159,7 +2159,7 @@ body{background-color:#030811;background-image:linear-gradient(rgba(31,91,137,.0
   </div>
 
   <div class="card section">
-    <div style="display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap"><b>Real Orders · One-Trade Acceptance Test</b><div style="display:flex;gap:8px;flex-wrap:wrap"><button id="founderRunNowBtn" class="btn" onclick="founderRunQualifiedTradeNow()">FOUNDER $1 EXECUTION PROOF</button><button id="authorizeTradeBtn" class="btn" onclick="authorizeOneBaselineTrade()">AUTHORIZE ONE ≤ $5 TRADE</button></div></div>
+    <div style="display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap"><b>Real Orders · One-Trade Acceptance Test</b><div style="display:flex;gap:8px;flex-wrap:wrap"><button id="founderRunNowBtn" type="button" class="btn">FOUNDER $1 EXECUTION PROOF</button><button id="authorizeTradeBtn" class="btn" onclick="authorizeOneBaselineTrade()">AUTHORIZE ONE ≤ $5 TRADE</button></div></div>
     <div class="compactGrid">
       <div class="miniBox"><div class="label">Orders waiting</div><div id="realController" class="miniVal">CHECKING…</div><div id="realTradeStatus" class="miniSub">CHECKING…</div></div>
       <div class="miniBox"><div class="label">Current position</div><div id="realTradeMarket" class="miniVal">WAITING</div><div class="miniSub">No manual order required</div></div>
@@ -2169,6 +2169,7 @@ body{background-color:#030811;background-image:linear-gradient(rgba(31,91,137,.0
       <div class="miniBox"><div class="label">Live ability</div><div id="realLiveAbility" class="miniVal good">ONE TRADE · AUTHORIZED</div><div class="miniSub">One entry only · premium + entry fee ≤ $5</div></div>
     </div>
     <div id="realAuthorizationNote" class="notice">Authorization is persistent for exactly one qualifying entry. It does not expire after 15 minutes. Once used, it cannot authorize a second entry; the exact filled position remains eligible only for its governed reduce-only exit.</div>
+    <div id="founderRunEvidence" class="notice" style="margin-top:8px"><b>FOUNDER EXECUTION PROOF:</b> READY · no request sent from this browser yet.</div>
   </div>
 
   <details class="card section" open><summary><b>FIRST REAL TRADE EVIDENCE</b> · immutable BEFORE / separate AFTER</summary>
@@ -2611,6 +2612,7 @@ function paintDashboardCountdown(){
 E('refresh').addEventListener('click',()=>{load();});
 document.addEventListener('click',e=>{const card=e.target.closest?.('[data-contract-key]');if(card)openContractInspector(card.dataset.contractKey);});
 document.addEventListener('keydown',e=>{if(e.key!=='Enter'&&e.key!==' ')return;const card=e.target.closest?.('[data-contract-key]');if(card){e.preventDefault();openContractInspector(card.dataset.contractKey);}});
+E('founderRunNowBtn')?.addEventListener('click',founderRunQualifiedTradeNow);
 E('contractModalClose')?.addEventListener('click',closeContractInspector);
 E('contractModal')?.addEventListener('click',e=>{if(e.target===E('contractModal'))closeContractInspector();});
 load();paintDashboardCountdown();setInterval(paintDashboardCountdown,1000);setInterval(refreshPrices,10000);
@@ -2618,27 +2620,38 @@ load();paintDashboardCountdown();setInterval(paintDashboardCountdown,1000);setIn
 <script>
 async function founderRunQualifiedTradeNow(){
   const btn=document.getElementById("founderRunNowBtn");
-  if(!confirm("Run exactly ONE $1-max EXECUTION PROOF now? This is a plumbing test, NOT a Baseline strategy result. It may buy and immediately sell one currently eligible, time-safe Kalshi contract. Execution safety, shard balance, one-shot authorization and reduce-only exit remain enforced.")) return;
-  const priorText=btn?.textContent||"FOUNDER $1 EXECUTION PROOF";
-  if(btn){btn.disabled=true;btn.textContent="FOUNDER $1 PROOF · BUY/SELL CHECK…";}
+  const evidence=document.getElementById("founderRunEvidence");
+  if(btn?.dataset?.busy==="1") return;
+  if(btn){btn.dataset.busy="1";btn.disabled=true;btn.textContent="FOUNDER $1 PROOF · SENDING…";}
+  if(evidence)evidence.innerHTML="<b>FOUNDER EXECUTION PROOF:</b> REQUEST STARTED · "+new Date().toLocaleTimeString()+" · waiting for controller response…";
   try{
-    const r=await fetch("/founder-run-qualified-trade-now",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({authorization:"FOUNDER_RUN_QUALIFYING_ONE_TRADE_NOW"})});
-    const j=await r.json().catch(()=>({}));
-    const submitted=Boolean(j?.entryOrderPresent||j?.submitted);
+    const r=await fetch("/founder-run-qualified-trade-now",{method:"POST",headers:{"content-type":"application/json","x-founder-control":"FOUNDER_$1_EXECUTION_PROOF"},body:JSON.stringify({authorization:"FOUNDER_RUN_QUALIFYING_ONE_TRADE_NOW"})});
+    const j=await r.json().catch(()=>({state:"NON_JSON_RESPONSE"}));
+    window.__founderRunLastResult=j;
     const orderId=j?.entryOrderId||j?.entryOrder?.orderId||null;
     const status=j?.status||j?.controllerStatus||j?.state||("HTTP "+r.status);
-    const source=j?.observationSource?("\nObservation: "+j.observationSource):"";
-    const latency=Number.isFinite(Number(j?.manualLatencyMs))?("\nManual path: "+j.manualLatencyMs+" ms"):"";
-    if(submitted){
-      alert("FOUNDER RUN RESULT: ORDER SUBMITTED / PRESENT"+(orderId?"\nOrder ID: "+orderId:"")+source+latency);
-    }else{
-      alert((r.ok?"FOUNDER RUN COMPLETE — NO ORDER SUBMITTED":"FOUNDER RUN BLOCKED")+"\nController: "+status+source+latency+"\nNo gate was overridden.");
-    }
+    const submitted=Boolean(j?.entryOrderPresent||j?.submitted||orderId);
+    const exitId=j?.exitOrderId||null;
+    const latency=Number.isFinite(Number(j?.manualLatencyMs))?j.manualLatencyMs:null;
+    const parts=[
+      "<b>FOUNDER EXECUTION PROOF:</b> "+(r.ok?"RESPONSE RECEIVED":"BLOCKED / ERROR"),
+      "HTTP "+r.status,
+      "controller="+String(status),
+      "entry="+(submitted?(orderId||"SUBMITTED"):"NOT SUBMITTED"),
+      "exit="+(exitId||"NOT SUBMITTED"),
+      "source="+String(j?.observationSource||"—"),
+      "latency="+(latency===null?"—":latency+" ms"),
+      "time="+new Date().toLocaleTimeString()
+    ];
+    if(evidence)evidence.innerHTML=parts.join(" · ");
+    if(btn){btn.textContent=submitted?"FOUNDER $1 PROOF · ENTRY SENT":"FOUNDER $1 PROOF · RESPONSE RECEIVED";}
   }catch(error){
-    alert("FOUNDER RUN ERROR: "+String(error?.message||error||"REQUEST_FAILED")+"\nNo gate was overridden.");
+    window.__founderRunLastResult={clientError:String(error?.message||error)};
+    if(evidence)evidence.innerHTML="<b>FOUNDER EXECUTION PROOF:</b> CLIENT REQUEST FAILED · "+String(error?.message||error||"REQUEST_FAILED")+" · "+new Date().toLocaleTimeString();
+    if(btn)btn.textContent="FOUNDER $1 PROOF · REQUEST FAILED";
   }finally{
-    if(btn){btn.disabled=false;btn.textContent=priorText;}
-    location.reload();
+    if(btn){btn.dataset.busy="0";btn.disabled=false;}
+    setTimeout(()=>load(),1500);
   }
 }
 async function authorizeOneBaselineTrade(){
