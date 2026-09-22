@@ -1332,7 +1332,7 @@ function hasOpposingUnderlyingPosition(shadow, candidate) {
 
 // Final Kalshi controller is invoked by the scheduler but remains fail-closed until BOTH
 // the controller switch and an unexpired persisted Founder one-trade authorization exist.
-async function maybeRunKalshiOneTrade(env, freshShadow=null, triggerSource="SCHEDULED_AUTO", preparedBalance=null) {
+async function maybeRunKalshiOneTrade(env, freshShadow=null, triggerSource="SCHEDULED_AUTO", preparedBalance=null, stakeCapUsd=REAL_TEST_CONFIG.maxStakeUsd) {
   const state=await loadRealTradeState(env);
   const persistedState=JSON.parse(JSON.stringify(state));
   const persistIfChanged=()=>saveRealTradeStateIfChanged(env,state,persistedState);
@@ -1399,8 +1399,9 @@ async function maybeRunKalshiOneTrade(env, freshShadow=null, triggerSource="SCHE
       return state;
     }
 
-    const sizing=estimateKalshiFeeSafeSize(candidate.yes,REAL_TEST_CONFIG.maxStakeUsd);
-    if(!sizing.ok || sizing.totalDebitUsd>REAL_TEST_CONFIG.maxStakeUsd || sizing.count<1) {
+    const effectiveStakeCapUsd=Math.min(REAL_TEST_CONFIG.maxStakeUsd,Number(stakeCapUsd)||REAL_TEST_CONFIG.maxStakeUsd);
+    const sizing=estimateKalshiFeeSafeSize(candidate.yes,effectiveStakeCapUsd);
+    if(!sizing.ok || sizing.totalDebitUsd>effectiveStakeCapUsd || sizing.count<1) {
       state.status="BLOCKED_FEE_SAFE_SIZE";
       await persistIfChanged();
       return state;
@@ -2792,7 +2793,7 @@ export default {
       }
 
       try {
-        const after=await maybeRunKalshiOneTrade(env,selectedShadow,"FOUNDER_MANUAL_TRIGGER",preparedBalance);
+        const after=await maybeRunKalshiOneTrade(env,selectedShadow,"FOUNDER_MANUAL_TRIGGER",preparedBalance,1);
         const view=publicRealTradeView(after,env);
         return json({
           ...view,
