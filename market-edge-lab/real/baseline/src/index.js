@@ -2818,11 +2818,26 @@ async function founderRunQualifiedTradeNow(){
   }
 }
 async function authorizeOneBaselineTrade(){
-  if(!confirm("TEST ONLY: authorize exactly ONE automatic trade at score >= .50, maximum $1, then HOLD for the normal 5-minute period before reduce-only exit? Baseline remains .80.")) return;
-  const r=await fetch("/kalshi-authorize-one-trade",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({authorization:"AUTHORIZE_ONE_AUTO_50_HOLD_PROOF_MAX_1_USD"})});
-  const j=await r.json();
-  alert(j.ok ? "AUTO .50 HOLD PROOF ARMED: one automatic $1-max entry; after a fill it must hold 5 minutes before governed exit. Baseline .80 was not changed." : "NOT AUTHORIZED: "+(j.state||r.status));
-  location.reload();
+  const btn=document.getElementById("authorizeTradeBtn");
+  if(btn){btn.disabled=true;btn.textContent="ARMING AUTO .50 TEST…";}
+  try{
+    const r=await fetch("/kalshi-authorize-one-trade",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({authorization:"AUTHORIZE_ONE_AUTO_50_HOLD_PROOF_MAX_1_USD"})});
+    const j=await r.json().catch(()=>({}));
+    if(!r.ok||!j.ok){
+      if(btn){btn.disabled=false;btn.textContent="ARM FAILED · CLICK TO RETRY";}
+      const note=document.getElementById("realAuthorizationNote");
+      if(note) note.textContent="AUTO TEST NOT ARMED · "+String(j.state||("HTTP "+r.status));
+      return;
+    }
+    if(btn){btn.textContent="AUTO .50 HOLD PROOF · ARMED";btn.disabled=true;}
+    const note=document.getElementById("realAuthorizationNote");
+    if(note) note.textContent="ARMED · Scheduler owns the next qualifying score ≥ .50 entry · $1 max · automatic governed exit · permanent Baseline remains ≥ .80.";
+    setTimeout(()=>location.reload(),1200);
+  }catch(error){
+    if(btn){btn.disabled=false;btn.textContent="ARM FAILED · CLICK TO RETRY";}
+    const note=document.getElementById("realAuthorizationNote");
+    if(note) note.textContent="AUTO TEST NOT ARMED · "+String(error?.message||error||"REQUEST_FAILED");
+  }
 }
 </script></body></html>`;
 }
