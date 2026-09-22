@@ -2272,9 +2272,9 @@ body{background-color:#030811;background-image:linear-gradient(rgba(31,91,137,.0
   <div class="card section">
     <b>Profit / Loss</b>
     <div class="pnlGrid">
-      <div class="pnlBox"><div class="label">Realized P/L</div><div class="pnlNum">$0.00</div><div class="m">No Baseline Real orders have been submitted.</div></div>
-      <div class="pnlBox"><div class="label">Unrealized P/L</div><div class="pnlNum">$0.00</div><div class="m">No real Baseline position is open.</div></div>
-      <div class="pnlBox"><div class="label">Total Real P/L</div><div class="pnlNum">$0.00</div><div class="m">REAL P/L · NOT STARTED</div></div>
+      <div class="pnlBox"><div class="label">Realized P/L</div><div id="realizedPnl" class="pnlNum">$0.00</div><div id="realizedPnlSub" class="m">Awaiting reconciled real-trade evidence.</div></div>
+      <div class="pnlBox"><div class="label">Unrealized P/L</div><div id="unrealizedPnl" class="pnlNum">$0.00</div><div id="unrealizedPnlSub" class="m">No real Baseline position is open.</div></div>
+      <div class="pnlBox"><div class="label">Total Real P/L</div><div id="totalRealPnl" class="pnlNum">$0.00</div><div id="totalRealPnlSub" class="m">Awaiting reconciled real-trade evidence.</div></div>
     </div>
     <div class="notice"><b>REAL MONEY ONLY:</b> Shadow observations never count as real P/L.</div>
   </div>
@@ -2641,6 +2641,16 @@ async function load(){
       const a=account.account||{};
       if(a.fundedRecordPresent){
         const providerCash=Number(realTrade?.providerCashUsd);bal.textContent=Number.isFinite(providerCash)?moneyFmt(providerCash):'$10.00';balSub.textContent=Number.isFinite(providerCash)?'REAL KALSHI CASH · authenticated read-only provider reconciliation':'REAL EXPERIMENT BANKROLL · funded proof complete';gateBalance.textContent='AVAILABLE';gateBalance.className='good';
+        const reconciledPnl=Number(realTrade?.bankrollNetPnlUsd),realizedPnl=E('realizedPnl'),unrealizedPnl=E('unrealizedPnl'),totalRealPnl=E('totalRealPnl'),realizedPnlSub=E('realizedPnlSub'),unrealizedPnlSub=E('unrealizedPnlSub'),totalRealPnlSub=E('totalRealPnlSub');
+        if(Number.isFinite(reconciledPnl)){
+          const pnlText=(reconciledPnl<0?'-$':'$')+Math.abs(reconciledPnl).toFixed(2);
+          if(realizedPnl){realizedPnl.textContent=pnlText;realizedPnl.className='pnlNum '+(reconciledPnl<0?'bad':'good');}
+          if(unrealizedPnl){unrealizedPnl.textContent='$0.00';unrealizedPnl.className='pnlNum';}
+          if(totalRealPnl){totalRealPnl.textContent=pnlText;totalRealPnl.className='pnlNum '+(reconciledPnl<0?'bad':'good');}
+          if(realizedPnlSub)realizedPnlSub.textContent='RECONCILED REAL KALSHI RESULT · provider cash versus original $10.00';
+          if(unrealizedPnlSub)unrealizedPnlSub.textContent=realTrade?.managedPositionOpen?'Real position currently open.':'No real Baseline position is open.';
+          if(totalRealPnlSub)totalRealPnlSub.textContent='REAL MONEY ONLY · reconciled';
+        }
       }else if(a.noBalanceRecord){
         bal.textContent='$0.00*';balSub.textContent='No funded balance record returned. *Unfunded display only; not withdrawal proof.';gateBalance.textContent='NO FUNDED RECORD';gateBalance.className='m';
       }else{bal.textContent='NOT AVAILABLE';balSub.textContent='Authenticated, but balance response was not recognized.';}
