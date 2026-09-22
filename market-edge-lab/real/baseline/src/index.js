@@ -655,6 +655,36 @@ async function kalshiExecutionBalanceSnapshot(env) {
   };
 }
 
+async function reconcileCompletedKalshiProof(env,state) {
+  if(!(Number(state?.filledCount)>0) || !(Number(state?.exitFilledTotal)>0)) return state;
+  const proof=await kalshiExecutionBalanceSnapshot(env);
+  if(!proof?.ok || !proof?.body) return state;
+  const rawCents=Number(proof.body?.balance);
+  const providerBalanceUsd=Number.isFinite(rawCents)?Number((rawCents/100).toFixed(2)):null;
+  const post=state?.firstRealTradeEvidence?.postTradeOutcomeEvidence||{};
+  const entry=safeFinite(post?.entry?.actualFillPrice), exit=safeFinite(post?.exit?.averageFillPrice);
+  const qty=safeFinite(post?.exit?.filledCount??post?.entry?.quantity);
+  const entryFee=safeFinite(post?.entry?.entryFeeUsd)||0, exitFee=safeFinite(post?.exit?.exitFeeUsd)||0;
+  const gross=(entry!==null&&exit!==null&&qty!==null)?Number(((exit-entry)*qty).toFixed(4)):null;
+  const executionNet=gross===null?null:Number((gross-entryFee-exitFee).toFixed(4));
+  const bankrollNet=providerBalanceUsd===null?null:Number((providerBalanceUsd-REAL_TEST_CONFIG.initialBankrollUsd).toFixed(2));
+  state.firstRealTradeEvidence=state.firstRealTradeEvidence||{};
+  state.firstRealTradeEvidence.postTradeOutcomeEvidence={...post,
+    realizedPnlUsd:executionNet,resultingCashBalanceUsd:providerBalanceUsd,
+    bankrollNetChangeUsd:bankrollNet,providerBalanceRawCents:Number.isFinite(rawCents)?rawCents:null,
+    accountingStatus:providerBalanceUsd!==null?"RECONCILED_FROM_KALSHI":"BALANCE_UNAVAILABLE",
+    reconciledAt:new Date().toISOString()
+  };
+  state.firstRealTradeEvidence.postTradeResearchReview=buildPostTradeResearchReview(state);
+  state.reconciledAccountBalanceUsd=providerBalanceUsd;
+  state.reconciledBankrollPnlUsd=bankrollNet;
+  state.reconciledAt=Date.now();
+  if(providerBalanceUsd!==null && !state?.ledger?.some(x=>x?.type==="POST_TRADE_BALANCE_RECONCILED"))
+    realTradeLedger(state,"POST_TRADE_BALANCE_RECONCILED",{resultingCashBalanceUsd:providerBalanceUsd,bankrollNetChangeUsd:bankrollNet,executionNetPnlUsd:executionNet});
+  await saveRealTradeState(env,state);
+  return state;
+}
+
 async function kalshiApprovedShardTransfer(env,payload) {
   const path="/trade-api/v2/portfolio/intra_exchange_instance_transfer";
   const headers=await kalshiExecutionHeaders(env,"POST",path);
@@ -1282,6 +1312,18 @@ async function loadRealTradeState(env) {
     entryScore: null,
     exitReason: null,
     initialBankrollUsd: REAL_TEST_CONFIG.initialBankrollUsd,
+    currentProviderBalanceUsd: safeFinite(state?.reconciledAccountBalanceUsd),
+    reconciledBankrollPnlUsd: safeFinite(state?.reconciledBankrollPnlUsd),
+    balanceReconciledAt: state?.reconciledAt ? new Date(state.reconciledAt).toISOString() : null,
+    founderAuthorization: state?.founderAuthorization ? {
+      authorized:Boolean(state.founderAuthorization.authorized),
+      consumed:Boolean(state.founderAuthorization.consumed),
+      executionProofOnly:Boolean(state.founderAuthorization.executionProofOnly),
+      automaticSignalProof:Boolean(state.founderAuthorization.automaticSignalProof),
+      testEntryScore:safeFinite(state.founderAuthorization.testEntryScore),
+      holdDurationProof:Boolean(state.founderAuthorization.holdDurationProof),
+      maxEntryDebitUsd:safeFinite(state.founderAuthorization.maxEntryDebitUsd)
+    } : null,
     maxStakeUsd: REAL_TEST_CONFIG.maxStakeUsd,
     ledger: [],
   };
@@ -2268,9 +2310,9 @@ body{background-color:#030811;background-image:linear-gradient(rgba(31,91,137,.0
   <div class="card section">
     <b>Profit / Loss</b>
     <div class="pnlGrid">
-      <div class="pnlBox"><div class="label">Realized P/L</div><div class="pnlNum">$0.00</div><div class="m">No Baseline Real orders have been submitted.</div></div>
-      <div class="pnlBox"><div class="label">Unrealized P/L</div><div class="pnlNum">$0.00</div><div class="m">No real Baseline position is open.</div></div>
-      <div class="pnlBox"><div class="label">Total Real P/L</div><div class="pnlNum">$0.00</div><div class="m">REAL P/L · NOT STARTED</div></div>
+      <div class="pnlBox"><div class="label">Realized P/L</div><div id="realizedPnl" class="pnlNum">$0.00</div><div id="realizedPnlSub" class="m">Awaiting real execution accounting.</div></div>
+      <div class="pnlBox"><div class="label">Unrealized P/L</div><div id="unrealizedPnl" class="pnlNum">$0.00</div><div id="unrealizedPnlSub" class="m">No real Baseline position is open.</div></div>
+      <div class="pnlBox"><div class="label">Total Real P/L</div><div id="totalRealPnl" class="pnlNum">$0.00</div><div id="totalRealPnlSub" class="m">REAL P/L · AWAITING RECONCILIATION</div></div>
     </div>
     <div class="notice"><b>REAL MONEY ONLY:</b> Shadow observations never count as real P/L.</div>
   </div>
@@ -2314,7 +2356,7 @@ body{background-color:#030811;background-image:linear-gradient(rgba(31,91,137,.0
   </div>
 
   <div class="card section">
-    <div style="display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap"><b>Real Orders · Temporary .50 Auto/Hold Acceptance Proof</b><div style="display:flex;gap:8px;flex-wrap:wrap"><a id="founderRunNowBtn" class="btn" href="/founder-execution-proof" style="display:inline-block;text-decoration:none">FOUNDER $1 EXECUTION PROOF</a><button id="authorizeTradeBtn" class="btn" onclick="authorizeOneBaselineTrade()">TEST AUTO ≥ .50 · HOLD 5 MIN · $1 MAX</button></div></div>
+    <div style="display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap"><b>Real Orders · Temporary .50 Auto/Hold Acceptance Proof</b><div style="display:flex;gap:8px;flex-wrap:wrap"><a id="founderRunNowBtn" class="btn" href="/founder-execution-proof" style="display:inline-block;text-decoration:none">DIAGNOSTICS · EXECUTION PROOF</a><button id="authorizeTradeBtn" class="btn" onclick="authorizeOneBaselineTrade()">TEST AUTO ≥ .50 · HOLD 5 MIN · $1 MAX</button></div></div>
     <div class="compactGrid">
       <div class="miniBox"><div class="label">Orders waiting</div><div id="realController" class="miniVal">CHECKING…</div><div id="realTradeStatus" class="miniSub">CHECKING…</div></div>
       <div class="miniBox"><div class="label">Current position</div><div id="realTradeMarket" class="miniVal">WAITING</div><div class="miniSub">No manual order required</div></div>
@@ -2489,7 +2531,8 @@ async function load(){
     E('realEntryOrder').className=realTrade?.entryOrderPresent?'good':'';
     E('realExitOrder').textContent=realTrade?.exitOrderPresent?'SUBMITTED / PRESENT':'NOT SUBMITTED';
     E('realExitOrder').className=realTrade?.exitOrderPresent?'good':'';
-    const ev=realTrade?.firstRealTradeEvidence||{},chain=ev?.chain||{},pre=ev?.preTradeDecisionSnapshot||null;
+    const reconciledPnl=Number(realTrade?.reconciledBankrollPnlUsd);
+    const pnlText=Number.isFinite(reconciledPnl)?(reconciledPnl<0?'-
     const setEv=(id,on,waiting='WAITING')=>{const el=E(id);if(!el)return;el.textContent=on?'PRESERVED':waiting;el.className='miniVal '+(on?'good':'');};
     setEv('evDiscovered',chain.discovered);setEv('evQualified',chain.qualified);setEv('evCompared',chain.compared);setEv('evSelected',chain.selected);setEv('evAuthorized',chain.authorized);
     setEv('evSubmitted',chain.submitted,'NOT YET OCCURRED');setEv('evFilled',chain.filled,'NOT YET OCCURRED');setEv('evExited',chain.exitedOrSettled,'NOT YET OCCURRED');setEv('evAccounted',chain.accounted,'NOT YET OCCURRED');
@@ -2517,8 +2560,8 @@ async function load(){
     if(authBtn){
       if(managedPosition){authBtn.textContent='POSITION UNDER GOVERNED EXIT';authBtn.disabled=true;}
       else if(armed){authBtn.textContent='AUTO .50 HOLD PROOF · ARMED';authBtn.disabled=true;}
-      else if(realTrade?.consumed && realTrade?.status==='EXECUTION_PROOF_ROUND_TRIP_COMPLETE'){
-        authBtn.textContent='TEST AUTO ≥ .50 · HOLD 5 MIN · $1 MAX';
+      else if(realTrade?.consumed && realTrade?.entryOrderPresent && realTrade?.exitOrderPresent){
+        authBtn.textContent='ARM AUTO ≥ .50 · HOLD 5 MIN · $1 MAX';
         authBtn.disabled=false;
       }else if(realTrade?.consumed){authBtn.textContent='ONE-TRADE TEST COMPLETE';authBtn.disabled=true;}
       else{authBtn.textContent='TEST AUTO ≥ .50 · HOLD 5 MIN · $1 MAX';authBtn.disabled=false;}
@@ -2636,7 +2679,8 @@ async function load(){
       gateAccount.textContent='PASS';gateAccount.className='good';statusDot.className='dot';statusText.innerHTML='<b class="good">AUTHENTICATED READ-ONLY · VERIFIED</b>';
       const a=account.account||{};
       if(a.fundedRecordPresent){
-        bal.textContent='$10.00';balSub.textContent='REAL EXPERIMENT BANKROLL · funded proof complete · provider account amounts remain private';gateBalance.textContent='AVAILABLE';gateBalance.className='good';
+        const providerBalance=Number(realTrade?.currentProviderBalanceUsd);
+        if(Number.isFinite(providerBalance)){bal.textContent='
       }else if(a.noBalanceRecord){
         bal.textContent='$0.00*';balSub.textContent='No funded balance record returned. *Unfunded display only; not withdrawal proof.';gateBalance.textContent='NO FUNDED RECORD';gateBalance.className='m';
       }else{bal.textContent='NOT AVAILABLE';balSub.textContent='Authenticated, but balance response was not recognized.';}
@@ -3109,8 +3153,11 @@ document.getElementById('export')?.addEventListener('click',async()=>{const r=aw
       const state=await loadRealTradeState(env);
       let body={}; try{body=await request.json();}catch{}
       if(body?.authorization!=="AUTHORIZE_ONE_AUTO_50_HOLD_PROOF_MAX_1_USD") return json({ok:false,state:"EXPLICIT_AUTHORIZATION_PHRASE_REQUIRED",armed:false},400);
-      if(state?.consumed && state?.status==="EXECUTION_PROOF_ROUND_TRIP_COMPLETE"){
+      if(state?.consumed && Number(state?.filledCount)>0 && Number(state?.exitFilledTotal)>0){
+        state=await reconcileCompletedKalshiProof(env,state);
         state.completedManualExecutionProof=JSON.parse(JSON.stringify(state.firstRealTradeEvidence||{}));
+        state.completedManualReconciledBalanceUsd=state.reconciledAccountBalanceUsd;
+        state.completedManualReconciledPnlUsd=state.reconciledBankrollPnlUsd;
         state.completedManualExecutionLedger=Array.isArray(state.ledger)?JSON.parse(JSON.stringify(state.ledger)):[];
         state.entryOrderId=null; state.exitOrderId=null; state.entrySubmitStartedAt=null; state.exitSubmitStartedAt=null;
         state.entryProviderStatus=null; state.entryProviderResponse=null; state.entryWriteError=null;
@@ -4394,7 +4441,12 @@ document.getElementById('export')?.addEventListener('click',async()=>{const r=aw
     }
 
     if (url.pathname === "/real-trade-state") {
-      return json(publicRealTradeView(await loadRealTradeState(env), env));
+      let state=await loadRealTradeState(env);
+      if(state?.consumed && Number(state?.filledCount)>0 && Number(state?.exitFilledTotal)>0 &&
+         state?.firstRealTradeEvidence?.postTradeOutcomeEvidence?.accountingStatus!=="RECONCILED_FROM_KALSHI"){
+        state=await reconcileCompletedKalshiProof(env,state);
+      }
+      return json(publicRealTradeView(state, env));
     }
 
     if (url.pathname === "/failed-xrp-provider-reconciliation") {
@@ -4482,4 +4534,3 @@ document.getElementById('export')?.addEventListener('click',async()=>{const r=aw
     return json({ ok: false, error: "NOT_FOUND" }, 404);
   },
 };
-
