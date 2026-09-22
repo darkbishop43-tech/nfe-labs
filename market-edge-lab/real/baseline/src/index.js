@@ -610,23 +610,28 @@ async function kalshiExecutionGet(env,path) {
 // validates the candidate-specific shard and required debit from this same-cycle snapshot.
 async function kalshiExecutionBalanceSnapshot(env) {
   const startedAt=Date.now();
-  try {
-    const response=await kalshiExecutionGet(env,"/trade-api/v2/portfolio/balance");
-    const body=await response.json().catch(()=>({}));
-    return {
-      ok:response.ok,
-      httpStatus:response.status,
-      body,
-      checkedAt:new Date().toISOString(),
-      latencyMs:Date.now()-startedAt
-    };
-  } catch(error) {
-    return {
-      ok:false,httpStatus:null,body:null,checkedAt:new Date().toISOString(),
-      latencyMs:Date.now()-startedAt,
-      error:String(error?.message||error||"EXECUTION_BALANCE_PREFLIGHT_FAILED").slice(0,160)
-    };
+  let lastStatus=null,lastBody=null,lastError=null,attempts=0;
+  for(const delayMs of [0,350,800]){
+    if(delayMs) await new Promise(resolve=>setTimeout(resolve,delayMs));
+    attempts++;
+    try {
+      const response=await kalshiExecutionGet(env,"/trade-api/v2/portfolio/balance");
+      const body=await response.json().catch(()=>({}));
+      lastStatus=response.status; lastBody=body;
+      if(response.ok) return {
+        ok:true,httpStatus:response.status,body,
+        checkedAt:new Date().toISOString(),latencyMs:Date.now()-startedAt,attempts
+      };
+      // Auth/permission/not-found style failures are not transient; fail closed immediately.
+      if(![429,500,502,503,504].includes(response.status)) break;
+    } catch(error) {
+      lastError=String(error?.message||error||"EXECUTION_BALANCE_PREFLIGHT_FAILED").slice(0,160);
+    }
   }
+  return {
+    ok:false,httpStatus:lastStatus,body:lastBody,checkedAt:new Date().toISOString(),
+    latencyMs:Date.now()-startedAt,attempts,error:lastError
+  };
 }
 
 async function kalshiApprovedShardTransfer(env,payload) {
@@ -1431,6 +1436,7 @@ async function maybeRunKalshiOneTrade(env, freshShadow=null, triggerSource="SCHE
         checkedAt:balanceProof?.checkedAt||new Date().toISOString(),
         passed:false,httpStatus:balanceProof?.httpStatus??null,
         latencyMs:balanceProof?.latencyMs??null,
+        attempts:balanceProof?.attempts??null,
         error:balanceProof?.error||null,
         source:preparedBalance?"COLD_PATH_SAME_CYCLE":"HOT_PATH_FALLBACK"
       };
@@ -1464,7 +1470,7 @@ async function maybeRunKalshiOneTrade(env, freshShadow=null, triggerSource="SCHE
       checkedAt:balanceProof.checkedAt||new Date().toISOString(),exchangeIndex:candidateExchangeIndex,
       shardBalanceUsd,requiredDebitUsd,
       aggregateBalanceCents:Number.isFinite(Number(balance?.balance))?Number(balance.balance):null,
-      passed:true,latencyMs:balanceProof.latencyMs??null,
+      passed:true,latencyMs:balanceProof.latencyMs??null,attempts:balanceProof.attempts??null,
       source:preparedBalance?"COLD_PATH_SAME_CYCLE":"HOT_PATH_FALLBACK"
     };
 
@@ -1892,6 +1898,14 @@ function publicRealTradeView(state, env) {
     exitReason: state?.exitReason || null,
     recentEvidence: (state?.ledger || []).slice(0, 20),
     firstRealTradeEvidence: publicFirstTradeEvidence(state),
+    executionBalancePreflight: state?.executionBalancePreflight ? {
+      passed:Boolean(state.executionBalancePreflight.passed),
+      httpStatus:state.executionBalancePreflight.httpStatus??null,
+      latencyMs:state.executionBalancePreflight.latencyMs??null,
+      attempts:state.executionBalancePreflight.attempts??null,
+      error:state.executionBalancePreflight.error??null,
+      source:state.executionBalancePreflight.source??null
+    } : null,
     actualProviderBalanceAmountsExposed: false,
   };
 }
