@@ -659,6 +659,41 @@ async function kalshiExecutionBalanceSnapshot(env) {
   };
 }
 
+async function kalshiProviderPositionAudit(env,state) {
+  const ticker=String(state?.marketTicker||state?.firstRealTradeEvidence?.preTradeDecisionSnapshot?.selected?.marketTicker||"").trim();
+  const [balanceResponse,positionsResponse]=await Promise.all([
+    kalshiExecutionGet(env,"/trade-api/v2/portfolio/balance"),
+    kalshiExecutionGet(env,"/trade-api/v2/portfolio/positions?limit=1000")
+  ]);
+  const balanceBody=await balanceResponse.json().catch(()=>({}));
+  const positionsBody=await positionsResponse.json().catch(()=>({}));
+  const rows=Array.isArray(positionsBody?.market_positions)?positionsBody.market_positions:
+    Array.isArray(positionsBody?.positions)?positionsBody.positions:[];
+  const row=ticker?rows.find(p=>String(p?.ticker||p?.market_ticker||p?.marketTicker||"")===ticker):null;
+  const quantity=Number(row?.position??row?.count??row?.quantity??0);
+  const providerPositionClosed=positionsResponse.ok && (!row || !Number.isFinite(quantity) || Math.abs(quantity)<=1e-9);
+  const cashCents=Number(balanceBody?.balance),positionCents=Number(balanceBody?.portfolio_value);
+  const providerCashUsd=Number.isFinite(cashCents)?Number((cashCents/100).toFixed(2)):null;
+  const providerPortfolioValueUsd=Number.isFinite(positionCents)?Number((positionCents/100).toFixed(2)):null;
+  const providerEquityUsd=providerCashUsd!==null?Number((providerCashUsd+(providerPortfolioValueUsd||0)).toFixed(2)):null;
+  const priorReconciledCash=Number(state?.completedManualExecutionProof?.postTradeOutcomeEvidence?.resultingCashBalanceUsd);
+  const priorCashUsd=Number.isFinite(priorReconciledCash)?priorReconciledCash:null;
+  const tradeNetFromPriorUsd=providerPositionClosed&&providerCashUsd!==null&&priorCashUsd!==null
+    ? Number((providerCashUsd-priorCashUsd).toFixed(2)) : null;
+  return {
+    ok:Boolean(balanceResponse.ok&&positionsResponse.ok),readOnly:true,checkedAt:new Date().toISOString(),
+    ticker:ticker||null,balanceHttpStatus:balanceResponse.status,positionsHttpStatus:positionsResponse.status,
+    providerCashUsd,providerPortfolioValueUsd,providerEquityUsd,
+    providerPositionClosed,providerPositionQuantity:Number.isFinite(quantity)?quantity:null,
+    managedExitOrderPresent:Boolean(state?.exitOrderId),
+    closureClassification:providerPositionClosed
+      ? (state?.exitOrderId?"PROVIDER_POSITION_CLOSED_AFTER_MANAGED_EXIT":"PROVIDER_POSITION_CLOSED_WITHOUT_MANAGED_EXIT")
+      : "PROVIDER_POSITION_OPEN",
+    priorReconciledCashUsd:priorCashUsd,tradeNetFromPriorUsd,
+    safety:{stateMutation:false,providerWrites:0,ordersCreated:0,transfers:0,reauthorizations:0,realMoneyMoved:false}
+  };
+}
+
 async function kalshiApprovedShardTransfer(env,payload) {
   const path="/trade-api/v2/portfolio/intra_exchange_instance_transfer";
   const headers=await kalshiExecutionHeaders(env,"POST",path);
@@ -3202,14 +3237,35 @@ document.getElementById('export')?.addEventListener('click',async()=>{const r=aw
         Number(state?.filledCount||0)>0 &&
         Number(state?.exitFilledTotal||0)>=Number(state?.filledCount||0)
       );
-      const preservedCompletedRoundTrip=Boolean(
-        state?.firstRealTradeEvidence?.postTradeOutcomeEvidence ||
-        state?.completedManualExecutionProof?.postTradeOutcomeEvidence ||
-        (Array.isArray(state?.ledger) && state.ledger.some(x=>x?.type==="EXECUTION_PROOF_EXIT_FILLED"))
-      );
-      if(completedRoundTrip || preservedCompletedRoundTrip){
-        state.completedManualExecutionProof=JSON.parse(JSON.stringify(state.firstRealTradeEvidence||state.completedManualExecutionProof||{}));
-        state.completedManualExecutionLedger=Array.isArray(state.ledger)?JSON.parse(JSON.stringify(state.ledger)):[];
+      const operationalResidue=Boolean(state?.consumed||state?.entryOrderId||state?.entrySubmitStartedAt);
+      let providerAudit=null;
+      if(operationalResidue){
+        try{providerAudit=await kalshiProviderPositionAudit(env,state);}catch{}
+      }
+      const providerConfirmedClosed=Boolean(providerAudit?.ok&&providerAudit?.providerPositionClosed);
+      if(completedRoundTrip || providerConfirmedClosed){
+        const archivedEvidence=JSON.parse(JSON.stringify(state.firstRealTradeEvidence||{}));
+        archivedEvidence.providerAudit=providerAudit;
+        archivedEvidence.archivedAt=new Date().toISOString();
+        if(archivedEvidence.postTradeOutcomeEvidence&&providerAudit){
+          archivedEvidence.postTradeOutcomeEvidence={
+            ...archivedEvidence.postTradeOutcomeEvidence,
+            positionState:"CLOSED",
+            closureClassification:providerAudit.closureClassification,
+            resultingCashBalanceUsd:providerAudit.providerCashUsd,
+            resultingEquityUsd:providerAudit.providerEquityUsd,
+            tradeNetFromPriorUsd:providerAudit.tradeNetFromPriorUsd,
+            accountingStatus:"PROVIDER_RECONCILED"
+          };
+        }
+        state.completedAutomaticTradeEvidence=archivedEvidence;
+        state.completedAutomaticTradeLedger=Array.isArray(state.ledger)?JSON.parse(JSON.stringify(state.ledger)):[];
+        realTradeLedger(state,"PRIOR_TRADE_PROVIDER_AUDIT_PRESERVED",{
+          marketTicker:providerAudit?.ticker||state?.marketTicker||null,
+          closureClassification:providerAudit?.closureClassification||"MANAGED_ROUND_TRIP",
+          providerCashUsd:providerAudit?.providerCashUsd??null,
+          tradeNetFromPriorUsd:providerAudit?.tradeNetFromPriorUsd??null
+        });
         state.entryOrderId=null; state.exitOrderId=null; state.entrySubmitStartedAt=null; state.exitSubmitStartedAt=null;
         state.entryProviderStatus=null; state.entryProviderResponse=null; state.entryWriteError=null;
         state.filledCount=0; state.exitFilledTotal=0; state.exitRemainingCount=0; state.remainingExitCount=0;
@@ -3218,10 +3274,9 @@ document.getElementById('export')?.addEventListener('click',async()=>{const r=aw
         state.exitAverageFillPrice=null; state.exitAverageFeePaid=null; state.completedAt=null;
         state.firstRealTradeEvidence={preTradeDecisionSnapshot:null,postTradeOutcomeEvidence:null,postTradeResearchReview:null};
         state.consumed=false;
-        realTradeLedger(state,"MANUAL_EXECUTION_PROOF_PRESERVED",{providerConfirmed:true});
-      } else if(state?.consumed||state?.entryOrderId||state?.entrySubmitStartedAt) {
-        if(nativeForm) return Response.redirect(new URL("/?baseline80=ONE_TRADE_ALREADY_USED_OR_LATCHED",request.url).toString(),303);
-        return json({ok:false,state:"ONE_TRADE_ALREADY_USED_OR_LATCHED",armed:false},409);
+      } else if(operationalResidue) {
+        if(nativeForm) return Response.redirect(new URL("/?baseline80=PRIOR_POSITION_NOT_PROVIDER_CLOSED",request.url).toString(),303);
+        return json({ok:false,state:"PRIOR_POSITION_NOT_PROVIDER_CLOSED",armed:false,providerAudit},409);
       }
       const now=Date.now();
       state.authorizationNonce=crypto.randomUUID();
@@ -4510,6 +4565,16 @@ document.getElementById('export')?.addEventListener('click',async()=>{const r=aw
         view.accountingSource="KALSHI_AUTHENTICATED_BALANCE_AND_PORTFOLIO_VALUE";
       }
       return json(view);
+    }
+
+    if (url.pathname === "/baseline-provider-audit") {
+      try {
+        const state=await loadRealTradeState(env);
+        const audit=await kalshiProviderPositionAudit(env,state);
+        return json({ok:audit.ok,state:"BASELINE_PROVIDER_AUDIT",readOnly:true,audit},audit.ok?200:502);
+      } catch(error) {
+        return json({ok:false,state:"BASELINE_PROVIDER_AUDIT_FAILED",readOnly:true,errorCode:String(error?.message||"FAILED").slice(0,160)},500);
+      }
     }
 
     if (url.pathname === "/failed-xrp-provider-reconciliation") {
