@@ -589,11 +589,32 @@ async function kalshiShadowGet(env,path) {
   return last;
 }
 
+function derLengthBytes(n) {
+  if(n<128) return [n];
+  const out=[]; let x=n;
+  while(x>0){out.unshift(x&255);x>>>=8;}
+  return [128|out.length,...out];
+}
+function derWrap(tag,bytes) {
+  const b=Array.from(bytes);
+  return new Uint8Array([tag,...derLengthBytes(b.length),...b]);
+}
+function rsaPkcs1ToPkcs8(pkcs1) {
+  const version=new Uint8Array([0x02,0x01,0x00]);
+  const rsaAlgId=new Uint8Array([0x30,0x0d,0x06,0x09,0x2a,0x86,0x48,0x86,0xf7,0x0d,0x01,0x01,0x01,0x05,0x00]);
+  const octet=derWrap(0x04,pkcs1);
+  const inner=new Uint8Array(version.length+rsaAlgId.length+octet.length);
+  inner.set(version,0); inner.set(rsaAlgId,version.length); inner.set(octet,version.length+rsaAlgId.length);
+  return derWrap(0x30,inner);
+}
 async function kalshiExecutionHeaders(env, method, path) {
   if (!env?.KALSHI_EXECUTION_KEY_ID || !env?.KALSHI_EXECUTION_PRIVATE_KEY) throw new Error("KALSHI_EXECUTION_CREDENTIALS_NOT_INSTALLED");
-  const body=String(env.KALSHI_EXECUTION_PRIVATE_KEY).replace(/-----BEGIN [^-]+-----/g,"").replace(/-----END [^-]+-----/g,"").replace(/\s+/g,"");
-  const raw=atob(body); const bytes=new Uint8Array(raw.length);
+  const pem=String(env.KALSHI_EXECUTION_PRIVATE_KEY).trim();
+  const isPkcs1=/-----BEGIN RSA PRIVATE KEY-----/.test(pem);
+  const body=pem.replace(/-----BEGIN [^-]+-----/g,"").replace(/-----END [^-]+-----/g,"").replace(/\s+/g,"");
+  const raw=atob(body); let bytes=new Uint8Array(raw.length);
   for(let i=0;i<raw.length;i++) bytes[i]=raw.charCodeAt(i);
+  if(isPkcs1) bytes=rsaPkcs1ToPkcs8(bytes);
   const key=await crypto.subtle.importKey("pkcs8",bytes.buffer,{name:"RSA-PSS",hash:"SHA-256"},false,["sign"]);
   const ts=String(Date.now()), signPath=path.split("?")[0];
   const sig=await crypto.subtle.sign({name:"RSA-PSS",saltLength:32},key,new TextEncoder().encode(ts+method.toUpperCase()+signPath));
