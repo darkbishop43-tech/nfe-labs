@@ -2341,7 +2341,7 @@ body{background-color:#030811;background-image:linear-gradient(rgba(31,91,137,.0
   </div>
 
   <div class="card section">
-    <div style="display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap"><b>Real Orders · Temporary .50 Auto/Hold Acceptance Proof</b><div style="display:flex;gap:8px;flex-wrap:wrap"><a id="founderRunNowBtn" class="btn" href="/founder-execution-proof" style="display:inline-block;text-decoration:none">FOUNDER $1 EXECUTION PROOF</a><a id="authorizeTradeBtn" class="btn" href="/auto-50-arm" style="display:inline-block;visibility:visible;text-decoration:none">TEST AUTO ≥ .50 · HOLD 5 MIN · $1 MAX</a></div></div>
+    <div style="display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap"><b>Real Orders · Baseline .80 Governed Live Trade</b><div style="display:flex;gap:8px;flex-wrap:wrap"><a id="founderRunNowBtn" class="btn" href="/founder-execution-proof" style="display:inline-block;text-decoration:none">FOUNDER $1 EXECUTION PROOF</a><a id="authorizeTradeBtn" class="btn" href="/baseline-80-arm" style="display:inline-block;visibility:visible;text-decoration:none">TEST AUTO ≥ .50 · HOLD 5 MIN · $1 MAX</a></div></div>
     <div class="compactGrid">
       <div class="miniBox"><div class="label">Orders waiting</div><div id="realController" class="miniVal">CHECKING…</div><div id="realTradeStatus" class="miniSub">CHECKING…</div></div>
       <div class="miniBox"><div class="label">Current position</div><div id="realTradeMarket" class="miniVal">WAITING</div><div class="miniSub">No manual order required</div></div>
@@ -2497,7 +2497,7 @@ async function load(){
       liveOrdersState.textContent='AUTHORIZED · WAITING';liveOrdersState.className='val good';
       const activeAuthorizedThreshold=Number(realTrade?.founderAuthorization?.testEntryScore);
       liveOrdersSub.textContent=Number.isFinite(activeAuthorizedThreshold)
-        ? 'TEMP ACCEPTANCE PROOF: exactly one trade may be selected automatically at score ≥ '+activeAuthorizedThreshold.toFixed(2)+'; $1 max. Permanent Baseline remains ≥ .80.'
+        ? 'BASELINE LIVE: exactly one trade may be selected automatically at score ≥ '+activeAuthorizedThreshold.toFixed(2)+'; $1 max · .20 / 5-minute governed exit.'
         : 'Exactly one trade may be selected automatically from the validated five-asset universe at score ≥ .80.';
     }else{
       liveOrdersState.textContent='DISABLED';liveOrdersState.className='val warn';
@@ -2548,7 +2548,7 @@ async function load(){
     const authBtn=E('authorizeTradeBtn');
     if(authBtn){
       if(managedPosition){authBtn.textContent='POSITION UNDER GOVERNED EXIT';authBtn.disabled=true;}
-      else if(armed){authBtn.textContent='AUTO .50 HOLD PROOF · ARMED';authBtn.disabled=true;}
+      else if(armed){authBtn.textContent='BASELINE .80 · ARMED';authBtn.disabled=true;}
       else if(realTrade?.consumed && realTrade?.entryOrderPresent && realTrade?.exitOrderPresent){
         authBtn.textContent='TEST AUTO ≥ .50 · HOLD 5 MIN · $1 MAX';
         authBtn.disabled=false;
@@ -2847,9 +2847,9 @@ async function founderRunQualifiedTradeNow(){
 }
 async function authorizeOneBaselineTrade(){
   const btn=document.getElementById("authorizeTradeBtn");
-  if(btn){btn.disabled=true;btn.textContent="ARMING AUTO .50 TEST…";}
+  if(btn){btn.disabled=true;btn.textContent="ARMING BASELINE .80…";}
   try{
-    const r=await fetch("/kalshi-authorize-one-trade",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({authorization:"AUTHORIZE_ONE_AUTO_50_HOLD_PROOF_MAX_1_USD"})});
+    const r=await fetch("/kalshi-authorize-one-trade",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({authorization:"AUTHORIZE_ONE_BASELINE_80_MAX_1_USD"})});
     const j=await r.json().catch(()=>({}));
     if(!r.ok||!j.ok){
       if(btn){btn.disabled=false;btn.textContent="ARM FAILED · CLICK TO RETRY";}
@@ -2857,9 +2857,9 @@ async function authorizeOneBaselineTrade(){
       if(note) note.textContent="AUTO TEST NOT ARMED · "+String(j.state||("HTTP "+r.status));
       return;
     }
-    if(btn){btn.textContent="AUTO .50 HOLD PROOF · ARMED";btn.disabled=true;}
+    if(btn){btn.textContent="BASELINE .80 · ARMED";btn.disabled=true;}
     const note=document.getElementById("realAuthorizationNote");
-    if(note) note.textContent="ARMED · Scheduler owns the next qualifying score ≥ .50 entry · $1 max · automatic governed exit · permanent Baseline remains ≥ .80.";
+    if(note) note.textContent="ARMED · Scheduler owns the next qualifying Baseline score ≥ .80 entry · $1 max · governed .20 / 5-minute exit.";
     setTimeout(()=>location.reload(),1200);
   }catch(error){
     if(btn){btn.disabled=false;btn.textContent="ARM FAILED · CLICK TO RETRY";}
@@ -3187,8 +3187,8 @@ document.getElementById('export')?.addEventListener('click',async()=>{const r=aw
       return json({ok:true,state:state.status,armed:true,maxEntryDebitUsd:1,manualOnly:true,automaticStrategyEntryAllowed:false,submitted:false,realMoneyMoved:false});
     }
 
-    if (request.method === "GET" && url.pathname === "/auto-50-arm") {
-      return new Response(`<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><title>Arm Automatic .50 Test</title><style>body{font-family:system-ui;background:#030811;color:#eef7ff;padding:24px;max-width:720px;margin:auto}.box{border:1px solid #31516b;border-radius:14px;padding:20px;background:#071725}button{font-size:18px;font-weight:800;padding:14px 18px;border-radius:10px;border:1px solid #d3a53a;background:#0b1421;color:#ffd86a}</style></head><body><div class="box"><h2>Automatic .50 / $1 Acceptance Test</h2><p>This arms exactly one automatic Baseline entry at score ≥ .50, premium + entry fee ≤ $1, followed by the governed 5-minute exit. Permanent Baseline remains ≥ .80.</p><form method="POST" action="/kalshi-authorize-one-trade"><input type="hidden" name="authorization" value="AUTHORIZE_ONE_AUTO_50_HOLD_PROOF_MAX_1_USD"><button type="submit">ARM ONE AUTOMATIC TEST</button></form></div></body></html>`,{headers:{"content-type":"text/html;charset=utf-8","cache-control":"no-store"}});
+    if (request.method === "GET" && url.pathname === "/baseline-80-arm") {
+      return new Response(`<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><title>Arm Automatic .50 Test</title><style>body{font-family:system-ui;background:#030811;color:#eef7ff;padding:24px;max-width:720px;margin:auto}.box{border:1px solid #31516b;border-radius:14px;padding:20px;background:#071725}button{font-size:18px;font-weight:800;padding:14px 18px;border-radius:10px;border:1px solid #d3a53a;background:#0b1421;color:#ffd86a}</style></head><body><div class="box"><h2>Baseline .80 / $1 Governed Trade</h2><p>This arms exactly one automatic Baseline entry at score ≥ .80, premium + entry fee ≤ $1, followed by the governed .20 / 5-minute exit.</p><form method="POST" action="/kalshi-authorize-one-trade"><input type="hidden" name="authorization" value="AUTHORIZE_ONE_BASELINE_80_MAX_1_USD"><button type="submit">ARM ONE BASELINE .80 TRADE</button></form></div></body></html>`,{headers:{"content-type":"text/html;charset=utf-8","cache-control":"no-store"}});
     }
 
     if (request.method === "POST" && url.pathname === "/kalshi-authorize-one-trade") {
@@ -3201,8 +3201,8 @@ document.getElementById('export')?.addEventListener('click',async()=>{const r=aw
         if(nativeForm){const form=await request.formData();body={authorization:String(form.get("authorization")||"")};}
         else body=await request.json();
       }catch{}
-      if(body?.authorization!=="AUTHORIZE_ONE_AUTO_50_HOLD_PROOF_MAX_1_USD"){
-        if(nativeForm) return Response.redirect(new URL("/?auto50=AUTHORIZATION_PHRASE_REJECTED",request.url).toString(),303);
+      if(body?.authorization!=="AUTHORIZE_ONE_BASELINE_80_MAX_1_USD"){
+        if(nativeForm) return Response.redirect(new URL("/?baseline80=AUTHORIZATION_PHRASE_REJECTED",request.url).toString(),303);
         return json({ok:false,state:"EXPLICIT_AUTHORIZATION_PHRASE_REQUIRED",armed:false},400);
       }
       const completedRoundTrip=Boolean(
@@ -3228,17 +3228,17 @@ document.getElementById('export')?.addEventListener('click',async()=>{const r=aw
         state.consumed=false;
         realTradeLedger(state,"MANUAL_EXECUTION_PROOF_PRESERVED",{providerConfirmed:true});
       } else if(state?.consumed||state?.entryOrderId||state?.entrySubmitStartedAt) {
-        if(nativeForm) return Response.redirect(new URL("/?auto50=ONE_TRADE_ALREADY_USED_OR_LATCHED",request.url).toString(),303);
+        if(nativeForm) return Response.redirect(new URL("/?baseline80=ONE_TRADE_ALREADY_USED_OR_LATCHED",request.url).toString(),303);
         return json({ok:false,state:"ONE_TRADE_ALREADY_USED_OR_LATCHED",armed:false},409);
       }
       const now=Date.now();
       state.authorizationNonce=crypto.randomUUID();
-      state.founderAuthorization={authorized:true,authorizedAt:now,expiresAt:null,consumed:false,scope:"ONE_TRADE_MAX_5_USD",executionProofOnly:false,maxEntryDebitUsd:1,automaticSignalProof:true,testEntryScore:0.50,holdDurationProof:true};
-      state.status="AUTHORIZED_WAITING_FOR_AUTO_50_HOLD_PROOF";
-      realTradeLedger(state,"FOUNDER_AUTO_50_HOLD_PROOF_AUTHORIZED",{testThreshold:0.50,baselineThreshold:REAL_TEST_CONFIG.entryScore,maxEntryDebitUsd:1,holdMs:REAL_TEST_CONFIG.maxHoldMs,automatic:true});
+      state.founderAuthorization={authorized:true,authorizedAt:now,expiresAt:null,consumed:false,scope:"ONE_TRADE_MAX_5_USD",executionProofOnly:false,maxEntryDebitUsd:1,automaticSignalProof:false,testEntryScore:REAL_TEST_CONFIG.entryScore,holdDurationProof:false};
+      state.status="AUTHORIZED_WAITING_FOR_BASELINE_80";
+      realTradeLedger(state,"FOUNDER_BASELINE_80_AUTHORIZED",{entryThreshold:REAL_TEST_CONFIG.entryScore,exitThreshold:REAL_TEST_CONFIG.exitScore,maxEntryDebitUsd:1,maxHoldMs:REAL_TEST_CONFIG.maxHoldMs,automatic:true});
       await saveRealTradeState(env,state);
-      if(nativeForm) return Response.redirect(new URL("/?auto50=ARMED",request.url).toString(),303);
-      return json({ok:true,state:state.status,armed:true,automatic:true,testThreshold:0.50,baselineThreshold:REAL_TEST_CONFIG.entryScore,maxEntryDebitUsd:1,holdMs:REAL_TEST_CONFIG.maxHoldMs,submitted:false,realMoneyMoved:false});
+      if(nativeForm) return Response.redirect(new URL("/?baseline80=ARMED",request.url).toString(),303);
+      return json({ok:true,state:state.status,armed:true,automatic:true,entryThreshold:REAL_TEST_CONFIG.entryScore,exitThreshold:REAL_TEST_CONFIG.exitScore,maxEntryDebitUsd:1,maxHoldMs:REAL_TEST_CONFIG.maxHoldMs,submitted:false,realMoneyMoved:false});
     }
 
     if (url.pathname === "/xrp-recovery-deployment-proof") {
