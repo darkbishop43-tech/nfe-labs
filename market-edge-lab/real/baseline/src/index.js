@@ -3233,6 +3233,11 @@ document.getElementById('export')?.addEventListener('click',async()=>{const r=aw
         state?.completedManualExecutionProof?.postTradeOutcomeEvidence ||
         (Array.isArray(state?.ledger) && state.ledger.some(x=>x?.type==="EXECUTION_PROOF_EXIT_FILLED"))
       );
+      const noFillComplete=Boolean(
+        state?.status==="ONE_TRADE_ENTRY_NO_FILL_COMPLETE" &&
+        state?.entryOrderId &&
+        Number(state?.filledCount||0)===0
+      );
       if(completedRoundTrip || preservedCompletedRoundTrip){
         state.completedManualExecutionProof=JSON.parse(JSON.stringify(state.firstRealTradeEvidence||state.completedManualExecutionProof||{}));
         state.completedManualExecutionLedger=Array.isArray(state.ledger)?JSON.parse(JSON.stringify(state.ledger)):[];
@@ -3245,6 +3250,32 @@ document.getElementById('export')?.addEventListener('click',async()=>{const r=aw
         state.firstRealTradeEvidence={preTradeDecisionSnapshot:null,postTradeOutcomeEvidence:null,postTradeResearchReview:null};
         state.consumed=false;
         realTradeLedger(state,"MANUAL_EXECUTION_PROOF_PRESERVED",{providerConfirmed:true});
+      } else if(noFillComplete) {
+        state.failedRealTradeAttempts=Array.isArray(state.failedRealTradeAttempts)?state.failedRealTradeAttempts:[];
+        const pre=state?.firstRealTradeEvidence?.preTradeDecisionSnapshot||null;
+        const archiveKey=String(pre?.capturedAt||"")+"|"+String(state?.entryOrderId||"");
+        if(!state.failedRealTradeAttempts.some(x=>String(x?.preTradeDecisionSnapshot?.capturedAt||"")+"|"+String(x?.entryOrderId||"")===archiveKey)){
+          state.failedRealTradeAttempts.push({
+            schema:"BASELINE_REAL_AUTO_NO_FILL_ATTEMPT_V1",
+            immutable:true,
+            archivedAt:new Date().toISOString(),
+            preTradeDecisionSnapshot:pre,
+            entryOrderId:state.entryOrderId,
+            entryClientOrderId:state.entryClientOrderId||null,
+            filledCount:0,
+            status:"ONE_TRADE_ENTRY_NO_FILL_COMPLETE"
+          });
+        }
+        realTradeLedger(state,"AUTO_NO_FILL_ATTEMPT_ARCHIVED",{entryOrderId:state.entryOrderId,marketTicker:state.marketTicker||null});
+        state.entryOrderId=null; state.entrySubmitStartedAt=null; state.entryClientOrderId=null;
+        state.entryProviderStatus=null; state.entryProviderResponse=null; state.entryWriteError=null;
+        state.filledCount=0; state.entryRemainingCount=0; state.entryAverageFillPrice=null; state.entryAverageFeePaid=null; state.entryFilledAt=null;
+        state.exitOrderId=null; state.exitSubmitStartedAt=null; state.exitProviderStatus=null; state.exitProviderResponse=null; state.exitWriteError=null;
+        state.exitFilledCount=0; state.exitFilledTotal=0; state.exitRemainingCount=0; state.remainingExitCount=0;
+        state.exitAverageFillPrice=null; state.exitAverageFeePaid=null; state.completedAt=null;
+        state.marketSlug=null; state.marketTicker=null; state.question=null; state.outcomeSide=null; state.direction=null; state.asset=null; state.entryScore=null;
+        state.firstRealTradeEvidence={preTradeDecisionSnapshot:null,postTradeOutcomeEvidence:null,postTradeResearchReview:null};
+        state.consumed=false;
       } else if(state?.consumed||state?.entryOrderId||state?.entrySubmitStartedAt) {
         if(nativeForm) return Response.redirect(new URL("/?baseline80=ONE_TRADE_ALREADY_USED_OR_LATCHED",request.url).toString(),303);
         return json({ok:false,state:"ONE_TRADE_ALREADY_USED_OR_LATCHED",armed:false},409);
