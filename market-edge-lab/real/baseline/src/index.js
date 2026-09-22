@@ -1468,10 +1468,13 @@ async function maybeRunKalshiOneTrade(env, freshShadow=null, triggerSource="SCHE
     // The Founder $1 execution proof validates provider plumbing, not strategy quality.
     // In that explicitly labeled mode ONLY, keep every execution/safety gate but do not
     // require the frozen Baseline >= .80 score/positive-edge strategy qualification.
+    const authorizedTestThreshold=Number(state?.founderAuthorization?.testEntryScore);
+    const activeEntryThreshold=(!executionProofMode && Number.isFinite(authorizedTestThreshold))
+      ? authorizedTestThreshold : REAL_TEST_CONFIG.entryScore;
     const qualifyingCandidates=executionProofMode
       ? executionProofEligibleCandidates(shadow,now)
       : (shadow.opportunities||[]).filter(o =>
-          Number(o?.score)>=REAL_TEST_CONFIG.entryScore && Number(o?.edge)>0 &&
+          Number(o?.score)>=activeEntryThreshold && Number(o?.edge)>0 &&
           Number(o?.yes)>0.01 && Number(o?.yes)<0.99 && o?.marketTicker &&
           o?.executionEligible===true &&
           ["BTC","ETH","SOL","XRP","HYPE"].includes(String(o?.asset||"")) &&
@@ -1744,7 +1747,8 @@ async function maybeRunKalshiOneTrade(env, freshShadow=null, triggerSource="SCHE
   const shadowNow=await loadShadowState(env);
   const current=(shadowNow?.opportunities||[]).find(o=>o?.marketTicker===state.marketTicker&&o?.outcomeSide===state.outcomeSide);
   const age=now-Number(state.entryFilledAt||state.entrySubmitStartedAt||now);
-  const exitByScore=current && Number(current.score)<=REAL_TEST_CONFIG.exitScore;
+  const holdDurationProof=state?.founderAuthorization?.holdDurationProof===true;
+  const exitByScore=!holdDurationProof && current && Number(current.score)<=REAL_TEST_CONFIG.exitScore;
   const exitByTime=age>=REAL_TEST_CONFIG.maxHoldMs;
   if(!exitByScore&&!exitByTime) {
     state.status="POSITION_OPEN_WAITING_FOR_EXIT";
@@ -2310,7 +2314,7 @@ body{background-color:#030811;background-image:linear-gradient(rgba(31,91,137,.0
   </div>
 
   <div class="card section">
-    <div style="display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap"><b>Real Orders · Automatic ≥ .80 Acceptance Proof</b><div style="display:flex;gap:8px;flex-wrap:wrap"><a id="founderRunNowBtn" class="btn" href="/founder-execution-proof" style="display:inline-block;text-decoration:none">FOUNDER $1 EXECUTION PROOF</a><button id="authorizeTradeBtn" class="btn" onclick="authorizeOneBaselineTrade()">AUTHORIZE AUTO ≥ .80 · $1 MAX</button></div></div>
+    <div style="display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap"><b>Real Orders · Temporary .50 Auto/Hold Acceptance Proof</b><div style="display:flex;gap:8px;flex-wrap:wrap"><a id="founderRunNowBtn" class="btn" href="/founder-execution-proof" style="display:inline-block;text-decoration:none">FOUNDER $1 EXECUTION PROOF</a><button id="authorizeTradeBtn" class="btn" onclick="authorizeOneBaselineTrade()">TEST AUTO ≥ .50 · HOLD 5 MIN · $1 MAX</button></div></div>
     <div class="compactGrid">
       <div class="miniBox"><div class="label">Orders waiting</div><div id="realController" class="miniVal">CHECKING…</div><div id="realTradeStatus" class="miniSub">CHECKING…</div></div>
       <div class="miniBox"><div class="label">Current position</div><div id="realTradeMarket" class="miniVal">WAITING</div><div class="miniSub">No manual order required</div></div>
@@ -2793,10 +2797,10 @@ async function founderRunQualifiedTradeNow(){
   }
 }
 async function authorizeOneBaselineTrade(){
-  if(!confirm("Authorize exactly ONE automatic Baseline proof trade, maximum $1, only at score >= .80?")) return;
-  const r=await fetch("/kalshi-authorize-one-trade",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({authorization:"AUTHORIZE_ONE_AUTO_80_PROOF_MAX_1_USD"})});
+  if(!confirm("TEST ONLY: authorize exactly ONE automatic trade at score >= .50, maximum $1, then HOLD for the normal 5-minute period before reduce-only exit? Baseline remains .80.")) return;
+  const r=await fetch("/kalshi-authorize-one-trade",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({authorization:"AUTHORIZE_ONE_AUTO_50_HOLD_PROOF_MAX_1_USD"})});
   const j=await r.json();
-  alert(j.ok ? "AUTO >= .80 PROOF ARMED: the scheduler will fire one qualifying real entry automatically, maximum $1." : "NOT AUTHORIZED: "+(j.state||r.status));
+  alert(j.ok ? "AUTO .50 HOLD PROOF ARMED: one automatic $1-max entry; after a fill it must hold 5 minutes before governed exit. Baseline .80 was not changed." : "NOT AUTHORIZED: "+(j.state||r.status));
   location.reload();
 }
 </script></body></html>`;
@@ -2817,15 +2821,19 @@ export default {
       try {
         // Run the exact same governed controller against every fresh scheduled observation.
         // Strategy, threshold, sizing, authorization and provider-write gates remain unchanged.
-        const authorizedCap=Number((await loadRealTradeState(env))?.founderAuthorization?.maxEntryDebitUsd);
+        const scheduledState=await loadRealTradeState(env);
+        const authorizedCap=Number(scheduledState?.founderAuthorization?.maxEntryDebitUsd);
         const scheduledStakeCap=Number.isFinite(authorizedCap)&&authorizedCap>0?Math.min(REAL_TEST_CONFIG.maxStakeUsd,authorizedCap):REAL_TEST_CONFIG.maxStakeUsd;
         controllerState=await maybeRunKalshiOneTrade(env, freshShadow, "SCHEDULED_AUTO", preparedBalance, scheduledStakeCap, false);
       } catch(error) {
         controllerError=String(error?.message||error||"CONTROLLER_RUNTIME_ERROR").slice(0,160);
       }
 
+      const traceState=await loadRealTradeState(env);
+      const traceTestThreshold=Number(traceState?.founderAuthorization?.testEntryScore);
+      const traceEntryThreshold=kalshiAuthorizationValid(traceState)&&Number.isFinite(traceTestThreshold)?traceTestThreshold:REAL_TEST_CONFIG.entryScore;
       const controllerEligible=(freshShadow?.opportunities||[]).filter(o =>
-        Number(o?.score)>=REAL_TEST_CONFIG.entryScore && Number(o?.edge)>0 &&
+        Number(o?.score)>=traceEntryThreshold && Number(o?.edge)>0 &&
         Number(o?.yes)>0.01 && Number(o?.yes)<0.99 && o?.marketTicker &&
         o?.executionEligible===true &&
         ["BTC","ETH","SOL","XRP","HYPE"].includes(String(o?.asset||"")) &&
@@ -2836,6 +2844,8 @@ export default {
         invokedAt:new Date(invokedAt).toISOString(),
         shadowLastRunAt:freshShadow?.lastRunAt||null,
         eligibleCount:Number(freshShadow?.eligibleCount||0),
+        activeEntryThreshold:traceEntryThreshold,
+        baselineEntryThreshold:REAL_TEST_CONFIG.entryScore,
         scoreQualifyingCandidateCount:controllerEligible.length,
         timeSafeQualifyingCandidateCount:controllerTimeSafe.length,
         candidates:controllerEligible.slice(0,5).map(o=>({
@@ -3091,7 +3101,7 @@ document.getElementById('export')?.addEventListener('click',async()=>{const r=aw
       if(!kalshiControllerSwitchEnabled(env)) return json({ok:false,state:"CONTROLLER_SWITCH_HARD_DISABLED",armed:false,submitted:false,realMoneyMoved:false},423);
       const state=await loadRealTradeState(env);
       let body={}; try{body=await request.json();}catch{}
-      if(body?.authorization!=="AUTHORIZE_ONE_AUTO_80_PROOF_MAX_1_USD") return json({ok:false,state:"EXPLICIT_AUTHORIZATION_PHRASE_REQUIRED",armed:false},400);
+      if(body?.authorization!=="AUTHORIZE_ONE_AUTO_50_HOLD_PROOF_MAX_1_USD") return json({ok:false,state:"EXPLICIT_AUTHORIZATION_PHRASE_REQUIRED",armed:false},400);
       if(state?.consumed && state?.status==="EXECUTION_PROOF_ROUND_TRIP_COMPLETE"){
         state.completedManualExecutionProof=JSON.parse(JSON.stringify(state.firstRealTradeEvidence||{}));
         state.completedManualExecutionLedger=Array.isArray(state.ledger)?JSON.parse(JSON.stringify(state.ledger)):[];
@@ -3109,11 +3119,11 @@ document.getElementById('export')?.addEventListener('click',async()=>{const r=aw
       }
       const now=Date.now();
       state.authorizationNonce=crypto.randomUUID();
-      state.founderAuthorization={authorized:true,authorizedAt:now,expiresAt:null,consumed:false,scope:"ONE_TRADE_MAX_5_USD",executionProofOnly:false,maxEntryDebitUsd:1,automaticSignalProof:true};
-      state.status="AUTHORIZED_WAITING_FOR_AUTO_80_SIGNAL";
-      realTradeLedger(state,"FOUNDER_AUTO_80_PROOF_AUTHORIZED",{threshold:REAL_TEST_CONFIG.entryScore,maxEntryDebitUsd:1,automatic:true});
+      state.founderAuthorization={authorized:true,authorizedAt:now,expiresAt:null,consumed:false,scope:"ONE_TRADE_MAX_5_USD",executionProofOnly:false,maxEntryDebitUsd:1,automaticSignalProof:true,testEntryScore:0.50,holdDurationProof:true};
+      state.status="AUTHORIZED_WAITING_FOR_AUTO_50_HOLD_PROOF";
+      realTradeLedger(state,"FOUNDER_AUTO_50_HOLD_PROOF_AUTHORIZED",{testThreshold:0.50,baselineThreshold:REAL_TEST_CONFIG.entryScore,maxEntryDebitUsd:1,holdMs:REAL_TEST_CONFIG.maxHoldMs,automatic:true});
       await saveRealTradeState(env,state);
-      return json({ok:true,state:state.status,armed:true,automatic:true,threshold:REAL_TEST_CONFIG.entryScore,maxEntryDebitUsd:1,submitted:false,realMoneyMoved:false});
+      return json({ok:true,state:state.status,armed:true,automatic:true,testThreshold:0.50,baselineThreshold:REAL_TEST_CONFIG.entryScore,maxEntryDebitUsd:1,holdMs:REAL_TEST_CONFIG.maxHoldMs,submitted:false,realMoneyMoved:false});
     }
 
     if (url.pathname === "/xrp-recovery-deployment-proof") {
