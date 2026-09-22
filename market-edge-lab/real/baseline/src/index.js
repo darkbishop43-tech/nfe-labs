@@ -2318,7 +2318,7 @@ body{background-color:#030811;background-image:linear-gradient(rgba(31,91,137,.0
   </div>
 
   <div class="card section">
-    <div style="display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap"><b>Real Orders · Temporary .50 Auto/Hold Acceptance Proof</b><div style="display:flex;gap:8px;flex-wrap:wrap"><a id="founderRunNowBtn" class="btn" href="/founder-execution-proof" style="display:inline-block;text-decoration:none">FOUNDER $1 EXECUTION PROOF</a><form method="POST" action="/kalshi-authorize-one-trade" style="display:inline;margin:0"><input type="hidden" name="authorization" value="AUTHORIZE_ONE_AUTO_50_HOLD_PROOF_MAX_1_USD"><button id="authorizeTradeBtn" type="submit" class="btn" style="display:inline-block;visibility:visible">TEST AUTO ≥ .50 · HOLD 5 MIN · $1 MAX</button></form></div></div>
+    <div style="display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap"><b>Real Orders · Temporary .50 Auto/Hold Acceptance Proof</b><div style="display:flex;gap:8px;flex-wrap:wrap"><a id="founderRunNowBtn" class="btn" href="/founder-execution-proof" style="display:inline-block;text-decoration:none">FOUNDER $1 EXECUTION PROOF</a><a id="authorizeTradeBtn" class="btn" href="/auto-50-arm" style="display:inline-block;visibility:visible;text-decoration:none">TEST AUTO ≥ .50 · HOLD 5 MIN · $1 MAX</a></div></div>
     <div class="compactGrid">
       <div class="miniBox"><div class="label">Orders waiting</div><div id="realController" class="miniVal">CHECKING…</div><div id="realTradeStatus" class="miniSub">CHECKING…</div></div>
       <div class="miniBox"><div class="label">Current position</div><div id="realTradeMarket" class="miniVal">WAITING</div><div class="miniSub">No manual order required</div></div>
@@ -3131,6 +3131,10 @@ document.getElementById('export')?.addEventListener('click',async()=>{const r=aw
       realTradeLedger(state,"FOUNDER_EXECUTION_PROOF_REARMED",{scope:"ONE_EXECUTION_PROOF_MAX_1_USD",maxEntryDebitUsd:1,automaticStrategyEntryAllowed:false});
       await saveRealTradeState(env,state);
       return json({ok:true,state:state.status,armed:true,maxEntryDebitUsd:1,manualOnly:true,automaticStrategyEntryAllowed:false,submitted:false,realMoneyMoved:false});
+    }
+
+    if (request.method === "GET" && url.pathname === "/auto-50-arm") {
+      return new Response(`<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><title>Arm Automatic .50 Test</title><style>body{font-family:system-ui;background:#030811;color:#eef7ff;padding:24px;max-width:720px;margin:auto}.box{border:1px solid #31516b;border-radius:14px;padding:20px;background:#071725}button{font-size:18px;font-weight:800;padding:14px 18px;border-radius:10px;border:1px solid #d3a53a;background:#0b1421;color:#ffd86a}</style></head><body><div class="box"><h2>Automatic .50 / $1 Acceptance Test</h2><p>This arms exactly one automatic Baseline entry at score ≥ .50, premium + entry fee ≤ $1, followed by the governed 5-minute exit. Permanent Baseline remains ≥ .80.</p><form method="POST" action="/kalshi-authorize-one-trade"><input type="hidden" name="authorization" value="AUTHORIZE_ONE_AUTO_50_HOLD_PROOF_MAX_1_USD"><button type="submit">ARM ONE AUTOMATIC TEST</button></form></div></body></html>`,{headers:{"content-type":"text/html;charset=utf-8","cache-control":"no-store"}});
     }
 
     if (request.method === "POST" && url.pathname === "/kalshi-authorize-one-trade") {
