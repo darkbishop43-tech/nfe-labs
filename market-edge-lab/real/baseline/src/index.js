@@ -2890,7 +2890,7 @@ export default {
     if (request.method === "GET" && url.pathname === "/founder-execution-proof-export") {
       const state=await loadRealTradeState(env);
       const shadow=await loadShadowState(env);
-      return new Response(JSON.stringify({schema:"BASELINE_REAL_EXECUTION_PROOF_EXPORT_V1",exportedAt:new Date().toISOString(),readOnly:true,providerWrites:0,state:publicRealTradeState(env,state),shadow:publicShadowView(shadow)},null,2),{headers:{"content-type":"application/json; charset=utf-8","content-disposition":'attachment; filename="baseline-real-execution-proof.json"',"cache-control":"no-store"}});
+      return new Response(JSON.stringify({schema:"BASELINE_REAL_EXECUTION_PROOF_EXPORT_V1",exportedAt:new Date().toISOString(),readOnly:true,providerWrites:0,state:publicRealTradeView(state,env),shadow:publicShadowView(shadow)},null,2),{headers:{"content-type":"application/json; charset=utf-8","content-disposition":'attachment; filename="baseline-real-execution-proof.json"',"cache-control":"no-store"}});
     }
 
     if (request.method === "GET" && url.pathname === "/founder-execution-proof") {
