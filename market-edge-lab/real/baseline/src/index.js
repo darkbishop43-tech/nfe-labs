@@ -2839,6 +2839,7 @@ async function authorizeOneBaselineTrade(){
     if(note) note.textContent="AUTO TEST NOT ARMED · "+String(error?.message||error||"REQUEST_FAILED");
   }
 }
+document.getElementById("authorizeTradeBtn")?.addEventListener("click",authorizeOneBaselineTrade);
 </script></body></html>`;
 }
 export default {
