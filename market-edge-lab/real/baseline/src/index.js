@@ -578,7 +578,7 @@ async function kalshiShadowGet(env,path) {
   for(let attempt=0;attempt<2;attempt++){
     const headers=await kalshiShadowHeaders(env,"GET",path);
     try{
-      const r=await fetch("https://api.elections.kalshi.com"+path,{method:"GET",headers});
+      const r=await fetch("https://external-api.kalshi.com"+path,{method:"GET",headers});
       last=r;
       if(r.ok || ![429,500,502,503,504].includes(r.status)) return r;
     }catch(error){
@@ -602,7 +602,7 @@ async function kalshiExecutionHeaders(env, method, path) {
 }
 async function kalshiExecutionGet(env,path) {
   const headers=await kalshiExecutionHeaders(env,"GET",path);
-  return fetch("https://api.elections.kalshi.com"+path,{method:"GET",headers});
+  return fetch("https://external-api.kalshi.com"+path,{method:"GET",headers});
 }
 
 // Cold-path execution readiness: perform the slow authenticated balance read in parallel
@@ -638,7 +638,7 @@ async function kalshiApprovedShardTransfer(env,payload) {
   const path="/trade-api/v2/portfolio/intra_exchange_instance_transfer";
   const headers=await kalshiExecutionHeaders(env,"POST",path);
   headers["content-type"]="application/json";
-  return fetch("https://api.elections.kalshi.com"+path,{method:"POST",headers,body:JSON.stringify(payload)});
+  return fetch("https://external-api.kalshi.com"+path,{method:"POST",headers,body:JSON.stringify(payload)});
 }
 
 function kalshiControllerSwitchEnabled(env) {
@@ -671,7 +671,7 @@ async function kalshiExecutionWrite(env, state, method, path, payload) {
   if (!kalshiOneTradeEnabled(env,state)) throw new Error("KALSHI_ONE_TRADE_CONTROLLER_HARD_DISABLED");
   const headers=await kalshiExecutionHeaders(env,method,path);
   headers["content-type"]="application/json";
-  return fetch("https://api.elections.kalshi.com"+path,{method,headers,body:payload===undefined?undefined:JSON.stringify(payload)});
+  return fetch("https://external-api.kalshi.com"+path,{method,headers,body:payload===undefined?undefined:JSON.stringify(payload)});
 }
 async function kalshiCreateOrderV2(env,state,payload) {
   return kalshiExecutionWrite(env,state,"POST","/trade-api/v2/portfolio/events/orders",payload);
@@ -687,7 +687,7 @@ async function kalshiCreateManagedExitV2(env,state,payload) {
   if(!(requested>0) || requested>remaining+1e-9) throw new Error("MANAGED_EXIT_COUNT_INVALID");
   const headers=await kalshiExecutionHeaders(env,"POST","/trade-api/v2/portfolio/events/orders");
   headers["content-type"]="application/json";
-  return fetch("https://api.elections.kalshi.com/trade-api/v2/portfolio/events/orders",{
+  return fetch("https://external-api.kalshi.com/trade-api/v2/portfolio/events/orders",{
     method:"POST",headers,body:JSON.stringify(payload)
   });
 }
@@ -2975,7 +2975,7 @@ export default {
       const payload={allocations:[{exchange_index:0,percent:50},{exchange_index:2,percent:50}]};
       const headers=await kalshiExecutionHeaders(env,"POST",allocationPath);
       headers["content-type"]="application/json";
-      const wr=await fetch("https://api.elections.kalshi.com"+allocationPath,{method:"POST",headers,body:JSON.stringify(payload)});
+      const wr=await fetch("https://external-api.kalshi.com"+allocationPath,{method:"POST",headers,body:JSON.stringify(payload)});
       let wb=null; try{wb=await wr.json();}catch{}
       return json({
         ok:wr.ok,
@@ -3268,7 +3268,7 @@ export default {
     // Authenticated, read-only Kalshi proof for the unchanged Baseline Real rules.
     // Credentials sign GET market-data requests only. No portfolio/order/write endpoint is called.
     if (url.pathname === "/kalshi-15m-proof") {
-      const base = "https://api.elections.kalshi.com/trade-api/v2";
+      const base = "https://external-api.kalshi.com/trade-api/v2";
       const series = [
         {asset:"BTC", ticker:"KXBTC15M"},
         {asset:"ETH", ticker:"KXETH15M"}
@@ -3820,7 +3820,7 @@ export default {
         evidence:{
           kalshiHelpCenter:{title:"Kalshi API",published:"2026-03-10",supportsAuthenticatedOrdersTradesPortfolio:true},
           generatedSdk:{package:"kalshi-typescript",version:"3.26.0",createOrderV2:"POST /portfolio/events/orders",cancelOrderV2:"DELETE /portfolio/events/orders/{order_id}",getOrder:"GET /portfolio/orders/{order_id}"},
-          productionBase:"https://api.elections.kalshi.com/trade-api/v2"
+          productionBase:"https://external-api.kalshi.com/trade-api/v2"
         },
         contract:{
           side:["bid","ask"],
