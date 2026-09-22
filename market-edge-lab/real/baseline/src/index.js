@@ -2782,10 +2782,21 @@ export default {
 
       let selectedShadow=cachedShadow;
       let observationSource="CACHED_GOVERNED_OBSERVATION";
+      let observationAttempts=0;
       if(!cachedFresh || !cachedHasTimeSafeCandidate) {
         try {
-          selectedShadow=await runShadow(env);
-          observationSource="FRESH_MANUAL_OBSERVATION";
+          // Kalshi can briefly return zero newly-open contracts at a 15-minute rollover.
+          // Retry discovery read-only a few times before failing closed. No provider write
+          // is possible during these attempts.
+          const retryDelaysMs=[0,900,1400];
+          for(const delayMs of retryDelaysMs){
+            if(delayMs) await new Promise(resolve=>setTimeout(resolve,delayMs));
+            observationAttempts++;
+            selectedShadow=await runShadow(env);
+            const ready=executionProofEligibleCandidates(selectedShadow,Date.now());
+            if(selectedShadow?.assetCoverageReady && selectedShadow?.status==="LIVE_KALSHI_SHADOW" && ready.length>0) break;
+          }
+          observationSource=observationAttempts>1?"FRESH_MANUAL_OBSERVATION_WITH_ROLLOVER_RETRY":"FRESH_MANUAL_OBSERVATION";
         } catch(error) {
           return json({
             ok:false,state:"FOUNDER_MANUAL_FRESH_SHADOW_FAILED",failureStage:"RUN_SHADOW",
@@ -2794,6 +2805,7 @@ export default {
             cachedShadowAgeMs:cachedAgeMs,
             cachedHadControllerCandidate:cachedControllerCandidates.length>0,
             cachedHadTimeSafeCandidate:cachedHasTimeSafeCandidate,
+            observationAttempts,
             authorizationStillActive:kalshiAuthorizationValid(await loadRealTradeState(env)),
             submitted:false,realMoneyMoved:false
           },500);
