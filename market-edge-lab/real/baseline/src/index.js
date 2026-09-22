@@ -2153,7 +2153,7 @@ body{background-color:#030811;background-image:linear-gradient(rgba(31,91,137,.0
   </div>
 
   <div class="card section">
-    <div style="display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap"><b>Real Orders · One-Trade Acceptance Test</b><div style="display:flex;gap:8px;flex-wrap:wrap"><button id="founderRunNowBtn" class="btn" onclick="founderRunQualifiedTradeNow()">FOUNDER RUN NOW</button><button id="authorizeTradeBtn" class="btn" onclick="authorizeOneBaselineTrade()">AUTHORIZE ONE ≤ $5 TRADE</button></div></div>
+    <div style="display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap"><b>Real Orders · One-Trade Acceptance Test</b><div style="display:flex;gap:8px;flex-wrap:wrap"><a id="founderRunNowBtn" class="btn" href="/founder-execution-proof" style="display:inline-block;text-decoration:none">FOUNDER $1 EXECUTION PROOF</a><button id="authorizeTradeBtn" class="btn" onclick="authorizeOneBaselineTrade()">AUTHORIZE ONE ≤ $5 TRADE</button></div></div>
     <div class="compactGrid">
       <div class="miniBox"><div class="label">Orders waiting</div><div id="realController" class="miniVal">CHECKING…</div><div id="realTradeStatus" class="miniSub">CHECKING…</div></div>
       <div class="miniBox"><div class="label">Current position</div><div id="realTradeMarket" class="miniVal">WAITING</div><div class="miniSub">No manual order required</div></div>
@@ -2729,6 +2729,12 @@ export default {
 
   async fetch(request, env) {
     const url = new URL(request.url);
+
+    if (request.method === "GET" && url.pathname === "/founder-execution-proof") {
+      const state=await loadRealTradeState(env);
+      const armed=Boolean(state?.armed)&&!state?.consumed&&!state?.managedPositionOpen;
+      return new Response(`<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><title>Founder $1 Execution Proof</title><style>body{font-family:system-ui;background:#030811;color:#eef7ff;padding:24px;max-width:760px;margin:auto}.box{border:1px solid #31516b;border-radius:14px;padding:20px;background:#071725}.good{color:#5ff7bf}.warn{color:#ffd86a}button{font-size:18px;font-weight:800;padding:14px 18px;border-radius:10px;border:1px solid #d3a53a;background:#0b1421;color:#ffd86a}button:disabled{opacity:.45}a{color:#7fdcff}</style></head><body><h1>Founder $1 Execution Proof</h1><div class="box"><p class="${armed?'good':'warn'}"><b>${armed?'ARMED':'NOT ARMED'}</b></p><p>Separate execution-plumbing acceptance test — not a Baseline strategy result.</p><p><b>Maximum entry debit: $1.00.</b> One currently eligible, time-safe Kalshi contract only. Existing one-shot authorization and governed exit remain enforced.</p><button id="run" ${armed?'':'disabled'}>RUN ONE $1-MAX BUY → SELL PROOF</button><pre id="result" style="white-space:pre-wrap;margin-top:18px"></pre><p><a href="/">Return to Baseline dashboard</a></p></div><script>document.getElementById('run')?.addEventListener('click',async()=>{if(!confirm('Run exactly ONE $1-max execution proof now? This can place real Kalshi orders.'))return;const b=document.getElementById('run'),o=document.getElementById('result');b.disabled=true;b.textContent='RUNNING…';o.textContent='Submitting governed execution proof…';try{const r=await fetch('/founder-run-qualified-trade-now',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({authorization:'FOUNDER_RUN_QUALIFYING_ONE_TRADE_NOW'})});const j=await r.json();o.textContent=JSON.stringify(j,null,2);b.textContent='COMPLETE — REVIEW EVIDENCE';}catch(e){o.textContent='REQUEST FAILED: '+String(e);b.textContent='FAILED — NO RETRY';}});</script></body></html>`,{headers:{"content-type":"text/html; charset=utf-8","cache-control":"no-store"}});
+    }
 
     if (request.method === "POST" && url.pathname === "/founder-run-qualified-trade-now") {
       let body={}; try{body=await request.json();}catch{}
