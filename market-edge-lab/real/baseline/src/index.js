@@ -4564,21 +4564,11 @@ document.getElementById('export')?.addEventListener('click',async()=>{const r=aw
         const entryCostUsd=positionOpen?Number(entryCostRaw.toFixed(2)):0;
         const unrealizedPnlUsd=positionOpen?Number((providerPortfolioValueUsd-entryCostUsd).toFixed(2)):0;
         const realizedPnlUsd=Number((totalNetPnlUsd-unrealizedPnlUsd).toFixed(2));
-        return json({
-          ok:true,readOnly:true,state:"ACCOUNTING_AUDIT_RECONCILED",
-          checkedAt:new Date().toISOString(),
-          initialBankrollUsd:REAL_TEST_CONFIG.initialBankrollUsd,
-          providerCashUsd,providerPortfolioValueUsd,providerEquityUsd,
-          totalNetPnlUsd,realizedPnlUsd,unrealizedPnlUsd,
-          positionOpen,entryCostUsd,
-          source:"KALSHI_AUTHENTICATED_BALANCE_AND_PORTFOLIO_VALUE",
-          safety:{providerWrites:0,stateMutation:false,ordersCreated:0,reauthorizations:0,realMoneyMoved:false}
-        });
+        return json({ok:true,readOnly:true,state:"ACCOUNTING_AUDIT_RECONCILED",checkedAt:new Date().toISOString(),initialBankrollUsd:REAL_TEST_CONFIG.initialBankrollUsd,providerCashUsd,providerPortfolioValueUsd,providerEquityUsd,totalNetPnlUsd,realizedPnlUsd,unrealizedPnlUsd,positionOpen,entryCostUsd,source:"KALSHI_AUTHENTICATED_BALANCE_AND_PORTFOLIO_VALUE",safety:{providerWrites:0,stateMutation:false,ordersCreated:0,reauthorizations:0,realMoneyMoved:false}});
       } catch(error) {
         return json({ok:false,readOnly:true,state:"ACCOUNTING_AUDIT_FAILED",errorCode:String(error?.message||error||"FAILED").slice(0,160),providerWrites:0,stateMutation:false},500);
       }
     }
-
     if (url.pathname === "/real-trade-state") {
       const state=await loadRealTradeState(env),view=publicRealTradeView(state,env);
       const completed=Boolean(state?.consumed&&Number(state?.filledCount||0)>0&&Number(state?.exitFilledTotal||0)>0);
@@ -6366,21 +6356,11 @@ document.getElementById('export')?.addEventListener('click',async()=>{const r=aw
         const entryCostUsd=positionOpen?Number(entryCostRaw.toFixed(2)):0;
         const unrealizedPnlUsd=positionOpen?Number((providerPortfolioValueUsd-entryCostUsd).toFixed(2)):0;
         const realizedPnlUsd=Number((totalNetPnlUsd-unrealizedPnlUsd).toFixed(2));
-        return json({
-          ok:true,readOnly:true,state:"ACCOUNTING_AUDIT_RECONCILED",
-          checkedAt:new Date().toISOString(),
-          initialBankrollUsd:REAL_TEST_CONFIG.initialBankrollUsd,
-          providerCashUsd,providerPortfolioValueUsd,providerEquityUsd,
-          totalNetPnlUsd,realizedPnlUsd,unrealizedPnlUsd,
-          positionOpen,entryCostUsd,
-          source:"KALSHI_AUTHENTICATED_BALANCE_AND_PORTFOLIO_VALUE",
-          safety:{providerWrites:0,stateMutation:false,ordersCreated:0,reauthorizations:0,realMoneyMoved:false}
-        });
+        return json({ok:true,readOnly:true,state:"ACCOUNTING_AUDIT_RECONCILED",checkedAt:new Date().toISOString(),initialBankrollUsd:REAL_TEST_CONFIG.initialBankrollUsd,providerCashUsd,providerPortfolioValueUsd,providerEquityUsd,totalNetPnlUsd,realizedPnlUsd,unrealizedPnlUsd,positionOpen,entryCostUsd,source:"KALSHI_AUTHENTICATED_BALANCE_AND_PORTFOLIO_VALUE",safety:{providerWrites:0,stateMutation:false,ordersCreated:0,reauthorizations:0,realMoneyMoved:false}});
       } catch(error) {
         return json({ok:false,readOnly:true,state:"ACCOUNTING_AUDIT_FAILED",errorCode:String(error?.message||error||"FAILED").slice(0,160),providerWrites:0,stateMutation:false},500);
       }
     }
-
     if (url.pathname === "/real-trade-state") {
       const state=await loadRealTradeState(env),view=publicRealTradeView(state,env);
       const completed=Boolean(state?.consumed&&Number(state?.filledCount||0)>0&&Number(state?.exitFilledTotal||0)>0);
@@ -6485,7 +6465,7 @@ document.getElementById('export')?.addEventListener('click',async()=>{const r=aw
       const a=await r.json();
       if(!a?.ok)return;
       const bal=document.getElementById('bal'),balSub=document.getElementById('balSub');
-      if(bal){bal.textContent='
+      if(bal)bal.textContent='
 export default {
   async scheduled(event, env, ctx) {
     ctx.waitUntil((async () => {
@@ -8179,21 +8159,11 @@ document.getElementById('export')?.addEventListener('click',async()=>{const r=aw
         const entryCostUsd=positionOpen?Number(entryCostRaw.toFixed(2)):0;
         const unrealizedPnlUsd=positionOpen?Number((providerPortfolioValueUsd-entryCostUsd).toFixed(2)):0;
         const realizedPnlUsd=Number((totalNetPnlUsd-unrealizedPnlUsd).toFixed(2));
-        return json({
-          ok:true,readOnly:true,state:"ACCOUNTING_AUDIT_RECONCILED",
-          checkedAt:new Date().toISOString(),
-          initialBankrollUsd:REAL_TEST_CONFIG.initialBankrollUsd,
-          providerCashUsd,providerPortfolioValueUsd,providerEquityUsd,
-          totalNetPnlUsd,realizedPnlUsd,unrealizedPnlUsd,
-          positionOpen,entryCostUsd,
-          source:"KALSHI_AUTHENTICATED_BALANCE_AND_PORTFOLIO_VALUE",
-          safety:{providerWrites:0,stateMutation:false,ordersCreated:0,reauthorizations:0,realMoneyMoved:false}
-        });
+        return json({ok:true,readOnly:true,state:"ACCOUNTING_AUDIT_RECONCILED",checkedAt:new Date().toISOString(),initialBankrollUsd:REAL_TEST_CONFIG.initialBankrollUsd,providerCashUsd,providerPortfolioValueUsd,providerEquityUsd,totalNetPnlUsd,realizedPnlUsd,unrealizedPnlUsd,positionOpen,entryCostUsd,source:"KALSHI_AUTHENTICATED_BALANCE_AND_PORTFOLIO_VALUE",safety:{providerWrites:0,stateMutation:false,ordersCreated:0,reauthorizations:0,realMoneyMoved:false}});
       } catch(error) {
         return json({ok:false,readOnly:true,state:"ACCOUNTING_AUDIT_FAILED",errorCode:String(error?.message||error||"FAILED").slice(0,160),providerWrites:0,stateMutation:false},500);
       }
     }
-
     if (url.pathname === "/real-trade-state") {
       const state=await loadRealTradeState(env),view=publicRealTradeView(state,env);
       const completed=Boolean(state?.consumed&&Number(state?.filledCount||0)>0&&Number(state?.exitFilledTotal||0)>0);
@@ -8287,8 +8257,8 @@ document.getElementById('export')?.addEventListener('click',async()=>{const r=aw
   },
 };
 
-+Number(a.providerCashUsd).toFixed(2);}
-      if(balSub){balSub.textContent='ACTUAL KALSHI CASH · authenticated provider record';}
++Number(a.providerCashUsd).toFixed(2);
+      if(balSub)balSub.textContent='ACTUAL KALSHI CASH · authenticated provider record';
       const realized=document.getElementById('realizedPnl'),unrealized=document.getElementById('unrealizedPnl'),total=document.getElementById('totalRealPnl');
       const rs=document.getElementById('realizedPnlSub'),us=document.getElementById('unrealizedPnlSub'),ts=document.getElementById('totalRealPnlSub');
       if(realized){realized.textContent=moneyAuditFmt(a.realizedPnlUsd);realized.className='pnlNum '+(Number(a.realizedPnlUsd)<0?'bad':'good');}
@@ -9997,21 +9967,11 @@ document.getElementById('export')?.addEventListener('click',async()=>{const r=aw
         const entryCostUsd=positionOpen?Number(entryCostRaw.toFixed(2)):0;
         const unrealizedPnlUsd=positionOpen?Number((providerPortfolioValueUsd-entryCostUsd).toFixed(2)):0;
         const realizedPnlUsd=Number((totalNetPnlUsd-unrealizedPnlUsd).toFixed(2));
-        return json({
-          ok:true,readOnly:true,state:"ACCOUNTING_AUDIT_RECONCILED",
-          checkedAt:new Date().toISOString(),
-          initialBankrollUsd:REAL_TEST_CONFIG.initialBankrollUsd,
-          providerCashUsd,providerPortfolioValueUsd,providerEquityUsd,
-          totalNetPnlUsd,realizedPnlUsd,unrealizedPnlUsd,
-          positionOpen,entryCostUsd,
-          source:"KALSHI_AUTHENTICATED_BALANCE_AND_PORTFOLIO_VALUE",
-          safety:{providerWrites:0,stateMutation:false,ordersCreated:0,reauthorizations:0,realMoneyMoved:false}
-        });
+        return json({ok:true,readOnly:true,state:"ACCOUNTING_AUDIT_RECONCILED",checkedAt:new Date().toISOString(),initialBankrollUsd:REAL_TEST_CONFIG.initialBankrollUsd,providerCashUsd,providerPortfolioValueUsd,providerEquityUsd,totalNetPnlUsd,realizedPnlUsd,unrealizedPnlUsd,positionOpen,entryCostUsd,source:"KALSHI_AUTHENTICATED_BALANCE_AND_PORTFOLIO_VALUE",safety:{providerWrites:0,stateMutation:false,ordersCreated:0,reauthorizations:0,realMoneyMoved:false}});
       } catch(error) {
         return json({ok:false,readOnly:true,state:"ACCOUNTING_AUDIT_FAILED",errorCode:String(error?.message||error||"FAILED").slice(0,160),providerWrites:0,stateMutation:false},500);
       }
     }
-
     if (url.pathname === "/real-trade-state") {
       const state=await loadRealTradeState(env),view=publicRealTradeView(state,env);
       const completed=Boolean(state?.consumed&&Number(state?.filledCount||0)>0&&Number(state?.exitFilledTotal||0)>0);
