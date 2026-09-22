@@ -3139,8 +3139,18 @@ document.getElementById('export')?.addEventListener('click',async()=>{const r=aw
       const state=await loadRealTradeState(env);
       let body={}; try{body=await request.json();}catch{}
       if(body?.authorization!=="AUTHORIZE_ONE_AUTO_50_HOLD_PROOF_MAX_1_USD") return json({ok:false,state:"EXPLICIT_AUTHORIZATION_PHRASE_REQUIRED",armed:false},400);
-      if(state?.consumed && state?.entryOrderId && state?.exitOrderId && Number(state?.filledCount||0)>0 && Number(state?.exitFilledTotal||0)>=Number(state?.filledCount||0)){
-        state.completedManualExecutionProof=JSON.parse(JSON.stringify(state.firstRealTradeEvidence||{}));
+      const completedRoundTrip=Boolean(
+        state?.entryOrderId && state?.exitOrderId &&
+        Number(state?.filledCount||0)>0 &&
+        Number(state?.exitFilledTotal||0)>=Number(state?.filledCount||0)
+      );
+      const preservedCompletedRoundTrip=Boolean(
+        state?.firstRealTradeEvidence?.postTradeOutcomeEvidence ||
+        state?.completedManualExecutionProof?.postTradeOutcomeEvidence ||
+        (Array.isArray(state?.ledger) && state.ledger.some(x=>x?.type==="EXECUTION_PROOF_EXIT_FILLED"))
+      );
+      if(completedRoundTrip || preservedCompletedRoundTrip){
+        state.completedManualExecutionProof=JSON.parse(JSON.stringify(state.firstRealTradeEvidence||state.completedManualExecutionProof||{}));
         state.completedManualExecutionLedger=Array.isArray(state.ledger)?JSON.parse(JSON.stringify(state.ledger)):[];
         state.entryOrderId=null; state.exitOrderId=null; state.entrySubmitStartedAt=null; state.exitSubmitStartedAt=null;
         state.entryProviderStatus=null; state.entryProviderResponse=null; state.entryWriteError=null;
