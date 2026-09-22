@@ -2516,8 +2516,12 @@ async function load(){
     const authBtn=E('authorizeTradeBtn');
     if(authBtn){
       if(managedPosition){authBtn.textContent='POSITION UNDER GOVERNED EXIT';authBtn.disabled=true;}
-      else if(armed){authBtn.textContent='ONE TRADE AUTHORIZED · WAITING';authBtn.disabled=true;}
-      else if(realTrade?.consumed){authBtn.textContent='ONE-TRADE TEST COMPLETE';authBtn.disabled=true;}
+      else if(armed){authBtn.textContent='AUTO .50 HOLD PROOF · ARMED';authBtn.disabled=true;}
+      else if(realTrade?.consumed && realTrade?.status==='EXECUTION_PROOF_ROUND_TRIP_COMPLETE'){
+        authBtn.textContent='TEST AUTO ≥ .50 · HOLD 5 MIN · $1 MAX';
+        authBtn.disabled=false;
+      }else if(realTrade?.consumed){authBtn.textContent='ONE-TRADE TEST COMPLETE';authBtn.disabled=true;}
+      else{authBtn.textContent='TEST AUTO ≥ .50 · HOLD 5 MIN · $1 MAX';authBtn.disabled=false;}
     }
     const founderRunBtn=E('founderRunNowBtn');
     if(founderRunBtn){
@@ -2533,7 +2537,10 @@ async function load(){
     }else if(armed){
       statusDot.className='dot good';
       statusText.innerHTML='<b>AUTHENTICATED · ONE-TRADE AUTO-SELECTION AUTHORIZED</b>';
-      statusSub.textContent='System is waiting for a validated BTC/ETH/SOL/XRP/HYPE opportunity at score ≥ .80.';
+      const testThreshold=Number(realTrade?.founderAuthorization?.testEntryScore);
+      statusSub.textContent=Number.isFinite(testThreshold)
+        ? 'TEST MODE: waiting automatically for score ≥ '+testThreshold.toFixed(2)+'; $1 max; then hold 5 minutes before governed exit. Permanent Baseline remains .80.'
+        : 'FISHING: waiting for a validated BTC/ETH/SOL/XRP/HYPE opportunity at score ≥ .80.';
     }
     const moneyFmt=n=>Number(n).toLocaleString(undefined,{style:'currency',currency:'USD',maximumFractionDigits:2});
     const pctFmt=n=>(Number(n)>=0?'+':'')+Number(n).toFixed(2)+'%';
