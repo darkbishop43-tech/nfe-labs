@@ -2310,14 +2310,14 @@ body{background-color:#030811;background-image:linear-gradient(rgba(31,91,137,.0
   </div>
 
   <div class="card section">
-    <div style="display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap"><b>Real Orders · One-Trade Acceptance Test</b><div style="display:flex;gap:8px;flex-wrap:wrap"><a id="founderRunNowBtn" class="btn" href="/founder-execution-proof" style="display:inline-block;text-decoration:none">FOUNDER $1 EXECUTION PROOF</a><button id="authorizeTradeBtn" class="btn" onclick="authorizeOneBaselineTrade()">AUTHORIZE ONE ≤ $5 TRADE</button></div></div>
+    <div style="display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap"><b>Real Orders · Automatic ≥ .80 Acceptance Proof</b><div style="display:flex;gap:8px;flex-wrap:wrap"><a id="founderRunNowBtn" class="btn" href="/founder-execution-proof" style="display:inline-block;text-decoration:none">FOUNDER $1 EXECUTION PROOF</a><button id="authorizeTradeBtn" class="btn" onclick="authorizeOneBaselineTrade()">AUTHORIZE AUTO ≥ .80 · $1 MAX</button></div></div>
     <div class="compactGrid">
       <div class="miniBox"><div class="label">Orders waiting</div><div id="realController" class="miniVal">CHECKING…</div><div id="realTradeStatus" class="miniSub">CHECKING…</div></div>
       <div class="miniBox"><div class="label">Current position</div><div id="realTradeMarket" class="miniVal">WAITING</div><div class="miniSub">No manual order required</div></div>
       <div class="miniBox"><div class="label">Entry order</div><div id="realEntryOrder" class="miniVal">NOT SUBMITTED</div></div>
       <div class="miniBox"><div class="label">Exit order</div><div id="realExitOrder" class="miniVal">NOT SUBMITTED</div></div>
       <div class="miniBox"><div class="label">Test complete</div><div id="realConsumed" class="miniVal">NO</div></div>
-      <div class="miniBox"><div class="label">Live ability</div><div id="realLiveAbility" class="miniVal good">ONE TRADE · AUTHORIZED</div><div class="miniSub">One entry only · premium + entry fee ≤ $5</div></div>
+      <div class="miniBox"><div class="label">Live ability</div><div id="realLiveAbility" class="miniVal good">ONE TRADE · AUTHORIZED</div><div class="miniSub">One automatic entry only · premium + entry fee ≤ $1</div></div>
     </div>
     <div id="realAuthorizationNote" class="notice">Authorization is persistent for exactly one qualifying entry. It does not expire after 15 minutes. Once used, it cannot authorize a second entry; the exact filled position remains eligible only for its governed reduce-only exit.</div>
   </div>
@@ -2793,10 +2793,10 @@ async function founderRunQualifiedTradeNow(){
   }
 }
 async function authorizeOneBaselineTrade(){
-  if(!confirm("Authorize exactly ONE governed Baseline trade, maximum $5, only at score >= .80?")) return;
-  const r=await fetch("/kalshi-authorize-one-trade",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({authorization:"AUTHORIZE_ONE_TRADE_MAX_5_USD"})});
+  if(!confirm("Authorize exactly ONE automatic Baseline proof trade, maximum $1, only at score >= .80?")) return;
+  const r=await fetch("/kalshi-authorize-one-trade",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({authorization:"AUTHORIZE_ONE_AUTO_80_PROOF_MAX_1_USD"})});
   const j=await r.json();
-  alert(j.ok ? "AUTHORIZED: system will wait for one legitimate >= .80 signal; the authorization is consumed before that one entry write." : "NOT AUTHORIZED: "+(j.state||r.status));
+  alert(j.ok ? "AUTO >= .80 PROOF ARMED: the scheduler will fire one qualifying real entry automatically, maximum $1." : "NOT AUTHORIZED: "+(j.state||r.status));
   location.reload();
 }
 </script></body></html>`;
@@ -2817,7 +2817,9 @@ export default {
       try {
         // Run the exact same governed controller against every fresh scheduled observation.
         // Strategy, threshold, sizing, authorization and provider-write gates remain unchanged.
-        controllerState=await maybeRunKalshiOneTrade(env, freshShadow, "SCHEDULED_AUTO", preparedBalance);
+        const authorizedCap=Number((await loadRealTradeState(env))?.founderAuthorization?.maxEntryDebitUsd);
+        const scheduledStakeCap=Number.isFinite(authorizedCap)&&authorizedCap>0?Math.min(REAL_TEST_CONFIG.maxStakeUsd,authorizedCap):REAL_TEST_CONFIG.maxStakeUsd;
+        controllerState=await maybeRunKalshiOneTrade(env, freshShadow, "SCHEDULED_AUTO", preparedBalance, scheduledStakeCap, false);
       } catch(error) {
         controllerError=String(error?.message||error||"CONTROLLER_RUNTIME_ERROR").slice(0,160);
       }
@@ -3088,15 +3090,30 @@ document.getElementById('export')?.addEventListener('click',async()=>{const r=aw
     if (request.method === "POST" && url.pathname === "/kalshi-authorize-one-trade") {
       if(!kalshiControllerSwitchEnabled(env)) return json({ok:false,state:"CONTROLLER_SWITCH_HARD_DISABLED",armed:false,submitted:false,realMoneyMoved:false},423);
       const state=await loadRealTradeState(env);
-      if(state?.consumed||state?.entryOrderId||state?.entrySubmitStartedAt) return json({ok:false,state:"ONE_TRADE_ALREADY_USED_OR_LATCHED",armed:false},409);
       let body={}; try{body=await request.json();}catch{}
-      if(body?.authorization!=="AUTHORIZE_ONE_TRADE_MAX_5_USD") return json({ok:false,state:"EXPLICIT_AUTHORIZATION_PHRASE_REQUIRED",armed:false},400);
+      if(body?.authorization!=="AUTHORIZE_ONE_AUTO_80_PROOF_MAX_1_USD") return json({ok:false,state:"EXPLICIT_AUTHORIZATION_PHRASE_REQUIRED",armed:false},400);
+      if(state?.consumed && state?.status==="EXECUTION_PROOF_ROUND_TRIP_COMPLETE"){
+        state.completedManualExecutionProof=JSON.parse(JSON.stringify(state.firstRealTradeEvidence||{}));
+        state.completedManualExecutionLedger=Array.isArray(state.ledger)?JSON.parse(JSON.stringify(state.ledger)):[];
+        state.entryOrderId=null; state.exitOrderId=null; state.entrySubmitStartedAt=null; state.exitSubmitStartedAt=null;
+        state.entryProviderStatus=null; state.entryProviderResponse=null; state.entryWriteError=null;
+        state.filledCount=0; state.exitFilledTotal=0; state.exitRemainingCount=0; state.remainingExitCount=0;
+        state.marketSlug=null; state.question=null; state.outcomeSide=null; state.entryScore=null;
+        state.entryFilledAt=null; state.entryAverageFillPrice=null; state.entryAverageFeePaid=null;
+        state.exitAverageFillPrice=null; state.exitAverageFeePaid=null; state.completedAt=null;
+        state.firstRealTradeEvidence={preTradeDecisionSnapshot:null,postTradeOutcomeEvidence:null,postTradeResearchReview:null};
+        state.consumed=false;
+        realTradeLedger(state,"MANUAL_EXECUTION_PROOF_PRESERVED",{providerConfirmed:true});
+      } else if(state?.consumed||state?.entryOrderId||state?.entrySubmitStartedAt) {
+        return json({ok:false,state:"ONE_TRADE_ALREADY_USED_OR_LATCHED",armed:false},409);
+      }
       const now=Date.now();
-      state.founderAuthorization={authorized:true,authorizedAt:now,expiresAt:null,consumed:false,scope:"ONE_TRADE_MAX_5_USD",executionProofOnly:false};
-      state.status="AUTHORIZED_WAITING_FOR_QUALIFYING_SIGNAL";
-      realTradeLedger(state,"FOUNDER_ONE_TRADE_AUTHORIZED",{scope:"ONE_TRADE_MAX_5_USD",expiresAt:state.founderAuthorization.expiresAt});
+      state.authorizationNonce=crypto.randomUUID();
+      state.founderAuthorization={authorized:true,authorizedAt:now,expiresAt:null,consumed:false,scope:"ONE_TRADE_MAX_5_USD",executionProofOnly:false,maxEntryDebitUsd:1,automaticSignalProof:true};
+      state.status="AUTHORIZED_WAITING_FOR_AUTO_80_SIGNAL";
+      realTradeLedger(state,"FOUNDER_AUTO_80_PROOF_AUTHORIZED",{threshold:REAL_TEST_CONFIG.entryScore,maxEntryDebitUsd:1,automatic:true});
       await saveRealTradeState(env,state);
-      return json({ok:true,state:state.status,armed:true,expiresAt:state.founderAuthorization.expiresAt,submitted:false,realMoneyMoved:false});
+      return json({ok:true,state:state.status,armed:true,automatic:true,threshold:REAL_TEST_CONFIG.entryScore,maxEntryDebitUsd:1,submitted:false,realMoneyMoved:false});
     }
 
     if (url.pathname === "/xrp-recovery-deployment-proof") {
