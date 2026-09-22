@@ -1315,6 +1315,15 @@ function kalshiCandidateTimeSafe(candidate, now=Date.now()) {
   const close=Date.parse(candidate?.closeTime||"");
   return Number.isFinite(close) && (close-now) > KALSHI_ONE_TRADE_SAFETY.minTimeToCloseMs;
 }
+function executionProofEligibleCandidates(shadow, now=Date.now()) {
+  return (shadow?.opportunities||[]).filter(o =>
+    Number(o?.yes)>0.01 && Number(o?.yes)<0.99 && o?.marketTicker &&
+    o?.executionEligible===true &&
+    ["BTC","ETH","SOL","XRP","HYPE"].includes(String(o?.asset||"")) &&
+    (o?.outcomeSide==="YES"||o?.outcomeSide==="NO") &&
+    kalshiCandidateTimeSafe(o,now)
+  );
+}
 
 function hasOpposingUnderlyingPosition(shadow, candidate) {
   const ticker=String(candidate?.marketTicker||candidate?.slug||"");
@@ -1383,13 +1392,15 @@ async function maybeRunKalshiOneTrade(env, freshShadow=null, triggerSource="SCHE
     // The Founder $1 execution proof validates provider plumbing, not strategy quality.
     // In that explicitly labeled mode ONLY, keep every execution/safety gate but do not
     // require the frozen Baseline >= .80 score/positive-edge strategy qualification.
-    const qualifyingCandidates=(shadow.opportunities||[]).filter(o =>
-      (!executionProofMode || (Number(o?.score)>=REAL_TEST_CONFIG.entryScore && Number(o?.edge)>0)) &&
-      Number(o?.yes)>0.01 && Number(o?.yes)<0.99 && o?.marketTicker &&
-      o?.executionEligible===true &&
-      ["BTC","ETH","SOL","XRP","HYPE"].includes(String(o?.asset||"")) &&
-      (o?.outcomeSide==="YES"||o?.outcomeSide==="NO") && kalshiCandidateTimeSafe(o,now)
-    );
+    const qualifyingCandidates=executionProofMode
+      ? executionProofEligibleCandidates(shadow,now)
+      : (shadow.opportunities||[]).filter(o =>
+          Number(o?.score)>=REAL_TEST_CONFIG.entryScore && Number(o?.edge)>0 &&
+          Number(o?.yes)>0.01 && Number(o?.yes)<0.99 && o?.marketTicker &&
+          o?.executionEligible===true &&
+          ["BTC","ETH","SOL","XRP","HYPE"].includes(String(o?.asset||"")) &&
+          (o?.outcomeSide==="YES"||o?.outcomeSide==="NO") && kalshiCandidateTimeSafe(o,now)
+        );
     const candidate=qualifyingCandidates.slice().sort((a,b)=>Number(b?.score||0)-Number(a?.score||0))[0]||null;
     if(!candidate) {
       state.status="SHADOW_WAITING_FOR_SIGNAL";
@@ -2761,14 +2772,8 @@ export default {
       ]);
       const cachedObservedAt=Date.parse(cachedShadow?.lastRunAt||"");
       const cachedAgeMs=Number.isFinite(cachedObservedAt)?Math.max(0,manualStartedAt-cachedObservedAt):null;
-      const cachedControllerCandidates=(cachedShadow?.opportunities||[]).filter(o =>
-        Number(o?.score)>=REAL_TEST_CONFIG.entryScore && Number(o?.edge)>0 &&
-        Number(o?.yes)>0.01 && Number(o?.yes)<0.99 && o?.marketTicker &&
-        o?.executionEligible===true &&
-        ["BTC","ETH","SOL","XRP","HYPE"].includes(String(o?.asset||"")) &&
-        (o?.outcomeSide==="YES"||o?.outcomeSide==="NO")
-      );
-      const cachedHasTimeSafeCandidate=cachedControllerCandidates.some(o=>kalshiCandidateTimeSafe(o,manualStartedAt));
+      const cachedControllerCandidates=executionProofEligibleCandidates(cachedShadow,manualStartedAt);
+      const cachedHasTimeSafeCandidate=cachedControllerCandidates.length>0;
       const cachedFresh=Boolean(
         cachedShadow?.status==="LIVE_KALSHI_SHADOW" &&
         cachedShadow?.assetCoverageReady &&
