@@ -1342,13 +1342,18 @@ function kalshiCandidateTimeSafe(candidate, now=Date.now()) {
   return Number.isFinite(close) && (close-now) > KALSHI_ONE_TRADE_SAFETY.minTimeToCloseMs;
 }
 function executionProofEligibleCandidates(shadow, now=Date.now()) {
-  return (shadow?.opportunities||[]).filter(o =>
-    Number(o?.yes)>0.01 && Number(o?.yes)<0.99 && o?.marketTicker &&
-    o?.executionEligible===true &&
-    ["BTC","ETH","SOL","XRP","HYPE"].includes(String(o?.asset||"")) &&
-    (o?.outcomeSide==="YES"||o?.outcomeSide==="NO") &&
-    kalshiCandidateTimeSafe(o,now)
-  );
+  // Execution-plumbing proof only: this test is meant to prove BUY -> FILL -> SELL,
+  // not hold for the Baseline strategy's five-minute horizon. Keep a two-minute
+  // settlement buffer, while leaving the Baseline strategy's 6.5-minute gate untouched.
+  const proofMinTimeToCloseMs=2*60*1000;
+  return (shadow?.opportunities||[]).filter(o => {
+    const close=Date.parse(o?.closeTime||"");
+    return Number(o?.yes)>0.01 && Number(o?.yes)<0.99 && o?.marketTicker &&
+      o?.executionEligible===true &&
+      ["BTC","ETH","SOL","XRP","HYPE"].includes(String(o?.asset||"")) &&
+      (o?.outcomeSide==="YES"||o?.outcomeSide==="NO") &&
+      Number.isFinite(close) && (close-now)>proofMinTimeToCloseMs;
+  });
 }
 
 function hasOpposingUnderlyingPosition(shadow, candidate) {
