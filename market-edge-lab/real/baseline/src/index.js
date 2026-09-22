@@ -769,6 +769,43 @@ function kalshiV2ExitPayload(state,currentBid,clientOrderId) {
     // exchange_index intentionally omitted on exit: API2 auto-routes using ticker.
   };
 }
+function kalshiExecutionProofEntryPayload(candidate,clientOrderId) {
+  const side=kalshiV2BookSide(candidate?.outcomeSide);
+  if(!side) return null;
+  // One-contract plumbing proof: deliberately marketable IOC while bounding worst-case
+  // premium + estimated taker fee to $1.00. YES uses 0.99 bid; NO uses 0.01 YES ask.
+  return {
+    ticker:String(candidate.marketTicker),
+    client_order_id:String(clientOrderId),
+    side,
+    count:"1.00",
+    price:side==="bid"?"0.9900":"0.0100",
+    time_in_force:"immediate_or_cancel",
+    self_trade_prevention_type:"taker_at_cross",
+    post_only:false,
+    cancel_order_on_pause:true,
+    reduce_only:false
+  };
+}
+function kalshiExecutionProofExitPayload(state,clientOrderId) {
+  const entrySide=kalshiV2BookSide(state?.outcomeSide);
+  if(!entrySide) return null;
+  // Immediate reduce-only close of exactly the filled proof quantity. Reverse the book side
+  // and cross aggressively so the acceptance test does not wait on the strategy exit logic.
+  const side=entrySide==="bid"?"ask":"bid";
+  return {
+    ticker:String(state.marketTicker),
+    client_order_id:String(clientOrderId),
+    side,
+    count:Number(state.remainingExitCount||state.filledCount||0).toFixed(2),
+    price:side==="bid"?"0.9900":"0.0100",
+    time_in_force:"immediate_or_cancel",
+    self_trade_prevention_type:"taker_at_cross",
+    post_only:false,
+    cancel_order_on_pause:true,
+    reduce_only:true
+  };
+}
 function summarizeKalshiV2CreateResponse(x) {
   return {
     orderId:x?.order_id||null,
@@ -1342,10 +1379,10 @@ function kalshiCandidateTimeSafe(candidate, now=Date.now()) {
   return Number.isFinite(close) && (close-now) > KALSHI_ONE_TRADE_SAFETY.minTimeToCloseMs;
 }
 function executionProofEligibleCandidates(shadow, now=Date.now()) {
-  // Execution-plumbing proof only: this test is meant to prove BUY -> FILL -> SELL,
-  // not hold for the Baseline strategy's five-minute horizon. Keep a two-minute
-  // settlement buffer, while leaving the Baseline strategy's 6.5-minute gate untouched.
-  const proofMinTimeToCloseMs=2*60*1000;
+  // Execution-plumbing proof only: prove one real BUY/FILL and immediate reduce-only SELL/FILL.
+  // This is NOT the Baseline strategy hold. Keep only a 30-second operational buffer.
+  // The normal Baseline 6.5-minute safety gate remains untouched.
+  const proofMinTimeToCloseMs=30*1000;
   return (shadow?.opportunities||[]).filter(o => {
     const close=Date.parse(o?.closeTime||"");
     return Number(o?.yes)>0.01 && Number(o?.yes)<0.99 && o?.marketTicker &&
@@ -1453,7 +1490,9 @@ async function maybeRunKalshiOneTrade(env, freshShadow=null, triggerSource="SCHE
     }
 
     const effectiveStakeCapUsd=Math.min(REAL_TEST_CONFIG.maxStakeUsd,Number(stakeCapUsd)||REAL_TEST_CONFIG.maxStakeUsd);
-    const sizing=estimateKalshiFeeSafeSize(candidate.yes,effectiveStakeCapUsd);
+    const sizing=executionProofMode
+      ? {ok:true,count:1,premiumUsd:0.99,feeUsd:0.01,totalDebitUsd:1,maxStakeUsd:1,reason:"EXECUTION_PROOF_ONE_CONTRACT_MAX_1_USD"}
+      : estimateKalshiFeeSafeSize(candidate.yes,effectiveStakeCapUsd);
     if(!sizing.ok || sizing.totalDebitUsd>effectiveStakeCapUsd || sizing.count<1) {
       state.status="BLOCKED_FEE_SAFE_SIZE";
       await persistIfChanged();
@@ -1585,7 +1624,9 @@ async function maybeRunKalshiOneTrade(env, freshShadow=null, triggerSource="SCHE
     });
     await persistIfChanged();
 
-    const dryEntry=kalshiV2EntryPayload(candidate,sizing,state.entryClientOrderId);
+    const dryEntry=executionProofMode
+      ? kalshiExecutionProofEntryPayload(candidate,state.entryClientOrderId)
+      : kalshiV2EntryPayload(candidate,sizing,state.entryClientOrderId);
     if(!dryEntry) {
       state.status="BLOCKED_V2_REQUEST_BUILD";
       await persistIfChanged();
@@ -1638,6 +1679,59 @@ async function maybeRunKalshiOneTrade(env, freshShadow=null, triggerSource="SCHE
     state.firstRealTradeEvidence.postTradeOutcomeEvidence={...(state.firstRealTradeEvidence.postTradeOutcomeEvidence||{}),entry:{submittedAt:state.entrySubmitStartedAt||null,orderId:state.entryOrderId||null,requestedPrice:state.entryObservedAsk??null,filledAt:state.entryFilledAt||null,actualFillPrice:state.entryAverageFillPrice??null,quantity:state.filledCount??null,entryFeeUsd:state.entryAverageFeePaid??null,status:"FILLED"},positionState:"OPEN"};
     realTradeLedger(state,"KALSHI_ENTRY_FILLED",{orderId:state.entryOrderId,filledCount:state.filledCount,averageFillPrice:state.entryAverageFillPrice});
     await persistIfChanged();
+
+    if(executionProofMode){
+      const remaining=Number(state.filledCount||0);
+      state.exitAttempt=1;
+      state.remainingExitCount=remaining;
+      state.exitClientOrderId=kalshiClientOrderId(state,"proof-exit");
+      state.exitSubmitStartedAt=Date.now();
+      state.exitReason="EXECUTION_PROOF_IMMEDIATE_EXIT";
+      const proofExit=kalshiExecutionProofExitPayload(state,state.exitClientOrderId);
+      if(!proofExit){
+        state.status="PROOF_EXIT_REQUEST_BUILD_FAILED";
+        state.exitSubmitStartedAt=null;
+        await persistIfChanged();
+        return state;
+      }
+      let xr;
+      try { xr=await kalshiCreateManagedExitV2(env,state,proofExit); }
+      catch(e){
+        state.status="PROOF_EXIT_WRITE_ERROR";
+        state.exitWriteError=String(e?.message||e);
+        state.exitSubmitStartedAt=null;
+        await persistIfChanged();
+        return state;
+      }
+      const xb=await xr.json().catch(()=>({}));
+      state.exitSubmitStartedAt=null;
+      if(!xr.ok){
+        state.status="PROOF_EXIT_PROVIDER_REJECTED";
+        state.exitProviderStatus=xr.status;
+        state.exitProviderResponse=xb;
+        await persistIfChanged();
+        return state;
+      }
+      const xs=summarizeKalshiV2CreateResponse(xb);
+      state.exitOrderId=xs.orderId;
+      state.exitFilledCount=xs.fillCount;
+      state.exitFilledTotal=Number(xs.fillCount||0);
+      state.exitRemainingCount=Math.max(0,remaining-state.exitFilledTotal);
+      state.exitAverageFillPrice=xs.averageFillPrice;
+      state.exitAverageFeePaid=xs.averageFeePaid;
+      if(state.exitRemainingCount<=1e-9){
+        state.status="EXECUTION_PROOF_ROUND_TRIP_COMPLETE";
+        state.consumed=true;
+        state.completedAt=Date.now();
+        state.firstRealTradeEvidence.postTradeOutcomeEvidence={...(state.firstRealTradeEvidence.postTradeOutcomeEvidence||{}),exit:{orderId:state.exitOrderId||null,reason:state.exitReason,filledCount:state.exitFilledTotal,averageFillPrice:state.exitAverageFillPrice??null,exitFeeUsd:state.exitAverageFeePaid??null,completedAt:new Date(state.completedAt).toISOString()},positionState:"CLOSED",accountingStatus:"WAITING_FOR_FINAL_BALANCE_RECONCILIATION"};
+        realTradeLedger(state,"EXECUTION_PROOF_EXIT_FILLED",{orderId:state.exitOrderId,filledCount:state.exitFilledTotal});
+      } else {
+        state.status="EXECUTION_PROOF_EXIT_NO_FILL";
+        realTradeLedger(state,"EXECUTION_PROOF_EXIT_NO_FILL",{orderId:state.exitOrderId,remaining:state.exitRemainingCount});
+      }
+      await persistIfChanged();
+      return state;
+    }
     return state;
   }
 
@@ -2816,7 +2910,7 @@ export default {
       const closeMs=best?Date.parse(best?.closeTime||""):NaN;
       const secondsToClose=Number.isFinite(closeMs)?Math.max(0,Math.floor((closeMs-now)/1000)):null;
       const shadowAgeMs=shadow?.lastRunAt?Math.max(0,now-Date.parse(shadow.lastRunAt)):null;
-      return new Response(`<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><title>Founder $1 Execution Proof</title><style>body{font-family:system-ui;background:#030811;color:#eef7ff;padding:24px;max-width:760px;margin:auto}.box{border:1px solid #31516b;border-radius:14px;padding:20px;background:#071725}.good{color:#5ff7bf}.warn{color:#ffd86a}.bad{color:#ff7d7d}button{font-size:18px;font-weight:800;padding:14px 18px;border-radius:10px;border:1px solid #d3a53a;background:#0b1421;color:#ffd86a}button:disabled{opacity:.45}a{color:#7fdcff}.facts{line-height:1.7}</style></head><body><h1>Founder $1 Execution Proof</h1><div class="box"><p class="${armed?'good':'bad'}"><b>${armed?'ARMED':'NOT ARMED'}</b></p><p class="${proofReady?'good':'warn'}"><b>${proofReady?'EXECUTION WINDOW READY':'WAITING FOR ALL EXECUTION GATES'}</b></p><div class="facts">Latest shadow: <b>${String(shadow?.status||'UNKNOWN')}</b><br>Latest observation age: <b>${shadowAgeMs==null?'—':Math.round(shadowAgeMs/1000)+' sec'}</b><br>Provider-eligible contracts: <b>${Number(shadow?.eligibleCount||0)}</b><br>$1 proof-ready, time-safe candidates: <b>${readyCandidates.length}</b>${best?'<br>Current candidate: <b>'+String(best.asset||'')+' · '+String(best.outcomeSide||'')+' · '+String(best.marketTicker||'')+'</b><br>Seconds to close: <b>'+String(secondsToClose)+'</b>':''}<br>Execution balance preflight: <b class="${balanceReady?'good':'bad'}">${balanceReady?'PASS':'FAILED'}</b><br>Balance failure stage: <b>${balanceFailureStage}</b><br>Safe failure class: <b>${safeBalanceError}</b><br>Balance HTTP status: <b>${balanceProof?.httpStatus??'—'}</b><br>Balance attempts: <b>${balanceProof?.attempts??'—'}</b></div><p>Separate execution-plumbing acceptance test — not a Baseline strategy result.</p><p><b>Maximum entry debit: $1.00.</b> One currently eligible, time-safe Kalshi contract only. Existing one-shot authorization and governed exit remain enforced.</p>${!armed?'<button id="rearm" style="margin-right:10px">REARM ONE $1 PROOF</button>':''}<button id="run" ${proofReady?'':'disabled'}>RUN ONE $1-MAX BUY → SELL PROOF</button><pre id="result" style="white-space:pre-wrap;margin-top:18px"></pre><p><a href="/founder-execution-proof">Refresh readiness</a> · <button id="export" type="button">EXPORT PROOF JSON</button> · <a href="/">Return to Baseline dashboard</a></p></div><script>document.getElementById('export')?.addEventListener('click',async()=>{const r=await fetch('/founder-execution-proof-export',{cache:'no-store'});if(!r.ok){alert('EXPORT FAILED: '+r.status);return;}const blob=await r.blob();const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='baseline-real-execution-proof-'+new Date().toISOString().replace(/[:.]/g,'-')+'.json';document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(a.href),1000);});document.getElementById('rearm')?.addEventListener('click',async()=>{if(!confirm('Rearm exactly ONE manual-only $1-max execution proof? This does not submit an order.'))return;const r=await fetch('/founder-rearm-execution-proof',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({authorization:'REARM_ONE_EXECUTION_PROOF_MAX_1_USD'})});const j=await r.json();alert(j.ok?'REARMED: one manual-only $1 execution proof is authorized. No order has been submitted.':'NOT REARMED: '+(j.state||r.status));location.reload();});document.getElementById('run')?.addEventListener('click',async()=>{if(!confirm('Run exactly ONE $1-max execution proof now? This can place real Kalshi orders.'))return;const b=document.getElementById('run'),o=document.getElementById('result');b.disabled=true;b.textContent='RUNNING…';o.textContent='Submitting governed execution proof…';try{const r=await fetch('/founder-run-qualified-trade-now',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({authorization:'FOUNDER_RUN_QUALIFYING_ONE_TRADE_NOW'})});const j=await r.json();o.textContent=JSON.stringify(j,null,2);b.textContent='COMPLETE — REVIEW EVIDENCE';}catch(e){o.textContent='REQUEST FAILED: '+String(e);b.textContent='FAILED — NO RETRY';}});</script></body></html>`,{headers:{"content-type":"text/html; charset=utf-8","cache-control":"no-store"}});
+      return new Response(`<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><title>Founder $1 Execution Proof</title><style>body{font-family:system-ui;background:#030811;color:#eef7ff;padding:24px;max-width:760px;margin:auto}.box{border:1px solid #31516b;border-radius:14px;padding:20px;background:#071725}.good{color:#5ff7bf}.warn{color:#ffd86a}.bad{color:#ff7d7d}button{font-size:18px;font-weight:800;padding:14px 18px;border-radius:10px;border:1px solid #d3a53a;background:#0b1421;color:#ffd86a}button:disabled{opacity:.45}a{color:#7fdcff}.facts{line-height:1.7}</style></head><body><h1>Founder $1 Execution Proof</h1><div class="box"><p class="${armed?'good':'bad'}"><b>${armed?'ARMED':'NOT ARMED'}</b></p><p class="${proofReady?'good':'warn'}"><b>${proofReady?'EXECUTION WINDOW READY':'WAITING FOR ALL EXECUTION GATES'}</b></p><div class="facts">Latest shadow: <b>${String(shadow?.status||'UNKNOWN')}</b><br>Latest observation age: <b>${shadowAgeMs==null?'—':Math.round(shadowAgeMs/1000)+' sec'}</b><br>Provider-eligible contracts: <b>${Number(shadow?.eligibleCount||0)}</b><br>$1 proof-ready, time-safe candidates: <b>${readyCandidates.length}</b>${best?'<br>Current candidate: <b>'+String(best.asset||'')+' · '+String(best.outcomeSide||'')+' · '+String(best.marketTicker||'')+'</b><br>Seconds to close: <b>'+String(secondsToClose)+'</b>':''}<br>Execution balance preflight: <b class="${balanceReady?'good':'bad'}">${balanceReady?'PASS':'FAILED'}</b><br>Balance failure stage: <b>${balanceFailureStage}</b><br>Safe failure class: <b>${safeBalanceError}</b><br>Balance HTTP status: <b>${balanceProof?.httpStatus??'—'}</b><br>Balance attempts: <b>${balanceProof?.attempts??'—'}</b></div><p>Separate execution-plumbing acceptance test — not a Baseline strategy result.</p><p><b>IMMEDIATE ROUND TRIP MODE: ONE CONTRACT · MARKETABLE IOC BUY → REDUCE-ONLY IOC SELL.</b></p><p><b>Maximum entry debit: $1.00.</b> One currently eligible, time-safe Kalshi contract only. Existing one-shot authorization and governed exit remain enforced.</p>${!armed?'<button id="rearm" style="margin-right:10px">REARM ONE $1 PROOF</button>':''}<button id="run" ${proofReady?'':'disabled'}>RUN ONE $1-MAX BUY → SELL PROOF</button><pre id="result" style="white-space:pre-wrap;margin-top:18px"></pre><p><a href="/founder-execution-proof">Refresh readiness</a> · <button id="export" type="button">EXPORT PROOF JSON</button> · <a href="/">Return to Baseline dashboard</a></p></div><script>document.getElementById('export')?.addEventListener('click',async()=>{const r=await fetch('/founder-execution-proof-export',{cache:'no-store'});if(!r.ok){alert('EXPORT FAILED: '+r.status);return;}const blob=await r.blob();const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='baseline-real-execution-proof-'+new Date().toISOString().replace(/[:.]/g,'-')+'.json';document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(a.href),1000);});document.getElementById('rearm')?.addEventListener('click',async()=>{if(!confirm('Rearm exactly ONE manual-only $1-max execution proof? This does not submit an order.'))return;const r=await fetch('/founder-rearm-execution-proof',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({authorization:'REARM_ONE_EXECUTION_PROOF_MAX_1_USD'})});const j=await r.json();alert(j.ok?'REARMED: one manual-only $1 execution proof is authorized. No order has been submitted.':'NOT REARMED: '+(j.state||r.status));location.reload();});document.getElementById('run')?.addEventListener('click',async()=>{if(!confirm('Run exactly ONE $1-max execution proof now? This can place real Kalshi orders.'))return;const b=document.getElementById('run'),o=document.getElementById('result');b.disabled=true;b.textContent='RUNNING…';o.textContent='Submitting governed execution proof…';try{const r=await fetch('/founder-run-qualified-trade-now',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({authorization:'FOUNDER_RUN_QUALIFYING_ONE_TRADE_NOW'})});const j=await r.json();o.textContent=JSON.stringify(j,null,2);b.textContent='COMPLETE — REVIEW EVIDENCE';}catch(e){o.textContent='REQUEST FAILED: '+String(e);b.textContent='FAILED — NO RETRY';}});</script></body></html>`,{headers:{"content-type":"text/html; charset=utf-8","cache-control":"no-store"}});
     }
 
     if (request.method === "POST" && url.pathname === "/founder-run-qualified-trade-now") {
@@ -2856,7 +2950,7 @@ export default {
           // Kalshi can briefly return zero newly-open contracts at a 15-minute rollover.
           // Retry discovery read-only a few times before failing closed. No provider write
           // is possible during these attempts.
-          const retryDelaysMs=[0,900,1400];
+          const retryDelaysMs=[0,500,1000,1500,2000,3000];
           for(const delayMs of retryDelaysMs){
             if(delayMs) await new Promise(resolve=>setTimeout(resolve,delayMs));
             observationAttempts++;
