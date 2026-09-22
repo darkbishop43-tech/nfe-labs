@@ -2472,7 +2472,10 @@ async function load(){
       liveOrdersSub.textContent='No second entry is allowed. Only the exact reduce-only exit remains enabled.';
     }else if(armed){
       liveOrdersState.textContent='AUTHORIZED · WAITING';liveOrdersState.className='val good';
-      liveOrdersSub.textContent='Exactly one trade may be selected automatically from the validated five-asset universe at score ≥ .80.';
+      const activeAuthorizedThreshold=Number(realTrade?.founderAuthorization?.testEntryScore);
+      liveOrdersSub.textContent=Number.isFinite(activeAuthorizedThreshold)
+        ? 'TEMP ACCEPTANCE PROOF: exactly one trade may be selected automatically at score ≥ '+activeAuthorizedThreshold.toFixed(2)+'; $1 max. Permanent Baseline remains ≥ .80.'
+        : 'Exactly one trade may be selected automatically from the validated five-asset universe at score ≥ .80.';
     }else{
       liveOrdersState.textContent='DISABLED';liveOrdersState.className='val warn';
       liveOrdersSub.textContent='No new real entry is currently authorized.';
@@ -2484,11 +2487,13 @@ async function load(){
     executionGov.className=(managedPosition||armed)?'good':'warn';
     moneyLiveOrders.textContent=managedPosition?'POSITION OPEN':(armed?'ONE TRADE AUTHORIZED':'DISABLED');
     moneyLiveOrders.className=(managedPosition||armed)?'good':'warn';
-    E('realController').textContent=managedPosition?'MANAGED EXIT ACTIVE':(armed?'AUTHORIZED · WAITING FOR ≥ .80':'DISARMED');
+    const activeTestThreshold=Number(realTrade?.founderAuthorization?.testEntryScore);
+    const activeThresholdLabel=(armed&&Number.isFinite(activeTestThreshold))?activeTestThreshold.toFixed(2):'.80';
+    E('realController').textContent=managedPosition?'MANAGED EXIT ACTIVE':(armed?'AUTHORIZED · WAITING FOR ≥ '+activeThresholdLabel:'DISARMED');
     E('realController').className=(managedPosition||armed)?'good':'warn';
     E('realTradeStatus').textContent=realTrade?.status||'UNKNOWN';
     E('realTradeStatus').className=(realTrade?.status==='ONE_TRADE_COMPLETE')?'good':(armed?'good':'warn');
-    E('realTradeMarket').textContent=realTrade?.question||realTrade?.marketSlug||'WAITING FOR ≥ .80 SIGNAL';
+    E('realTradeMarket').textContent=realTrade?.question||realTrade?.marketSlug||('WAITING FOR ≥ '+activeThresholdLabel+' SIGNAL');
     E('realEntryOrder').textContent=realTrade?.entryOrderPresent?'SUBMITTED / PRESENT':'NOT SUBMITTED';
     E('realEntryOrder').className=realTrade?.entryOrderPresent?'good':'';
     E('realExitOrder').textContent=realTrade?.exitOrderPresent?'SUBMITTED / PRESENT':'NOT SUBMITTED';
