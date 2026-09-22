@@ -1332,10 +1332,7 @@ function hasOpposingUnderlyingPosition(shadow, candidate) {
 
 // Final Kalshi controller is invoked by the scheduler but remains fail-closed until BOTH
 // the controller switch and an unexpired persisted Founder one-trade authorization exist.
-async function maybeRunKalshiOneTrade(env, freshShadow=null, triggerSource="SCHEDULED_AUTO", preparedBalance=null, runOptions={}) {
-  const executionProofMode=runOptions?.executionProofMode===true;
-  const entryScoreFloor=executionProofMode?0:REAL_TEST_CONFIG.entryScore;
-  const entryStakeCapUsd=executionProofMode?1:REAL_TEST_CONFIG.maxStakeUsd;
+async function maybeRunKalshiOneTrade(env, freshShadow=null, triggerSource="SCHEDULED_AUTO", preparedBalance=null) {
   const state=await loadRealTradeState(env);
   const persistedState=JSON.parse(JSON.stringify(state));
   const persistIfChanged=()=>saveRealTradeStateIfChanged(env,state,persistedState);
@@ -1384,7 +1381,7 @@ async function maybeRunKalshiOneTrade(env, freshShadow=null, triggerSource="SCHE
       return state;
     }
     const qualifyingCandidates=(shadow.opportunities||[]).filter(o =>
-      Number(o?.score)>=entryScoreFloor && Number(o?.edge)>0 &&
+      Number(o?.score)>=REAL_TEST_CONFIG.entryScore && Number(o?.edge)>0 &&
       Number(o?.yes)>0.01 && Number(o?.yes)<0.99 && o?.marketTicker &&
       o?.executionEligible===true &&
       ["BTC","ETH","SOL","XRP","HYPE"].includes(String(o?.asset||"")) &&
@@ -1402,8 +1399,8 @@ async function maybeRunKalshiOneTrade(env, freshShadow=null, triggerSource="SCHE
       return state;
     }
 
-    const sizing=estimateKalshiFeeSafeSize(candidate.yes,entryStakeCapUsd);
-    if(!sizing.ok || sizing.totalDebitUsd>entryStakeCapUsd || sizing.count<1) {
+    const sizing=estimateKalshiFeeSafeSize(candidate.yes,REAL_TEST_CONFIG.maxStakeUsd);
+    if(!sizing.ok || sizing.totalDebitUsd>REAL_TEST_CONFIG.maxStakeUsd || sizing.count<1) {
       state.status="BLOCKED_FEE_SAFE_SIZE";
       await persistIfChanged();
       return state;
@@ -1503,7 +1500,7 @@ async function maybeRunKalshiOneTrade(env, freshShadow=null, triggerSource="SCHE
         settlement:{seriesTicker:candidate.seriesTicker||null,seriesTitle:candidate.seriesTitle||null,seriesFrequency:candidate.seriesFrequency||null,settlementSources:Array.isArray(candidate.settlementSources)?candidate.settlementSources:[],openTime:candidate.openTime||null,closeTime:candidate.closeTime||null},
         baselineInputs:{assetSpotUsd:safeFinite(shadow?.prices?.[candidate.asset]),assetSpotSource:shadow?.priceSources?.[candidate.asset]||null,movement:safeFinite(candidate.move),marketAsk:safeFinite(candidate.yes),marketBid:safeFinite(candidate.bid),edge:safeFinite(candidate.edge),score:safeFinite(candidate.score)},
         eligibleCandidatesConsidered:ranked.map((o,index)=>({rank:index+1,asset:o.asset||null,marketTicker:o.marketTicker||null,question:o.question||null,side:o.outcomeSide||null,direction:o.direction||null,score:safeFinite(o.score),edge:safeFinite(o.edge),movement:safeFinite(o.move),observedAsk:safeFinite(o.yes),observedBid:safeFinite(o.bid)})),
-        selectionExplanation:{rule:executionProofMode?"FOUNDER $1 EXECUTION PROOF — HIGHEST CURRENTLY ELIGIBLE TIME-SAFE CANDIDATE; BASELINE >= 0.80 STRATEGY FLOOR NOT USED FOR THIS PLUMBING TEST":"HIGHEST EXISTING BASELINE SCORE AMONG CURRENTLY ELIGIBLE CANDIDATES MEETING >= 0.80",selectedScore:safeFinite(candidate.score),alternativeCount:Math.max(0,ranked.length-1),noNewReasoningIntroduced:!executionProofMode,triggerSource,executionProofMode},
+        selectionExplanation:{rule:"HIGHEST EXISTING BASELINE SCORE AMONG CURRENTLY ELIGIBLE CANDIDATES MEETING >= 0.80",selectedScore:safeFinite(candidate.score),alternativeCount:Math.max(0,ranked.length-1),noNewReasoningIntroduced:true,triggerSource},
         authorization:{oneTradeAuthorized:kalshiAuthorizationValid(state),scope:state?.founderAuthorization?.scope||null,authorizedAt:state?.founderAuthorization?.authorizedAt||null,expiresAt:state?.founderAuthorization?.expiresAt??null}
       },postTradeOutcomeEvidence:state?.firstRealTradeEvidence?.postTradeOutcomeEvidence||null};
       realTradeLedger(state,"FIRST_REAL_TRADE_DECISION_SNAPSHOT_CAPTURED",{marketTicker:candidate.marketTicker,asset:candidate.asset,score:safeFinite(candidate.score),exchangeIndex:candidate.exchangeIndex??null,triggerSource});
@@ -1520,8 +1517,6 @@ async function maybeRunKalshiOneTrade(env, freshShadow=null, triggerSource="SCHE
     state.question=candidate.question||null;
     state.asset=candidate.asset||null;
     state.entryScore=Number(candidate.score);
-    state.executionProofMode=executionProofMode;
-    state.executionProofStakeCapUsd=executionProofMode?1:null;
     state.entryObservedAsk=Number(candidate.yes);
     state.entryCount=sizing.count;
     state.entryFeeBudgetUsd=sizing.feeUsd;
@@ -1531,7 +1526,7 @@ async function maybeRunKalshiOneTrade(env, freshShadow=null, triggerSource="SCHE
     state.status="ENTRY_SUBMITTING";
     realTradeLedger(state,"KALSHI_ENTRY_PRE_SUBMIT_LATCHED",{
       marketTicker:state.marketTicker,outcomeSide:state.outcomeSide,score:state.entryScore,exchangeIndex:state.exchangeIndex??null,
-      count:state.entryCount,totalDebitCapUsd:state.entryTotalDebitCapUsd,clientOrderId:state.entryClientOrderId,triggerSource,executionProofMode
+      count:state.entryCount,totalDebitCapUsd:state.entryTotalDebitCapUsd,clientOrderId:state.entryClientOrderId,triggerSource
     });
     await persistIfChanged();
 
@@ -1600,10 +1595,9 @@ async function maybeRunKalshiOneTrade(env, freshShadow=null, triggerSource="SCHE
   const shadowNow=await loadShadowState(env);
   const current=(shadowNow?.opportunities||[]).find(o=>o?.marketTicker===state.marketTicker&&o?.outcomeSide===state.outcomeSide);
   const age=now-Number(state.entryFilledAt||state.entrySubmitStartedAt||now);
-  const exitByExecutionProof=state?.executionProofMode===true;
   const exitByScore=current && Number(current.score)<=REAL_TEST_CONFIG.exitScore;
   const exitByTime=age>=REAL_TEST_CONFIG.maxHoldMs;
-  if(!exitByExecutionProof&&!exitByScore&&!exitByTime) {
+  if(!exitByScore&&!exitByTime) {
     state.status="POSITION_OPEN_WAITING_FOR_EXIT";
     await persistIfChanged();
     return state;
@@ -1632,7 +1626,7 @@ async function maybeRunKalshiOneTrade(env, freshShadow=null, triggerSource="SCHE
   state.remainingExitCount=remaining;
   state.exitClientOrderId=kalshiClientOrderId(state,"exit"+state.exitAttempt);
   state.exitSubmitStartedAt=Date.now();
-  state.exitReason=exitByExecutionProof?"FOUNDER_EXECUTION_PROOF_IMMEDIATE_EXIT":(exitByScore?"SCORE_EXIT":"MAX_HOLD_EXIT");
+  state.exitReason=exitByScore?"SCORE_EXIT":"MAX_HOLD_EXIT";
   await persistIfChanged();
   const exitPayload=kalshiV2ExitPayload(state,current.bid,state.exitClientOrderId);
   if(!exitPayload) {
@@ -2159,7 +2153,7 @@ body{background-color:#030811;background-image:linear-gradient(rgba(31,91,137,.0
   </div>
 
   <div class="card section">
-    <div style="display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap"><b>Real Orders · One-Trade Acceptance Test</b><div style="display:flex;gap:8px;flex-wrap:wrap"><button id="founderRunNowBtn" class="btn" type="button">FOUNDER $1 EXECUTION PROOF</button><button id="authorizeTradeBtn" class="btn" onclick="authorizeOneBaselineTrade()">AUTHORIZE ONE ≤ $5 TRADE</button></div></div>
+    <div style="display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap"><b>Real Orders · One-Trade Acceptance Test</b><div style="display:flex;gap:8px;flex-wrap:wrap"><button id="founderRunNowBtn" class="btn" onclick="founderRunQualifiedTradeNow()">FOUNDER RUN NOW</button><button id="authorizeTradeBtn" class="btn" onclick="authorizeOneBaselineTrade()">AUTHORIZE ONE ≤ $5 TRADE</button></div></div>
     <div class="compactGrid">
       <div class="miniBox"><div class="label">Orders waiting</div><div id="realController" class="miniVal">CHECKING…</div><div id="realTradeStatus" class="miniSub">CHECKING…</div></div>
       <div class="miniBox"><div class="label">Current position</div><div id="realTradeMarket" class="miniVal">WAITING</div><div class="miniSub">No manual order required</div></div>
@@ -2368,8 +2362,8 @@ async function load(){
     if(founderRunBtn){
       if(managedPosition){founderRunBtn.textContent='POSITION OPEN';founderRunBtn.disabled=true;}
       else if(realTrade?.consumed){founderRunBtn.textContent='TEST COMPLETE';founderRunBtn.disabled=true;}
-      else if(armed){founderRunBtn.textContent='FOUNDER $1 EXECUTION PROOF · ARMED';founderRunBtn.disabled=false;}
-      else{founderRunBtn.textContent='FOUNDER $1 EXECUTION PROOF · NOT ARMED';founderRunBtn.disabled=true;}
+      else if(armed){founderRunBtn.textContent='FOUNDER RUN NOW · SAME GATES';founderRunBtn.disabled=false;}
+      else{founderRunBtn.textContent='FOUNDER RUN NOW · NOT ARMED';founderRunBtn.disabled=true;}
     }
     if(managedPosition){
       statusDot.className='dot good';
@@ -2614,12 +2608,13 @@ document.addEventListener('keydown',e=>{if(e.key!=='Enter'&&e.key!==' ')return;c
 E('contractModalClose')?.addEventListener('click',closeContractInspector);
 E('contractModal')?.addEventListener('click',e=>{if(e.target===E('contractModal'))closeContractInspector();});
 load();paintDashboardCountdown();setInterval(paintDashboardCountdown,1000);setInterval(refreshPrices,10000);
-
+</script>
+<script>
 async function founderRunQualifiedTradeNow(){
   const btn=document.getElementById("founderRunNowBtn");
-  if(!confirm("Run exactly ONE $1-max EXECUTION PROOF now? This is a plumbing test, NOT a Baseline strategy result. It may buy and immediately sell one currently eligible, time-safe Kalshi contract. Execution safety, shard balance, one-shot authorization and reduce-only exit remain enforced.")) return;
-  const priorText=btn?.textContent||"FOUNDER $1 EXECUTION PROOF";
-  if(btn){btn.disabled=true;btn.textContent="FOUNDER $1 PROOF · BUY/SELL CHECK…";}
+  if(!confirm("Run the SAME governed Kalshi controller NOW? This can place the one already-authorized trade, up to $5, only if a current live candidate still passes EVERY existing gate: score >= .80, execution eligibility, shard balance, sizing, and time safety.")) return;
+  const priorText=btn?.textContent||"FOUNDER RUN NOW";
+  if(btn){btn.disabled=true;btn.textContent="FOUNDER RUN · CHECKING LIVE GATES…";}
   try{
     const r=await fetch("/founder-run-qualified-trade-now",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({authorization:"FOUNDER_RUN_QUALIFYING_ONE_TRADE_NOW"})});
     const j=await r.json().catch(()=>({}));
@@ -2647,7 +2642,6 @@ async function authorizeOneBaselineTrade(){
   alert(j.ok ? "AUTHORIZED: system will wait for one legitimate >= .80 signal; the authorization is consumed before that one entry write." : "NOT AUTHORIZED: "+(j.state||r.status));
   location.reload();
 }
-document.getElementById("founderRunNowBtn")?.addEventListener("click", founderRunQualifiedTradeNow);
 </script></body></html>`;
 }
 export default {
@@ -2792,19 +2786,13 @@ export default {
       }
 
       try {
-        let after=await maybeRunKalshiOneTrade(env,selectedShadow,"FOUNDER_MANUAL_$1_EXECUTION_PROOF",preparedBalance,{executionProofMode:true});
-        if(after?.entryOrderId && Number(after?.filledCount||0)>0 && !after?.consumed){
-          after=await maybeRunKalshiOneTrade(env,selectedShadow,"FOUNDER_MANUAL_$1_EXECUTION_PROOF_EXIT",preparedBalance,{executionProofMode:true});
-        }
+        const after=await maybeRunKalshiOneTrade(env,selectedShadow,"FOUNDER_MANUAL_TRIGGER",preparedBalance);
         const view=publicRealTradeView(after,env);
         return json({
           ...view,
           ok:true,
-          state:"FOUNDER_MANUAL_EXECUTION_PROOF_COMPLETE",
-          triggerSource:"FOUNDER_MANUAL_$1_EXECUTION_PROOF",
-          executionProofMode:true,
-          strategyResult:false,
-          stakeCapUsd:1,
+          state:"FOUNDER_MANUAL_CONTROLLER_RUN_COMPLETE",
+          triggerSource:"FOUNDER_MANUAL_TRIGGER",
           observationSource,
           manualLatencyMs:Date.now()-manualStartedAt,
           cachedShadowAgeMs:cachedAgeMs,
