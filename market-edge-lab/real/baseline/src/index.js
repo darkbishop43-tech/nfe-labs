@@ -744,7 +744,7 @@ function kalshiV2EntryPayload(candidate,sizing,clientOrderId) {
     post_only:false,
     cancel_order_on_pause:true,
     reduce_only:false,
-    ...(Number.isInteger(Number(candidate?.exchangeIndex)) ? {exchange_index:Number(candidate.exchangeIndex)} : {})
+    // exchange_index intentionally omitted: API2 auto-routes using ticker; shard balance is still preflighted.
   };
 }
 function kalshiV2ExitPayload(state,currentBid,clientOrderId) {
@@ -766,7 +766,7 @@ function kalshiV2ExitPayload(state,currentBid,clientOrderId) {
     post_only:false,
     cancel_order_on_pause:true,
     reduce_only:true,
-    ...(Number.isInteger(Number(state?.exchangeIndex)) ? {exchange_index:Number(state.exchangeIndex)} : {})
+    // exchange_index intentionally omitted on exit: API2 auto-routes using ticker.
   };
 }
 function summarizeKalshiV2CreateResponse(x) {
