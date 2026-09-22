@@ -4550,7 +4550,12 @@ document.getElementById('export')?.addEventListener('click',async()=>{const r=aw
 
     if (url.pathname === "/real-trade-state") {
       const state=await loadRealTradeState(env),view=publicRealTradeView(state,env);
-      const bp=await kalshiExecutionBalanceSnapshot(env);
+      // Never let a slow provider read hold the whole dashboard in CHECKING.
+      // Provider money remains authoritative when it returns inside the bounded window.
+      const bp=await Promise.race([
+        kalshiExecutionBalanceSnapshot(env),
+        new Promise(resolve=>setTimeout(()=>resolve({ok:false,timedOut:true}),2500))
+      ]);
       const cashCents=Number(bp?.body?.balance),positionCents=Number(bp?.body?.portfolio_value);
       if(bp?.ok&&Number.isFinite(cashCents)){
         view.providerCashUsd=Number((cashCents/100).toFixed(2));
