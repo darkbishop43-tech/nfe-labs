@@ -726,6 +726,24 @@ async function kalshiGetOrderV2(env,orderId) {
 async function kalshiGetFillsV2(env,orderId) {
   return kalshiExecutionGet(env,"/trade-api/v2/portfolio/fills?order_id="+encodeURIComponent(orderId)+"&limit=100");
 }
+async function kalshiLiveOutcomeBid(env,state) {
+  const ticker=String(state?.marketTicker||"").trim();
+  const outcome=String(state?.outcomeSide||"").toUpperCase();
+  if(!ticker || (outcome!=="YES"&&outcome!=="NO")) return null;
+  try {
+    const response=await kalshiExecutionGet(env,"/trade-api/v2/markets/"+encodeURIComponent(ticker));
+    if(!response.ok) return null;
+    const body=await response.json().catch(()=>({}));
+    const market=body?.market||body;
+    const raw=outcome==="YES"
+      ? (market?.yes_bid_dollars??market?.yes_bid)
+      : (market?.no_bid_dollars??market?.no_bid);
+    const bid=normalizeProbability(raw);
+    return Number.isFinite(bid)&&bid>0&&bid<1 ? {bid,source:"EXACT_TICKER_AUTHENTICATED_MARKET_READ",httpStatus:response.status} : null;
+  } catch {
+    return null;
+  }
+}
 function kalshiV2BookSide(outcomeSide) {
   return String(outcomeSide||"").toUpperCase()==="YES" ? "bid" :
          String(outcomeSide||"").toUpperCase()==="NO" ? "ask" : null;
@@ -1749,21 +1767,26 @@ async function maybeRunKalshiOneTrade(env, freshShadow=null, triggerSource="SCHE
     return state;
   }
   const shadowNow=await loadShadowState(env);
-  const current=(shadowNow?.opportunities||[]).find(o=>o?.marketTicker===state.marketTicker&&o?.outcomeSide===state.outcomeSide);
+  const shadowCurrent=(shadowNow?.opportunities||[]).find(o=>o?.marketTicker===state.marketTicker&&o?.outcomeSide===state.outcomeSide);
+  const exactQuote=await kalshiLiveOutcomeBid(env,state);
+  const liveBid=Number(exactQuote?.bid ?? shadowCurrent?.bid);
+  const current=shadowCurrent ? {...shadowCurrent,bid:liveBid} : (Number.isFinite(liveBid)?{marketTicker:state.marketTicker,outcomeSide:state.outcomeSide,bid:liveBid,score:null}:null);
   const age=now-Number(state.entryFilledAt||state.entrySubmitStartedAt||now);
   const holdDurationProof=state?.founderAuthorization?.holdDurationProof===true;
-  const exitByScore=!holdDurationProof && current && Number(current.score)<=REAL_TEST_CONFIG.exitScore;
+  const exitByScore=!holdDurationProof && shadowCurrent && Number(shadowCurrent.score)<=REAL_TEST_CONFIG.exitScore;
   const exitByTime=age>=REAL_TEST_CONFIG.maxHoldMs;
   if(!exitByScore&&!exitByTime) {
     state.status="POSITION_OPEN_WAITING_FOR_EXIT";
     await persistIfChanged();
     return state;
   }
-  if(!current || !(Number(current.bid)>0.01) || !(Number(current.bid)<0.99)) {
+  if(!current || !(liveBid>0.01) || !(liveBid<0.99)) {
     state.status="EXIT_REQUIRED_WAITING_FOR_LIVE_BID";
+    state.exitQuoteSource=exactQuote?.source||"SHADOW_EXACT_TICKER_MISSING_OR_NO_VALID_BID";
     await persistIfChanged();
     return state;
   }
+  state.exitQuoteSource=exactQuote?.source||(shadowCurrent?"SHADOW_EXACT_TICKER":"UNKNOWN");
   if(state.exitSubmitStartedAt && (now-Number(state.exitSubmitStartedAt))<KALSHI_ONE_TRADE_SAFETY.pendingOrderTimeoutMs) {
     state.status="BLOCKED_EXIT_RECONCILIATION";
     await persistIfChanged();
