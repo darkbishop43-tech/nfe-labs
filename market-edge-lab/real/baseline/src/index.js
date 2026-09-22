@@ -2611,12 +2611,29 @@ load();paintDashboardCountdown();setInterval(paintDashboardCountdown,1000);setIn
 </script>
 <script>
 async function founderRunQualifiedTradeNow(){
-  if(!confirm("Run the SAME governed Kalshi controller NOW? This can place the one already-authorized trade, up to $5, only if a fresh live candidate still meets every existing gate including score >= .80 and time safety.")) return;
-  const r=await fetch("/founder-run-qualified-trade-now",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({authorization:"FOUNDER_RUN_QUALIFYING_ONE_TRADE_NOW"})});
-  const j=await r.json().catch(()=>({}));
-  const outcome=j?.entryOrderPresent?"ORDER SUBMITTED / PRESENT":(j?.status||j?.state||("HTTP "+r.status));
-  alert((r.ok?"FOUNDER RUN RESULT: ":"FOUNDER RUN BLOCKED: ")+outcome);
-  location.reload();
+  const btn=document.getElementById("founderRunNowBtn");
+  if(!confirm("Run the SAME governed Kalshi controller NOW? This can place the one already-authorized trade, up to $5, only if a current live candidate still passes EVERY existing gate: score >= .80, execution eligibility, shard balance, sizing, and time safety.")) return;
+  const priorText=btn?.textContent||"FOUNDER RUN NOW";
+  if(btn){btn.disabled=true;btn.textContent="FOUNDER RUN · CHECKING LIVE GATES…";}
+  try{
+    const r=await fetch("/founder-run-qualified-trade-now",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({authorization:"FOUNDER_RUN_QUALIFYING_ONE_TRADE_NOW"})});
+    const j=await r.json().catch(()=>({}));
+    const submitted=Boolean(j?.entryOrderPresent||j?.submitted);
+    const orderId=j?.entryOrderId||j?.entryOrder?.orderId||null;
+    const status=j?.status||j?.controllerStatus||j?.state||("HTTP "+r.status);
+    const source=j?.observationSource?("\nObservation: "+j.observationSource):"";
+    const latency=Number.isFinite(Number(j?.manualLatencyMs))?("\nManual path: "+j.manualLatencyMs+" ms"):"";
+    if(submitted){
+      alert("FOUNDER RUN RESULT: ORDER SUBMITTED / PRESENT"+(orderId?"\nOrder ID: "+orderId:"")+source+latency);
+    }else{
+      alert((r.ok?"FOUNDER RUN COMPLETE — NO ORDER SUBMITTED":"FOUNDER RUN BLOCKED")+"\nController: "+status+source+latency+"\nNo gate was overridden.");
+    }
+  }catch(error){
+    alert("FOUNDER RUN ERROR: "+String(error?.message||error||"REQUEST_FAILED")+"\nNo gate was overridden.");
+  }finally{
+    if(btn){btn.disabled=false;btn.textContent=priorText;}
+    location.reload();
+  }
 }
 async function authorizeOneBaselineTrade(){
   if(!confirm("Authorize exactly ONE governed Baseline trade, maximum $5, only at score >= .80?")) return;
@@ -2716,33 +2733,74 @@ export default {
     if (request.method === "POST" && url.pathname === "/founder-run-qualified-trade-now") {
       let body={}; try{body=await request.json();}catch{}
       if(body?.authorization!=="FOUNDER_RUN_QUALIFYING_ONE_TRADE_NOW") return json({ok:false,state:"EXPLICIT_FOUNDER_RUN_PHRASE_REQUIRED",submitted:false,realMoneyMoved:false},400);
+
       const before=await loadRealTradeState(env);
       if(!kalshiControllerSwitchEnabled(env)) return json({ok:false,state:"CONTROLLER_SWITCH_HARD_DISABLED",submitted:false,realMoneyMoved:false},423);
       if(!kalshiAuthorizationValid(before)) return json({ok:false,state:"FOUNDER_AUTHORIZATION_NOT_ACTIVE",submitted:false,realMoneyMoved:false},423);
       if(before?.consumed||before?.entryOrderId||before?.entrySubmitStartedAt) return json({ok:false,state:"ONE_TRADE_ALREADY_USED_OR_LATCHED",submitted:Boolean(before?.entryOrderId),realMoneyMoved:Boolean(before?.entryOrderId)},409);
-      let freshShadow=null;
-      try {
-        freshShadow=await runShadow(env);
-      } catch(error) {
-        return json({
-          ok:false,state:"FOUNDER_MANUAL_FRESH_SHADOW_FAILED",failureStage:"RUN_SHADOW",
-          errorName:String(error?.name||"Error"),
-          errorCode:String(error?.message||error||"UNKNOWN").slice(0,220),
-          authorizationStillActive:kalshiAuthorizationValid(await loadRealTradeState(env)),
-          submitted:false,realMoneyMoved:false
-        },500);
+
+      // Founder manual fast path:
+      // Use the latest successful governed observation immediately when it is still fresh.
+      // This avoids spending the remaining 15-minute window re-running full discovery before
+      // the exact same controller gets a chance to evaluate the already-observed signal.
+      // No strategy, score, time-safety, sizing, shard, authorization or one-shot gate is bypassed.
+      const manualStartedAt=Date.now();
+      const [cachedShadow,preparedBalance]=await Promise.all([
+        loadShadowState(env),
+        kalshiExecutionBalanceSnapshot(env)
+      ]);
+      const cachedObservedAt=Date.parse(cachedShadow?.lastRunAt||"");
+      const cachedAgeMs=Number.isFinite(cachedObservedAt)?Math.max(0,manualStartedAt-cachedObservedAt):null;
+      const cachedControllerCandidates=(cachedShadow?.opportunities||[]).filter(o =>
+        Number(o?.score)>=REAL_TEST_CONFIG.entryScore && Number(o?.edge)>0 &&
+        Number(o?.yes)>0.01 && Number(o?.yes)<0.99 && o?.marketTicker &&
+        o?.executionEligible===true &&
+        ["BTC","ETH","SOL","XRP","HYPE"].includes(String(o?.asset||"")) &&
+        (o?.outcomeSide==="YES"||o?.outcomeSide==="NO")
+      );
+      const cachedHasTimeSafeCandidate=cachedControllerCandidates.some(o=>kalshiCandidateTimeSafe(o,manualStartedAt));
+      const cachedFresh=Boolean(
+        cachedShadow?.status==="LIVE_KALSHI_SHADOW" &&
+        cachedShadow?.assetCoverageReady &&
+        cachedAgeMs!==null && cachedAgeMs<=75000
+      );
+
+      let selectedShadow=cachedShadow;
+      let observationSource="CACHED_GOVERNED_OBSERVATION";
+      if(!cachedFresh || !cachedHasTimeSafeCandidate) {
+        try {
+          selectedShadow=await runShadow(env);
+          observationSource="FRESH_MANUAL_OBSERVATION";
+        } catch(error) {
+          return json({
+            ok:false,state:"FOUNDER_MANUAL_FRESH_SHADOW_FAILED",failureStage:"RUN_SHADOW",
+            errorName:String(error?.name||"Error"),
+            errorCode:String(error?.message||error||"UNKNOWN").slice(0,220),
+            cachedShadowAgeMs:cachedAgeMs,
+            cachedHadControllerCandidate:cachedControllerCandidates.length>0,
+            cachedHadTimeSafeCandidate:cachedHasTimeSafeCandidate,
+            authorizationStillActive:kalshiAuthorizationValid(await loadRealTradeState(env)),
+            submitted:false,realMoneyMoved:false
+          },500);
+        }
       }
+
       try {
-        const after=await maybeRunKalshiOneTrade(env,freshShadow,"FOUNDER_MANUAL_TRIGGER");
+        const after=await maybeRunKalshiOneTrade(env,selectedShadow,"FOUNDER_MANUAL_TRIGGER",preparedBalance);
         const view=publicRealTradeView(after,env);
         return json({
           ...view,
           ok:true,
           state:"FOUNDER_MANUAL_CONTROLLER_RUN_COMPLETE",
           triggerSource:"FOUNDER_MANUAL_TRIGGER",
-          freshShadowLastRunAt:freshShadow?.lastRunAt||null,
-          freshShadowStatus:freshShadow?.status||null,
-          freshEligibleCount:Number(freshShadow?.eligibleCount||0),
+          observationSource,
+          manualLatencyMs:Date.now()-manualStartedAt,
+          cachedShadowAgeMs:cachedAgeMs,
+          cachedHadControllerCandidate:cachedControllerCandidates.length>0,
+          cachedHadTimeSafeCandidate:cachedHasTimeSafeCandidate,
+          freshShadowLastRunAt:selectedShadow?.lastRunAt||null,
+          freshShadowStatus:selectedShadow?.status||null,
+          freshEligibleCount:Number(selectedShadow?.eligibleCount||0),
           submitted:Boolean(after?.entryOrderId),
           realMoneyMoved:Boolean(after?.entryOrderId)
         });
@@ -2752,9 +2810,14 @@ export default {
           ok:false,state:"FOUNDER_MANUAL_CONTROLLER_FAILED",failureStage:"MAYBE_RUN_KALSHI_ONE_TRADE",
           errorName:String(error?.name||"Error"),
           errorCode:String(error?.message||error||"UNKNOWN").slice(0,220),
-          freshShadowLastRunAt:freshShadow?.lastRunAt||null,
-          freshShadowStatus:freshShadow?.status||null,
-          freshEligibleCount:Number(freshShadow?.eligibleCount||0),
+          observationSource,
+          manualLatencyMs:Date.now()-manualStartedAt,
+          cachedShadowAgeMs:cachedAgeMs,
+          cachedHadControllerCandidate:cachedControllerCandidates.length>0,
+          cachedHadTimeSafeCandidate:cachedHasTimeSafeCandidate,
+          freshShadowLastRunAt:selectedShadow?.lastRunAt||null,
+          freshShadowStatus:selectedShadow?.status||null,
+          freshEligibleCount:Number(selectedShadow?.eligibleCount||0),
           controllerStatus:afterFailure?.status||null,
           authorizationStillActive:kalshiAuthorizationValid(afterFailure),
           authorizationConsumed:Boolean(afterFailure?.founderAuthorization?.consumed),
