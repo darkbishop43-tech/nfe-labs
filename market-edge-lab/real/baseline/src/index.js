@@ -2371,12 +2371,12 @@ body{background-color:#030811;background-image:linear-gradient(rgba(31,91,137,.0
       <div class="miniBox"><div class="label">Persistence</div><div id="shadowPersistence" class="miniVal">—</div><div class="miniSub">Isolated from paper experiments</div></div>
       <div class="miniBox"><div class="label">Started</div><div id="shadowStarted" class="miniVal">—</div></div>
       <div class="miniBox"><div class="label">Last observation</div><div id="shadowLast" class="miniVal">—</div><div class="miniSub">Dashboard refresh in <span id="refreshCountdownRuntime">05:00</span></div></div>
-      <div class="miniBox"><div class="label">Trading rule</div><div class="miniVal">≥ .80 ENTRY · ≤ .20 EXIT</div><div class="miniSub">5 min max hold · $5 max stake</div></div>
+      <div class="miniBox"><div class="label">Trading rule</div><div class="miniVal">≥ .80 ENTRY · ≤ .20 EXIT</div><div class="miniSub">5 min max hold · $1 current live cap</div></div>
     </div>
   </div>
 
   <div class="card section">
-    <div style="display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap"><b>Real Orders · Baseline .80 Governed Live Trade</b><div style="display:flex;gap:8px;flex-wrap:wrap"><a id="founderRunNowBtn" class="btn" href="/founder-execution-proof" style="display:inline-block;text-decoration:none">FOUNDER $1 EXECUTION PROOF</a><a id="authorizeTradeBtn" class="btn" href="/baseline-80-arm" style="display:inline-block;visibility:visible;text-decoration:none">TEST AUTO ≥ .50 · HOLD 5 MIN · $1 MAX</a></div></div>
+    <div style="display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap"><b>Real Orders · Baseline .80 Governed Live Trade</b><div style="display:flex;gap:8px;flex-wrap:wrap"><a id="founderRunNowBtn" class="btn" href="/founder-execution-proof" style="display:inline-block;text-decoration:none">FOUNDER $1 EXECUTION PROOF</a><a id="authorizeTradeBtn" class="btn" href="/baseline-80-arm" style="display:inline-block;visibility:visible;text-decoration:none">ARM BASELINE ≥ .80 · $1 MAX</a></div></div>
     <div class="compactGrid">
       <div class="miniBox"><div class="label">Orders waiting</div><div id="realController" class="miniVal">CHECKING…</div><div id="realTradeStatus" class="miniSub">CHECKING…</div></div>
       <div class="miniBox"><div class="label">Current position</div><div id="realTradeMarket" class="miniVal">WAITING</div><div class="miniSub">No manual order required</div></div>
@@ -2585,10 +2585,10 @@ async function load(){
       if(managedPosition){authBtn.textContent='POSITION UNDER GOVERNED EXIT';authBtn.disabled=true;}
       else if(armed){authBtn.textContent='BASELINE .80 · ARMED';authBtn.disabled=true;}
       else if(realTrade?.consumed && realTrade?.entryOrderPresent && realTrade?.exitOrderPresent){
-        authBtn.textContent='TEST AUTO ≥ .50 · HOLD 5 MIN · $1 MAX';
+        authBtn.textContent='ARM BASELINE ≥ .80 · $1 MAX';
         authBtn.disabled=false;
       }else if(realTrade?.consumed){authBtn.textContent='ONE-TRADE TEST COMPLETE';authBtn.disabled=true;}
-      else{authBtn.textContent='TEST AUTO ≥ .50 · HOLD 5 MIN · $1 MAX';authBtn.disabled=false;}
+      else{authBtn.textContent='ARM BASELINE ≥ .80 · $1 MAX';authBtn.disabled=false;}
     }
     const founderRunBtn=E('founderRunNowBtn');
     if(founderRunBtn){
@@ -2606,7 +2606,7 @@ async function load(){
       statusText.innerHTML='<b>AUTHENTICATED · ONE-TRADE AUTO-SELECTION AUTHORIZED</b>';
       const testThreshold=Number(realTrade?.founderAuthorization?.testEntryScore);
       statusSub.textContent=Number.isFinite(testThreshold)
-        ? 'TEST MODE: waiting automatically for score ≥ '+testThreshold.toFixed(2)+'; $1 max; then hold 5 minutes before governed exit. Permanent Baseline remains .80.'
+        ? 'BASELINE LIVE: waiting automatically for score ≥ '+testThreshold.toFixed(2)+'; $1 max; governed exit at ≤ .20 or 5-minute maximum hold.'
         : 'FISHING: waiting for a validated BTC/ETH/SOL/XRP/HYPE opportunity at score ≥ .80.';
     }
     const moneyFmt=n=>Number(n).toLocaleString(undefined,{style:'currency',currency:'USD',maximumFractionDigits:2});
@@ -3215,7 +3215,7 @@ document.getElementById('export')?.addEventListener('click',async()=>{const r=aw
     }
 
     if (request.method === "GET" && url.pathname === "/baseline-80-arm") {
-      return new Response(`<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><title>Arm Automatic .50 Test</title><style>body{font-family:system-ui;background:#030811;color:#eef7ff;padding:24px;max-width:720px;margin:auto}.box{border:1px solid #31516b;border-radius:14px;padding:20px;background:#071725}button{font-size:18px;font-weight:800;padding:14px 18px;border-radius:10px;border:1px solid #d3a53a;background:#0b1421;color:#ffd86a}</style></head><body><div class="box"><h2>Baseline .80 / $1 Governed Trade</h2><p>This arms exactly one automatic Baseline entry at score ≥ .80, premium + entry fee ≤ $1, followed by the governed .20 / 5-minute exit.</p><form method="POST" action="/kalshi-authorize-one-trade"><input type="hidden" name="authorization" value="AUTHORIZE_ONE_BASELINE_80_MAX_1_USD"><button type="submit">ARM ONE BASELINE .80 TRADE</button></form></div></body></html>`,{headers:{"content-type":"text/html;charset=utf-8","cache-control":"no-store"}});
+      return new Response(`<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><title>Arm Baseline .80 Trade</title><style>body{font-family:system-ui;background:#030811;color:#eef7ff;padding:24px;max-width:720px;margin:auto}.box{border:1px solid #31516b;border-radius:14px;padding:20px;background:#071725}button{font-size:18px;font-weight:800;padding:14px 18px;border-radius:10px;border:1px solid #d3a53a;background:#0b1421;color:#ffd86a}</style></head><body><div class="box"><h2>Baseline .80 / $1 Governed Trade</h2><p>This arms exactly one automatic Baseline entry at score ≥ .80, premium + entry fee ≤ $1, followed by the governed .20 / 5-minute exit.</p><form method="POST" action="/kalshi-authorize-one-trade"><input type="hidden" name="authorization" value="AUTHORIZE_ONE_BASELINE_80_MAX_1_USD"><button type="submit">ARM ONE BASELINE .80 TRADE</button></form></div></body></html>`,{headers:{"content-type":"text/html;charset=utf-8","cache-control":"no-store"}});
     }
 
     if (request.method === "POST" && url.pathname === "/kalshi-authorize-one-trade") {
