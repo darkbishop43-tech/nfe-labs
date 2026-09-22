@@ -2318,7 +2318,7 @@ body{background-color:#030811;background-image:linear-gradient(rgba(31,91,137,.0
   </div>
 
   <div class="card section">
-    <div style="display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap"><b>Real Orders · Temporary .50 Auto/Hold Acceptance Proof</b><div style="display:flex;gap:8px;flex-wrap:wrap"><a id="founderRunNowBtn" class="btn" href="/founder-execution-proof" style="display:inline-block;text-decoration:none">FOUNDER $1 EXECUTION PROOF</a><button id="authorizeTradeBtn" class="btn" style="display:inline-block;visibility:visible" onclick="authorizeOneBaselineTrade()">TEST AUTO ≥ .50 · HOLD 5 MIN · $1 MAX</button></div></div>
+    <div style="display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap"><b>Real Orders · Temporary .50 Auto/Hold Acceptance Proof</b><div style="display:flex;gap:8px;flex-wrap:wrap"><a id="founderRunNowBtn" class="btn" href="/founder-execution-proof" style="display:inline-block;text-decoration:none">FOUNDER $1 EXECUTION PROOF</a><form method="POST" action="/kalshi-authorize-one-trade" style="display:inline;margin:0"><input type="hidden" name="authorization" value="AUTHORIZE_ONE_AUTO_50_HOLD_PROOF_MAX_1_USD"><button id="authorizeTradeBtn" type="submit" class="btn" style="display:inline-block;visibility:visible">TEST AUTO ≥ .50 · HOLD 5 MIN · $1 MAX</button></form></div></div>
     <div class="compactGrid">
       <div class="miniBox"><div class="label">Orders waiting</div><div id="realController" class="miniVal">CHECKING…</div><div id="realTradeStatus" class="miniSub">CHECKING…</div></div>
       <div class="miniBox"><div class="label">Current position</div><div id="realTradeMarket" class="miniVal">WAITING</div><div class="miniSub">No manual order required</div></div>
@@ -2839,7 +2839,6 @@ async function authorizeOneBaselineTrade(){
     if(note) note.textContent="AUTO TEST NOT ARMED · "+String(error?.message||error||"REQUEST_FAILED");
   }
 }
-document.getElementById("authorizeTradeBtn")?.addEventListener("click",authorizeOneBaselineTrade);
 </script></body></html>`;
 }
 export default {
@@ -3137,8 +3136,17 @@ document.getElementById('export')?.addEventListener('click',async()=>{const r=aw
     if (request.method === "POST" && url.pathname === "/kalshi-authorize-one-trade") {
       if(!kalshiControllerSwitchEnabled(env)) return json({ok:false,state:"CONTROLLER_SWITCH_HARD_DISABLED",armed:false,submitted:false,realMoneyMoved:false},423);
       const state=await loadRealTradeState(env);
-      let body={}; try{body=await request.json();}catch{}
-      if(body?.authorization!=="AUTHORIZE_ONE_AUTO_50_HOLD_PROOF_MAX_1_USD") return json({ok:false,state:"EXPLICIT_AUTHORIZATION_PHRASE_REQUIRED",armed:false},400);
+      let body={};
+      const contentType=String(request.headers.get("content-type")||"").toLowerCase();
+      const nativeForm=contentType.includes("application/x-www-form-urlencoded")||contentType.includes("multipart/form-data");
+      try{
+        if(nativeForm){const form=await request.formData();body={authorization:String(form.get("authorization")||"")};}
+        else body=await request.json();
+      }catch{}
+      if(body?.authorization!=="AUTHORIZE_ONE_AUTO_50_HOLD_PROOF_MAX_1_USD"){
+        if(nativeForm) return Response.redirect(new URL("/?auto50=AUTHORIZATION_PHRASE_REJECTED",request.url).toString(),303);
+        return json({ok:false,state:"EXPLICIT_AUTHORIZATION_PHRASE_REQUIRED",armed:false},400);
+      }
       const completedRoundTrip=Boolean(
         state?.entryOrderId && state?.exitOrderId &&
         Number(state?.filledCount||0)>0 &&
@@ -3162,6 +3170,7 @@ document.getElementById('export')?.addEventListener('click',async()=>{const r=aw
         state.consumed=false;
         realTradeLedger(state,"MANUAL_EXECUTION_PROOF_PRESERVED",{providerConfirmed:true});
       } else if(state?.consumed||state?.entryOrderId||state?.entrySubmitStartedAt) {
+        if(nativeForm) return Response.redirect(new URL("/?auto50=ONE_TRADE_ALREADY_USED_OR_LATCHED",request.url).toString(),303);
         return json({ok:false,state:"ONE_TRADE_ALREADY_USED_OR_LATCHED",armed:false},409);
       }
       const now=Date.now();
@@ -3170,6 +3179,7 @@ document.getElementById('export')?.addEventListener('click',async()=>{const r=aw
       state.status="AUTHORIZED_WAITING_FOR_AUTO_50_HOLD_PROOF";
       realTradeLedger(state,"FOUNDER_AUTO_50_HOLD_PROOF_AUTHORIZED",{testThreshold:0.50,baselineThreshold:REAL_TEST_CONFIG.entryScore,maxEntryDebitUsd:1,holdMs:REAL_TEST_CONFIG.maxHoldMs,automatic:true});
       await saveRealTradeState(env,state);
+      if(nativeForm) return Response.redirect(new URL("/?auto50=ARMED",request.url).toString(),303);
       return json({ok:true,state:state.status,armed:true,automatic:true,testThreshold:0.50,baselineThreshold:REAL_TEST_CONFIG.entryScore,maxEntryDebitUsd:1,holdMs:REAL_TEST_CONFIG.maxHoldMs,submitted:false,realMoneyMoved:false});
     }
 
