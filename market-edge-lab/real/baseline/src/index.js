@@ -2614,8 +2614,7 @@ document.addEventListener('keydown',e=>{if(e.key!=='Enter'&&e.key!==' ')return;c
 E('contractModalClose')?.addEventListener('click',closeContractInspector);
 E('contractModal')?.addEventListener('click',e=>{if(e.target===E('contractModal'))closeContractInspector();});
 load();paintDashboardCountdown();setInterval(paintDashboardCountdown,1000);setInterval(refreshPrices,10000);
-</script>
-<script>
+
 async function founderRunQualifiedTradeNow(){
   const btn=document.getElementById("founderRunNowBtn");
   if(!confirm("Run exactly ONE $1-max EXECUTION PROOF now? This is a plumbing test, NOT a Baseline strategy result. It may buy and immediately sell one currently eligible, time-safe Kalshi contract. Execution safety, shard balance, one-shot authorization and reduce-only exit remain enforced.")) return;
@@ -2641,7 +2640,6 @@ async function founderRunQualifiedTradeNow(){
     location.reload();
   }
 }
-document.getElementById("founderRunNowBtn")?.addEventListener("click", founderRunQualifiedTradeNow);
 async function authorizeOneBaselineTrade(){
   if(!confirm("Authorize exactly ONE governed Baseline trade, maximum $5, only at score >= .80?")) return;
   const r=await fetch("/kalshi-authorize-one-trade",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({authorization:"AUTHORIZE_ONE_TRADE_MAX_5_USD"})});
@@ -2649,6 +2647,7 @@ async function authorizeOneBaselineTrade(){
   alert(j.ok ? "AUTHORIZED: system will wait for one legitimate >= .80 signal; the authorization is consumed before that one entry write." : "NOT AUTHORIZED: "+(j.state||r.status));
   location.reload();
 }
+document.getElementById("founderRunNowBtn")?.addEventListener("click", founderRunQualifiedTradeNow);
 </script></body></html>`;
 }
 export default {
