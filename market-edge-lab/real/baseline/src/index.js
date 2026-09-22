@@ -2159,7 +2159,7 @@ body{background-color:#030811;background-image:linear-gradient(rgba(31,91,137,.0
   </div>
 
   <div class="card section">
-    <div style="display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap"><b>Real Orders · One-Trade Acceptance Test</b><div style="display:flex;gap:8px;flex-wrap:wrap"><button id="founderRunNowBtn" class="btn" onclick="founderRunQualifiedTradeNow()">FOUNDER $1 EXECUTION PROOF</button><button id="authorizeTradeBtn" class="btn" onclick="authorizeOneBaselineTrade()">AUTHORIZE ONE ≤ $5 TRADE</button></div></div>
+    <div style="display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap"><b>Real Orders · One-Trade Acceptance Test</b><div style="display:flex;gap:8px;flex-wrap:wrap"><button id="founderRunNowBtn" class="btn" type="button">FOUNDER $1 EXECUTION PROOF</button><button id="authorizeTradeBtn" class="btn" onclick="authorizeOneBaselineTrade()">AUTHORIZE ONE ≤ $5 TRADE</button></div></div>
     <div class="compactGrid">
       <div class="miniBox"><div class="label">Orders waiting</div><div id="realController" class="miniVal">CHECKING…</div><div id="realTradeStatus" class="miniSub">CHECKING…</div></div>
       <div class="miniBox"><div class="label">Current position</div><div id="realTradeMarket" class="miniVal">WAITING</div><div class="miniSub">No manual order required</div></div>
@@ -2641,7 +2641,7 @@ async function founderRunQualifiedTradeNow(){
     location.reload();
   }
 }
-async function authorizeOneBaselineTrade(){
+document.getElementById("founderRunNowBtn")?.addEventListener("click", founderRunQualifiedTradeNow);\nasync function authorizeOneBaselineTrade(){
   if(!confirm("Authorize exactly ONE governed Baseline trade, maximum $5, only at score >= .80?")) return;
   const r=await fetch("/kalshi-authorize-one-trade",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({authorization:"AUTHORIZE_ONE_TRADE_MAX_5_USD"})});
   const j=await r.json();
