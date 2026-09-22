@@ -1332,7 +1332,7 @@ function hasOpposingUnderlyingPosition(shadow, candidate) {
 
 // Final Kalshi controller is invoked by the scheduler but remains fail-closed until BOTH
 // the controller switch and an unexpired persisted Founder one-trade authorization exist.
-async function maybeRunKalshiOneTrade(env, freshShadow=null, triggerSource="SCHEDULED_AUTO", preparedBalance=null, stakeCapUsd=REAL_TEST_CONFIG.maxStakeUsd) {
+async function maybeRunKalshiOneTrade(env, freshShadow=null, triggerSource="SCHEDULED_AUTO", preparedBalance=null, stakeCapUsd=REAL_TEST_CONFIG.maxStakeUsd, executionProofMode=false) {
   const state=await loadRealTradeState(env);
   const persistedState=JSON.parse(JSON.stringify(state));
   const persistIfChanged=()=>saveRealTradeStateIfChanged(env,state,persistedState);
@@ -1380,8 +1380,11 @@ async function maybeRunKalshiOneTrade(env, freshShadow=null, triggerSource="SCHE
       await persistIfChanged();
       return state;
     }
+    // The Founder $1 execution proof validates provider plumbing, not strategy quality.
+    // In that explicitly labeled mode ONLY, keep every execution/safety gate but do not
+    // require the frozen Baseline >= .80 score/positive-edge strategy qualification.
     const qualifyingCandidates=(shadow.opportunities||[]).filter(o =>
-      Number(o?.score)>=REAL_TEST_CONFIG.entryScore && Number(o?.edge)>0 &&
+      (!executionProofMode || (Number(o?.score)>=REAL_TEST_CONFIG.entryScore && Number(o?.edge)>0)) &&
       Number(o?.yes)>0.01 && Number(o?.yes)<0.99 && o?.marketTicker &&
       o?.executionEligible===true &&
       ["BTC","ETH","SOL","XRP","HYPE"].includes(String(o?.asset||"")) &&
@@ -2793,7 +2796,7 @@ export default {
       }
 
       try {
-        const after=await maybeRunKalshiOneTrade(env,selectedShadow,"FOUNDER_MANUAL_TRIGGER",preparedBalance,1);
+        const after=await maybeRunKalshiOneTrade(env,selectedShadow,"FOUNDER_MANUAL_TRIGGER",preparedBalance,1,true);
         const view=publicRealTradeView(after,env);
         return json({
           ...view,
