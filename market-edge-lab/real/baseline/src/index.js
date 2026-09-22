@@ -2641,7 +2641,8 @@ async function founderRunQualifiedTradeNow(){
     location.reload();
   }
 }
-document.getElementById("founderRunNowBtn")?.addEventListener("click", founderRunQualifiedTradeNow);\nasync function authorizeOneBaselineTrade(){
+document.getElementById("founderRunNowBtn")?.addEventListener("click", founderRunQualifiedTradeNow);
+async function authorizeOneBaselineTrade(){
   if(!confirm("Authorize exactly ONE governed Baseline trade, maximum $5, only at score >= .80?")) return;
   const r=await fetch("/kalshi-authorize-one-trade",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({authorization:"AUTHORIZE_ONE_TRADE_MAX_5_USD"})});
   const j=await r.json();
