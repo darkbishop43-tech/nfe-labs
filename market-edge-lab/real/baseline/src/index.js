@@ -2290,25 +2290,12 @@ async function load(){
   const conn=E('conn'),connSub=E('connSub'),bal=E('bal'),balSub=E('balSub'),creds=E('creds'),gateAccount=E('gateAccount'),gateBalance=E('gateBalance'),gatePreview=E('gatePreview'),markets=E('markets'),statusDot=E('statusDot'),statusText=E('statusText'),refresh=E('refresh');
   refresh.disabled=true;refresh.textContent='CHECKING…';gatePreview.textContent='CHECKING LIVE PROOF…';gatePreview.className='m';
   try{
-    const dashboardJson=async(url,timeoutMs=8000)=>{
-      const controller=new AbortController();
-      const timer=setTimeout(()=>controller.abort("DASHBOARD_READ_TIMEOUT"),timeoutMs);
-      try{
-        const response=await fetch(url,{cache:'no-store',signal:controller.signal});
-        // The timeout must cover response-body parsing too. Previously it was cleared
-        // as soon as headers arrived, so a stalled body could still freeze CHECKING.
-        const body=await response.text();
-        try{return JSON.parse(body);}catch{return {};}
-      }catch{return {};}
-      finally{clearTimeout(timer);}
-    };
-    // Each proof is independently bounded. Slow legacy diagnostics cannot freeze
-    // the Founder control surface; missing execution state continues to fail closed.
-    const values=await Promise.all([
-      dashboardJson('/account'),dashboardJson('/status'),dashboardJson('/markets'),dashboardJson('/preview-proof'),
-      dashboardJson('/money-path-proof'),dashboardJson('/shadow-state'),dashboardJson('/price-proof'),dashboardJson('/real-trade-state')
+    const reqs=await Promise.allSettled([
+      fetch('/account',{cache:'no-store'}),fetch('/status',{cache:'no-store'}),fetch('/markets',{cache:'no-store'}),fetch('/preview-proof',{cache:'no-store'}),
+      fetch('/money-path-proof',{cache:'no-store'}),fetch('/shadow-state',{cache:'no-store'}),fetch('/price-proof',{cache:'no-store'}),fetch('/real-trade-state',{cache:'no-store'})
     ]);
-    const [account,status,market,preview,money,shadow,prices,realTrade]=values;
+    const readJson=async(i,fallback={})=>{try{if(reqs[i].status!=='fulfilled')return fallback;return await reqs[i].value.json();}catch{return fallback;}};
+    const account=await readJson(0),status=await readJson(1),market=await readJson(2),preview=await readJson(3),money=await readJson(4),shadow=await readJson(5),prices=await readJson(6),realTrade=await readJson(7);
     // Kalshi window display is sourced from the actual live contract close_time
     // returned in the shadow observation. No browser-created 15-minute clock.
     const nowForKalshiWindow=Date.now();
