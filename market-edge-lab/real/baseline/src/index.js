@@ -3187,6 +3187,49 @@ document.getElementById('export')?.addEventListener('click',async()=>{const r=aw
       return json({ok:true,state:state.status,armed:true,maxEntryDebitUsd:1,manualOnly:true,automaticStrategyEntryAllowed:false,submitted:false,realMoneyMoved:false});
     }
 
+    if (url.pathname === "/baseline-clear-stale-xrp") {
+      const state=await loadRealTradeState(env);
+      const ticker=String(state?.marketTicker||state?.firstRealTradeEvidence?.preTradeDecisionSnapshot?.selected?.marketTicker||"").trim();
+      const staleCandidate=Boolean(
+        ticker && String(state?.outcomeSide||"").toUpperCase()==="YES" &&
+        Number(state?.filledCount||0)>0 &&
+        !state?.exitOrderId &&
+        (state?.consumed||String(state?.status||"").includes("EXIT_REQUIRED"))
+      );
+      let marketStatus=null,marketResult=null,marketHttpStatus=null;
+      if(ticker){
+        try{
+          const mr=await kalshiExecutionGet(env,"/trade-api/v2/markets/"+encodeURIComponent(ticker));
+          marketHttpStatus=mr.status;
+          const mb=await mr.json().catch(()=>({}));
+          const market=mb?.market||mb||{};
+          marketStatus=String(market?.status||"").toLowerCase()||null;
+          marketResult=String(market?.result||market?.settlement_value||"").toLowerCase()||null;
+        }catch{}
+      }
+      const providerClosed=Boolean(staleCandidate && ["settled","closed","finalized"].includes(marketStatus));
+      if(request.method==="GET"){
+        return json({ok:true,readOnly:true,state:"STALE_XRP_CLEAR_PREFLIGHT",ticker:ticker||null,staleCandidate,marketHttpStatus,marketStatus,marketResult,providerClosed,clearAvailable:providerClosed,safety:{providerWrites:0,orders:0,reauthorizations:0,realMoneyMoved:false}});
+      }
+      if(request.method!=="POST") return json({ok:false,error:"METHOD_NOT_ALLOWED"},405);
+      if(!providerClosed) return json({ok:false,state:"STALE_XRP_NOT_PROVIDER_CLOSED",ticker:ticker||null,marketHttpStatus,marketStatus,marketResult,cleared:false,armed:false},409);
+      state.completedAutomaticTradeEvidence=JSON.parse(JSON.stringify(state.firstRealTradeEvidence||{}));
+      state.completedAutomaticTradeLedger=Array.isArray(state.ledger)?JSON.parse(JSON.stringify(state.ledger)):[];
+      state.completedAutomaticTradeEvidence.providerClosure={ticker,marketStatus,marketResult,verifiedAt:new Date().toISOString(),source:"AUTHENTICATED_EXACT_TICKER_MARKET_READ"};
+      realTradeLedger(state,"STALE_SETTLED_POSITION_ARCHIVED",{ticker,marketStatus,marketResult});
+      state.entryOrderId=null; state.exitOrderId=null; state.entrySubmitStartedAt=null; state.exitSubmitStartedAt=null;
+      state.entryProviderStatus=null; state.entryProviderResponse=null; state.entryWriteError=null;
+      state.filledCount=0; state.exitFilledTotal=0; state.exitRemainingCount=0; state.remainingExitCount=0;
+      state.marketTicker=null; state.marketSlug=null; state.question=null; state.outcomeSide=null; state.entryScore=null;
+      state.entryFilledAt=null; state.entryAverageFillPrice=null; state.entryAverageFeePaid=null;
+      state.exitAverageFillPrice=null; state.exitAverageFeePaid=null; state.completedAt=null; state.consumed=false;
+      state.founderAuthorization={...(state.founderAuthorization||{}),authorized:false,consumed:true};
+      state.firstRealTradeEvidence={preTradeDecisionSnapshot:null,postTradeOutcomeEvidence:null,postTradeResearchReview:null};
+      state.status="READY_DISARMED";
+      await saveRealTradeState(env,state);
+      return json({ok:true,state:"STALE_SETTLED_POSITION_CLEARED",ticker,marketStatus,marketResult,cleared:true,armed:false,submitted:false,realMoneyMoved:false,next:"FOUNDER_MAY_ARM_BASELINE_80"});
+    }
+
     if (request.method === "GET" && url.pathname === "/baseline-80-arm") {
       return new Response(`<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><title>Arm Automatic .50 Test</title><style>body{font-family:system-ui;background:#030811;color:#eef7ff;padding:24px;max-width:720px;margin:auto}.box{border:1px solid #31516b;border-radius:14px;padding:20px;background:#071725}button{font-size:18px;font-weight:800;padding:14px 18px;border-radius:10px;border:1px solid #d3a53a;background:#0b1421;color:#ffd86a}</style></head><body><div class="box"><h2>Baseline .80 / $1 Governed Trade</h2><p>This arms exactly one automatic Baseline entry at score ≥ .80, premium + entry fee ≤ $1, followed by the governed .20 / 5-minute exit.</p><form method="POST" action="/kalshi-authorize-one-trade"><input type="hidden" name="authorization" value="AUTHORIZE_ONE_BASELINE_80_MAX_1_USD"><button type="submit">ARM ONE BASELINE .80 TRADE</button></form></div></body></html>`,{headers:{"content-type":"text/html;charset=utf-8","cache-control":"no-store"}});
     }
