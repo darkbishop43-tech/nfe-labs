@@ -2290,9 +2290,16 @@ async function load(){
   const conn=E('conn'),connSub=E('connSub'),bal=E('bal'),balSub=E('balSub'),creds=E('creds'),gateAccount=E('gateAccount'),gateBalance=E('gateBalance'),gatePreview=E('gatePreview'),markets=E('markets'),statusDot=E('statusDot'),statusText=E('statusText'),refresh=E('refresh');
   refresh.disabled=true;refresh.textContent='CHECKING…';gatePreview.textContent='CHECKING LIVE PROOF…';gatePreview.className='m';
   try{
+    const dashboardFetch=(url,timeoutMs=8000)=>{
+      const controller=new AbortController();
+      const timer=setTimeout(()=>controller.abort("DASHBOARD_READ_TIMEOUT"),timeoutMs);
+      return fetch(url,{cache:'no-store',signal:controller.signal}).finally(()=>clearTimeout(timer));
+    };
+    // One slow legacy/read-only proof must never hold the entire Founder control surface on CHECKING.
+    // Critical execution state still fails closed if its own read is unavailable.
     const reqs=await Promise.allSettled([
-      fetch('/account',{cache:'no-store'}),fetch('/status',{cache:'no-store'}),fetch('/markets',{cache:'no-store'}),fetch('/preview-proof',{cache:'no-store'}),
-      fetch('/money-path-proof',{cache:'no-store'}),fetch('/shadow-state',{cache:'no-store'}),fetch('/price-proof',{cache:'no-store'}),fetch('/real-trade-state',{cache:'no-store'})
+      dashboardFetch('/account'),dashboardFetch('/status'),dashboardFetch('/markets'),dashboardFetch('/preview-proof'),
+      dashboardFetch('/money-path-proof'),dashboardFetch('/shadow-state'),dashboardFetch('/price-proof'),dashboardFetch('/real-trade-state')
     ]);
     const readJson=async(i,fallback={})=>{try{if(reqs[i].status!=='fulfilled')return fallback;return await reqs[i].value.json();}catch{return fallback;}};
     const account=await readJson(0),status=await readJson(1),market=await readJson(2),preview=await readJson(3),money=await readJson(4),shadow=await readJson(5),prices=await readJson(6),realTrade=await readJson(7);
