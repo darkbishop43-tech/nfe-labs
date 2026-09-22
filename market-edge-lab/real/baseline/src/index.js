@@ -2521,7 +2521,7 @@ async function load(){
     if(authBtn){
       if(managedPosition){authBtn.textContent='POSITION UNDER GOVERNED EXIT';authBtn.disabled=true;}
       else if(armed){authBtn.textContent='AUTO .50 HOLD PROOF · ARMED';authBtn.disabled=true;}
-      else if(realTrade?.consumed && realTrade?.status==='EXECUTION_PROOF_ROUND_TRIP_COMPLETE'){
+      else if(realTrade?.consumed && realTrade?.entryOrderPresent && realTrade?.exitOrderPresent){
         authBtn.textContent='TEST AUTO ≥ .50 · HOLD 5 MIN · $1 MAX';
         authBtn.disabled=false;
       }else if(realTrade?.consumed){authBtn.textContent='ONE-TRADE TEST COMPLETE';authBtn.disabled=true;}
@@ -3123,7 +3123,7 @@ document.getElementById('export')?.addEventListener('click',async()=>{const r=aw
       const state=await loadRealTradeState(env);
       let body={}; try{body=await request.json();}catch{}
       if(body?.authorization!=="AUTHORIZE_ONE_AUTO_50_HOLD_PROOF_MAX_1_USD") return json({ok:false,state:"EXPLICIT_AUTHORIZATION_PHRASE_REQUIRED",armed:false},400);
-      if(state?.consumed && state?.status==="EXECUTION_PROOF_ROUND_TRIP_COMPLETE"){
+      if(state?.consumed && state?.entryOrderId && state?.exitOrderId && Number(state?.filledCount||0)>0 && Number(state?.exitFilledTotal||0)>=Number(state?.filledCount||0)){
         state.completedManualExecutionProof=JSON.parse(JSON.stringify(state.firstRealTradeEvidence||{}));
         state.completedManualExecutionLedger=Array.isArray(state.ledger)?JSON.parse(JSON.stringify(state.ledger)):[];
         state.entryOrderId=null; state.exitOrderId=null; state.entrySubmitStartedAt=null; state.exitSubmitStartedAt=null;
