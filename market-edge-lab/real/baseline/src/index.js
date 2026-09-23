@@ -2162,36 +2162,61 @@ function mirrorSize(m,names){
 }
 async function kalshiLiveMirrorData(env) {
   const shadow=await loadShadowState(env);
-  const opportunities=Array.isArray(shadow?.opportunities)?shadow.opportunities:[];
-  const unique=[...new Map(opportunities.filter(o=>o?.marketTicker).map(o=>[String(o.marketTicker),o])).values()].slice(0,10);
+  const opportunities=(Array.isArray(shadow?.opportunities)?shadow.opportunities:[])
+    .filter(o=>o?.marketTicker)
+    .slice()
+    .sort((a,b)=>{
+      const aa=String(a?.asset||""),bb=String(b?.asset||"");
+      if(aa!==bb)return aa.localeCompare(bb);
+      const ad=String(a?.direction||a?.outcomeSide||""),bd=String(b?.direction||b?.outcomeSide||"");
+      return ad.localeCompare(bd);
+    })
+    .slice(0,10);
   const observedAt=new Date().toISOString();
-  const rows=await Promise.all(unique.map(async o=>{
-    const ticker=String(o.marketTicker);
+
+  // Fetch each Kalshi contract once, then expand it back into the exact
+  // UP/YES and DOWN/NO opportunity rows Baseline is displaying. This keeps
+  // the mirror and Current Opportunities on the same contract set.
+  const tickers=[...new Set(opportunities.map(o=>String(o.marketTicker)))];
+  const marketEntries=await Promise.all(tickers.map(async ticker=>{
     try{
       const path="/trade-api/v2/markets/"+encodeURIComponent(ticker);
       const r=await kalshiShadowGet(env,path);
       const body=await r.json().catch(()=>({}));
-      const m=body?.market||body;
-      if(!r.ok) return {ticker,asset:o.asset||null,direction:o.direction||null,outcomeSide:o.outcomeSide||null,score:o.score??null,ok:false,httpStatus:r.status};
-      return {
-        ok:true,ticker,asset:o.asset||null,direction:o.direction||null,outcomeSide:o.outcomeSide||null,
-        score:o.score??null,edge:o.edge??null,closeTime:m?.close_time||o.closeTime||null,status:m?.status||null,
-        yesBid:mirrorNumber(m,["yes_bid_dollars","yes_bid"]),
-        yesAsk:mirrorNumber(m,["yes_ask_dollars","yes_ask"]),
-        noBid:mirrorNumber(m,["no_bid_dollars","no_bid"]),
-        noAsk:mirrorNumber(m,["no_ask_dollars","no_ask"]),
-        last:mirrorNumber(m,["last_price_dollars","last_price"]),
-        yesBidSize:mirrorSize(m,["yes_bid_size_fp","yes_bid_size"]),
-        yesAskSize:mirrorSize(m,["yes_ask_size_fp","yes_ask_size"]),
-        noBidSize:mirrorSize(m,["no_bid_size_fp","no_bid_size"]),
-        noAskSize:mirrorSize(m,["no_ask_size_fp","no_ask_size"]),
-        liquidityDollars:mirrorNumber(m,["liquidity_dollars"]),
-        observedAsk:o.observedAsk??o.yes??null,observedBid:o.observedBid??o.bid??null,
-        updatedTime:m?.updated_time||null
-      };
-    }catch(error){return {ticker,asset:o.asset||null,direction:o.direction||null,outcomeSide:o.outcomeSide||null,score:o.score??null,ok:false,error:"READ_FAILED"};}
+      return [ticker,{ok:r.ok,httpStatus:r.status,market:body?.market||body}];
+    }catch{return [ticker,{ok:false,httpStatus:null,market:null}];}
   }));
-  return {ok:true,readOnly:true,source:"KALSHI_AUTHENTICATED_MARKET_READ",observedAt,shadowLastRunAt:shadow?.lastRunAt||null,rows,
+  const marketByTicker=Object.fromEntries(marketEntries);
+
+  const rows=opportunities.map(o=>{
+    const ticker=String(o.marketTicker),read=marketByTicker[ticker]||{},m=read.market||{};
+    const outcome=String(o?.outcomeSide||"").toUpperCase();
+    const yesBid=mirrorNumber(m,["yes_bid_dollars","yes_bid"]);
+    const yesAsk=mirrorNumber(m,["yes_ask_dollars","yes_ask"]);
+    const noBid=mirrorNumber(m,["no_bid_dollars","no_bid"]);
+    const noAsk=mirrorNumber(m,["no_ask_dollars","no_ask"]);
+    const yesBidSize=mirrorSize(m,["yes_bid_size_fp","yes_bid_size"]);
+    const yesAskSize=mirrorSize(m,["yes_ask_size_fp","yes_ask_size"]);
+    const noBidSize=mirrorSize(m,["no_bid_size_fp","no_bid_size"]);
+    const noAskSize=mirrorSize(m,["no_ask_size_fp","no_ask_size"]);
+    return {
+      ok:Boolean(read.ok),httpStatus:read.httpStatus??null,
+      ticker,asset:o.asset||null,direction:o.direction||null,outcomeSide:o.outcomeSide||null,
+      score:o.score??null,edge:o.edge??null,closeTime:m?.close_time||o.closeTime||null,status:m?.status||null,
+      yesBid,yesAsk,noBid,noAsk,
+      yesBidSize,yesAskSize,noBidSize,noAskSize,
+      selectedBid:outcome==="NO"?noBid:yesBid,
+      selectedAsk:outcome==="NO"?noAsk:yesAsk,
+      selectedBidSize:outcome==="NO"?noBidSize:yesBidSize,
+      selectedAskSize:outcome==="NO"?noAskSize:yesAskSize,
+      last:mirrorNumber(m,["last_price_dollars","last_price"]),
+      liquidityDollars:mirrorNumber(m,["liquidity_dollars"]),
+      observedAsk:o.observedAsk??o.yes??null,observedBid:o.observedBid??o.bid??null,
+      updatedTime:m?.updated_time||null
+    };
+  });
+  return {ok:true,readOnly:true,source:"KALSHI_AUTHENTICATED_MARKET_READ",observedAt,shadowLastRunAt:shadow?.lastRunAt||null,
+    contractAlignment:"EXACT_BASELINE_OPPORTUNITY_SET",rowCount:rows.length,rows,
     safety:{providerWrites:0,ordersCreated:0,stateMutation:false,realMoneyMoved:false}};
 }
 function kalshiLiveMirrorHtml(){
@@ -2204,7 +2229,7 @@ const cents=v=>Number.isFinite(Number(v))?(Number(v)*100).toFixed(1)+'¢':'—';
 function side(name,bid,ask,bidSize,askSize){return '<div class="side"><b>'+name+'</b><div class="prices"><div><div class="muted">BEST BID</div><div class="big">'+cents(bid)+'</div><div class="muted">qty '+size(bidSize)+'</div></div><div><div class="muted">BEST ASK</div><div class="big">'+cents(ask)+'</div><div class="muted">qty '+size(askSize)+'</div></div></div></div>';}
 async function load(){
  try{const r=await fetch('/kalshi-live-mirror-data',{cache:'no-store'}),j=await r.json(); document.getElementById('stamp').textContent='KALSHI READ · '+new Date(j.observedAt||Date.now()).toLocaleTimeString();
- document.getElementById('grid').innerHTML=(j.rows||[]).map(x=>'<div class="card"><div style="display:flex;justify-content:space-between;gap:8px"><div><b>'+esc(x.asset||'')+' · '+esc(x.direction||x.outcomeSide||'')+'</b><div class="muted">'+esc(x.ticker)+'</div></div><span class="pill">SCORE '+(Number.isFinite(Number(x.score))?Number(x.score).toFixed(2):'—')+'</span></div><div class="prices">'+side('YES',x.yesBid,x.yesAsk,x.yesBidSize,x.yesAskSize)+side('NO',x.noBid,x.noAsk,x.noBidSize,x.noAskSize)+'</div><div class="row"><span>LAST TRADE</span><b>'+cents(x.last)+'</b></div><div class="row"><span>NFE OBSERVED ASK</span><b>'+cents(x.observedAsk)+'</b></div><div class="row"><span>LIVE STATUS</span><b>'+esc(x.status||'—')+'</b></div><div class="row"><span>CLOSE</span><b>'+esc(x.closeTime?new Date(x.closeTime).toLocaleTimeString():'—')+'</b></div></div>').join('')||'<div class="card">Waiting for current Baseline Kalshi contracts…</div>';
+ document.getElementById('grid').innerHTML=(j.rows||[]).map(x=>'<div class="card"><div style="display:flex;justify-content:space-between;gap:8px"><div><b>'+esc(x.asset||'')+' · '+esc(x.direction||x.outcomeSide||'')+'</b><div class="muted">'+esc(x.ticker)+'</div></div><span class="pill">SCORE '+(Number.isFinite(Number(x.score))?Number(x.score).toFixed(2):'—')+'</span></div><div class="prices">'+side('YES',x.yesBid,x.yesAsk,x.yesBidSize,x.yesAskSize)+side('NO',x.noBid,x.noAsk,x.noBidSize,x.noAskSize)+'</div><div class="row"><span>LAST TRADE</span><b>'+cents(x.last)+'</b></div><div class="row"><span>BASELINE SIDE</span><b>'+esc(x.outcomeSide||'—')+' · LIVE ASK '+cents(x.selectedAsk)+'</b></div><div class="row"><span>NFE OBSERVED ASK</span><b>'+cents(x.observedAsk)+'</b></div><div class="row"><span>LIVE STATUS</span><b>'+esc(x.status||'—')+'</b></div><div class="row"><span>CLOSE</span><b>'+esc(x.closeTime?new Date(x.closeTime).toLocaleTimeString():'—')+'</b></div></div>').join('')||'<div class="card">Waiting for current Baseline Kalshi contracts…</div>';
  }catch(e){document.getElementById('stamp').textContent='READ FAILED';}}
 load(); setInterval(load,2000);
 </script></body></html>`;
@@ -2835,7 +2860,7 @@ async function refreshKalshiMirror(){
     const r=await fetch('/kalshi-live-mirror-data',{cache:'no-store'}),j=await r.json();
     stamp.textContent='KALSHI READ · '+new Date(j.observedAt||Date.now()).toLocaleTimeString();
     const side=(name,bid,ask,bidSize,askSize)=>'<div class="miniBox"><div class="label">'+name+'</div><div class="miniVal">BID '+mirrorCents(bid)+' · ASK '+mirrorCents(ask)+'</div><div class="miniSub">bid qty '+mirrorQty(bidSize)+' · ask qty '+mirrorQty(askSize)+'</div></div>';
-    grid.innerHTML=(j.rows||[]).map(x=>'<div class="opp"><div class="oppHead"><div><div class="q">'+esc(x.asset||'')+' · '+esc(x.direction||x.outcomeSide||'')+'</div><div class="meta">'+esc(x.ticker||'')+'</div></div><div class="scoreBadge"><small>SCORE</small><strong>'+(Number.isFinite(Number(x.score))?Number(x.score).toFixed(2):'—')+'</strong></div></div><div class="compactGrid" style="margin-top:8px">'+side('YES',x.yesBid,x.yesAsk,x.yesBidSize,x.yesAskSize)+side('NO',x.noBid,x.noAsk,x.noBidSize,x.noAskSize)+'</div><div class="meta">LAST '+mirrorCents(x.last)+' · NFE OBSERVED ASK '+mirrorCents(x.observedAsk)+' · '+esc(x.status||'—')+'</div></div>').join('')||'<div class="opp"><div class="meta">Waiting for current Baseline Kalshi contracts…</div></div>';
+    grid.innerHTML=(j.rows||[]).map(x=>'<div class="opp"><div class="oppHead"><div><div class="q">'+esc(x.asset||'')+' · '+esc(x.direction||x.outcomeSide||'')+'</div><div class="meta">'+esc(x.ticker||'')+'</div></div><div class="scoreBadge"><small>SCORE</small><strong>'+(Number.isFinite(Number(x.score))?Number(x.score).toFixed(2):'—')+'</strong></div></div><div class="compactGrid" style="margin-top:8px">'+side('YES',x.yesBid,x.yesAsk,x.yesBidSize,x.yesAskSize)+side('NO',x.noBid,x.noAsk,x.noBidSize,x.noAskSize)+'</div><div class="meta"><b>BASELINE '+esc(x.outcomeSide||'SIDE')+'</b> · LIVE BID '+mirrorCents(x.selectedBid)+' · LIVE ASK '+mirrorCents(x.selectedAsk)+' · NFE OBSERVED ASK '+mirrorCents(x.observedAsk)+' · '+esc(x.status||'—')+'</div></div>').join('')||'<div class="opp"><div class="meta">Waiting for current Baseline Kalshi contracts…</div></div>';
   }catch{stamp.textContent='MIRROR READ FAILED';}
 }
 async function refreshPrices(){
