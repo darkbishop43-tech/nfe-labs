@@ -1355,6 +1355,254 @@ function realTradeLedger(state, type, payload = {}) {
   state.ledger.unshift({ ts: new Date().toISOString(), type, ...payload });
   state.ledger = state.ledger.slice(0, 80);
 }
+
+// Isolated repeatability test controller.
+// This DOES NOT change the production Baseline definition (>= .80). It exists only to
+// prove RADAR -> LOCK -> FIRE -> MANAGE -> RECORD across repeated real $1 executions.
+const EXECUTION_TEST_CONFIG={
+  entryScore:0.60,
+  exitScore:0.20,
+  maxHoldMs:5*60*1000,
+  maxEntryDebitUsd:1,
+  maxAttempts:5,
+  maxConcurrent:3,
+  requiredExchangeIndex:2,
+  minSeriesFundingUsd:5
+};
+const EXECUTION_TEST_STATE_KEY="baseline-real-execution-test-v1";
+
+function defaultExecutionTestState(){
+  return {
+    schema:"BASELINE_REAL_EXECUTION_TEST_V1",mode:"EXECUTION_TEST_NOT_PRODUCTION_BASELINE",
+    status:"DISARMED",armed:false,seriesId:null,armedAt:null,completedAt:null,
+    threshold:EXECUTION_TEST_CONFIG.entryScore,maxAttempts:EXECUTION_TEST_CONFIG.maxAttempts,
+    maxConcurrent:EXECUTION_TEST_CONFIG.maxConcurrent,maxEntryDebitUsd:EXECUTION_TEST_CONFIG.maxEntryDebitUsd,
+    requiredExchangeIndex:EXECUTION_TEST_CONFIG.requiredExchangeIndex,
+    attemptsStarted:0,positions:[],attempts:[],ledger:[]
+  };
+}
+async function loadExecutionTestState(env){
+  if(!env?.BASELINE_REAL_SHADOW_STATE)return defaultExecutionTestState();
+  try{
+    const raw=await env.BASELINE_REAL_SHADOW_STATE.get(EXECUTION_TEST_STATE_KEY);
+    if(raw)return {...defaultExecutionTestState(),...JSON.parse(raw)};
+  }catch{}
+  return defaultExecutionTestState();
+}
+async function saveExecutionTestState(env,state){
+  state.updatedAt=new Date().toISOString();
+  if(env?.BASELINE_REAL_SHADOW_STATE)await env.BASELINE_REAL_SHADOW_STATE.put(EXECUTION_TEST_STATE_KEY,JSON.stringify(state));
+}
+function executionTestLedger(state,type,payload={}){
+  state.ledger=Array.isArray(state.ledger)?state.ledger:[];
+  state.ledger.unshift({ts:new Date().toISOString(),type,...payload});
+  state.ledger=state.ledger.slice(0,120);
+}
+function executionTestEntryAuthorized(state){
+  return Boolean(state?.armed && Number(state?.attemptsStarted||0)<EXECUTION_TEST_CONFIG.maxAttempts);
+}
+function executionTestOpenPositions(state){
+  return (Array.isArray(state?.positions)?state.positions:[]).filter(p=>p?.status==="OPEN"||p?.status==="EXIT_RETRY");
+}
+function executionTestClientOrderId(state,attemptNo,phase){
+  const seed=String(state?.seriesId||"test").replace(/[^0-9A-Za-z]/g,"").slice(-12);
+  return ("nfe-test-"+seed+"-"+String(attemptNo)+"-"+phase).slice(0,64);
+}
+async function executionTestEntryWrite(env,state,payload){
+  if(!executionTestEntryAuthorized(state))throw new Error("EXECUTION_TEST_ENTRY_NOT_AUTHORIZED");
+  const path="/trade-api/v2/portfolio/events/orders";
+  const headers=await kalshiExecutionHeaders(env,"POST",path);
+  headers["content-type"]="application/json";
+  return fetch("https://external-api.kalshi.com"+path,{method:"POST",headers,body:JSON.stringify(payload)});
+}
+async function executionTestExitWrite(env,state,position,payload){
+  const live=(Array.isArray(state?.positions)?state.positions:[]).find(p=>p?.id===position?.id);
+  if(!live||!(Number(live?.filledCount)>0)||!["OPEN","EXIT_RETRY"].includes(String(live?.status)))throw new Error("EXECUTION_TEST_EXIT_POSITION_INVALID");
+  if(payload?.reduce_only!==true||String(payload?.ticker||"")!==String(live.marketTicker||""))throw new Error("EXECUTION_TEST_EXIT_SCOPE_INVALID");
+  const path="/trade-api/v2/portfolio/events/orders";
+  const headers=await kalshiExecutionHeaders(env,"POST",path);
+  headers["content-type"]="application/json";
+  return fetch("https://external-api.kalshi.com"+path,{method:"POST",headers,body:JSON.stringify(payload)});
+}
+function executionTestCandidatePool(shadow,now=Date.now()){
+  return (shadow?.opportunities||[]).filter(o=>
+    Number(o?.score)>=EXECUTION_TEST_CONFIG.entryScore &&
+    Number(o?.edge)>0 &&
+    Number(o?.yes)>0.01 && Number(o?.yes)<0.99 &&
+    o?.marketTicker && o?.executionEligible===true &&
+    Number(o?.exchangeIndex)===EXECUTION_TEST_CONFIG.requiredExchangeIndex &&
+    ["BTC","ETH","SOL","XRP","HYPE"].includes(String(o?.asset||"")) &&
+    (o?.outcomeSide==="YES"||o?.outcomeSide==="NO") &&
+    kalshiCandidateTimeSafe(o,now)
+  ).sort((a,b)=>Number(b?.score||0)-Number(a?.score||0));
+}
+async function runExecutionTestSeries(env,freshShadow=null){
+  const state=await loadExecutionTestState(env);
+  const now=Date.now();
+  const shadow=freshShadow&&typeof freshShadow==="object"?freshShadow:await loadShadowState(env);
+
+  // MANAGE: every filled position owns its own independent .20 / 5-minute exit.
+  for(const position of executionTestOpenPositions(state)){
+    const shadowCurrent=(shadow?.opportunities||[]).find(o=>o?.marketTicker===position.marketTicker&&o?.outcomeSide===position.outcomeSide);
+    const exactQuote=await kalshiLiveOutcomeBid(env,position);
+    const liveBid=Number(exactQuote?.bid??shadowCurrent?.bid);
+    const age=now-Number(position?.filledAt||position?.submittedAt||now);
+    const exitByScore=Boolean(shadowCurrent&&Number(shadowCurrent.score)<=EXECUTION_TEST_CONFIG.exitScore);
+    const exitByTime=age>=EXECUTION_TEST_CONFIG.maxHoldMs;
+    if(!exitByScore&&!exitByTime)continue;
+    if(!(liveBid>0.01&&liveBid<0.99)){
+      position.status="EXIT_RETRY";
+      position.exitHoldReason="LIVE_BID_UNAVAILABLE";
+      continue;
+    }
+    const alreadyExited=Number(position.exitFilledTotal||0);
+    const remaining=Math.max(0,Number(position.filledCount||0)-alreadyExited);
+    if(!(remaining>0)){position.status="CLOSED";continue;}
+    position.exitAttempt=Number(position.exitAttempt||0)+1;
+    const exitState={...position,remainingExitCount:remaining};
+    const clientId=executionTestClientOrderId(state,position.attemptNo,"x"+position.exitAttempt);
+    const payload=kalshiV2ExitPayload(exitState,liveBid,clientId);
+    if(!payload){position.status="EXIT_RETRY";position.exitHoldReason="PAYLOAD_BUILD_FAILED";continue;}
+    position.exitReason=exitByScore?"SCORE_EXIT":"MAX_HOLD_EXIT";
+    position.exitSubmitStartedAt=Date.now();
+    let r;
+    try{r=await executionTestExitWrite(env,state,position,payload);}
+    catch(error){position.status="EXIT_RETRY";position.exitWriteError=String(error?.message||error);continue;}
+    const body=await r.json().catch(()=>({}));
+    position.exitSubmitStartedAt=null;
+    if(!r.ok){
+      position.status="EXIT_RETRY";position.exitProviderStatus=r.status;position.exitProviderResponse=body;
+      executionTestLedger(state,"TEST_EXIT_PROVIDER_REJECTED",{positionId:position.id,ticker:position.marketTicker,httpStatus:r.status});
+      continue;
+    }
+    const x=summarizeKalshiV2CreateResponse(body);
+    position.exitOrderId=x.orderId||position.exitOrderId||null;
+    position.exitFilledTotal=Number((alreadyExited+Number(x.fillCount||0)).toFixed(4));
+    position.exitRemainingCount=Math.max(0,Number(position.filledCount||0)-position.exitFilledTotal);
+    position.exitAverageFillPrice=x.averageFillPrice??position.exitAverageFillPrice??null;
+    position.exitAverageFeePaid=x.averageFeePaid??position.exitAverageFeePaid??null;
+    if(position.exitRemainingCount<=1e-9){
+      position.status="CLOSED";position.closedAt=Date.now();
+      executionTestLedger(state,"TEST_POSITION_CLOSED",{positionId:position.id,attemptNo:position.attemptNo,ticker:position.marketTicker,side:position.outcomeSide,reason:position.exitReason,exitOrderId:position.exitOrderId});
+    }else{
+      position.status="EXIT_RETRY";
+      executionTestLedger(state,"TEST_EXIT_PARTIAL",{positionId:position.id,attemptNo:position.attemptNo,remaining:position.exitRemainingCount});
+    }
+  }
+
+  if(!executionTestEntryAuthorized(state)){
+    if(Number(state.attemptsStarted||0)>=EXECUTION_TEST_CONFIG.maxAttempts&&executionTestOpenPositions(state).length===0){
+      state.armed=false;state.status="SERIES_COMPLETE";state.completedAt=state.completedAt||Date.now();
+    }else if(state.armed) state.status="MANAGING_OPEN_POSITIONS";
+    await saveExecutionTestState(env,state);
+    return state;
+  }
+  if(!shadow?.assetCoverageReady||shadow?.status!=="LIVE_KALSHI_SHADOW"){
+    state.status="WAITING_FOR_LIVE_SHADOW";
+    await saveExecutionTestState(env,state);return state;
+  }
+
+  // RADAR: only exact index-2 candidates enter this five-attempt test series.
+  const activeTickers=new Set(executionTestOpenPositions(state).map(p=>String(p.marketTicker)));
+  const candidates=executionTestCandidatePool(shadow,now).filter(o=>!activeTickers.has(String(o.marketTicker)));
+  let slots=Math.max(0,EXECUTION_TEST_CONFIG.maxConcurrent-executionTestOpenPositions(state).length);
+
+  for(const observed of candidates){
+    if(slots<=0||Number(state.attemptsStarted||0)>=EXECUTION_TEST_CONFIG.maxAttempts)break;
+
+    // LOCK: exact ticker/side provider reread + same frozen score formula at the live ask.
+    const live=await freshKalshiExecutionQuote(env,observed);
+    if(!live?.ok){
+      executionTestLedger(state,"TEST_LOCK_QUOTE_HOLD",{ticker:observed.marketTicker,side:observed.outcomeSide,reason:live?.reason||"READ_FAILED"});
+      continue;
+    }
+    const candidate=live.candidate;
+    if(Number(candidate.score)<EXECUTION_TEST_CONFIG.entryScore||Number(candidate.edge)<=0||!kalshiCandidateTimeSafe(candidate,Date.now())){
+      executionTestLedger(state,"TEST_LOCK_REQUALIFICATION_HOLD",{ticker:candidate.marketTicker,side:candidate.outcomeSide,observedScore:safeFinite(observed.score),liveScore:safeFinite(candidate.score),liveAsk:safeFinite(candidate.yes)});
+      continue;
+    }
+    let sizing=estimateKalshiFeeSafeSize(candidate.yes,EXECUTION_TEST_CONFIG.maxEntryDebitUsd);
+    if(!sizing?.ok||Number(sizing.totalDebitUsd)>EXECUTION_TEST_CONFIG.maxEntryDebitUsd||Number(sizing.count)<1)continue;
+
+    // Preflight exact execution shard immediately before FIRE.
+    const balanceProof=await kalshiExecutionBalanceSnapshot(env);
+    const rows=Array.isArray(balanceProof?.body?.balance_breakdown)?balanceProof.body.balance_breakdown:[];
+    const shard=rows.find(x=>Number(x?.exchange_index)===EXECUTION_TEST_CONFIG.requiredExchangeIndex);
+    const shardUsd=Number(shard?.balance);
+    if(!balanceProof?.ok||!Number.isFinite(shardUsd)||shardUsd+1e-9<Number(sizing.totalDebitUsd)){
+      state.status="HOLD_TEST_INDEX2_BALANCE";
+      state.fundingProof={checkedAt:balanceProof?.checkedAt||new Date().toISOString(),index2Usd:Number.isFinite(shardUsd)?shardUsd:null,requiredForNextAttemptUsd:safeFinite(sizing.totalDebitUsd)};
+      executionTestLedger(state,"TEST_INDEX2_BALANCE_HOLD",state.fundingProof);
+      break;
+    }
+
+    const attemptNo=Number(state.attemptsStarted||0)+1;
+    const attemptId=(state.seriesId||"series")+"-"+attemptNo;
+    const clientId=executionTestClientOrderId(state,attemptNo,"entry");
+    const payload=kalshiV2EntryPayload(candidate,sizing,clientId);
+    if(!payload)continue;
+
+    // FIRE: attempt count increments only when we are committed to a provider POST.
+    const attempt={
+      id:attemptId,attemptNo,status:"SUBMITTING",createdAt:new Date().toISOString(),
+      threshold:EXECUTION_TEST_CONFIG.entryScore,classification:"EXECUTION_TEST_NOT_PRODUCTION_BASELINE",
+      asset:candidate.asset,marketTicker:candidate.marketTicker,outcomeSide:candidate.outcomeSide,direction:candidate.direction,
+      exchangeIndex:candidate.exchangeIndex,observedScore:safeFinite(observed.score),observedAsk:safeFinite(observed.yes),
+      liveScore:safeFinite(candidate.score),liveAsk:safeFinite(candidate.yes),liveBid:safeFinite(candidate.bid),
+      count:safeFinite(sizing.count),maximumEntryDebitUsd:safeFinite(sizing.totalDebitUsd),clientOrderId:clientId
+    };
+    state.attemptsStarted=attemptNo;
+    state.attempts=Array.isArray(state.attempts)?state.attempts:[];
+    state.attempts.push(attempt);
+    state.status="FIRING";
+    executionTestLedger(state,"TEST_FIRE_LATCHED",{attemptNo,ticker:candidate.marketTicker,side:candidate.outcomeSide,observedScore:attempt.observedScore,liveScore:attempt.liveScore,liveAsk:attempt.liveAsk,maxDebitUsd:attempt.maximumEntryDebitUsd});
+    await saveExecutionTestState(env,state);
+
+    let r;
+    try{r=await executionTestEntryWrite(env,state,payload);}
+    catch(error){
+      attempt.status="WRITE_ERROR";attempt.error=String(error?.message||error);
+      executionTestLedger(state,"TEST_ENTRY_WRITE_ERROR",{attemptNo,ticker:candidate.marketTicker});
+      await saveExecutionTestState(env,state);continue;
+    }
+    const body=await r.json().catch(()=>({}));
+    attempt.providerHttpStatus=r.status;
+    if(!r.ok){
+      attempt.status="PROVIDER_REJECTED";attempt.providerResponse=body;
+      executionTestLedger(state,"TEST_ENTRY_PROVIDER_REJECTED",{attemptNo,ticker:candidate.marketTicker,httpStatus:r.status});
+      await saveExecutionTestState(env,state);continue;
+    }
+    const e=summarizeKalshiV2CreateResponse(body);
+    attempt.orderId=e.orderId||null;attempt.fillCount=Number(e.fillCount||0);attempt.remainingCount=Number(e.remainingCount||0);
+    attempt.averageFillPrice=e.averageFillPrice??null;attempt.averageFeePaid=e.averageFeePaid??null;
+    if(!(attempt.fillCount>0)){
+      attempt.status="NO_FILL";
+      executionTestLedger(state,"TEST_ENTRY_NO_FILL",{attemptNo,ticker:candidate.marketTicker,side:candidate.outcomeSide,orderId:attempt.orderId});
+      await saveExecutionTestState(env,state);continue;
+    }
+    attempt.status="FILLED";attempt.filledAt=Date.now();
+    const position={
+      id:attemptId,attemptNo,status:"OPEN",asset:candidate.asset,marketTicker:candidate.marketTicker,outcomeSide:candidate.outcomeSide,direction:candidate.direction,
+      exchangeIndex:candidate.exchangeIndex,entryScore:safeFinite(candidate.score),entryObservedAsk:safeFinite(candidate.yes),
+      entryOrderId:attempt.orderId,filledCount:attempt.fillCount,entryAverageFillPrice:attempt.averageFillPrice,
+      entryAverageFeePaid:attempt.averageFeePaid,filledAt:attempt.filledAt,exitFilledTotal:0,exitAttempt:0
+    };
+    state.positions=Array.isArray(state.positions)?state.positions:[];
+    state.positions.push(position);
+    slots--;
+    activeTickers.add(String(candidate.marketTicker));
+    executionTestLedger(state,"TEST_POSITION_OPENED",{attemptNo,positionId:position.id,ticker:position.marketTicker,side:position.outcomeSide,orderId:position.entryOrderId,filledCount:position.filledCount});
+    await saveExecutionTestState(env,state);
+  }
+
+  const open=executionTestOpenPositions(state).length;
+  if(Number(state.attemptsStarted||0)>=EXECUTION_TEST_CONFIG.maxAttempts){
+    state.status=open>0?"ATTEMPT_LIMIT_REACHED_MANAGING_POSITIONS":"SERIES_COMPLETE";
+    if(open===0){state.armed=false;state.completedAt=state.completedAt||Date.now();}
+  }else state.status=open>0?"FISHING_WITH_OPEN_POSITIONS":"FISHING";
+  await saveExecutionTestState(env,state);
+  return state;
+}
 function safeFinite(v){const n=Number(v);return Number.isFinite(n)?n:null;}
 function firstTradeEvidenceStage(state){
   const pre=state?.firstRealTradeEvidence?.preTradeDecisionSnapshot;
