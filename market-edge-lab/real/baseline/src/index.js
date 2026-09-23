@@ -2145,6 +2145,71 @@ function publicShadowView(state) {
   };
 }
 
+
+function mirrorNumber(m, names) {
+  for (const name of names) {
+    const v=m?.[name];
+    if(v===null||v===undefined||v==="") continue;
+    const n=Number(v);
+    if(!Number.isFinite(n)) continue;
+    return name.includes("_dollars") ? n : (n>1 ? n/100 : n);
+  }
+  return null;
+}
+function mirrorSize(m,names){
+  for(const name of names){const n=Number(m?.[name]);if(Number.isFinite(n))return n;}
+  return null;
+}
+async function kalshiLiveMirrorData(env) {
+  const shadow=await loadShadowState(env);
+  const opportunities=Array.isArray(shadow?.opportunities)?shadow.opportunities:[];
+  const unique=[...new Map(opportunities.filter(o=>o?.marketTicker).map(o=>[String(o.marketTicker),o])).values()].slice(0,10);
+  const observedAt=new Date().toISOString();
+  const rows=await Promise.all(unique.map(async o=>{
+    const ticker=String(o.marketTicker);
+    try{
+      const path="/trade-api/v2/markets/"+encodeURIComponent(ticker);
+      const r=await kalshiShadowGet(env,path);
+      const body=await r.json().catch(()=>({}));
+      const m=body?.market||body;
+      if(!r.ok) return {ticker,asset:o.asset||null,direction:o.direction||null,outcomeSide:o.outcomeSide||null,score:o.score??null,ok:false,httpStatus:r.status};
+      return {
+        ok:true,ticker,asset:o.asset||null,direction:o.direction||null,outcomeSide:o.outcomeSide||null,
+        score:o.score??null,edge:o.edge??null,closeTime:m?.close_time||o.closeTime||null,status:m?.status||null,
+        yesBid:mirrorNumber(m,["yes_bid_dollars","yes_bid"]),
+        yesAsk:mirrorNumber(m,["yes_ask_dollars","yes_ask"]),
+        noBid:mirrorNumber(m,["no_bid_dollars","no_bid"]),
+        noAsk:mirrorNumber(m,["no_ask_dollars","no_ask"]),
+        last:mirrorNumber(m,["last_price_dollars","last_price"]),
+        yesBidSize:mirrorSize(m,["yes_bid_size_fp","yes_bid_size"]),
+        yesAskSize:mirrorSize(m,["yes_ask_size_fp","yes_ask_size"]),
+        noBidSize:mirrorSize(m,["no_bid_size_fp","no_bid_size"]),
+        noAskSize:mirrorSize(m,["no_ask_size_fp","no_ask_size"]),
+        liquidityDollars:mirrorNumber(m,["liquidity_dollars"]),
+        observedAsk:o.observedAsk??o.yes??null,observedBid:o.observedBid??o.bid??null,
+        updatedTime:m?.updated_time||null
+      };
+    }catch(error){return {ticker,asset:o.asset||null,direction:o.direction||null,outcomeSide:o.outcomeSide||null,score:o.score??null,ok:false,error:"READ_FAILED"};}
+  }));
+  return {ok:true,readOnly:true,source:"KALSHI_AUTHENTICATED_MARKET_READ",observedAt,shadowLastRunAt:shadow?.lastRunAt||null,rows,
+    safety:{providerWrites:0,ordersCreated:0,stateMutation:false,realMoneyMoved:false}};
+}
+function kalshiLiveMirrorHtml(){
+ return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Baseline Real · Kalshi Live Mirror</title>
+<style>body{margin:0;background:#050a11;color:#f5f7fb;font-family:system-ui}.w{max-width:1100px;margin:auto;padding:14px}.head,.card{background:#0d1724;border:1px solid #243a55;border-radius:16px;padding:14px;margin-bottom:10px}.gold{color:#f3d58a}.green{color:#67e49b}.red{color:#ff8585}.muted{color:#91a6be;font-size:12px}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(290px,1fr));gap:10px}.prices{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px}.side{background:#08121d;border:1px solid #294764;border-radius:12px;padding:10px}.big{font-size:24px;font-weight:850}.row{display:flex;justify-content:space-between;gap:8px;border-top:1px solid #1b2d42;padding:6px 0;font-size:12px}.flashUp{color:#67e49b}.flashDown{color:#ff8585}.pill{display:inline-block;border:1px solid #725f34;border-radius:999px;padding:5px 8px;font-size:10px;color:#f3d58a}</style></head>
+<body><div class="w"><div class="head"><div class="gold"><b>MARKET EDGE · BASELINE REAL</b></div><h2 style="margin:5px 0">Kalshi Live Market Mirror</h2><div class="muted">READ ONLY · provider prices only · no order submission · refreshes every 2 seconds</div><div style="margin-top:8px"><span id="stamp" class="pill">CONNECTING…</span> <span class="pill">BASELINE EXECUTION UNCHANGED</span></div></div><div id="grid" class="grid"></div></div>
+<script>
+const prev={}; const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const cents=v=>Number.isFinite(Number(v))?(Number(v)*100).toFixed(1)+'¢':'—'; const size=v=>Number.isFinite(Number(v))?Number(v).toFixed(2):'—';
+function side(name,bid,ask,bidSize,askSize){return '<div class="side"><b>'+name+'</b><div class="prices"><div><div class="muted">BEST BID</div><div class="big">'+cents(bid)+'</div><div class="muted">qty '+size(bidSize)+'</div></div><div><div class="muted">BEST ASK</div><div class="big">'+cents(ask)+'</div><div class="muted">qty '+size(askSize)+'</div></div></div></div>';}
+async function load(){
+ try{const r=await fetch('/kalshi-live-mirror-data',{cache:'no-store'}),j=await r.json(); document.getElementById('stamp').textContent='KALSHI READ · '+new Date(j.observedAt||Date.now()).toLocaleTimeString();
+ document.getElementById('grid').innerHTML=(j.rows||[]).map(x=>'<div class="card"><div style="display:flex;justify-content:space-between;gap:8px"><div><b>'+esc(x.asset||'')+' · '+esc(x.direction||x.outcomeSide||'')+'</b><div class="muted">'+esc(x.ticker)+'</div></div><span class="pill">SCORE '+(Number.isFinite(Number(x.score))?Number(x.score).toFixed(2):'—')+'</span></div><div class="prices">'+side('YES',x.yesBid,x.yesAsk,x.yesBidSize,x.yesAskSize)+side('NO',x.noBid,x.noAsk,x.noBidSize,x.noAskSize)+'</div><div class="row"><span>LAST TRADE</span><b>'+cents(x.last)+'</b></div><div class="row"><span>NFE OBSERVED ASK</span><b>'+cents(x.observedAsk)+'</b></div><div class="row"><span>LIVE STATUS</span><b>'+esc(x.status||'—')+'</b></div><div class="row"><span>CLOSE</span><b>'+esc(x.closeTime?new Date(x.closeTime).toLocaleTimeString():'—')+'</b></div></div>').join('')||'<div class="card">Waiting for current Baseline Kalshi contracts…</div>';
+ }catch(e){document.getElementById('stamp').textContent='READ FAILED';}}
+load(); setInterval(load,2000);
+</script></body></html>`;
+}
+
 function dashboardHtml() {
   return `<!doctype html>
 <html lang="en">
@@ -4364,6 +4429,9 @@ document.getElementById('export')?.addEventListener('click',async()=>{const r=aw
           controllerEnabled:false,postOrdersCalled:false,deleteOrdersCalled:false,submitted:false,realMoneyMoved:false}
       });
     }
+
+    if (url.pathname === "/kalshi-live-mirror") return html(kalshiLiveMirrorHtml());
+    if (url.pathname === "/kalshi-live-mirror-data") return json(await kalshiLiveMirrorData(env));
 
     if (url.pathname === "/price-proof") return json(await livePriceProof(env));
 
