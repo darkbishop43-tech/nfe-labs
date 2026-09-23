@@ -3167,7 +3167,7 @@ async function load(){
       gateAccount.textContent='PASS';gateAccount.className='good';statusDot.className='dot';statusText.innerHTML='<b class="good">AUTHENTICATED READ-ONLY · VERIFIED</b>';
       const a=account.account||{};
       if(a.fundedRecordPresent){
-        const providerCash=Number(realTrade?.providerCashUsd);bal.textContent=Number.isFinite(providerCash)?moneyFmt(providerCash):'$10.00';balSub.textContent=Number.isFinite(providerCash)?'REAL KALSHI CASH · authenticated read-only provider reconciliation':'REAL EXPERIMENT BANKROLL · funded proof complete';gateBalance.textContent='AVAILABLE';gateBalance.className='good';
+        const providerCash=Number(realTrade?.providerCashUsd);bal.textContent=Number.isFinite(providerCash)?moneyFmt(providerCash):'UPDATING';balSub.textContent=Number.isFinite(providerCash)?'REAL KALSHI CASH · authenticated read-only provider reconciliation':'Provider balance unavailable · historical starting capital $10.00';gateBalance.textContent='AVAILABLE';gateBalance.className='good';
         const reconciledPnl=Number(realTrade?.bankrollNetPnlUsd),realizedPnl=E('realizedPnl'),unrealizedPnl=E('unrealizedPnl'),totalRealPnl=E('totalRealPnl'),realizedPnlSub=E('realizedPnlSub'),unrealizedPnlSub=E('unrealizedPnlSub'),totalRealPnlSub=E('totalRealPnlSub');
         if(Number.isFinite(reconciledPnl)){
           const pnlText=(reconciledPnl<0?'-$':'$')+Math.abs(reconciledPnl).toFixed(2);
