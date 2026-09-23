@@ -1434,9 +1434,10 @@ async function executionTestExitWrite(env,state,position,payload){
   headers["content-type"]="application/json";
   return fetch("https://external-api.kalshi.com"+path,{method:"POST",headers,body:JSON.stringify(payload)});
 }
-function executionTestCandidatePool(shadow,now=Date.now()){
+function executionTestCandidatePool(shadow,now=Date.now(),threshold=EXECUTION_TEST_CONFIG.entryScore){
+  const activeThreshold=Number(threshold);
   return (shadow?.opportunities||[]).filter(o=>
-    Number(o?.score)>=EXECUTION_TEST_CONFIG.entryScore &&
+    Number(o?.score)>=activeThreshold &&
     Number(o?.edge)>0 &&
     Number(o?.yes)>0.01 && Number(o?.yes)<0.99 &&
     o?.marketTicker && o?.executionEligible===true &&
@@ -1539,7 +1540,8 @@ async function runExecutionTestSeries(env,freshShadow=null,preparedBalance=null)
 
   // RADAR: only exact index-2 candidates enter this bounded Founder-selected test series.
   const activeTickers=new Set(executionTestOpenPositions(state).map(p=>String(p.marketTicker)));
-  const candidates=executionTestCandidatePool(shadow,now).filter(o=>!activeTickers.has(String(o.marketTicker)));
+  const activeTestThreshold=Number.isFinite(Number(state?.threshold))?Number(state.threshold):EXECUTION_TEST_CONFIG.entryScore;
+  const candidates=executionTestCandidatePool(shadow,now,activeTestThreshold).filter(o=>!activeTickers.has(String(o.marketTicker)));
   let slots=Math.max(0,EXECUTION_TEST_CONFIG.maxConcurrent-executionTestOpenPositions(state).length);
   let warmedBalance=preparedBalance&&typeof preparedBalance==="object"?preparedBalance:null;
 
@@ -1553,7 +1555,7 @@ async function runExecutionTestSeries(env,freshShadow=null,preparedBalance=null)
       continue;
     }
     const candidate=live.candidate;
-    if(Number(candidate.score)<EXECUTION_TEST_CONFIG.entryScore||Number(candidate.edge)<=0||!kalshiCandidateTimeSafe(candidate,Date.now())){
+    if(Number(candidate.score)<activeTestThreshold||Number(candidate.edge)<=0||!kalshiCandidateTimeSafe(candidate,Date.now())){
       executionTestLedger(state,"TEST_LOCK_REQUALIFICATION_HOLD",{ticker:candidate.marketTicker,side:candidate.outcomeSide,observedScore:safeFinite(observed.score),liveScore:safeFinite(candidate.score),liveAsk:safeFinite(candidate.yes)});
       continue;
     }
@@ -1582,7 +1584,7 @@ async function runExecutionTestSeries(env,freshShadow=null,preparedBalance=null)
     // FIRE: attempt count increments only when we are committed to a provider POST.
     const attempt={
       id:attemptId,attemptNo,status:"SUBMITTING",createdAt:new Date().toISOString(),
-      threshold:EXECUTION_TEST_CONFIG.entryScore,classification:"EXECUTION_TEST_NOT_PRODUCTION_BASELINE",
+      threshold:activeTestThreshold,classification:"EXECUTION_TEST_NOT_PRODUCTION_BASELINE",
       asset:candidate.asset,marketTicker:candidate.marketTicker,outcomeSide:candidate.outcomeSide,direction:candidate.direction,
       exchangeIndex:candidate.exchangeIndex,observedScore:safeFinite(observed.score),observedAsk:safeFinite(observed.yes),
       liveScore:safeFinite(candidate.score),liveAsk:safeFinite(candidate.yes),liveBid:safeFinite(candidate.bid),
@@ -3805,7 +3807,7 @@ document.getElementById('export')?.addEventListener('click',async()=>{const r=aw
           attempts:(state.attempts||[]).map(a=>({attemptNo:a.attemptNo,status:a.status,asset:a.asset,ticker:a.marketTicker,side:a.outcomeSide,observedScore:a.observedScore,liveScore:a.liveScore,liveAsk:a.liveAsk,orderId:a.orderId||null,fillCount:Number(a.fillCount||0)}))
         },
         funding:{httpStatus:balanceProof?.httpStatus??null,totalBalance:balanceProof?.body?.balance??null,index0:index0?.balance??null,index2:index2?.balance??null,index2Ready:Number(index2?.balance)>=EXECUTION_TEST_CONFIG.minSeriesFundingUsd},
-        safety:{maxEntryDebitUsd:1,maxAttempts:executionTestSeriesLimit(state),maxSelectableAttempts:EXECUTION_TEST_CONFIG.maxSelectableAttempts,maxConcurrent:3,requiredExchangeIndex:2,productionBaselineEntryScore:REAL_TEST_CONFIG.entryScore,testEntryScore:EXECUTION_TEST_CONFIG.entryScore}
+        safety:{maxEntryDebitUsd:1,maxAttempts:executionTestSeriesLimit(state),maxSelectableAttempts:EXECUTION_TEST_CONFIG.maxSelectableAttempts,maxConcurrent:3,requiredExchangeIndex:2,productionBaselineEntryScore:REAL_TEST_CONFIG.entryScore,testEntryScore:Number(state?.threshold??EXECUTION_TEST_CONFIG.entryScore)}
       });
     }
 
@@ -3818,11 +3820,11 @@ document.getElementById('export')?.addEventListener('click',async()=>{const r=aw
       const ready=Boolean(balanceProof?.ok&&Number.isFinite(index2)&&index2>=EXECUTION_TEST_CONFIG.minSeriesFundingUsd);
       let control="<html><head><meta name='viewport' content='width=device-width,initial-scale=1'><title>NFE Execution Test Control</title><style>body{font-family:system-ui;background:#050a11;color:#eef7ff;padding:20px;max-width:760px;margin:auto}.box{border:1px solid #294764;background:#0d1724;border-radius:14px;padding:18px;margin:12px 0}button{font-size:17px;font-weight:800;padding:13px 16px;border-radius:10px;border:1px solid #d3a53a;background:#101b29;color:#ffd86a;width:100%;margin-top:10px}.ok{color:#67e49b}.warn{color:#f0c75e}.muted{color:#91a6be}</style></head><body>";
       control+="<h2>NFE-OS · MULTI-TRADE EXECUTION TEST</h2>";
-      control+="<div class='box'><b>TEST ONLY · NOT PRODUCTION BASELINE</b><p>Threshold <b>.60</b> · Founder selects <b>1–100 provider entry attempts</b> · max <b>3 simultaneous filled positions</b> · max <b>$1 total debit per entry</b> · each filled position keeps its own ≤ .20 / 5-minute exit.</p><p class='muted'>Production Baseline remains .80 and is not changed by this series.</p></div>";
+      control+="<div class='box'><b>TEST ONLY · NOT PRODUCTION BASELINE</b><p>Threshold <b>"+Number(state?.threshold??EXECUTION_TEST_CONFIG.entryScore).toFixed(2)+"</b> · Founder selects <b>score + 1–100 provider entry attempts</b> · max <b>3 simultaneous filled positions</b> · max <b>$1 total debit per entry</b> · each filled position keeps its own ≤ .20 / 5-minute exit.</p><p class='muted'>Production Baseline remains .80 and is not changed by this series.</p></div>";
       control+="<div class='box'><b>INDEX 2 TEST FUNDING</b><p>Index 0: <b>"+(Number.isFinite(index0)?"$"+index0.toFixed(2):"—")+"</b><br>Index 2: <b class='"+(ready?"ok":"warn")+"'>"+(Number.isFinite(index2)?"$"+index2.toFixed(2):"—")+"</b></p><p>"+(ready?"READY — execution-test funding gate passed.":"NOT READY — test arm requires at least $5.00 on index 2.")+"</p>";
       if(Number.isFinite(index0)&&index0>0) control+="<form method='post' action='/execution-test-consolidate-index2'><input type='hidden' name='authorization' value='MOVE_INDEX0_TO_INDEX2_FOR_FIVE_EXECUTION_TESTS'><button type='submit'>MOVE INDEX 0 BALANCE TO INDEX 2</button></form>";
       control+="</div><div class='box'><b>SERIES STATUS</b><p>"+String(state.status||"DISARMED")+" · attempts "+Number(state.attemptsStarted||0)+"/"+executionTestSeriesLimit(state)+" · open positions "+executionTestOpenPositions(state).length+"/3</p>";
-      if(!state.armed&&ready) control+="<form method='post' action='/execution-test-arm'><input type='hidden' name='authorization' value='ARM_BOUNDED_EXECUTION_TESTS_AT_60_MAX_1_USD'><label for='runCount'><b>Automatic attempts</b></label><input id='runCount' name='runCount' type='number' inputmode='numeric' min='1' max='100' step='1' value='10' style='font-size:18px;padding:12px;width:100%;box-sizing:border-box;margin-top:8px;border-radius:10px'><button type='submit'>ARM SELECTED .60 EXECUTION TEST SERIES</button></form>";
+      if(!state.armed&&ready) control+="<form method='post' action='/execution-test-arm'><input type='hidden' name='authorization' value='ARM_BOUNDED_EXECUTION_TESTS_MAX_1_USD'><label for='testScore'><b>Acceptance score</b></label><select id='testScore' name='testScore' style='font-size:18px;padding:12px;width:100%;box-sizing:border-box;margin:8px 0 14px;border-radius:10px'><option value='.50'>.50</option><option value='.55'>.55</option><option value='.60'>.60</option><option value='.65' selected>.65</option><option value='.70'>.70</option><option value='.75'>.75</option><option value='.80'>.80</option></select><label for='runCount'><b>Automatic attempts</b></label><input id='runCount' name='runCount' type='number' inputmode='numeric' min='1' max='100' step='1' value='10' style='font-size:18px;padding:12px;width:100%;box-sizing:border-box;margin-top:8px;border-radius:10px'><button type='submit'>ARM SELECTED EXECUTION TEST SERIES</button></form>";
       control+="<p class='muted'>Arming authorizes only the bounded number of attempts selected above. It does not place a manual trade. The scheduler owns RADAR → LOCK → FIRE → MANAGE → RECORD.</p></div></body></html>";
       return new Response(control,{headers:{"content-type":"text/html;charset=utf-8","cache-control":"no-store"}});
     }
@@ -3850,7 +3852,10 @@ document.getElementById('export')?.addEventListener('click',async()=>{const r=aw
 
     if (request.method === "POST" && url.pathname === "/execution-test-arm") {
       const form=await request.formData().catch(()=>null);
-      if(String(form?.get("authorization")||"")!=="ARM_BOUNDED_EXECUTION_TESTS_AT_60_MAX_1_USD") return json({ok:false,state:"EXPLICIT_TEST_ARM_AUTHORIZATION_REQUIRED"},400);
+      if(String(form?.get("authorization")||"")!=="ARM_BOUNDED_EXECUTION_TESTS_MAX_1_USD") return json({ok:false,state:"EXPLICIT_TEST_ARM_AUTHORIZATION_REQUIRED"},400);
+      const requestedScore=Number(form?.get("testScore"));
+      const allowedScores=[.50,.55,.60,.65,.70,.75,.80];
+      if(!allowedScores.some(x=>Math.abs(x-requestedScore)<1e-9)) return json({ok:false,state:"TEST_SCORE_INVALID",allowedScores},400);
       const requestedAttempts=Math.trunc(Number(form?.get("runCount")));
       if(!Number.isFinite(requestedAttempts)||requestedAttempts<1||requestedAttempts>EXECUTION_TEST_CONFIG.maxSelectableAttempts) return json({ok:false,state:"TEST_RUN_COUNT_INVALID",minimum:1,maximum:EXECUTION_TEST_CONFIG.maxSelectableAttempts},400);
       if(!kalshiControllerSwitchEnabled(env)) return json({ok:false,state:"CONTROLLER_SWITCH_HARD_DISABLED"},423);
@@ -3864,9 +3869,10 @@ document.getElementById('export')?.addEventListener('click',async()=>{const r=aw
       if(!balanceProof?.ok||!Number.isFinite(index2)||index2<EXECUTION_TEST_CONFIG.minSeriesFundingUsd) return json({ok:false,state:"INDEX2_FUNDING_NOT_READY",index2Usd:Number.isFinite(index2)?index2:null,requiredUsd:EXECUTION_TEST_CONFIG.minSeriesFundingUsd},409);
       const state=defaultExecutionTestState();
       state.maxAttempts=requestedAttempts;
+      state.threshold=requestedScore;
       state.armed=true;state.status="ARMED_FISHING";state.seriesId=crypto.randomUUID();state.armedAt=Date.now();
       state.fundingAtArm={index2Usd:index2,requiredExchangeIndex:2};
-      executionTestLedger(state,"EXECUTION_TEST_SERIES_ARMED",{threshold:.60,maxAttempts:requestedAttempts,maxConcurrent:3,maxEntryDebitUsd:1,index2Usd:index2,productionBaselineThreshold:REAL_TEST_CONFIG.entryScore});
+      executionTestLedger(state,"EXECUTION_TEST_SERIES_ARMED",{threshold:requestedScore,maxAttempts:requestedAttempts,maxConcurrent:3,maxEntryDebitUsd:1,index2Usd:index2,productionBaselineThreshold:REAL_TEST_CONFIG.entryScore});
       await saveExecutionTestState(env,state);
       return Response.redirect(new URL("/execution-test-control?armed=1",request.url).toString(),303);
     }
