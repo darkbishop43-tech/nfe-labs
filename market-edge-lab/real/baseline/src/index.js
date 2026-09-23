@@ -3233,23 +3233,6 @@ async function refreshLiveTradeWatch(){
     ]);
     const test=await reads[0].json();
     const mirror=await reads[1].json();
-
-    const liveAccountValue=Number(test?.funding?.accountValueUsd);
-    const liveCash=Number(test?.funding?.cashUsd);
-    const livePortfolioValue=Number(test?.funding?.portfolioValueUsd);
-    const livePnl=Number(test?.funding?.bankrollPnlUsd);
-    const livePnlPct=Number(test?.funding?.bankrollPnlPct);
-    const accountBalEl=E('bal'),accountBalSubEl=E('balSub');
-    if(accountBalEl&&Number.isFinite(liveAccountValue)){
-      accountBalEl.textContent='$'+liveAccountValue.toFixed(2);
-      accountBalEl.className='val '+(livePnl<0?'bad':'good');
-      if(accountBalSubEl){
-        const sign=livePnl>0?'+':'';
-        const pctSign=livePnlPct>0?'+':'';
-        accountBalSubEl.textContent='LIVE KALSHI · '+sign+'$'+livePnl.toFixed(2)+' ('+pctSign+livePnlPct.toFixed(2)+'%) · cash $'+(Number.isFinite(liveCash)?liveCash.toFixed(2):'—')+(livePortfolioValue>0?' · positions $'+livePortfolioValue.toFixed(2):'');
-      }
-    }
-
     const positions=Array.isArray(test?.state?.positions)?test.state.positions:[];
     const open=positions.filter(p=>p?.status==='OPEN'||p?.status==='EXIT_RETRY');
     const rows=Array.isArray(mirror?.rows)?mirror.rows:[];
@@ -3789,16 +3772,7 @@ document.getElementById('export')?.addEventListener('click',async()=>{const r=aw
           positions:(state.positions||[]).map(p=>({id:p.id,attemptNo:p.attemptNo,status:p.status,asset:p.asset,ticker:p.marketTicker,side:p.outcomeSide,direction:p.direction||null,entryScore:p.entryScore,entryObservedAsk:p.entryObservedAsk??null,entryOrderId:p.entryOrderId||null,filledCount:p.filledCount,entryAverageFillPrice:p.entryAverageFillPrice??null,entryAverageFeePaid:p.entryAverageFeePaid??null,filledAt:p.filledAt,exitReason:p.exitReason||null,exitOrderId:p.exitOrderId||null,exitFilledTotal:p.exitFilledTotal??0,exitAverageFillPrice:p.exitAverageFillPrice??null,exitAverageFeePaid:p.exitAverageFeePaid??null,closedAt:p.closedAt||null})),
           attempts:(state.attempts||[]).map(a=>({attemptNo:a.attemptNo,status:a.status,asset:a.asset,ticker:a.marketTicker,side:a.outcomeSide,observedScore:a.observedScore,liveScore:a.liveScore,liveAsk:a.liveAsk,orderId:a.orderId||null,fillCount:Number(a.fillCount||0)}))
         },
-        funding:(()=>{
-          const cashCents=Number(balanceProof?.body?.balance);
-          const portfolioCents=Number(balanceProof?.body?.portfolio_value??balanceProof?.body?.portfolioValue);
-          const cashUsd=Number.isFinite(cashCents)?cashCents/100:null;
-          const portfolioValueUsd=Number.isFinite(portfolioCents)?portfolioCents/100:0;
-          const accountValueUsd=Number.isFinite(cashUsd)?cashUsd+portfolioValueUsd:null;
-          const bankrollPnlUsd=Number.isFinite(accountValueUsd)?accountValueUsd-10:null;
-          const bankrollPnlPct=Number.isFinite(bankrollPnlUsd)?bankrollPnlUsd/10*100:null;
-          return {httpStatus:balanceProof?.httpStatus??null,totalBalanceCents:Number.isFinite(cashCents)?cashCents:null,portfolioValueCents:Number.isFinite(portfolioCents)?portfolioCents:null,cashUsd,portfolioValueUsd,accountValueUsd,bankrollPnlUsd,bankrollPnlPct,index0:index0?.balance??null,index2:index2?.balance??null,index2Ready:Number(index2?.balance)>=EXECUTION_TEST_CONFIG.minSeriesFundingUsd};
-        })(),
+        funding:{httpStatus:balanceProof?.httpStatus??null,totalBalance:balanceProof?.body?.balance??null,index0:index0?.balance??null,index2:index2?.balance??null,index2Ready:Number(index2?.balance)>=EXECUTION_TEST_CONFIG.minSeriesFundingUsd},
         safety:{maxEntryDebitUsd:1,maxAttempts:5,maxConcurrent:3,requiredExchangeIndex:2,productionBaselineEntryScore:REAL_TEST_CONFIG.entryScore,testEntryScore:EXECUTION_TEST_CONFIG.entryScore}
       });
     }
