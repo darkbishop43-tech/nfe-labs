@@ -2406,7 +2406,7 @@ body{background-color:#030811;background-image:linear-gradient(rgba(31,91,137,.0
   </div>
 
   <div class="card section">
-    <div style="display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap"><b>Real Orders · Baseline .80 Governed Live Trade</b><div style="display:flex;gap:8px;flex-wrap:wrap"><a id="founderRunNowBtn" class="btn" href="/founder-execution-proof" style="display:inline-block;text-decoration:none">FOUNDER $1 EXECUTION PROOF</a><a id="authorizeTradeBtn" class="btn" href="/baseline-80-arm" style="display:inline-block;visibility:visible;text-decoration:none">TEST AUTO ≥ .50 · HOLD 5 MIN · $1 MAX</a></div></div>
+    <div style="display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap"><b>Real Orders · Baseline .80 Governed Live Trade</b><div style="display:flex;gap:8px;flex-wrap:wrap"><button id="authorizeTradeBtn" class="btn" type="button" style="display:inline-block;visibility:visible">ARM ONE BASELINE .80 TRADE · $1 MAX</button><a id="founderRunNowBtn" class="btn" href="/founder-execution-proof" style="display:inline-block;text-decoration:none">FOUNDER $1 EXECUTION PROOF</a></div></div>
     <div class="compactGrid">
       <div class="miniBox"><div class="label">Orders waiting</div><div id="realController" class="miniVal">CHECKING…</div><div id="realTradeStatus" class="miniSub">CHECKING…</div></div>
       <div class="miniBox"><div class="label">Current position</div><div id="realTradeMarket" class="miniVal">WAITING</div><div class="miniSub">No manual order required</div></div>
@@ -2416,6 +2416,11 @@ body{background-color:#030811;background-image:linear-gradient(rgba(31,91,137,.0
       <div class="miniBox"><div class="label">Live ability</div><div id="realLiveAbility" class="miniVal good">ONE TRADE · AUTHORIZED</div><div class="miniSub">One automatic entry only · premium + entry fee ≤ $1</div></div>
     </div>
     <div id="realAuthorizationNote" class="notice">Authorization is persistent for exactly one qualifying entry. It does not expire after 15 minutes. Once used, it cannot authorize a second entry; the exact filled position remains eligible only for its governed reduce-only exit.</div>
+  </div>
+
+  <div class="card section">
+    <div style="display:flex;justify-content:space-between;gap:10px;align-items:center;flex-wrap:wrap"><div><b>Kalshi Live Market Mirror</b><div class="m">READ ONLY · provider prices · no order submission · refreshes every 2 seconds</div></div><span id="mirrorStamp" class="tag">CONNECTING…</span></div>
+    <div id="mirrorGrid" class="opps" style="margin-top:10px"><div class="m">Loading live Kalshi bid / ask / quantity…</div></div>
   </div>
 
   <details class="card section" open><summary><b>FIRST REAL TRADE EVIDENCE</b> · immutable BEFORE / separate AFTER</summary>
@@ -2615,10 +2620,10 @@ async function load(){
       if(managedPosition){authBtn.textContent='POSITION UNDER GOVERNED EXIT';authBtn.disabled=true;}
       else if(armed){authBtn.textContent='BASELINE .80 · ARMED';authBtn.disabled=true;}
       else if(realTrade?.consumed && realTrade?.entryOrderPresent && realTrade?.exitOrderPresent){
-        authBtn.textContent='TEST AUTO ≥ .50 · HOLD 5 MIN · $1 MAX';
+        authBtn.textContent='ARM ONE BASELINE .80 TRADE · $1 MAX';
         authBtn.disabled=false;
       }else if(realTrade?.consumed){authBtn.textContent='ONE-TRADE TEST COMPLETE';authBtn.disabled=true;}
-      else{authBtn.textContent='TEST AUTO ≥ .50 · HOLD 5 MIN · $1 MAX';authBtn.disabled=false;}
+      else{authBtn.textContent='ARM ONE BASELINE .80 TRADE · $1 MAX';authBtn.disabled=false;}
     }
     const founderRunBtn=E('founderRunNowBtn');
     if(founderRunBtn){
@@ -2821,6 +2826,18 @@ async function load(){
     refresh.disabled=false;refresh.textContent='REFRESH PROOF · '+new Date().toLocaleTimeString();
   }
 }
+
+const mirrorCents=v=>Number.isFinite(Number(v))?(Number(v)*100).toFixed(1)+'¢':'—';
+const mirrorQty=v=>Number.isFinite(Number(v))?Number(v).toFixed(2):'—';
+async function refreshKalshiMirror(){
+  const grid=E('mirrorGrid'),stamp=E('mirrorStamp'); if(!grid||!stamp)return;
+  try{
+    const r=await fetch('/kalshi-live-mirror-data',{cache:'no-store'}),j=await r.json();
+    stamp.textContent='KALSHI READ · '+new Date(j.observedAt||Date.now()).toLocaleTimeString();
+    const side=(name,bid,ask,bidSize,askSize)=>'<div class="miniBox"><div class="label">'+name+'</div><div class="miniVal">BID '+mirrorCents(bid)+' · ASK '+mirrorCents(ask)+'</div><div class="miniSub">bid qty '+mirrorQty(bidSize)+' · ask qty '+mirrorQty(askSize)+'</div></div>';
+    grid.innerHTML=(j.rows||[]).map(x=>'<div class="opp"><div class="oppHead"><div><div class="q">'+esc(x.asset||'')+' · '+esc(x.direction||x.outcomeSide||'')+'</div><div class="meta">'+esc(x.ticker||'')+'</div></div><div class="scoreBadge"><small>SCORE</small><strong>'+(Number.isFinite(Number(x.score))?Number(x.score).toFixed(2):'—')+'</strong></div></div><div class="compactGrid" style="margin-top:8px">'+side('YES',x.yesBid,x.yesAsk,x.yesBidSize,x.yesAskSize)+side('NO',x.noBid,x.noAsk,x.noBidSize,x.noAskSize)+'</div><div class="meta">LAST '+mirrorCents(x.last)+' · NFE OBSERVED ASK '+mirrorCents(x.observedAsk)+' · '+esc(x.status||'—')+'</div></div>').join('')||'<div class="opp"><div class="meta">Waiting for current Baseline Kalshi contracts…</div></div>';
+  }catch{stamp.textContent='MIRROR READ FAILED';}
+}
 async function refreshPrices(){
   try{
     const r=await fetch('/price-proof',{cache:'no-store'}),prices=await r.json();
@@ -2878,11 +2895,12 @@ function paintDashboardCountdown(){
   paintKalshiWindowCountdown(now);
 }
 E('refresh').addEventListener('click',()=>{load();});
+E('authorizeTradeBtn')?.addEventListener('click',authorizeOneBaselineTrade);
 document.addEventListener('click',e=>{const card=e.target.closest?.('[data-contract-key]');if(card)openContractInspector(card.dataset.contractKey);});
 document.addEventListener('keydown',e=>{if(e.key!=='Enter'&&e.key!==' ')return;const card=e.target.closest?.('[data-contract-key]');if(card){e.preventDefault();openContractInspector(card.dataset.contractKey);}});
 E('contractModalClose')?.addEventListener('click',closeContractInspector);
 E('contractModal')?.addEventListener('click',e=>{if(e.target===E('contractModal'))closeContractInspector();});
-load();paintDashboardCountdown();setInterval(paintDashboardCountdown,1000);setInterval(refreshPrices,10000);
+load();refreshKalshiMirror();paintDashboardCountdown();setInterval(paintDashboardCountdown,1000);setInterval(refreshPrices,10000);setInterval(refreshKalshiMirror,2000);
 </script>
 <script>
 async function founderRunQualifiedTradeNow(){
