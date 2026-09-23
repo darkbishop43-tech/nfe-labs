@@ -2895,7 +2895,7 @@ function paintDashboardCountdown(){
   paintKalshiWindowCountdown(now);
 }
 E('refresh').addEventListener('click',()=>{load();});
-E('authorizeTradeBtn')?.addEventListener('click',authorizeOneBaselineTrade);
+E('authorizeTradeBtn')?.addEventListener('click',()=>authorizeOneBaselineTrade());
 document.addEventListener('click',e=>{const card=e.target.closest?.('[data-contract-key]');if(card)openContractInspector(card.dataset.contractKey);});
 document.addEventListener('keydown',e=>{if(e.key!=='Enter'&&e.key!==' ')return;const card=e.target.closest?.('[data-contract-key]');if(card){e.preventDefault();openContractInspector(card.dataset.contractKey);}});
 E('contractModalClose')?.addEventListener('click',closeContractInspector);
