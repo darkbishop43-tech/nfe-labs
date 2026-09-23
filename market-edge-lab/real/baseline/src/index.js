@@ -2929,14 +2929,29 @@ async function load(){
           const ageMs=Number.isFinite(filledAt)?Math.max(0,Date.now()-filledAt):null;
           const ageText=Number.isFinite(ageMs)?Math.floor(ageMs/60000)+':'+String(Math.floor((ageMs%60000)/1000)).padStart(2,'0'):'—';
           const exitState=p?.status==='EXIT_RETRY'?'EXIT RETRY':'MANAGED · WAITING';
+          const feeText=Number.isFinite(fee)?'USD '+fee.toFixed(4):'—';
+          const fillText=Number.isFinite(fill)?(fill*100).toFixed(1)+'¢':'—';
           return '<div class="opp onRadar">'+
             '<div class="oppHead"><div><div class="q">'+esc(p?.asset||'ASSET')+' · '+esc(p?.direction||p?.side||'')+'</div><div class="meta">'+esc(p?.ticker||'')+'</div></div>'+
             '<div class="oppBadges"><div class="tag radar">🎣 POSITION OPEN</div><div class="scoreBadge hot"><small>ENTRY SCORE</small><strong>'+(Number.isFinite(Number(p?.entryScore))?Number(p.entryScore).toFixed(2):'—')+'</strong></div></div></div>'+
             '<div class="compactGrid" style="margin-top:8px">'+
               '<div class="miniBox"><div class="label">Side</div><div class="miniVal">'+esc(p?.side||'—')+'</div></div>'+
               '<div class="miniBox"><div class="label">Filled qty</div><div class="miniVal">'+(Number.isFinite(Number(p?.filledCount))?Number(p.filledCount).toFixed(2):'—')+'</div></div>'+
-              '<div class="miniBox"><div class="label">Avg fill</div><div class="miniVal">'+(Number.isFinite(fill)?(fill*100).toFixed(1)+'¢':'—')+'</div></div>'+
-              '<div class="miniBox"><div class="label">Entry fee</div><div class="miniVal">'+(Number.isFinite(fee)?'
+              '<div class="miniBox"><div class="label">Avg fill</div><div class="miniVal">'+fillText+'</div></div>'+
+              '<div class="miniBox"><div class="label">Entry fee</div><div class="miniVal">'+feeText+'</div></div>'+
+              '<div class="miniBox"><div class="label">Open timer</div><div class="miniVal">'+ageText+'</div></div>'+
+              '<div class="miniBox"><div class="label">Exit control</div><div class="miniVal">'+exitState+'</div><div class="miniSub">≤ .20 OR 5:00 max hold</div></div>'+
+            '</div>'+
+            '<div class="meta">Entry order: '+esc(p?.entryOrderId||'—')+(p?.exitOrderId?' · Exit order: '+esc(p.exitOrderId):'')+'</div>'+
+          '</div>';
+        }).join('');
+      }else{
+        const recentAttempts=Array.isArray(executionTest?.state?.attempts)?executionTest.state.attempts.slice(-3).reverse():[];
+        testPositionGrid.innerHTML=recentAttempts.length
+          ? recentAttempts.map(a=>'<div class="opp"><div class="oppHead"><div class="q">Attempt '+Number(a?.attemptNo||0)+' · '+esc(a?.asset||'')+' · '+esc(a?.side||'')+'</div><div class="tag">'+esc(a?.status||'UNKNOWN')+'</div></div><div class="meta">'+esc(a?.ticker||'')+' · score '+(Number.isFinite(Number(a?.liveScore))?Number(a.liveScore).toFixed(2):'—')+(a?.orderId?' · order '+esc(a.orderId):'')+'</div></div>').join('')
+          : '<div class="opp"><div class="meta">No execution-test position is currently open.</div></div>';
+      }
+    }
     // Kalshi window display is sourced from the actual live contract close_time
     // returned in the shadow observation. No browser-created 15-minute clock.
     const nowForKalshiWindow=Date.now();
