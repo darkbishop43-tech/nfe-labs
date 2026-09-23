@@ -2850,6 +2850,9 @@ body{background-color:#030811;background-image:linear-gradient(rgba(31,91,137,.0
 const E=id=>document.getElementById(id);
 const esc=s=>String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
 let latestOpportunityMap={};
+let dashboardEntryThreshold=.80;
+let dashboardTestMode=false;
+function dashboardThresholdLabel(){return dashboardEntryThreshold.toFixed(2).replace(/^0/,'');}
 function fmtContractTime(v){if(!v)return '—';const d=new Date(v);return Number.isNaN(d.getTime())?'—':d.toLocaleString();}
 function fmtPrice(v){const n=Number(v);return Number.isFinite(n)?(n*100).toFixed(1)+'¢':'—';}
 function fmtNum(v,d=3){const n=Number(v);return Number.isFinite(n)?n.toFixed(d):'—';}
@@ -2865,16 +2868,16 @@ function openContractInspector(key){
   const modal=E('contractModal'),body=E('contractModalBody'),title=E('contractModalTitle');
   title.textContent=(o.asset||'')+' · '+(o.direction||o.outcomeSide||'')+' · 15-minute contract';
   const score=Number(o.score),move=Number(o.move),edge=Number(o.edge),fair=Number(o.fair);
-  const qualified=Number.isFinite(score)&&score>=.80&&edge>0&&o.executionEligible===true;
+  const qualified=Number.isFinite(score)&&score>=dashboardEntryThreshold&&edge>0&&o.executionEligible===true;
   const closeMs=Date.parse(o.closeTime||o.expirationTime||o.expectedExpirationTime||'');
   const timeSafe=Number.isFinite(closeMs)&&(closeMs-Date.now())>(5*60*1000+90*1000);
   const founderFallbackReady=qualified&&timeSafe;
   body.innerHTML='<div style="margin-top:8px;font-size:16px;font-weight:800">'+esc(o.question||o.marketTicker||'')+'</div>'+
     '<div class="m" style="margin-top:5px">'+esc(contractTarget(o))+'</div>'+
-    '<div class="notice" style="border-left-color:'+(qualified?'var(--green)':'var(--gold)')+'"><b>'+(qualified?'ON RADAR · QUALIFIED ≥ .80':'OBSERVING · NOT CURRENTLY QUALIFIED')+'</b> · '+(timeSafe?'TIME GATE PASS':'TIME GATE NOT PASSING')+' · '+(founderFallbackReady?'Founder fallback may re-run the same governed controller; every gate is rechecked at execution time.':'Founder fallback unavailable for this current observation.')+'</div>'+
+    '<div class="notice" style="border-left-color:'+(qualified?'var(--green)':'var(--gold)')+'"><b>'+(qualified?(dashboardTestMode?'🧪 TEST RADAR · QUALIFIED ≥ '+dashboardThresholdLabel():'ON RADAR · QUALIFIED ≥ .80'):'OBSERVING · NOT CURRENTLY QUALIFIED')+'</b> · '+(timeSafe?'TIME GATE PASS':'TIME GATE NOT PASSING')+' · '+(founderFallbackReady?'Every execution gate is rechecked against the live Kalshi contract before FIRE.':'Current observation is not ready to fire.')+'</div>'+
     '<div class="detailGrid">'+
       '<div class="detailBox"><div class="label">Direction Baseline is evaluating</div><b>'+esc(o.direction||o.outcomeSide||'—')+'</b></div>'+
-      '<div class="detailBox"><div class="label">Baseline score</div><b class="'+(score>=.80&&edge>0?'good':'')+'">'+(Number.isFinite(score)?score.toFixed(2):'—')+'</b> · entry requires ≥ .80</div>'+
+      '<div class="detailBox"><div class="label">'+(dashboardTestMode?'Execution-test observation score':'Baseline score')+'</div><b class="'+(score>=dashboardEntryThreshold&&edge>0?'good':'')+'">'+(Number.isFinite(score)?score.toFixed(2):'—')+'</b> · '+(dashboardTestMode?'TEST entry requires ≥ '+dashboardThresholdLabel():'Baseline entry requires ≥ .80')+'</div>'+
       '<div class="detailBox"><div class="label">Kalshi ask / bid</div><b>'+fmtPrice(o.observedAsk)+' / '+fmtPrice(o.observedBid)+'</b></div>'+
       '<div class="detailBox"><div class="label">Coinbase movement input</div><b>'+(Number.isFinite(move)?(move*100).toFixed(3)+'%':'—')+'</b></div>'+
       '<div class="detailBox"><div class="label">Baseline fair / edge</div><b>'+(Number.isFinite(fair)?(fair*100).toFixed(1)+'¢':'—')+' / '+(Number.isFinite(edge)?(edge*100).toFixed(3)+'%':'—')+'</b></div>'+
@@ -2894,10 +2897,14 @@ async function load(){
   try{
     const reqs=await Promise.allSettled([
       fetch('/account',{cache:'no-store'}),fetch('/status',{cache:'no-store'}),fetch('/markets',{cache:'no-store'}),fetch('/preview-proof',{cache:'no-store'}),
-      fetch('/money-path-proof',{cache:'no-store'}),fetch('/shadow-state',{cache:'no-store'}),fetch('/price-proof',{cache:'no-store'}),fetch('/real-trade-state',{cache:'no-store'})
+      fetch('/money-path-proof',{cache:'no-store'}),fetch('/shadow-state',{cache:'no-store'}),fetch('/price-proof',{cache:'no-store'}),fetch('/real-trade-state',{cache:'no-store'}),
+      fetch('/execution-test-state',{cache:'no-store'})
     ]);
     const readJson=async(i,fallback={})=>{try{if(reqs[i].status!=='fulfilled')return fallback;return await reqs[i].value.json();}catch{return fallback;}};
-    const account=await readJson(0),status=await readJson(1),market=await readJson(2),preview=await readJson(3),money=await readJson(4),shadow=await readJson(5),prices=await readJson(6),realTrade=await readJson(7);
+    const account=await readJson(0),status=await readJson(1),market=await readJson(2),preview=await readJson(3),money=await readJson(4),shadow=await readJson(5),prices=await readJson(6),realTrade=await readJson(7),executionTest=await readJson(8);
+    dashboardTestMode=Boolean(executionTest?.state?.armed||Number(executionTest?.state?.openPositions||0)>0);
+    const configuredTestThreshold=Number(executionTest?.safety?.testEntryScore);
+    dashboardEntryThreshold=dashboardTestMode&&Number.isFinite(configuredTestThreshold)?configuredTestThreshold:.80;
     // Kalshi window display is sourced from the actual live contract close_time
     // returned in the shadow observation. No browser-created 15-minute clock.
     const nowForKalshiWindow=Date.now();
@@ -3118,13 +3125,13 @@ async function load(){
     } else {
       const renderDirectionalCard=(o,oi,sideLabel)=>{
         const ask=Number(o.observedAsk),bid=Number(o.observedBid),score=Number(o.score),move=Number(o.move),edge=Number(o.edge);
-        const qualifies=Number.isFinite(score)&&score>=0.80&&edge>0;
+        const qualifies=Number.isFinite(score)&&score>=dashboardEntryThreshold&&edge>0;
         const horizon=esc(o.horizon||'UNCLASSIFIED');
         const contractKey='opp-'+oi;latestOpportunityMap[contractKey]=o;
         const sideText=sideLabel==='DOWN'?'DOWN / NO':'UP / YES';
         return '<div class="opp clickable '+(qualifies?'onRadar':'')+'" role="button" tabindex="0" data-contract-key="'+contractKey+'" title="Open read-only contract details">'+
           '<div class="oppHead"><div><div class="q">'+esc(o.asset||'ASSET')+' · '+sideText+'</div><div class="meta" style="margin-top:3px">Market: '+esc(o.question||o.slug||'US market')+'</div></div>'+
-          '<div class="oppBadges">'+(qualifies?'<div class="tag radar">SYSTEM LOOKING</div>':'')+'<div class="tag">'+horizon+'</div><div class="scoreBadge '+(qualifies?'hot':'')+'"><small>SCORE</small><strong>'+(Number.isFinite(score)?score.toFixed(2):'—')+'</strong></div><div class="tag">'+esc(o.asset||'')+' · '+((o.executionEligible===true)?(qualifies?'QUALIFIED ≥ .80':'AUTO SELECT ELIGIBLE'):'DISCOVERY HOLD')+'</div></div></div><div class="meta">'+
+          '<div class="oppBadges">'+(qualifies?'<div class="tag radar">'+(dashboardTestMode?'🧪 TEST RADAR · ≥ '+dashboardThresholdLabel():'SYSTEM LOOKING')+'</div>':'')+'<div class="tag">'+horizon+'</div><div class="scoreBadge '+(qualifies?'hot':'')+'"><small>'+(dashboardTestMode?'TEST SCORE':'SCORE')+'</small><strong>'+(Number.isFinite(score)?score.toFixed(2):'—')+'</strong></div><div class="tag">'+esc(o.asset||'')+' · '+((o.executionEligible===true)?(qualifies?(dashboardTestMode?'TEST QUALIFIED ≥ '+dashboardThresholdLabel():'QUALIFIED ≥ .80'):'AUTO SELECT ELIGIBLE'):'DISCOVERY HOLD')+'</div></div></div><div class="meta">'+
           (Number.isFinite(move)?('move '+(move*100).toFixed(3)+'% · '):'')+
           (Number.isFinite(ask)?('ASK '+(ask*100).toFixed(1)+'¢ · '):'')+
           (Number.isFinite(bid)?('BID '+(bid*100).toFixed(1)+'¢ · '):'')+
@@ -3139,8 +3146,8 @@ async function load(){
         (isDown?downCards:upCards).push(renderDirectionalCard(o,oi,isDown?'DOWN':'UP'));
       }
       parts.push('<div style="grid-column:1/-1;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px">'+
-        '<div><div class="opp" style="margin-bottom:8px"><div class="oppHead"><div class="q">⬆ UP / YES OPPORTUNITIES</div><div class="tag">'+upCards.length+' LIVE</div></div><div class="meta">Five-asset upward / YES side. Same frozen Baseline scoring and ≥ .80 qualification rule.</div></div>'+upCards.join('')+'</div>'+
-        '<div><div class="opp" style="margin-bottom:8px"><div class="oppHead"><div class="q">⬇ DOWN / NO OPPORTUNITIES</div><div class="tag">'+downCards.length+' LIVE</div></div><div class="meta">Five-asset downward / NO side. Same frozen Baseline scoring and ≥ .80 qualification rule.</div></div>'+downCards.join('')+'</div>'+
+        '<div><div class="opp" style="margin-bottom:8px"><div class="oppHead"><div class="q">⬆ UP / YES OPPORTUNITIES</div><div class="tag">'+upCards.length+' LIVE</div></div><div class="meta">Five-asset upward / YES side. '+(dashboardTestMode?'Execution-test radar is temporarily ≥ '+dashboardThresholdLabel()+'; production Baseline remains ≥ .80.':'Production Baseline qualification remains ≥ .80.')+'</div></div>'+upCards.join('')+'</div>'+
+        '<div><div class="opp" style="margin-bottom:8px"><div class="oppHead"><div class="q">⬇ DOWN / NO OPPORTUNITIES</div><div class="tag">'+downCards.length+' LIVE</div></div><div class="meta">Five-asset downward / NO side. '+(dashboardTestMode?'Execution-test radar is temporarily ≥ '+dashboardThresholdLabel()+'; production Baseline remains ≥ .80.':'Production Baseline qualification remains ≥ .80.')+'</div></div>'+downCards.join('')+'</div>'+
       '</div>');
     }
     markets.innerHTML=parts.join('');
@@ -3155,13 +3162,13 @@ async function load(){
         if(assetOpps.length){
           body=assetOpps.map((o,ri)=>{
             const score=Number(o.score),ask=Number(o.observedAsk),bid=Number(o.observedBid),edge=Number(o.edge);
-            const qualifies=Number.isFinite(score)&&score>=0.80&&edge>0;
+            const qualifies=Number.isFinite(score)&&score>=dashboardEntryThreshold&&edge>0;
             const contractKey='lane-'+asset+'-'+ri;latestOpportunityMap[contractKey]=o;
             return '<div class="meta clickable" role="button" tabindex="0" data-contract-key="'+contractKey+'" title="Open read-only contract details" style="padding:8px 0;border-top:1px solid rgba(255,255,255,.07)"><b>'+esc(o.direction||o.outcomeSide||'CONTRACT')+'</b> · '+esc(o.marketTicker||o.slug||'')+
               ' · '+(Number.isFinite(ask)?'ASK '+(ask*100).toFixed(1)+'¢':'ASK —')+
               ' · '+(Number.isFinite(bid)?'BID '+(bid*100).toFixed(1)+'¢':'BID —')+
               ' · SCORE '+(Number.isFinite(score)?score.toFixed(2):'—')+
-              (qualifies?' · <span class="good">QUALIFIED ≥ .80</span>':'')+'</div>';
+              (qualifies?' · <span class="good">'+(dashboardTestMode?'TEST QUALIFIED ≥ '+dashboardThresholdLabel():'QUALIFIED ≥ .80')+'</span>':'')+'</div>';
           }).join('');
         }else{
           body='<div class="meta" style="padding-top:6px">Waiting for a live validated 15-minute '+asset+' contract. Lane is already reserved and will populate automatically when discovery succeeds.</div>';
