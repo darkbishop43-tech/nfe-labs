@@ -3314,10 +3314,15 @@ export default {
       try {
         // Run the exact same governed controller against every fresh scheduled observation.
         // Strategy, threshold, sizing, authorization and provider-write gates remain unchanged.
-        const scheduledState=await loadRealTradeState(env);
-        const authorizedCap=Number(scheduledState?.founderAuthorization?.maxEntryDebitUsd);
-        const scheduledStakeCap=Number.isFinite(authorizedCap)&&authorizedCap>0?Math.min(REAL_TEST_CONFIG.maxStakeUsd,authorizedCap):REAL_TEST_CONFIG.maxStakeUsd;
-        controllerState=await maybeRunKalshiOneTrade(env, freshShadow, "SCHEDULED_AUTO", preparedBalance, scheduledStakeCap, false);
+        const executionTestState=await loadExecutionTestState(env);
+        if(executionTestState?.armed || executionTestOpenPositions(executionTestState).length>0){
+          controllerState=await runExecutionTestSeries(env,freshShadow);
+        }else{
+          const scheduledState=await loadRealTradeState(env);
+          const authorizedCap=Number(scheduledState?.founderAuthorization?.maxEntryDebitUsd);
+          const scheduledStakeCap=Number.isFinite(authorizedCap)&&authorizedCap>0?Math.min(REAL_TEST_CONFIG.maxStakeUsd,authorizedCap):REAL_TEST_CONFIG.maxStakeUsd;
+          controllerState=await maybeRunKalshiOneTrade(env, freshShadow, "SCHEDULED_AUTO", preparedBalance, scheduledStakeCap, false);
+        }
       } catch(error) {
         controllerError=String(error?.message||error||"CONTROLLER_RUNTIME_ERROR").slice(0,160);
       }
@@ -3640,6 +3645,8 @@ document.getElementById('export')?.addEventListener('click',async()=>{const r=aw
 
     if (request.method === "POST" && url.pathname === "/kalshi-authorize-one-trade") {
       if(!kalshiControllerSwitchEnabled(env)) return json({ok:false,state:"CONTROLLER_SWITCH_HARD_DISABLED",armed:false,submitted:false,realMoneyMoved:false},423);
+      const activeTest=await loadExecutionTestState(env);
+      if(activeTest?.armed || executionTestOpenPositions(activeTest).length>0) return json({ok:false,state:"EXECUTION_TEST_SERIES_ACTIVE",armed:false},409);
       const state=await loadRealTradeState(env);
       let body={};
       const contentType=String(request.headers.get("content-type")||"").toLowerCase();
