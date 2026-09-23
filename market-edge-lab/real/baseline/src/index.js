@@ -744,6 +744,29 @@ async function kalshiLiveOutcomeBid(env,state) {
     return null;
   }
 }
+
+async function freshKalshiExecutionQuote(env,candidate) {
+  const ticker=String(candidate?.marketTicker||"").trim();
+  const outcome=String(candidate?.outcomeSide||"").toUpperCase();
+  if(!ticker || (outcome!=="YES"&&outcome!=="NO")) return {ok:false,reason:"INVALID_CANDIDATE"};
+  try{
+    const r=await kalshiExecutionGet(env,"/trade-api/v2/markets/"+encodeURIComponent(ticker));
+    if(!r.ok) return {ok:false,reason:"MARKET_READ_HTTP_"+r.status,httpStatus:r.status};
+    const body=await r.json().catch(()=>({}));
+    const m=body?.market||body;
+    const yesAsk=normalizeProbability(m?.yes_ask_dollars??m?.yes_ask);
+    const yesBid=normalizeProbability(m?.yes_bid_dollars??m?.yes_bid);
+    const noAsk=normalizeProbability(m?.no_ask_dollars??m?.no_ask);
+    const noBid=normalizeProbability(m?.no_bid_dollars??m?.no_bid);
+    const selectedAsk=outcome==="YES"?yesAsk:noAsk;
+    const selectedBid=outcome==="YES"?yesBid:noBid;
+    if(!Number.isFinite(selectedAsk)||selectedAsk<=0||selectedAsk>=1) return {ok:false,reason:"LIVE_SELECTED_ASK_UNAVAILABLE"};
+    const rescored=scoreShadowMarket({...candidate,yes:selectedAsk,bid:selectedBid},{[candidate.asset]:Number(candidate?.move)||0});
+    return {ok:true,candidate:rescored,readAt:new Date().toISOString(),httpStatus:r.status,
+      market:{yesAsk,yesBid,noAsk,noBid,status:m?.status||null,closeTime:m?.close_time||candidate?.closeTime||null}};
+  }catch(error){return {ok:false,reason:"LIVE_EXECUTION_QUOTE_READ_FAILED",error:String(error?.message||error).slice(0,120)};}
+}
+
 function kalshiV2BookSide(outcomeSide) {
   return String(outcomeSide||"").toUpperCase()==="YES" ? "bid" :
          String(outcomeSide||"").toUpperCase()==="NO" ? "ask" : null;
@@ -1502,7 +1525,7 @@ async function maybeRunKalshiOneTrade(env, freshShadow=null, triggerSource="SCHE
           ["BTC","ETH","SOL","XRP","HYPE"].includes(String(o?.asset||"")) &&
           (o?.outcomeSide==="YES"||o?.outcomeSide==="NO") && kalshiCandidateTimeSafe(o,now)
         );
-    const candidate=qualifyingCandidates.slice().sort((a,b)=>Number(b?.score||0)-Number(a?.score||0))[0]||null;
+    let candidate=qualifyingCandidates.slice().sort((a,b)=>Number(b?.score||0)-Number(a?.score||0))[0]||null;
     if(!candidate) {
       state.status="SHADOW_WAITING_FOR_SIGNAL";
       await persistIfChanged();
@@ -1515,7 +1538,7 @@ async function maybeRunKalshiOneTrade(env, freshShadow=null, triggerSource="SCHE
     }
 
     const effectiveStakeCapUsd=Math.min(REAL_TEST_CONFIG.maxStakeUsd,Number(stakeCapUsd)||REAL_TEST_CONFIG.maxStakeUsd);
-    const sizing=executionProofMode
+    let sizing=executionProofMode
       ? {ok:true,count:1,premiumUsd:0.99,feeUsd:0.01,totalDebitUsd:1,maxStakeUsd:1,reason:"EXECUTION_PROOF_ONE_CONTRACT_MAX_1_USD"}
       : estimateKalshiFeeSafeSize(candidate.yes,effectiveStakeCapUsd);
     if(!sizing.ok || sizing.totalDebitUsd>effectiveStakeCapUsd || sizing.count<1) {
@@ -1572,6 +1595,56 @@ async function maybeRunKalshiOneTrade(env, freshShadow=null, triggerSource="SCHE
       source:preparedBalance?"COLD_PATH_SAME_CYCLE":"HOT_PATH_FALLBACK"
     };
 
+
+    // Final execution-price gate: immediately before any one-way latch/provider POST,
+    // re-read the exact Kalshi ticker and same YES/NO side. Re-run the frozen Baseline
+    // formula at that live executable ask. A stale >=.80 observation cannot authorize a
+    // worse live quote; authorization remains armed and waits for a fresh qualified quote.
+    if(!executionProofMode){
+      const originalCandidate={...candidate};
+      const liveQuote=await freshKalshiExecutionQuote(env,candidate);
+      state.executionPriceProof={
+        checkedAt:liveQuote?.readAt||new Date().toISOString(),ticker:candidate.marketTicker||null,
+        outcomeSide:candidate.outcomeSide||null,observedAsk:safeFinite(candidate.yes),
+        observedBid:safeFinite(candidate.bid),observedScore:safeFinite(candidate.score),
+        liveReadOk:Boolean(liveQuote?.ok),reason:liveQuote?.reason||null,httpStatus:liveQuote?.httpStatus??null,
+        liveYesAsk:safeFinite(liveQuote?.market?.yesAsk),liveYesBid:safeFinite(liveQuote?.market?.yesBid),
+        liveNoAsk:safeFinite(liveQuote?.market?.noAsk),liveNoBid:safeFinite(liveQuote?.market?.noBid),
+        providerWrites:0
+      };
+      if(!liveQuote?.ok){
+        state.status="HOLD_FRESH_EXECUTION_QUOTE_REQUIRED";
+        realTradeLedger(state,"FRESH_EXECUTION_QUOTE_HOLD",state.executionPriceProof);
+        await persistIfChanged();
+        return state;
+      }
+      candidate=liveQuote.candidate;
+      state.executionPriceProof.liveSelectedAsk=safeFinite(candidate.yes);
+      state.executionPriceProof.liveSelectedBid=safeFinite(candidate.bid);
+      state.executionPriceProof.liveScore=safeFinite(candidate.score);
+      state.executionPriceProof.liveEdge=safeFinite(candidate.edge);
+      if(Number(candidate.score)<activeEntryThreshold || Number(candidate.edge)<=0 || !kalshiCandidateTimeSafe(candidate,Date.now())){
+        state.status="HOLD_FRESH_PRICE_NO_LONGER_QUALIFIES";
+        realTradeLedger(state,"FRESH_EXECUTION_PRICE_REQUALIFICATION_HOLD",state.executionPriceProof);
+        await persistIfChanged();
+        return state;
+      }
+      sizing=estimateKalshiFeeSafeSize(candidate.yes,effectiveStakeCapUsd);
+      if(!sizing.ok || sizing.totalDebitUsd>effectiveStakeCapUsd || sizing.count<1 || shardBalanceUsd+1e-9<Number(sizing.totalDebitUsd)){
+        state.status="HOLD_FRESH_PRICE_FEE_SAFE_SIZE";
+        state.executionPriceProof.freshRequiredDebitUsd=safeFinite(sizing?.totalDebitUsd);
+        realTradeLedger(state,"FRESH_EXECUTION_PRICE_SIZE_HOLD",state.executionPriceProof);
+        await persistIfChanged();
+        return state;
+      }
+      state.executionPriceProof.freshRequiredDebitUsd=safeFinite(sizing.totalDebitUsd);
+      state.executionPriceProof.freshCount=safeFinite(sizing.count);
+      state.executionPriceProof.requalified=true;
+      state.executionPriceProof.priceSource="EXACT_TICKER_AUTHENTICATED_PRE_SUBMIT_READ";
+      state.executionPriceProof.originalObservedAsk=safeFinite(originalCandidate.yes);
+      realTradeLedger(state,"FRESH_EXECUTION_PRICE_REQUALIFIED",state.executionPriceProof);
+    }
+
     // Immutable BEFORE evidence for the next executable attempt.
     // A provider-rejected attempt remains preserved as a failed specimen, but it must
     // not occupy the write-once slot needed by a later, separately authorized attempt.
@@ -1617,7 +1690,7 @@ async function maybeRunKalshiOneTrade(env, freshShadow=null, triggerSource="SCHE
         qualification:{score:safeFinite(candidate.score),threshold:REAL_TEST_CONFIG.entryScore,edge:safeFinite(candidate.edge),movement:safeFinite(candidate.move),observedAsk:safeFinite(candidate.yes),observedBid:safeFinite(candidate.bid)},
         capital:{startingResearchCapitalUsd:10,intendedContractCount:safeFinite(sizing.count),intendedPremiumUsd:safeFinite(sizing.premiumUsd),estimatedEntryFeeUsd:safeFinite(sizing.feeUsd),maximumEntryDebitUsd:safeFinite(sizing.totalDebitUsd),maximumPossibleDollarLossUsd:safeFinite(sizing.totalDebitUsd),maximumPossibleGrossPayoutUsd:grossPayout,maximumPossibleGrossProfitUsd:Number((grossPayout-Number(sizing.premiumUsd||0)-Number(sizing.feeUsd||0)).toFixed(4)),untouchedReserveMinimumUsd:5},
         settlement:{seriesTicker:candidate.seriesTicker||null,seriesTitle:candidate.seriesTitle||null,seriesFrequency:candidate.seriesFrequency||null,settlementSources:Array.isArray(candidate.settlementSources)?candidate.settlementSources:[],openTime:candidate.openTime||null,closeTime:candidate.closeTime||null},
-        baselineInputs:{assetSpotUsd:safeFinite(shadow?.prices?.[candidate.asset]),assetSpotSource:shadow?.priceSources?.[candidate.asset]||null,movement:safeFinite(candidate.move),marketAsk:safeFinite(candidate.yes),marketBid:safeFinite(candidate.bid),edge:safeFinite(candidate.edge),score:safeFinite(candidate.score)},
+        baselineInputs:{assetSpotUsd:safeFinite(shadow?.prices?.[candidate.asset]),assetSpotSource:shadow?.priceSources?.[candidate.asset]||null,movement:safeFinite(candidate.move),marketAsk:safeFinite(candidate.yes),marketBid:safeFinite(candidate.bid),edge:safeFinite(candidate.edge),score:safeFinite(candidate.score),executionPriceSource:executionProofMode?"EXECUTION_PROOF":"EXACT_TICKER_AUTHENTICATED_PRE_SUBMIT_READ"},
         eligibleCandidatesConsidered:ranked.map((o,index)=>({rank:index+1,asset:o.asset||null,marketTicker:o.marketTicker||null,question:o.question||null,side:o.outcomeSide||null,direction:o.direction||null,score:safeFinite(o.score),edge:safeFinite(o.edge),movement:safeFinite(o.move),observedAsk:safeFinite(o.yes),observedBid:safeFinite(o.bid)})),
         selectionExplanation:{rule:executionProofMode?"FOUNDER $1 EXECUTION PROOF — HIGHEST CURRENTLY EXECUTION-ELIGIBLE TIME-SAFE CANDIDATE; BASELINE >= 0.80 STRATEGY FLOOR NOT USED FOR THIS PLUMBING TEST":"HIGHEST EXISTING BASELINE SCORE AMONG CURRENTLY ELIGIBLE CANDIDATES MEETING >= 0.80",selectedScore:safeFinite(candidate.score),alternativeCount:Math.max(0,ranked.length-1),noNewReasoningIntroduced:true,triggerSource,executionProofMode:Boolean(executionProofMode)},
         authorization:{oneTradeAuthorized:kalshiAuthorizationValid(state),scope:state?.founderAuthorization?.scope||null,authorizedAt:state?.founderAuthorization?.authorizedAt||null,expiresAt:state?.founderAuthorization?.expiresAt??null}
