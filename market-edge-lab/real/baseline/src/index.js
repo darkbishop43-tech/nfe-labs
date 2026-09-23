@@ -3639,6 +3639,87 @@ document.getElementById('export')?.addEventListener('click',async()=>{const r=aw
       return json({ok:positionsHttpStatus===200,readOnly:true,state:providerFlat?"PROVIDER_FLAT_CONFIRMED":"PROVIDER_POSITION_NOT_FLAT",ticker,positionsHttpStatus,providerFlat,exactPosition:exact?safeJsonValue(exact):null,local:{status:state?.status||null,entryOrderPresent:Boolean(state?.entryOrderId),filledCount:Number(state?.filledCount||0),exitFilledTotal:Number(state?.exitFilledTotal||0)},safety:{providerWrites:0,stateMutation:false,ordersCreated:0,realMoneyMoved:false}},positionsHttpStatus===200?200:502);
     }
 
+
+    if (request.method === "GET" && url.pathname === "/execution-test-state") {
+      const state=await loadExecutionTestState(env);
+      const balanceProof=await kalshiExecutionBalanceSnapshot(env);
+      const rows=Array.isArray(balanceProof?.body?.balance_breakdown)?balanceProof.body.balance_breakdown:[];
+      const index0=rows.find(x=>Number(x?.exchange_index)===0);
+      const index2=rows.find(x=>Number(x?.exchange_index)===EXECUTION_TEST_CONFIG.requiredExchangeIndex);
+      return json({
+        ok:true,readOnly:true,mode:"EXECUTION_TEST_NOT_PRODUCTION_BASELINE",
+        config:EXECUTION_TEST_CONFIG,
+        state:{
+          status:state.status,armed:Boolean(state.armed),seriesId:state.seriesId||null,
+          attemptsStarted:Number(state.attemptsStarted||0),attemptsRemaining:Math.max(0,EXECUTION_TEST_CONFIG.maxAttempts-Number(state.attemptsStarted||0)),
+          openPositions:executionTestOpenPositions(state).length,
+          positions:(state.positions||[]).map(p=>({id:p.id,attemptNo:p.attemptNo,status:p.status,asset:p.asset,ticker:p.marketTicker,side:p.outcomeSide,entryScore:p.entryScore,filledCount:p.filledCount,filledAt:p.filledAt,exitReason:p.exitReason||null})),
+          attempts:(state.attempts||[]).map(a=>({attemptNo:a.attemptNo,status:a.status,asset:a.asset,ticker:a.marketTicker,side:a.outcomeSide,observedScore:a.observedScore,liveScore:a.liveScore,liveAsk:a.liveAsk,orderId:a.orderId||null,fillCount:Number(a.fillCount||0)}))
+        },
+        funding:{httpStatus:balanceProof?.httpStatus??null,totalBalance:balanceProof?.body?.balance??null,index0:index0?.balance??null,index2:index2?.balance??null,index2Ready:Number(index2?.balance)>=EXECUTION_TEST_CONFIG.minSeriesFundingUsd},
+        safety:{maxEntryDebitUsd:1,maxAttempts:5,maxConcurrent:3,requiredExchangeIndex:2,productionBaselineEntryScore:REAL_TEST_CONFIG.entryScore,testEntryScore:EXECUTION_TEST_CONFIG.entryScore}
+      });
+    }
+
+    if (request.method === "GET" && url.pathname === "/execution-test-control") {
+      const state=await loadExecutionTestState(env);
+      const balanceProof=await kalshiExecutionBalanceSnapshot(env);
+      const rows=Array.isArray(balanceProof?.body?.balance_breakdown)?balanceProof.body.balance_breakdown:[];
+      const index0=Number(rows.find(x=>Number(x?.exchange_index)===0)?.balance);
+      const index2=Number(rows.find(x=>Number(x?.exchange_index)===2)?.balance);
+      const ready=Boolean(balanceProof?.ok&&Number.isFinite(index2)&&index2>=EXECUTION_TEST_CONFIG.minSeriesFundingUsd);
+      let control="<html><head><meta name='viewport' content='width=device-width,initial-scale=1'><title>NFE Execution Test Control</title><style>body{font-family:system-ui;background:#050a11;color:#eef7ff;padding:20px;max-width:760px;margin:auto}.box{border:1px solid #294764;background:#0d1724;border-radius:14px;padding:18px;margin:12px 0}button{font-size:17px;font-weight:800;padding:13px 16px;border-radius:10px;border:1px solid #d3a53a;background:#101b29;color:#ffd86a;width:100%;margin-top:10px}.ok{color:#67e49b}.warn{color:#f0c75e}.muted{color:#91a6be}</style></head><body>";
+      control+="<h2>NFE-OS · MULTI-TRADE EXECUTION TEST</h2>";
+      control+="<div class='box'><b>TEST ONLY · NOT PRODUCTION BASELINE</b><p>Threshold <b>.60</b> · max <b>5 provider entry attempts</b> · max <b>3 simultaneous filled positions</b> · max <b>$1 total debit per entry</b> · each filled position keeps its own ≤ .20 / 5-minute exit.</p><p class='muted'>Production Baseline remains .80 and is not changed by this series.</p></div>";
+      control+="<div class='box'><b>INDEX 2 TEST FUNDING</b><p>Index 0: <b>"+(Number.isFinite(index0)?"$"+index0.toFixed(2):"—")+"</b><br>Index 2: <b class='"+(ready?"ok":"warn")+"'>"+(Number.isFinite(index2)?"$"+index2.toFixed(2):"—")+"</b></p><p>"+(ready?"READY — enough index-2 cash for five worst-case $1 test debits.":"NOT READY — test arm requires at least $5.00 on index 2.")+"</p>";
+      if(Number.isFinite(index0)&&index0>0) control+="<form method='post' action='/execution-test-consolidate-index2'><input type='hidden' name='authorization' value='MOVE_INDEX0_TO_INDEX2_FOR_FIVE_EXECUTION_TESTS'><button type='submit'>MOVE INDEX 0 BALANCE TO INDEX 2</button></form>";
+      control+="</div><div class='box'><b>SERIES STATUS</b><p>"+String(state.status||"DISARMED")+" · attempts "+Number(state.attemptsStarted||0)+"/5 · open positions "+executionTestOpenPositions(state).length+"/3</p>";
+      if(!state.armed&&ready) control+="<form method='post' action='/execution-test-arm'><input type='hidden' name='authorization' value='ARM_FIVE_EXECUTION_TESTS_AT_60_MAX_1_USD'><button type='submit'>ARM 5 AUTOMATIC .60 EXECUTION TESTS</button></form>";
+      control+="<p class='muted'>Arming authorizes the bounded five-attempt series. It does not place a manual trade. The scheduler owns RADAR → LOCK → FIRE → MANAGE → RECORD.</p></div></body></html>";
+      return new Response(control,{headers:{"content-type":"text/html;charset=utf-8","cache-control":"no-store"}});
+    }
+
+    if (request.method === "POST" && url.pathname === "/execution-test-consolidate-index2") {
+      const form=await request.formData().catch(()=>null);
+      if(String(form?.get("authorization")||"")!=="MOVE_INDEX0_TO_INDEX2_FOR_FIVE_EXECUTION_TESTS") return json({ok:false,state:"EXPLICIT_TRANSFER_AUTHORIZATION_REQUIRED"},400);
+      const state=await loadExecutionTestState(env);
+      if(state?.armed||executionTestOpenPositions(state).length>0) return json({ok:false,state:"TEST_ACTIVE_TRANSFER_BLOCKED"},409);
+      const balanceProof=await kalshiExecutionBalanceSnapshot(env);
+      if(!balanceProof?.ok) return json({ok:false,state:"BALANCE_READ_FAILED"},502);
+      const rows=Array.isArray(balanceProof?.body?.balance_breakdown)?balanceProof.body.balance_breakdown:[];
+      const source=Number(rows.find(x=>Number(x?.exchange_index)===0)?.balance);
+      if(!Number.isFinite(source)||source<=0) return Response.redirect(new URL("/execution-test-control?funding=NO_INDEX0_BALANCE",request.url).toString(),303);
+      const amountCenticents=Math.floor(source*10000+1e-9);
+      if(!(amountCenticents>0)) return json({ok:false,state:"TRANSFER_AMOUNT_INVALID"},400);
+      const payload={source:"event_contract",destination:"event_contract",amount:amountCenticents,source_exchange_shard:0,destination_exchange_shard:2,source_subaccount:0,destination_subaccount:0};
+      const r=await kalshiApprovedShardTransfer(env,payload);
+      const body=await r.json().catch(()=>({}));
+      if(!r.ok) return json({ok:false,state:"INDEX2_TRANSFER_PROVIDER_REJECTED",httpStatus:r.status,providerResponse:body},502);
+      executionTestLedger(state,"TEST_FUNDING_MOVED_INDEX0_TO_INDEX2",{sourceUsd:source,amountCenticents,httpStatus:r.status});
+      await saveExecutionTestState(env,state);
+      return Response.redirect(new URL("/execution-test-control?funding=MOVED_TO_INDEX2",request.url).toString(),303);
+    }
+
+    if (request.method === "POST" && url.pathname === "/execution-test-arm") {
+      const form=await request.formData().catch(()=>null);
+      if(String(form?.get("authorization")||"")!=="ARM_FIVE_EXECUTION_TESTS_AT_60_MAX_1_USD") return json({ok:false,state:"EXPLICIT_TEST_ARM_AUTHORIZATION_REQUIRED"},400);
+      if(!kalshiControllerSwitchEnabled(env)) return json({ok:false,state:"CONTROLLER_SWITCH_HARD_DISABLED"},423);
+      const real=await loadRealTradeState(env);
+      if(kalshiAuthorizationValid(real)||Number(real?.filledCount||0)>Number(real?.exitFilledTotal||0)) return json({ok:false,state:"ONE_TRADE_CONTROLLER_OR_POSITION_ACTIVE"},409);
+      const current=await loadExecutionTestState(env);
+      if(current?.armed||executionTestOpenPositions(current).length>0) return json({ok:false,state:"EXECUTION_TEST_ALREADY_ACTIVE"},409);
+      const balanceProof=await kalshiExecutionBalanceSnapshot(env);
+      const rows=Array.isArray(balanceProof?.body?.balance_breakdown)?balanceProof.body.balance_breakdown:[];
+      const index2=Number(rows.find(x=>Number(x?.exchange_index)===2)?.balance);
+      if(!balanceProof?.ok||!Number.isFinite(index2)||index2<EXECUTION_TEST_CONFIG.minSeriesFundingUsd) return json({ok:false,state:"INDEX2_FUNDING_NOT_READY",index2Usd:Number.isFinite(index2)?index2:null,requiredUsd:EXECUTION_TEST_CONFIG.minSeriesFundingUsd},409);
+      const state=defaultExecutionTestState();
+      state.armed=true;state.status="ARMED_FISHING";state.seriesId=crypto.randomUUID();state.armedAt=Date.now();
+      state.fundingAtArm={index2Usd:index2,requiredExchangeIndex:2};
+      executionTestLedger(state,"EXECUTION_TEST_SERIES_ARMED",{threshold:.60,maxAttempts:5,maxConcurrent:3,maxEntryDebitUsd:1,index2Usd:index2,productionBaselineThreshold:REAL_TEST_CONFIG.entryScore});
+      await saveExecutionTestState(env,state);
+      return Response.redirect(new URL("/execution-test-control?armed=1",request.url).toString(),303);
+    }
+
     if (request.method === "GET" && url.pathname === "/baseline-80-arm") {
       return new Response(`<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><title>Arm Automatic .50 Test</title><style>body{font-family:system-ui;background:#030811;color:#eef7ff;padding:24px;max-width:720px;margin:auto}.box{border:1px solid #31516b;border-radius:14px;padding:20px;background:#071725}button{font-size:18px;font-weight:800;padding:14px 18px;border-radius:10px;border:1px solid #d3a53a;background:#0b1421;color:#ffd86a}</style></head><body><div class="box"><h2>Baseline .80 / $1 Governed Trade</h2><p>This arms exactly one automatic Baseline entry at score ≥ .80, premium + entry fee ≤ $1, followed by the governed .20 / 5-minute exit.</p><form method="POST" action="/kalshi-authorize-one-trade"><input type="hidden" name="authorization" value="AUTHORIZE_ONE_BASELINE_80_MAX_1_USD"><button type="submit">ARM ONE BASELINE .80 TRADE</button></form></div></body></html>`,{headers:{"content-type":"text/html;charset=utf-8","cache-control":"no-store"}});
     }
