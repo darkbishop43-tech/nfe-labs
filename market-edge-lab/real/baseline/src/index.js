@@ -1451,6 +1451,31 @@ async function runExecutionTestSeries(env,freshShadow=null,preparedBalance=null)
   const now=Date.now();
   const shadow=freshShadow&&typeof freshShadow==="object"?freshShadow:await loadShadowState(env);
 
+  // PROVIDER RECONCILIATION: Kalshi is authoritative for whether a position is still open.
+  // This is a read-only provider check. If Kalshi is flat for one of our locally OPEN /
+  // EXIT_RETRY positions, retire only that stale local position so it cannot consume a
+  // concurrency slot forever. Never infer flatness from a failed/ambiguous provider read.
+  try{
+    const pr=await kalshiExecutionGet(env,"/trade-api/v2/portfolio/positions?limit=1000");
+    if(pr.ok){
+      const pb=await pr.json().catch(()=>({}));
+      const rows=Array.isArray(pb?.market_positions)?pb.market_positions:Array.isArray(pb?.positions)?pb.positions:[];
+      for(const position of executionTestOpenPositions(state)){
+        const exact=rows.find(x=>String(x?.ticker||x?.market_ticker||"")===String(position?.marketTicker||""))||null;
+        const qty=Number(exact?.position??exact?.quantity??0);
+        const providerFlat=!exact||!Number.isFinite(qty)||Math.abs(qty)<=1e-9;
+        if(providerFlat){
+          position.status="CLOSED";
+          position.closedAt=position.closedAt||Date.now();
+          position.providerReconciledFlat=true;
+          position.providerReconciledAt=new Date().toISOString();
+          position.exitReason=position.exitReason||"PROVIDER_FLAT_RECONCILIATION";
+          executionTestLedger(state,"TEST_STALE_POSITION_PROVIDER_FLAT_RECONCILED",{positionId:position.id,attemptNo:position.attemptNo,ticker:position.marketTicker,side:position.outcomeSide});
+        }
+      }
+    }
+  }catch{}
+
   // MANAGE: every filled position owns its own independent .20 / 5-minute exit.
   for(const position of executionTestOpenPositions(state)){
     const shadowCurrent=(shadow?.opportunities||[]).find(o=>o?.marketTicker===position.marketTicker&&o?.outcomeSide===position.outcomeSide);
