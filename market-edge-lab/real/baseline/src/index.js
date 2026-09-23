@@ -1399,7 +1399,10 @@ function executionTestLedger(state,type,payload={}){
   state.ledger=state.ledger.slice(0,120);
 }
 function executionTestEntryAuthorized(state){
-  return Boolean(state?.armed && Number(state?.attemptsStarted||0)<EXECUTION_TEST_CONFIG.maxAttempts);
+  // attemptsStarted is incremented immediately before the provider write latch.
+  // <= allows the fifth and final latched attempt to submit, while the controller
+  // itself will not create attempt 6.
+  return Boolean(state?.armed && Number(state?.attemptsStarted||0)<=EXECUTION_TEST_CONFIG.maxAttempts);
 }
 function executionTestOpenPositions(state){
   return (Array.isArray(state?.positions)?state.positions:[]).filter(p=>p?.status==="OPEN"||p?.status==="EXIT_RETRY");
@@ -1436,7 +1439,7 @@ function executionTestCandidatePool(shadow,now=Date.now()){
     kalshiCandidateTimeSafe(o,now)
   ).sort((a,b)=>Number(b?.score||0)-Number(a?.score||0));
 }
-async function runExecutionTestSeries(env,freshShadow=null){
+async function runExecutionTestSeries(env,freshShadow=null,preparedBalance=null){
   const state=await loadExecutionTestState(env);
   const now=Date.now();
   const shadow=freshShadow&&typeof freshShadow==="object"?freshShadow:await loadShadowState(env);
@@ -1506,6 +1509,7 @@ async function runExecutionTestSeries(env,freshShadow=null){
   const activeTickers=new Set(executionTestOpenPositions(state).map(p=>String(p.marketTicker)));
   const candidates=executionTestCandidatePool(shadow,now).filter(o=>!activeTickers.has(String(o.marketTicker)));
   let slots=Math.max(0,EXECUTION_TEST_CONFIG.maxConcurrent-executionTestOpenPositions(state).length);
+  let warmedBalance=preparedBalance&&typeof preparedBalance==="object"?preparedBalance:null;
 
   for(const observed of candidates){
     if(slots<=0||Number(state.attemptsStarted||0)>=EXECUTION_TEST_CONFIG.maxAttempts)break;
@@ -1525,7 +1529,8 @@ async function runExecutionTestSeries(env,freshShadow=null){
     if(!sizing?.ok||Number(sizing.totalDebitUsd)>EXECUTION_TEST_CONFIG.maxEntryDebitUsd||Number(sizing.count)<1)continue;
 
     // Preflight exact execution shard immediately before FIRE.
-    const balanceProof=await kalshiExecutionBalanceSnapshot(env);
+    const balanceProof=warmedBalance||await kalshiExecutionBalanceSnapshot(env);
+    warmedBalance=null;
     const rows=Array.isArray(balanceProof?.body?.balance_breakdown)?balanceProof.body.balance_breakdown:[];
     const shard=rows.find(x=>Number(x?.exchange_index)===EXECUTION_TEST_CONFIG.requiredExchangeIndex);
     const shardUsd=Number(shard?.balance);
@@ -3316,7 +3321,7 @@ export default {
         // Strategy, threshold, sizing, authorization and provider-write gates remain unchanged.
         const executionTestState=await loadExecutionTestState(env);
         if(executionTestState?.armed || executionTestOpenPositions(executionTestState).length>0){
-          controllerState=await runExecutionTestSeries(env,freshShadow);
+          controllerState=await runExecutionTestSeries(env,freshShadow,preparedBalance);
         }else{
           const scheduledState=await loadRealTradeState(env);
           const authorizedCap=Number(scheduledState?.founderAuthorization?.maxEntryDebitUsd);
