@@ -32,5 +32,90 @@ async function save(env,lab,st){await env.SIBLING_STATE.put(`state:${lab}`,JSON.
 async function runLab(env,lab,s){const st=await load(env,lab),os=opps(s);for(const p of [...st.positions]){const o=os.find(x=>key(x)===p.oppKey),held=Date.now()-Date.parse(p.entryTs),d=o?decision(lab,o,os):{label:'MISSING'};if(held>=MAX_HOLD_MS)close(st,p,o,'max_hold');else if(!o)close(st,p,null,'market_missing');else if(d.label!==action(lab))close(st,p,o,'decision_exit')}
 const openKeys=new Set(st.positions.map(p=>p.oppKey));for(const o of os.slice().sort((a,b)=>score(b)-score(a)||edge(b)-edge(a))){if(st.positions.length>=MAX_OPEN)break;const k=key(o);if(openKeys.has(k))continue;const d=decision(lab,o,os);if(d.label!==action(lab))continue;const le=lastExit(st,k);if(le&&Date.now()-Date.parse(le.ts)<COOLDOWN_MS)continue;if(open(st,o,d))openKeys.add(k)}st.lastRunAt=now();st.sharedSnapshotAt=s.lastRunAt||s.updatedAt||null;await save(env,lab,st);return st}
 async function run(env){const r=await fetch(FEED,{headers:{accept:'application/json'},cf:{cacheTtl:0}});if(!r.ok)throw Error(`shared feed ${r.status}`);const s=await r.json();const result={};for(const lab of labs)result[lab]=await runLab(env,lab,s);return result}
+
+const CALIBRATION_KEY='state:adaptive_market_lab:execution_calibration:v1';
+const CALIBRATION_MIN_SCORE=.50;
+const CALIBRATION_MAX_ROWS=250;
+const KALSHI_PUBLIC='https://api.elections.kalshi.com/trade-api/v2';
+const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+const prob=v=>{const n=Number(v);if(!Number.isFinite(n))return null;if(n>1&&n<=100)return n/100;return n>=0&&n<=1?n:null};
+function calFresh(){return{mode:'PAPER_EXECUTION_CALIBRATION',paperOnly:true,provider:'KALSHI_READ_ONLY',minScore:CALIBRATION_MIN_SCORE,observations:[],count:0,exactAskCaptureProxy:0,plusOneCaptureProxy:0,lastRunAt:null,status:'WAITING_FOR_QUALIFYING_OPPORTUNITY'}}
+async function calLoad(env){return await env.SIBLING_STATE.get(CALIBRATION_KEY,'json')||calFresh()}
+async function calSave(env,st){await env.SIBLING_STATE.put(CALIBRATION_KEY,JSON.stringify(st))}
+function calSelected(m,outcome){
+  const yesBid=prob(m?.yes_bid_dollars??m?.yes_bid),yesAsk=prob(m?.yes_ask_dollars??m?.yes_ask);
+  const noBid=prob(m?.no_bid_dollars??m?.no_bid),noAsk=prob(m?.no_ask_dollars??m?.no_ask);
+  const side=String(outcome||'YES').toUpperCase();
+  return {yesBid,yesAsk,noBid,noAsk,bid:side==='NO'?noBid:yesBid,ask:side==='NO'?noAsk:yesAsk}
+}
+async function calMarket(ticker){
+  const requestedAtMs=Date.now();
+  const r=await fetch(KALSHI_PUBLIC+'/markets/'+encodeURIComponent(ticker),{method:'GET',headers:{accept:'application/json'}});
+  const receivedAtMs=Date.now();
+  if(!r.ok)return{ok:false,httpStatus:r.status,requestedAtMs,receivedAtMs,error:'MARKET_READ_'+r.status};
+  const body=await r.json(),m=body?.market||body;
+  return{ok:true,httpStatus:r.status,requestedAtMs,receivedAtMs,market:m}
+}
+function calFee(price,count=1){const p=Number(price),c=Number(count);if(!(p>0&&p<1&&c>0))return null;return Math.ceil((.07*c*p*(1-p)-1e-12)*100)/100}
+function calSize(price,cap=1){const p=Number(price);if(!(p>0&&p<1))return{count:0,premium:null,fee:null,debit:null};for(let c=Math.floor(cap/p);c>=1;c--){const premium=Number((c*p).toFixed(4)),fee=calFee(p,c),debit=Number((premium+fee).toFixed(4));if(fee!==null&&debit<=cap)return{count:c,premium,fee,debit}}return{count:0,premium:null,fee:null,debit:null}}
+function calClass(limit,updatedAsk){return Number.isFinite(limit)&&Number.isFinite(updatedAsk)?(limit+1e-12>=updatedAsk?'REACHES OBSERVED ASK':'MISSES UPDATED ASK'):'UNKNOWN'}
+async function runCalibration(env){
+  const st=await calLoad(env);
+  st.paperOnly=true;st.mode='PAPER_EXECUTION_CALIBRATION';st.provider='KALSHI_READ_ONLY';
+  st.lastRunAt=now();
+  let shadow;
+  try{
+    const r=await fetch('https://market-edge-baseline-real.darkbishop43.workers.dev/shadow-state',{method:'GET',headers:{accept:'application/json'}});
+    if(!r.ok)throw Error('SHADOW_READ_'+r.status);
+    shadow=await r.json();
+  }catch(e){st.status='WAITING_SHADOW_READ';st.lastError=String(e?.message||e);await calSave(env,st);return st}
+  const candidates=(Array.isArray(shadow?.opportunities)?shadow.opportunities:[])
+    .filter(o=>Number(o?.score)>=CALIBRATION_MIN_SCORE&&o?.marketTicker&&(String(o?.outcomeSide).toUpperCase()==='YES'||String(o?.outcomeSide).toUpperCase()==='NO'))
+    .sort((a,b)=>Number(b?.score||0)-Number(a?.score||0));
+  const o=candidates[0];
+  if(!o){st.status='WAITING_FOR_QUALIFYING_OPPORTUNITY';st.lastError=null;await calSave(env,st);return st}
+  const ticker=String(o.marketTicker),outcome=String(o.outcomeSide).toUpperCase();
+  const t0=await calMarket(ticker);
+  if(!t0.ok){st.status='T0_QUOTE_FAILED';st.lastError=t0.error;await calSave(env,st);return st}
+  const q0=calSelected(t0.market,outcome),ask0=Number(q0.ask),bid0=Number(q0.bid);
+  if(!(ask0>0&&ask0<1)){st.status='T0_SELECTED_ASK_UNAVAILABLE';st.lastError=null;await calSave(env,st);return st}
+  const fireAtMs=Date.now();
+  const controlLimit=Number(ask0.toFixed(4));
+  const plusOneLimit=Number(Math.min(.99,ask0+.01).toFixed(4));
+  const controlYesLeg=outcome==='YES'?controlLimit:Number((1-controlLimit).toFixed(4));
+  const plusOneYesLeg=outcome==='YES'?plusOneLimit:Number((1-plusOneLimit).toFixed(4));
+  const sizing=calSize(controlLimit,1);
+  await sleep(75);
+  const t2=await calMarket(ticker);
+  const q2=t2.ok?calSelected(t2.market,outcome):{bid:null,ask:null};
+  const ask2=Number(q2.ask),bid2=Number(q2.bid);
+  const spread0=Number.isFinite(ask0)&&Number.isFinite(bid0)?Number((ask0-bid0).toFixed(4)):null;
+  const spread2=Number.isFinite(ask2)&&Number.isFinite(bid2)?Number((ask2-bid2).toFixed(4)):null;
+  const row={
+    observationNo:Number(st.count||0)+1,
+    dataset:'PAPER_EXECUTION_CALIBRATION',
+    paperOnly:true,
+    createdAt:new Date(fireAtMs).toISOString(),
+    asset:o?.asset||null,ticker,direction:outcome,score:Number(o?.score),
+    t0:{quoteRequestedAtMs:t0.requestedAtMs,quoteReceivedAtMs:t0.receivedAtMs,bid:Number.isFinite(bid0)?bid0:null,ask:ask0,spread:spread0,quoteReadLatencyMs:t0.receivedAtMs-t0.requestedAtMs},
+    hypothetical:{fireAtMs,elapsedFromT0ReceivedMs:fireAtMs-t0.receivedAtMs,count:sizing.count,debitUsd:sizing.debit,feeEstimateUsd:sizing.fee,
+      control:{selectedSideLimit:controlLimit,kalshiYesLegPrice:controlYesLeg},
+      plusOne:{selectedSideLimit:plusOneLimit,kalshiYesLegPrice:plusOneYesLeg}},
+    t2:{quoteRequestedAtMs:t2.requestedAtMs,quoteReceivedAtMs:t2.receivedAtMs,bid:Number.isFinite(bid2)?bid2:null,ask:Number.isFinite(ask2)?ask2:null,spread:spread2,elapsedFromT0ReceivedMs:t2.receivedAtMs-t0.receivedAtMs,httpStatus:t2.httpStatus??null},
+    controlClassification:calClass(controlLimit,ask2),
+    plusOneClassification:calClass(plusOneLimit,ask2),
+    priceMovement:Number.isFinite(ask2)?Number((ask2-ask0).toFixed(4)):null,
+    spreadChange:Number.isFinite(spread0)&&Number.isFinite(spread2)?Number((spread2-spread0).toFixed(4)):null,
+    note:'PAPER CAPTURE PROXY ONLY — no order submitted; quote reach is not a fill.'
+  };
+  st.observations=Array.isArray(st.observations)?st.observations:[];
+  st.observations.push(row);if(st.observations.length>CALIBRATION_MAX_ROWS)st.observations=st.observations.slice(-CALIBRATION_MAX_ROWS);
+  st.count=Number(st.count||0)+1;
+  st.exactAskCaptureProxy=Number(st.exactAskCaptureProxy||0)+(row.controlClassification==='REACHES OBSERVED ASK'?1:0);
+  st.plusOneCaptureProxy=Number(st.plusOneCaptureProxy||0)+(row.plusOneClassification==='REACHES OBSERVED ASK'?1:0);
+  st.latest=row;st.status='LIVE';st.lastError=null;
+  await calSave(env,st);return st
+}
+
 const json=x=>new Response(JSON.stringify(x,null,2),{headers:{'content-type':'application/json','access-control-allow-origin':'*','cache-control':'no-store'}});
-export default {async scheduled(e,env,ctx){ctx.waitUntil(run(env))},async fetch(req,env){const u=new URL(req.url);try{if(u.pathname==='/api/run')return json(await run(env));if(u.pathname==='/api/state/nfe')return json(await load(env,'nfe_reasoning'));if(u.pathname==='/api/state/payne')return json(await load(env,'payne_method'));if(u.pathname==='/api/state/adaptive')return json(await load(env,'adaptive_market_lab'));if(u.pathname==='/api/state')return json({nfe:await load(env,'nfe_reasoning'),payne:await load(env,'payne_method'),adaptive:await load(env,'adaptive_market_lab')});return json({name:'NFE-OS Market Edge Sibling Cloud Executor',mode:'PAPER_ONLY',baseline:'UNTOUCHED',routes:['/api/run','/api/state','/api/state/nfe','/api/state/payne','/api/state/adaptive']})}catch(e){return new Response(JSON.stringify({ok:false,error:String(e?.message||e)}),{status:500,headers:{'content-type':'application/json','access-control-allow-origin':'*'}})}}};
+export default {async scheduled(e,env,ctx){ctx.waitUntil(run(env));ctx.waitUntil(runCalibration(env))},async fetch(req,env){const u=new URL(req.url);try{if(u.pathname==='/api/calibration/run')return json(await runCalibration(env));if(u.pathname==='/api/calibration/state')return json(await calLoad(env));if(u.pathname==='/api/run')return json(await run(env));if(u.pathname==='/api/state/nfe')return json(await load(env,'nfe_reasoning'));if(u.pathname==='/api/state/payne')return json(await load(env,'payne_method'));if(u.pathname==='/api/state/adaptive')return json(await load(env,'adaptive_market_lab'));if(u.pathname==='/api/state')return json({nfe:await load(env,'nfe_reasoning'),payne:await load(env,'payne_method'),adaptive:await load(env,'adaptive_market_lab')});return json({name:'NFE-OS Market Edge Sibling Cloud Executor',mode:'PAPER_ONLY',baseline:'UNTOUCHED',routes:['/api/run','/api/state','/api/state/nfe','/api/state/payne','/api/state/adaptive','/api/calibration/run','/api/calibration/state']})}catch(e){return new Response(JSON.stringify({ok:false,error:String(e?.message||e)}),{status:500,headers:{'content-type':'application/json','access-control-allow-origin':'*'}})}}};
