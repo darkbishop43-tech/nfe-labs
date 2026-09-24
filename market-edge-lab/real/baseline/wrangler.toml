@@ -11,9 +11,8 @@ MARKET_SCOPE = "BTC_ETH_SOL_XRP_HYPE_AUTO_SELECT"
 KALSHI_ONE_TRADE_CONTROLLER_ENABLED = "ENABLED"
 
 # SECURITY:
-# Never place Polymarket credentials in this file.
-# Add POLYMARKET_US_KEY_ID and POLYMARKET_US_SECRET only as encrypted
-# Cloudflare Worker secrets after the isolated Worker is created.
+# Kalshi credentials are provided only as encrypted Cloudflare Worker secrets.
+# Never place API key IDs, private keys, signatures, or other authentication material here.
 
 
 [[kv_namespaces]]
