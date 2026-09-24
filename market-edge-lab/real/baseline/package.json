@@ -8,9 +8,6 @@
     "dev": "wrangler dev",
     "check": "wrangler deploy --dry-run"
   },
-  "dependencies": {
-    "polymarket-us": "^0.1.1"
-  },
   "devDependencies": {
     "wrangler": "^4.0.0"
   }
