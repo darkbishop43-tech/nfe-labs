@@ -1,0 +1,124 @@
+name: Kalshi Event Surface Proof
+
+on:
+  push:
+    branches:
+      - market-edge-baseline-real
+    paths:
+      - '.github/workflows/kalshi-event-surface-proof.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  prove:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Read Kalshi events with nested markets and exact-ticker controls
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json, urllib.request, urllib.parse, time, datetime
+          BASE='https://external-api.kalshi.com/trade-api/v2'
+          series_list=['KXBTC15M','KXETH15M','KXSOL15M','KXXRP15M','KXHYPE15M']
+          now=time.time()
+
+          def get(url):
+              req=urllib.request.Request(url,headers={'Accept':'application/json'})
+              with urllib.request.urlopen(req,timeout=25) as r:
+                  return r.status,json.load(r)
+
+          def prob(m,k1,k2):
+              v=m.get(k1,m.get(k2))
+              if v is None:return None
+              try:n=float(v)
+              except:return None
+              if n>1 and n<=100:n/=100
+              return n if 0<=n<=1 else None
+
+          def parse_ts(x):
+              try:return datetime.datetime.fromisoformat(str(x).replace('Z','+00:00')).timestamp()
+              except:return None
+
+          current_controls=[]
+          output=[]
+          for series in series_list:
+              q=urllib.parse.urlencode({
+                  'series_ticker':series,
+                  'with_nested_markets':'true',
+                  'min_close_ts':int(now),
+                  'limit':200
+              })
+              status,data=get(BASE+'/events?'+q)
+              events=data.get('events') or []
+              record={'seriesTicker':series,'httpStatus':status,'eventCount':len(events),'events':[],'currentValidNestedMarkets':[]}
+              for e in events[:200]:
+                  ms=e.get('markets') or []
+                  er={
+                      'eventTicker':e.get('event_ticker') or e.get('ticker'),
+                      'seriesTicker':e.get('series_ticker'),
+                      'eventStatus':e.get('status'),
+                      'nestedMarketCount':len(ms),
+                      'markets':[]
+                  }
+                  for m in ms[:200]:
+                      ot=parse_ts(m.get('open_time')); ct=parse_ts(m.get('close_time'))
+                      dur=(ct-ot) if ot is not None and ct is not None else None
+                      rem=(ct-now) if ct is not None else None
+                      yesBid=prob(m,'yes_bid_dollars','yes_bid'); yesAsk=prob(m,'yes_ask_dollars','yes_ask')
+                      noBid=prob(m,'no_bid_dollars','no_bid'); noAsk=prob(m,'no_ask_dollars','no_ask')
+                      if noAsk is None and yesBid is not None:noAsk=round(1-yesBid,4)
+                      if noBid is None and yesAsk is not None:noBid=round(1-yesAsk,4)
+                      st=str(m.get('status') or '').lower()
+                      reasons=[]
+                      if st not in ('active','open'): reasons.append('STATUS_NOT_OPEN_ACTIVE')
+                      if yesAsk is None or yesBid is None or noAsk is None or noBid is None: reasons.append('BBO_INCOMPLETE')
+                      if yesAsk is not None and (yesAsk<=.01 or yesAsk>=.99): reasons.append('YES_ASK_DEGENERATE')
+                      if noAsk is not None and (noAsk<=.01 or noAsk>=.99): reasons.append('NO_ASK_DEGENERATE')
+                      if rem is None: reasons.append('CLOSE_TIME_INVALID')
+                      elif rem<=0: reasons.append('CLOSE_NOT_FUTURE')
+                      elif rem>20*60: reasons.append('CLOSE_MORE_THAN_20_MIN_AWAY')
+                      if dur is None or not (10*60<=dur<=20*60): reasons.append('DURATION_OUTSIDE_10_TO_20_MIN')
+                      row={
+                          'ticker':m.get('ticker'),
+                          'status':m.get('status'),
+                          'open_time':m.get('open_time'),
+                          'close_time':m.get('close_time'),
+                          'durationMinutes':round(dur/60,3) if dur is not None else None,
+                          'minutesToClose':round(rem/60,3) if rem is not None else None,
+                          'yesBid':yesBid,'yesAsk':yesAsk,'noBid':noBid,'noAsk':noAsk,
+                          'exchange_index':m.get('exchange_index'),
+                          'localRejectReasons':reasons
+                      }
+                      er['markets'].append(row)
+                      if not reasons and m.get('ticker'):
+                          record['currentValidNestedMarkets'].append(row)
+                          current_controls.append((series,m.get('ticker')))
+                  record['events'].append(er)
+              output.append(record)
+
+          controls=[]
+          seen=set()
+          for series,ticker in current_controls:
+              if ticker in seen: continue
+              seen.add(ticker)
+              st,d=get(BASE+'/markets/'+urllib.parse.quote(ticker,safe=''))
+              m=d.get('market') or d
+              controls.append({
+                  'seriesTicker':series,
+                  'ticker':ticker,
+                  'httpStatus':st,
+                  'providerStatus':m.get('status'),
+                  'open_time':m.get('open_time'),
+                  'close_time':m.get('close_time'),
+                  'yes_bid_dollars':m.get('yes_bid_dollars',m.get('yes_bid')),
+                  'yes_ask_dollars':m.get('yes_ask_dollars',m.get('yes_ask')),
+                  'no_bid_dollars':m.get('no_bid_dollars',m.get('no_bid')),
+                  'no_ask_dollars':m.get('no_ask_dollars',m.get('no_ask')),
+                  'exchange_index':m.get('exchange_index')
+              })
+              if len(controls)>=10: break
+
+          print(json.dumps({'observedAtUnix':int(now),'series':output,'exactTickerControls':controls},indent=2))
+          PY
