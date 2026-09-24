@@ -1,0 +1,49 @@
+name: Baseline Forensic Read
+
+on:
+  push:
+    branches:
+      - market-edge-baseline-real
+    paths:
+      - '.github/workflows/baseline-forensic-read.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  read:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify public Kalshi Baseline read paths
+        shell: bash
+        run: |
+          set -euo pipefail
+          BASE="https://market-edge-baseline-real.darkbishop43.workers.dev"
+          echo "=== HEALTH ==="
+          curl --fail --silent --show-error "$BASE/health"
+          echo
+          echo "=== STATUS ==="
+          curl --fail --silent --show-error "$BASE/status"
+          echo
+          echo "=== ACCOUNT ==="
+          curl --fail --silent --show-error "$BASE/account"
+          echo
+          echo "=== EXECUTION TEST STATE ==="
+          curl --fail --silent --show-error "$BASE/execution-test-state"
+          echo
+          echo "=== HISTORICAL NFE TEST ORDERS ==="
+          curl --fail --silent --show-error "$BASE/forensic-historical-orders?limit=200" -o /tmp/orders.json
+          python - <<'PY'
+          import json
+          data=json.load(open('/tmp/orders.json'))
+          orders=data.get('orders') or data.get('data') or []
+          if isinstance(orders, dict):
+              orders=orders.get('orders') or []
+          matched=[o for o in orders if str(o.get('client_order_id','')).startswith('nfe-test-')]
+          print(json.dumps({
+              'provider_cursor': data.get('cursor'),
+              'provider_order_count': len(orders),
+              'matched_nfe_test_count': len(matched),
+              'matched_orders': matched
+          }, indent=2, sort_keys=True))
+          PY
