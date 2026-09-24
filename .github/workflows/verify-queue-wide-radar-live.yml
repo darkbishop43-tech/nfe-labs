@@ -14,30 +14,50 @@ jobs:
   verify:
     runs-on: ubuntu-latest
     steps:
-      - name: Read live bounded queue and wide radar
+      - name: Verify unattended queue architecture and live wide radar
         shell: bash
         run: |
           set -euo pipefail
           BASE='https://market-edge-baseline-real.darkbishop43.workers.dev'
+          PROOF_ID='unattended-proof-20260924'
+
           curl --fail --silent --show-error "$BASE/execution-test-state" -o /tmp/test.json
           curl --fail --silent --show-error "$BASE/execution-test-queue-proof" -o /tmp/queue.json
+          curl --fail --silent --show-error "$BASE/execution-test-regression-proof" -o /tmp/regression.json
           curl --fail --silent --show-error "$BASE/wide-radar-state" -o /tmp/radar.json
           curl --fail --silent --show-error "$BASE/shadow-state" -o /tmp/shadow.json
+          curl --fail --silent --show-error "$BASE/execution-test-control" -o /tmp/control.html
+
+          curl --fail --silent --show-error -X POST             -H 'content-type: application/json'             --data '{"authorization":"WRITE_ISOLATED_QUEUE_PERSISTENCE_PROOF","proofId":"unattended-proof-20260924"}'             "$BASE/execution-test-queue-persistence-proof" -o /tmp/pwrite.json
+
+          curl --fail --silent --show-error "$BASE/execution-test-queue-persistence-proof" -o /tmp/pread.json
+
           python - <<'PY'
           import json
           t=json.load(open('/tmp/test.json'))
           q=json.load(open('/tmp/queue.json'))
+          g=json.load(open('/tmp/regression.json'))
           r=json.load(open('/tmp/radar.json'))
           s=json.load(open('/tmp/shadow.json'))
+          pw=json.load(open('/tmp/pwrite.json'))
+          pr=json.load(open('/tmp/pread.json'))
+          control=open('/tmp/control.html',encoding='utf-8').read()
+
           core=['BTC','ETH','SOL','XRP','HYPE']
           added=['ZEC','DOGE','BNB','NEAR']
           inv={x.get('asset'):x for x in r.get('inventory',[]) if x.get('asset')}
           cov=r.get('live',{}).get('coverage') or {}
+
           out={
             'execution_test_status':t.get('state',{}).get('status'),
             'execution_test_armed':t.get('state',{}).get('armed'),
             'queue_runtime':t.get('queue'),
             'queue_proof':q,
+            'regression_proof':g,
+            'persistence_write':pw,
+            'persistence_read':pr,
+            'single_series_control_visible':'ARM SELECTED EXECUTION TEST SERIES' in control,
+            'queue_control_visible':'ARM GOVERNED THRESHOLD QUEUE' in control,
             'radar_discovered_series_count':r.get('discoveredSeriesCount'),
             'provider_impact':r.get('providerImpact'),
             'frozen':r.get('frozen'),
@@ -55,18 +75,42 @@ jobs:
             'real_order_submitted_by_validation':False
           }
           print(json.dumps(out,indent=2))
+
           assert q.get('ok') is True
           assert q.get('realOrderSubmitted') is False
           assert q.get('oneStageActive') is True
           assert q.get('automaticAdvance') is True
+          assert q.get('stageTransitionExactlyOnce') is True
           assert q.get('freshStageIdentity') is True
           assert q.get('duplicateArmWouldReject') is True
           assert q.get('stopPreservesOpenPositionManagement') is True
           assert abs(float(q.get('productionThreshold'))-.80)<1e-9
+
+          assert g.get('ok') is True
+          assert g.get('singleSeriesArmRoutePreserved') is True
+          assert g.get('schedulerOwnsExecution') is True
+          assert g.get('browserRequired') is False
+          assert g.get('workerRestartFailClosed') is True
+          assert g.get('stopPreservesFilledPositionManagement') is True
+          assert g.get('queueAboveController') is True
+          assert g.get('realOrderSubmitted') is False
+
+          assert 'ARM SELECTED EXECUTION TEST SERIES' in control
+          assert 'ARM GOVERNED THRESHOLD QUEUE' in control
+
+          assert pw.get('written') is True
+          assert pw.get('productionExecutionStateTouched') is False
+          assert pw.get('realOrderSubmitted') is False
+          assert pr.get('persisted') is True
+          assert pr.get('proof',{}).get('proofId')=='unattended-proof-20260924'
+          assert pr.get('proof',{}).get('queue',{}).get('completedAttempts')==2
+          assert pr.get('proof',{}).get('queue',{}).get('currentIndex')==1
+
           assert int(r.get('discoveredSeriesCount'))==14
           assert all(a in inv for a in core+added)
           assert abs(float(r.get('frozen',{}).get('productionEntryScore'))-.80)<1e-9
           assert abs(float(r.get('frozen',{}).get('exitScore'))-.20)<1e-9
           assert int(r.get('frozen',{}).get('maxHoldMs'))==300000
           assert float(r.get('frozen',{}).get('maxEntryDebitUsd'))==1
+          assert int(r.get('frozen',{}).get('requiredExchangeIndex'))==2
           PY
