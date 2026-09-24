@@ -30,7 +30,7 @@ function statusPayload(env) {
     experiment: env.EXPERIMENT_NAME || "MARKET EDGE — BASELINE REAL",
     isolation: "DEDICATED_WORKER",
     venue: "KALSHI",
-    marketScope: env.MARKET_SCOPE || "BTC_ETH_SOL_XRP_HYPE",
+    marketScope: env.MARKET_SCOPE || EXECUTABLE_15M_ASSETS.join("_"),
     executionMode: env.EXECUTION_MODE || "LOCKED",
     liveOrderSubmission: env.LIVE_ORDER_SUBMISSION || "DISABLED",
     fundingAuthorized: true,
@@ -146,7 +146,7 @@ async function marketSnapshot(env) {
   const shadow=await loadShadowState(env);
   return {
     ok:true,source:"KALSHI_BASELINE_SHADOW",provider:"KALSHI",
-    marketScope:"BTC_ETH_SOL_XRP_HYPE",
+    marketScope:EXECUTABLE_15M_ASSETS.join("_"),
     status:shadow?.status||"UNKNOWN",
     lastRunAt:shadow?.lastRunAt||null,
     eligibleCount:Number(shadow?.eligibleCount||0),
@@ -194,17 +194,39 @@ async function coinbaseSpot(product) {
   return price;
 }
 
+const EXECUTABLE_15M_ASSETS=["BTC","ETH","SOL","XRP","HYPE","ZEC","DOGE","BNB","NEAR"];
+const KALSHI_15M_CRYPTO_INVENTORY=[
+  {asset:"BTC",seriesTicker:"KXBTC15M",title:"Bitcoin price up down",inventory:"ACTIVE_OR_FUTURE",scoreSupport:"SUPPORTED"},
+  {asset:null,seriesTicker:"KXCRYPTOCOMP15M",title:"Crypto Comparison 15 minute",inventory:"NONE_OBSERVED",scoreSupport:"UNSUPPORTED_COMPOSITE"},
+  {asset:"ADA",seriesTicker:"KXADA15M",title:"Cardano 15 Minute",inventory:"NONE_OBSERVED",scoreSupport:"SPOT_CAPABLE_NO_INVENTORY"},
+  {asset:"ZEC",seriesTicker:"KXZEC15M",title:"Zcash 15min",inventory:"ACTIVE_OR_FUTURE",scoreSupport:"SUPPORTED"},
+  {asset:"TON",seriesTicker:"KXTON15M",title:"TON 15m",inventory:"NONE_OBSERVED",scoreSupport:"SPOT_CAPABLE_NO_INVENTORY"},
+  {asset:"HYPE",seriesTicker:"KXHYPE15M",title:"Hype 15 min",inventory:"ACTIVE_OR_FUTURE",scoreSupport:"SUPPORTED"},
+  {asset:null,seriesTicker:"KXCRYPTOLEAD15M",title:"Coin Race 15 minutes",inventory:"ACTIVE_OR_FUTURE",scoreSupport:"UNSUPPORTED_COMPOSITE"},
+  {asset:"DOGE",seriesTicker:"KXDOGE15M",title:"Dogecoin 15 Minute",inventory:"ACTIVE_OR_FUTURE",scoreSupport:"SUPPORTED"},
+  {asset:"BCH",seriesTicker:"KXBCH15M",title:"Bitcoin Cash 15 Minute",inventory:"NONE_OBSERVED",scoreSupport:"SPOT_CAPABLE_NO_INVENTORY"},
+  {asset:"XRP",seriesTicker:"KXXRP15M",title:"XRP 15 Minute",inventory:"ACTIVE_OR_FUTURE",scoreSupport:"SUPPORTED"},
+  {asset:"ETH",seriesTicker:"KXETH15M",title:"ETH 15M price up down",inventory:"ACTIVE_OR_FUTURE",scoreSupport:"SUPPORTED"},
+  {asset:"BNB",seriesTicker:"KXBNB15M",title:"BNB 15 Minute",inventory:"ACTIVE_OR_FUTURE",scoreSupport:"SUPPORTED"},
+  {asset:"NEAR",seriesTicker:"KXNEAR15M",title:"NEAR 15m",inventory:"ACTIVE_OR_FUTURE",scoreSupport:"SUPPORTED"},
+  {asset:"SOL",seriesTicker:"KXSOL15M",title:"Solana 15 minutes",inventory:"ACTIVE_OR_FUTURE",scoreSupport:"SUPPORTED"}
+];
 const ASSET_PRICE_META={
   BTC:{coinbase:"BTC-USD",coingecko:"bitcoin"},
   ETH:{coinbase:"ETH-USD",coingecko:"ethereum"},
   SOL:{coinbase:"SOL-USD",coingecko:"solana"},
   XRP:{coinbase:"XRP-USD",coingecko:"ripple"},
-  HYPE:{coinbase:"HYPE-USD",coingecko:"hyperliquid"}
+  HYPE:{coinbase:"HYPE-USD",coingecko:"hyperliquid"},
+  ZEC:{coinbase:"ZEC-USD"},
+  DOGE:{coinbase:"DOGE-USD"},
+  BNB:{coinbase:"BNB-USD"},
+  NEAR:{coinbase:"NEAR-USD"}
 };
 async function assetSpot(asset) {
   const meta=ASSET_PRICE_META[asset];
   if(!meta) throw new Error("UNSUPPORTED_ASSET");
   try { return {price:await coinbaseSpot(meta.coinbase),source:"COINBASE"}; } catch {}
+  if(!meta.coingecko) throw new Error("COINBASE_SPOT_UNAVAILABLE_NO_FALLBACK");
   const r=await fetch("https://api.coingecko.com/api/v3/simple/price?ids="+encodeURIComponent(meta.coingecko)+"&vs_currencies=usd",{headers:{accept:"application/json"}});
   if(!r.ok) throw new Error("PUBLIC_SPOT_READ_FAILED_"+r.status);
   const data=await r.json(), price=Number(data?.[meta.coingecko]?.usd);
@@ -746,6 +768,10 @@ async function resolveKalshi15mSeries(env, priorSeries=[]) {
     SOL:{coinbaseProduct:"SOL-USD",aliases:["SOL","SOLANA"]},
     XRP:{coinbaseProduct:"XRP-USD",aliases:["XRP","RIPPLE"]},
     HYPE:{coinbaseProduct:"HYPE-USD",aliases:["HYPE","HYPERLIQUID"]},
+    ZEC:{coinbaseProduct:"ZEC-USD",aliases:["ZEC","ZCASH"]},
+    DOGE:{coinbaseProduct:"DOGE-USD",aliases:["DOGE","DOGECOIN"]},
+    BNB:{coinbaseProduct:"BNB-USD",aliases:["BNB"]},
+    NEAR:{coinbaseProduct:"NEAR-USD",aliases:["NEAR"]},
   };
   const path="/trade-api/v2/series?category="+encodeURIComponent("Crypto")+"&include_product_metadata=true";
   const r=await kalshiShadowGet(env,path);
@@ -1047,7 +1073,7 @@ async function runShadow(env) {
   let stage = "MULTI_ASSET_SPOT";
   let discovery;
   try {
-    const trackedAssets=["BTC","ETH","SOL","XRP","HYPE"];
+    const trackedAssets=[...EXECUTABLE_15M_ASSETS];
     stage = "KALSHI_DISCOVERY";
     discovery = await discoverKalshiShadowMarkets(env, state?.kalshiSeriesCache||[]);
     stage = "MULTI_ASSET_SPOT";
@@ -1331,8 +1357,46 @@ function defaultExecutionTestState(){
     threshold:EXECUTION_TEST_CONFIG.entryScore,maxAttempts:EXECUTION_TEST_CONFIG.defaultMaxAttempts,
     maxConcurrent:EXECUTION_TEST_CONFIG.maxConcurrent,maxEntryDebitUsd:EXECUTION_TEST_CONFIG.maxEntryDebitUsd,
     requiredExchangeIndex:EXECUTION_TEST_CONFIG.requiredExchangeIndex,
-    attemptsStarted:0,positions:[],attempts:[],ledger:[]
+    attemptsStarted:0,positions:[],attempts:[],ledger:[],
+    queue:{active:false,status:"NONE",queueId:null,currentIndex:-1,totalAttempts:0,completedAttempts:0,stages:[],completedStages:[],cancelledStages:[]}
   };
+}
+function executionTestQueueActive(state){
+  return Boolean(state?.queue?.active===true && ["ACTIVE","QUEUED"].includes(String(state?.queue?.status||"")));
+}
+function executionTestStageSnapshot(state,reason="SERIES_COMPLETE"){
+  return {stageIndex:Number(state?.queue?.currentIndex??-1),seriesId:state?.seriesId||null,threshold:Number(state?.threshold),maxAttempts:executionTestSeriesLimit(state),attemptsStarted:Number(state?.attemptsStarted||0),reason,completedAt:Date.now(),attempts:JSON.parse(JSON.stringify(Array.isArray(state?.attempts)?state.attempts:[])),positions:JSON.parse(JSON.stringify(Array.isArray(state?.positions)?state.positions:[]))};
+}
+function activateExecutionTestQueueStage(state,index){
+  const q=state?.queue,stage=Array.isArray(q?.stages)?q.stages[index]:null;
+  if(!stage)return false;
+  q.currentIndex=index;q.active=true;q.status="ACTIVE";
+  q.stages=q.stages.map((s,i)=>({...s,status:i<index?"COMPLETE":i===index?"ACTIVE":"QUEUED"}));
+  state.threshold=Number(stage.threshold);state.maxAttempts=Math.trunc(Number(stage.count));
+  state.attemptsStarted=0;state.attempts=[];state.positions=[];state.ledger=[];
+  state.seriesId=crypto.randomUUID();state.armedAt=Date.now();state.completedAt=null;state.armed=true;state.status="ARMED_FISHING";
+  executionTestLedger(state,"EXECUTION_TEST_QUEUE_STAGE_ACTIVATED",{queueId:q.queueId,stageIndex:index,threshold:state.threshold,maxAttempts:state.maxAttempts});
+  return true;
+}
+function advanceExecutionTestQueue(state){
+  if(!executionTestQueueActive(state)||state.status!=="SERIES_COMPLETE"||executionTestOpenPositions(state).length>0)return false;
+  const q=state.queue,idx=Number(q.currentIndex);
+  if(idx<0||!q.stages?.[idx])return false;
+  if(!Array.isArray(q.completedStages))q.completedStages=[];
+  if(!q.completedStages.some(x=>Number(x.stageIndex)===idx)){q.completedStages.push(executionTestStageSnapshot(state));q.completedAttempts=Number(q.completedAttempts||0)+Number(state.attemptsStarted||0);}
+  const next=idx+1;
+  if(next>=q.stages.length){q.active=false;q.status="COMPLETE";q.stages=q.stages.map(s=>({...s,status:"COMPLETE"}));state.armed=false;state.status="QUEUE_COMPLETE";state.completedAt=Date.now();return true;}
+  return activateExecutionTestQueueStage(state,next);
+}
+function cancelExecutionTestQueue(state){
+  const q=state?.queue;if(!q)return false;
+  q.active=false;q.status="CANCELLED";
+  const idx=Number(q.currentIndex);
+  q.cancelledStages=(Array.isArray(q.stages)?q.stages:[]).filter((s,i)=>i>idx).map((s,i)=>({...s,originalIndex:idx+1+i,status:"CANCELLED"}));
+  q.stages=(Array.isArray(q.stages)?q.stages:[]).map((s,i)=>i<=idx?s:{...s,status:"CANCELLED"});
+  state.armed=false;state.status=executionTestOpenPositions(state).length>0?"QUEUE_DISARMED_MANAGING_POSITIONS":"QUEUE_DISARMED";
+  executionTestLedger(state,"EXECUTION_TEST_QUEUE_DISARMED",{queueId:q.queueId,currentIndex:idx,openPositions:executionTestOpenPositions(state).length});
+  return true;
 }
 async function loadExecutionTestState(env){
   if(!env?.BASELINE_REAL_SHADOW_STATE)return defaultExecutionTestState();
@@ -1394,7 +1458,7 @@ function executionTestCandidatePool(shadow,now=Date.now(),threshold=EXECUTION_TE
     Number(o?.yes)>0.01 && Number(o?.yes)<0.99 &&
     o?.marketTicker && o?.executionEligible===true &&
     Number(o?.exchangeIndex)===EXECUTION_TEST_CONFIG.requiredExchangeIndex &&
-    ["BTC","ETH","SOL","XRP","HYPE"].includes(String(o?.asset||"")) &&
+    EXECUTABLE_15M_ASSETS.includes(String(o?.asset||"")) &&
     (o?.outcomeSide==="YES"||o?.outcomeSide==="NO") &&
     kalshiCandidateTimeSafe(o,now)
   ).sort((a,b)=>Number(b?.score||0)-Number(a?.score||0));
@@ -1482,6 +1546,7 @@ async function runExecutionTestSeries(env,freshShadow=null,preparedBalance=null)
     if(Number(state.attemptsStarted||0)>=executionTestSeriesLimit(state)&&executionTestOpenPositions(state).length===0){
       state.armed=false;state.status="SERIES_COMPLETE";state.completedAt=state.completedAt||Date.now();
     }else if(state.armed) state.status="MANAGING_OPEN_POSITIONS";
+    advanceExecutionTestQueue(state);
     await saveExecutionTestState(env,state);
     return state;
   }
@@ -1591,6 +1656,7 @@ async function runExecutionTestSeries(env,freshShadow=null,preparedBalance=null)
     state.status=open>0?"ATTEMPT_LIMIT_REACHED_MANAGING_POSITIONS":"SERIES_COMPLETE";
     if(open===0){state.armed=false;state.completedAt=state.completedAt||Date.now();}
   }else state.status=open>0?"FISHING_WITH_OPEN_POSITIONS":"FISHING";
+  advanceExecutionTestQueue(state);
   await saveExecutionTestState(env,state);
   return state;
 }
@@ -1671,7 +1737,7 @@ function executionProofEligibleCandidates(shadow, now=Date.now()) {
     const close=Date.parse(o?.closeTime||"");
     return Number(o?.yes)>0.01 && Number(o?.yes)<0.99 && o?.marketTicker &&
       o?.executionEligible===true &&
-      ["BTC","ETH","SOL","XRP","HYPE"].includes(String(o?.asset||"")) &&
+      EXECUTABLE_15M_ASSETS.includes(String(o?.asset||"")) &&
       (o?.outcomeSide==="YES"||o?.outcomeSide==="NO") &&
       Number.isFinite(close) && (close-now)>proofMinTimeToCloseMs;
   });
@@ -1761,7 +1827,7 @@ async function maybeRunKalshiOneTrade(env, freshShadow=null, triggerSource="SCHE
           Number(o?.score)>=activeEntryThreshold && Number(o?.edge)>0 &&
           Number(o?.yes)>0.01 && Number(o?.yes)<0.99 && o?.marketTicker &&
           o?.executionEligible===true &&
-          ["BTC","ETH","SOL","XRP","HYPE"].includes(String(o?.asset||"")) &&
+          EXECUTABLE_15M_ASSETS.includes(String(o?.asset||"")) &&
           (o?.outcomeSide==="YES"||o?.outcomeSide==="NO") && kalshiCandidateTimeSafe(o,now)
         );
     let candidate=qualifyingCandidates.slice().sort((a,b)=>Number(b?.score||0)-Number(a?.score||0))[0]||null;
@@ -3436,7 +3502,7 @@ export default {
         Number(o?.score)>=traceEntryThreshold && Number(o?.edge)>0 &&
         Number(o?.yes)>0.01 && Number(o?.yes)<0.99 && o?.marketTicker &&
         o?.executionEligible===true &&
-        ["BTC","ETH","SOL","XRP","HYPE"].includes(String(o?.asset||"")) &&
+        EXECUTABLE_15M_ASSETS.includes(String(o?.asset||"")) &&
         (o?.outcomeSide==="YES"||o?.outcomeSide==="NO")
       );
       const controllerTimeSafe=controllerEligible.filter(o=>kalshiCandidateTimeSafe(o,invokedAt));
@@ -3782,6 +3848,7 @@ document.getElementById('export')?.addEventListener('click',async()=>{const r=aw
           attempts:(state.attempts||[]).map(a=>({attemptNo:a.attemptNo,status:a.status,asset:a.asset,ticker:a.marketTicker,side:a.outcomeSide,observedScore:a.observedScore,liveScore:a.liveScore,liveAsk:a.liveAsk,orderId:a.orderId||null,fillCount:Number(a.fillCount||0)}))
         },
         funding:{httpStatus:balanceProof?.httpStatus??null,totalBalance:balanceProof?.body?.balance??null,index0:index0?.balance??null,index2:index2?.balance??null,index2Ready:Number(index2?.balance)>=EXECUTION_TEST_CONFIG.minSeriesFundingUsd},
+        queue:{active:executionTestQueueActive(state),status:state?.queue?.status||"NONE",queueId:state?.queue?.queueId||null,currentIndex:Number(state?.queue?.currentIndex??-1),totalAttempts:Number(state?.queue?.totalAttempts||0),completedAttempts:Number(state?.queue?.completedAttempts||0),stages:Array.isArray(state?.queue?.stages)?state.queue.stages:[],completedStages:(Array.isArray(state?.queue?.completedStages)?state.queue.completedStages:[]).map(x=>({stageIndex:x.stageIndex,seriesId:x.seriesId,threshold:x.threshold,maxAttempts:x.maxAttempts,attemptsStarted:x.attemptsStarted,reason:x.reason,completedAt:x.completedAt})),cancelledStages:Array.isArray(state?.queue?.cancelledStages)?state.queue.cancelledStages:[]},
         safety:{maxEntryDebitUsd:1,maxAttempts:executionTestSeriesLimit(state),maxSelectableAttempts:EXECUTION_TEST_CONFIG.maxSelectableAttempts,maxConcurrent:3,requiredExchangeIndex:2,productionBaselineEntryScore:REAL_TEST_CONFIG.entryScore,testEntryScore:Number(state?.threshold??EXECUTION_TEST_CONFIG.entryScore)}
       });
     }
@@ -3799,7 +3866,9 @@ document.getElementById('export')?.addEventListener('click',async()=>{const r=aw
       control+="<div class='box'><b>INDEX 2 TEST FUNDING</b><p>Index 0: <b>"+(Number.isFinite(index0)?"$"+index0.toFixed(2):"—")+"</b><br>Index 2: <b class='"+(ready?"ok":"warn")+"'>"+(Number.isFinite(index2)?"$"+index2.toFixed(2):"—")+"</b></p><p>"+(ready?"READY — execution-test funding gate passed.":"NOT READY — test arm requires at least $5.00 on index 2.")+"</p>";
       if(Number.isFinite(index0)&&index0>0) control+="<form method='post' action='/execution-test-consolidate-index2'><input type='hidden' name='authorization' value='MOVE_INDEX0_TO_INDEX2_FOR_FIVE_EXECUTION_TESTS'><button type='submit'>MOVE INDEX 0 BALANCE TO INDEX 2</button></form>";
       control+="</div><div class='box'><b>SERIES STATUS</b><p>"+String(state.status||"DISARMED")+" · attempts "+Number(state.attemptsStarted||0)+"/"+executionTestSeriesLimit(state)+" · open positions "+executionTestOpenPositions(state).length+"/3</p>";
-      if(!state.armed&&ready) control+="<form method='post' action='/execution-test-arm'><input type='hidden' name='authorization' value='ARM_BOUNDED_EXECUTION_TESTS_MAX_1_USD'><label for='testScore'><b>Acceptance score</b></label><select id='testScore' name='testScore' style='font-size:18px;padding:12px;width:100%;box-sizing:border-box;margin:8px 0 14px;border-radius:10px'><option value='.50'>.50</option><option value='.55'>.55</option><option value='.60'>.60</option><option value='.65' selected>.65</option><option value='.70'>.70</option><option value='.75'>.75</option><option value='.80'>.80</option></select><label for='runCount'><b>Automatic attempts</b></label><input id='runCount' name='runCount' type='number' inputmode='numeric' min='1' max='100' step='1' value='10' style='font-size:18px;padding:12px;width:100%;box-sizing:border-box;margin-top:8px;border-radius:10px'><button type='submit'>ARM SELECTED EXECUTION TEST SERIES</button></form>";
+      const q=state?.queue||{};
+      if(executionTestQueueActive(state)){const idx=Number(q.currentIndex||0),active=q.stages?.[idx]||{};control+="<div class='box'><b>QUEUE ACTIVE</b><p>ACTIVE: <b>"+Number(active.threshold||state.threshold).toFixed(2)+" — "+Number(state.attemptsStarted||0)+"/"+executionTestSeriesLimit(state)+"</b></p><p>NEXT: <b>"+(q.stages?.[idx+1]?Number(q.stages[idx+1].threshold).toFixed(2)+" — 0/"+Number(q.stages[idx+1].count):"NONE")+"</b></p><p>TOTAL: <b>"+Number(q.completedAttempts||0)+"/"+Number(q.totalAttempts||0)+" attempts completed</b></p><form method='post' action='/execution-test-queue-disarm'><input type='hidden' name='authorization' value='DISARM_EXECUTION_TEST_QUEUE'><button type='submit'>STOP / DISARM QUEUE</button></form></div>";}
+      if(!state.armed&&!executionTestQueueActive(state)&&executionTestOpenPositions(state).length===0&&ready) control+="<form method='post' action='/execution-test-queue-arm'><input type='hidden' name='authorization' value='ARM_GOVERNED_THRESHOLD_QUEUE_MAX_1_USD'><b>Threshold queue · minimum scores</b><p class='muted'>Each nonblank row becomes one sequential stage. Only one stage can be active. A higher score may qualify during any lower-threshold stage.</p>"+[1,2,3,4,5].map((n,i)=>"<div style='display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:8px 0'><select name='score"+n+"' style='font-size:17px;padding:10px;border-radius:9px'><option value=''>Unused</option>"+[.50,.55,.60,.65,.70,.75,.80,.85].map(v=>"<option value='"+v+"' "+(i===0&&v===.65?"selected":"")+">"+v.toFixed(2)+"</option>").join("")+"</select><input name='count"+n+"' type='number' min='1' max='100' step='1' value='"+(i===0?2:"")+"' placeholder='attempts' style='font-size:17px;padding:10px;border-radius:9px'></div>").join("")+"<button type='submit'>ARM GOVERNED THRESHOLD QUEUE</button></form><p class='muted'>The queue uses the existing RADAR → LOCK → FIRE → MANAGE → RECORD controller unchanged.</p>";
       control+="<p class='muted'>Arming authorizes only the bounded number of attempts selected above. It does not place a manual trade. The scheduler owns RADAR → LOCK → FIRE → MANAGE → RECORD.</p></div></body></html>";
       return new Response(control,{headers:{"content-type":"text/html;charset=utf-8","cache-control":"no-store"}});
     }
@@ -3829,7 +3898,7 @@ document.getElementById('export')?.addEventListener('click',async()=>{const r=aw
       const form=await request.formData().catch(()=>null);
       if(String(form?.get("authorization")||"")!=="ARM_BOUNDED_EXECUTION_TESTS_MAX_1_USD") return json({ok:false,state:"EXPLICIT_TEST_ARM_AUTHORIZATION_REQUIRED"},400);
       const requestedScore=Number(form?.get("testScore"));
-      const allowedScores=[.50,.55,.60,.65,.70,.75,.80];
+      const allowedScores=[.50,.55,.60,.65,.70,.75,.80,.85];
       if(!allowedScores.some(x=>Math.abs(x-requestedScore)<1e-9)) return json({ok:false,state:"TEST_SCORE_INVALID",allowedScores},400);
       const requestedAttempts=Math.trunc(Number(form?.get("runCount")));
       if(!Number.isFinite(requestedAttempts)||requestedAttempts<1||requestedAttempts>EXECUTION_TEST_CONFIG.maxSelectableAttempts) return json({ok:false,state:"TEST_RUN_COUNT_INVALID",minimum:1,maximum:EXECUTION_TEST_CONFIG.maxSelectableAttempts},400);
@@ -3837,6 +3906,7 @@ document.getElementById('export')?.addEventListener('click',async()=>{const r=aw
       const real=await loadRealTradeState(env);
       if(kalshiAuthorizationValid(real)||Number(real?.filledCount||0)>Number(real?.exitFilledTotal||0)) return json({ok:false,state:"ONE_TRADE_CONTROLLER_OR_POSITION_ACTIVE"},409);
       const current=await loadExecutionTestState(env);
+      if(executionTestQueueActive(current)) return json({ok:false,state:"QUEUE_ALREADY_ACTIVE"},409);
       if(current?.armed||executionTestOpenPositions(current).length>0) return json({ok:false,state:"EXECUTION_TEST_ALREADY_ACTIVE"},409);
       const balanceProof=await kalshiExecutionBalanceSnapshot(env);
       const rows=Array.isArray(balanceProof?.body?.balance_breakdown)?balanceProof.body.balance_breakdown:[];
@@ -3850,6 +3920,51 @@ document.getElementById('export')?.addEventListener('click',async()=>{const r=aw
       executionTestLedger(state,"EXECUTION_TEST_SERIES_ARMED",{threshold:requestedScore,maxAttempts:requestedAttempts,maxConcurrent:3,maxEntryDebitUsd:1,index2Usd:index2,productionBaselineThreshold:REAL_TEST_CONFIG.entryScore});
       await saveExecutionTestState(env,state);
       return Response.redirect(new URL("/execution-test-control?armed=1",request.url).toString(),303);
+    }
+
+    if (request.method === "POST" && url.pathname === "/execution-test-queue-arm") {
+      const form=await request.formData().catch(()=>null);
+      if(String(form?.get("authorization")||"")!=="ARM_GOVERNED_THRESHOLD_QUEUE_MAX_1_USD") return json({ok:false,state:"EXPLICIT_QUEUE_ARM_AUTHORIZATION_REQUIRED"},400);
+      if(!kalshiControllerSwitchEnabled(env)) return json({ok:false,state:"CONTROLLER_SWITCH_HARD_DISABLED"},423);
+      const real=await loadRealTradeState(env);
+      if(kalshiAuthorizationValid(real)||Number(real?.filledCount||0)>Number(real?.exitFilledTotal||0)) return json({ok:false,state:"ONE_TRADE_CONTROLLER_OR_POSITION_ACTIVE"},409);
+      const current=await loadExecutionTestState(env);
+      if(executionTestQueueActive(current)) return json({ok:false,state:"QUEUE_ALREADY_ACTIVE"},409);
+      if(current?.armed||executionTestOpenPositions(current).length>0) return json({ok:false,state:"EXECUTION_TEST_ALREADY_ACTIVE"},409);
+      const allowed=[.50,.55,.60,.65,.70,.75,.80,.85],stages=[];
+      for(let n=1;n<=5;n++){const raw=String(form?.get("score"+n)||"").trim();if(!raw)continue;const threshold=Number(raw),count=Math.trunc(Number(form?.get("count"+n)));if(!allowed.some(x=>Math.abs(x-threshold)<1e-9))return json({ok:false,state:"QUEUE_SCORE_INVALID",row:n,allowedScores:allowed},400);if(!Number.isFinite(count)||count<1||count>EXECUTION_TEST_CONFIG.maxSelectableAttempts)return json({ok:false,state:"QUEUE_COUNT_INVALID",row:n,minimum:1,maximum:EXECUTION_TEST_CONFIG.maxSelectableAttempts},400);stages.push({threshold,count,status:"QUEUED"});}
+      if(!stages.length)return json({ok:false,state:"QUEUE_EMPTY"},400);
+      const totalAttempts=stages.reduce((a,s)=>a+s.count,0);
+      if(totalAttempts>EXECUTION_TEST_CONFIG.maxSelectableAttempts)return json({ok:false,state:"QUEUE_TOTAL_ATTEMPTS_TOO_LARGE",maximum:EXECUTION_TEST_CONFIG.maxSelectableAttempts},400);
+      const balanceProof=await kalshiExecutionBalanceSnapshot(env),rows=Array.isArray(balanceProof?.body?.balance_breakdown)?balanceProof.body.balance_breakdown:[],index2=Number(rows.find(x=>Number(x?.exchange_index)===2)?.balance);
+      if(!balanceProof?.ok||!Number.isFinite(index2)||index2<EXECUTION_TEST_CONFIG.minSeriesFundingUsd)return json({ok:false,state:"INDEX2_FUNDING_NOT_READY",index2Usd:Number.isFinite(index2)?index2:null,requiredUsd:EXECUTION_TEST_CONFIG.minSeriesFundingUsd},409);
+      const state=defaultExecutionTestState();
+      state.queue={active:true,status:"QUEUED",queueId:crypto.randomUUID(),currentIndex:-1,totalAttempts,completedAttempts:0,stages,completedStages:[],cancelledStages:[]};
+      state.fundingAtArm={index2Usd:index2,requiredExchangeIndex:2};activateExecutionTestQueueStage(state,0);
+      executionTestLedger(state,"EXECUTION_TEST_QUEUE_ARMED",{queueId:state.queue.queueId,stages:stages.map(s=>({threshold:s.threshold,count:s.count})),totalAttempts,maxEntryDebitUsd:1,productionBaselineThreshold:REAL_TEST_CONFIG.entryScore});
+      await saveExecutionTestState(env,state);return Response.redirect(new URL("/execution-test-control?queue=armed",request.url).toString(),303);
+    }
+
+    if (request.method === "POST" && url.pathname === "/execution-test-queue-disarm") {
+      const form=await request.formData().catch(()=>null);
+      if(String(form?.get("authorization")||"")!=="DISARM_EXECUTION_TEST_QUEUE")return json({ok:false,state:"EXPLICIT_QUEUE_DISARM_AUTHORIZATION_REQUIRED"},400);
+      const state=await loadExecutionTestState(env);
+      if(!executionTestQueueActive(state)&&!state?.armed)return json({ok:false,state:"QUEUE_NOT_ACTIVE"},409);
+      cancelExecutionTestQueue(state);await saveExecutionTestState(env,state);return Response.redirect(new URL("/execution-test-control?queue=disarmed",request.url).toString(),303);
+    }
+
+    if (request.method === "GET" && url.pathname === "/execution-test-queue-proof") {
+      const synthetic=defaultExecutionTestState();
+      synthetic.queue={active:true,status:"QUEUED",queueId:"QUEUE_PROOF",currentIndex:-1,totalAttempts:4,completedAttempts:0,stages:[{threshold:.65,count:2,status:"QUEUED"},{threshold:.70,count:2,status:"QUEUED"}],completedStages:[],cancelledStages:[]};
+      activateExecutionTestQueueStage(synthetic,0);synthetic.attemptsStarted=2;synthetic.status="SERIES_COMPLETE";synthetic.armed=false;
+      const before=synthetic.seriesId,advanced=advanceExecutionTestQueue(synthetic),after=synthetic.seriesId,duplicateArmWouldReject=executionTestQueueActive(synthetic);
+      const stopProof=JSON.parse(JSON.stringify(synthetic));stopProof.positions=[{id:"proof-open",status:"OPEN",filledCount:1,marketTicker:"PROOF",outcomeSide:"YES"}];cancelExecutionTestQueue(stopProof);
+      return json({ok:true,realOrderSubmitted:false,persistentStateKey:EXECUTION_TEST_STATE_KEY,oneStageActive:synthetic.queue.stages.filter(s=>s.status==="ACTIVE").length===1,automaticAdvance:advanced&&synthetic.queue.currentIndex===1,freshStageIdentity:before!==after,nextStageThreshold:synthetic.threshold,nextStageAttemptsStarted:synthetic.attemptsStarted,duplicateArmWouldReject,stopPreservesOpenPositionManagement:executionTestOpenPositions(stopProof).length===1&&stopProof.armed===false,productionThreshold:REAL_TEST_CONFIG.entryScore,maxEntryDebitUsd:EXECUTION_TEST_CONFIG.maxEntryDebitUsd,note:"Synthetic controller proof only; no production authorization or provider POST."});
+    }
+
+    if (request.method === "GET" && url.pathname === "/wide-radar-state") {
+      const shadow=await loadShadowState(env),supported=new Set(EXECUTABLE_15M_ASSETS);
+      return json({ok:true,readOnly:true,provider:"KALSHI",inventoryObservedAt:"2026-09-24T09:53:24Z",discoveredSeriesCount:KALSHI_15M_CRYPTO_INVENTORY.length,providerImpact:{corePerSeriesReadsPerCycle:5,widePerSeriesReadsPerCycle:EXECUTABLE_15M_ASSETS.length,additionalPerMinute:EXECUTABLE_15M_ASSETS.length-5,uncontrolledEnumeration:false},inventory:KALSHI_15M_CRYPTO_INVENTORY.map(x=>({...x,executionPool:supported.has(x.asset),spotInput:supported.has(x.asset)?ASSET_PRICE_META[x.asset]?.coinbase||null:null})),live:{lastRunAt:shadow?.lastRunAt||null,status:shadow?.status||null,seenCount:Number(shadow?.seenCount||0),rejectedCount:Number(shadow?.rejectedCount||0),coverage:shadow?.assetCoverage||{},opportunities:(shadow?.opportunities||[]).map(o=>({asset:o.asset,ticker:o.marketTicker,side:o.outcomeSide,score:safeFinite(o.score),ask:safeFinite(o.yes),bid:safeFinite(o.bid),edge:safeFinite(o.edge),executionEligible:o.executionEligible===true,seriesTicker:o.seriesTicker,closeTime:o.closeTime}))},frozen:{productionEntryScore:REAL_TEST_CONFIG.entryScore,exitScore:REAL_TEST_CONFIG.exitScore,maxHoldMs:REAL_TEST_CONFIG.maxHoldMs,maxEntryDebitUsd:EXECUTION_TEST_CONFIG.maxEntryDebitUsd,requiredExchangeIndex:EXECUTION_TEST_CONFIG.requiredExchangeIndex}});
     }
 
     if (request.method === "GET" && url.pathname === "/baseline-80-arm") {
@@ -4923,7 +5038,7 @@ document.getElementById('export')?.addEventListener('click',async()=>{const r=aw
         Number(o?.score)>=REAL_TEST_CONFIG.entryScore && Number(o?.edge)>0 &&
         Number(o?.yes)>0.01 && Number(o?.yes)<0.99 && o?.marketTicker &&
         o?.executionEligible===true &&
-        ["BTC","ETH","SOL","XRP","HYPE"].includes(String(o?.asset||"")) &&
+        EXECUTABLE_15M_ASSETS.includes(String(o?.asset||"")) &&
         (o?.outcomeSide==="YES"||o?.outcomeSide==="NO")
       );
       const timeSafeCandidates=scoreCandidates.filter(o=>kalshiCandidateTimeSafe(o,now));
