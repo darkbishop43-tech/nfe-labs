@@ -1,0 +1,87 @@
+name: Final Unattended Queue Wide Radar Proof
+
+on:
+  push:
+    branches:
+      - market-edge-baseline-real
+    paths:
+      - '.github/workflows/final-unattended-queue-wide-proof.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Final read-only live proof
+        shell: bash
+        run: |
+          set -euo pipefail
+          BASE='https://market-edge-baseline-real.darkbishop43.workers.dev'
+          curl --fail --silent --show-error "$BASE/execution-test-state" -o /tmp/test.json
+          curl --fail --silent --show-error "$BASE/execution-test-queue-proof" -o /tmp/queue.json
+          curl --fail --silent --show-error "$BASE/execution-test-regression-proof" -o /tmp/regression.json
+          curl --fail --silent --show-error "$BASE/execution-test-queue-persistence-proof" -o /tmp/persist.json
+          curl --fail --silent --show-error "$BASE/wide-radar-state" -o /tmp/radar.json
+          curl --fail --silent --show-error "$BASE/shadow-state" -o /tmp/shadow.json
+          curl --fail --silent --show-error "$BASE/execution-test-control" -o /tmp/control.html
+          python - <<'PY'
+          import json, datetime
+          t=json.load(open('/tmp/test.json'))
+          q=json.load(open('/tmp/queue.json'))
+          g=json.load(open('/tmp/regression.json'))
+          p=json.load(open('/tmp/persist.json'))
+          r=json.load(open('/tmp/radar.json'))
+          s=json.load(open('/tmp/shadow.json'))
+          control=open('/tmp/control.html',encoding='utf-8').read()
+          core=['BTC','ETH','SOL','XRP','HYPE']
+          added=['ZEC','DOGE','BNB','NEAR']
+          cov=r.get('live',{}).get('coverage') or {}
+          opps=r.get('live',{}).get('opportunities') or []
+          out={
+            'queue_proof':q,
+            'regression':g,
+            'persistence_after_restart':p,
+            'single_series_ui_preserved':'ARM SELECTED EXECUTION TEST SERIES' in control,
+            'queue_ui_present':'ARM GOVERNED THRESHOLD QUEUE' in control,
+            'scheduler_shadow_status':r.get('live',{}).get('status'),
+            'scheduler_last_run':r.get('live',{}).get('lastRunAt'),
+            'seen':r.get('live',{}).get('seenCount'),
+            'rejected':r.get('live',{}).get('rejectedCount'),
+            'coverage':{a:cov.get(a) for a in core+added},
+            'opportunity_count':len(opps),
+            'opportunity_assets':sorted(set(x.get('asset') for x in opps if x.get('asset'))),
+            'frozen':r.get('frozen'),
+            'execution_test_status':t.get('state',{}).get('status'),
+            'execution_test_armed':t.get('state',{}).get('armed'),
+            'historical_attempts':t.get('state',{}).get('attempts'),
+            'real_order_submitted_by_validation':False
+          }
+          print(json.dumps(out,indent=2))
+
+          assert q.get('stageTransitionExactlyOnce') is True
+          assert q.get('automaticAdvance') is True
+          assert q.get('duplicateArmWouldReject') is True
+          assert q.get('stopPreservesOpenPositionManagement') is True
+          assert g.get('singleSeriesArmRoutePreserved') is True
+          assert g.get('schedulerOwnsExecution') is True
+          assert g.get('browserRequired') is False
+          assert g.get('workerRestartFailClosed') is True
+          assert g.get('queueAboveController') is True
+          assert p.get('persisted') is True
+          assert p.get('proof',{}).get('proofId')=='unattended-proof-20260924'
+          assert p.get('proof',{}).get('writtenAt')=='2026-09-24T10:06:46.476Z'
+          assert p.get('proof',{}).get('queue',{}).get('completedAttempts')==2
+          assert p.get('proof',{}).get('queue',{}).get('currentIndex')==1
+          assert 'ARM SELECTED EXECUTION TEST SERIES' in control
+          assert 'ARM GOVERNED THRESHOLD QUEUE' in control
+          assert r.get('live',{}).get('status')=='LIVE_KALSHI_SHADOW'
+          assert all(cov.get(a,{}).get('seriesTicker') for a in core+added)
+          assert all(cov.get(a,{}).get('spotSignalReady') is True for a in core+added)
+          assert abs(float(r.get('frozen',{}).get('productionEntryScore'))-.80)<1e-9
+          assert abs(float(r.get('frozen',{}).get('exitScore'))-.20)<1e-9
+          assert int(r.get('frozen',{}).get('maxHoldMs'))==300000
+          assert float(r.get('frozen',{}).get('maxEntryDebitUsd'))==1
+          assert int(r.get('frozen',{}).get('requiredExchangeIndex'))==2
+          PY
