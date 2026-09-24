@@ -1,0 +1,27 @@
+name: Baseline Discovery Diagnostic Read
+
+on:
+  push:
+    branches:
+      - market-edge-baseline-real
+    paths:
+      - '.github/workflows/baseline-discovery-diagnostic-read.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  read:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Query bounded discovery diagnostic
+        shell: bash
+        run: |
+          set -euo pipefail
+          BASE="https://market-edge-baseline-real.darkbishop43.workers.dev"
+          curl --fail --silent --show-error "$BASE/diagnostic-kalshi-discovery" -o /tmp/diag.json
+          python - <<'PY'
+          import json
+          d=json.load(open('/tmp/diag.json'))
+          print(json.dumps(d,indent=2,sort_keys=True))
+          PY
