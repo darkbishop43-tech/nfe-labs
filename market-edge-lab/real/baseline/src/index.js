@@ -821,12 +821,15 @@ async function resolveKalshi15mSeries(env, priorSeries=[]) {
   const discoveryProof=broadDiscovered?._proof||{pages:0,scanned:0,reachedEnd:true,readError:null,evidence:{}};
   const resolved=[];
   for(const [asset,meta] of Object.entries(wanted)) {
+    const providerProvenSeries=Object.fromEntries(KALSHI_15M_CRYPTO_INVENTORY.filter(x=>x.asset&&x.scoreSupport==="SUPPORTED").map(x=>[x.asset,x.seriesTicker]));
+    const preferredTicker=String(providerProvenSeries[asset]||"").toUpperCase();
     const exact=rows.find(s=>{
       const title=String(s?.title||"").toUpperCase();
       const freq=String(s?.frequency||"").toLowerCase();
       const ticker=String(s?.ticker||"").toUpperCase();
-      const assetMatch=assetTextMatch(asset,title+" "+ticker);
       const shortMatch=/15\s*(MIN|MINUTE)/i.test(title)||/15\s*m/i.test(freq)||ticker.includes("15M");
+      if(preferredTicker) return ticker===preferredTicker && shortMatch;
+      const assetMatch=assetTextMatch(asset,title+" "+ticker);
       return assetMatch && shortMatch;
     });
     // Only BTC/ETH have independently proven 15-minute series fallbacks.
