@@ -1,5 +1,4 @@
 // CLOUDFLARE DEPLOYMENT MARKER 2026-09-20: XRP recovery V2 proof route ce2252b / 7637a6f
-import { PolymarketUS } from "polymarket-us";
 // SHARD_ROUTING_DEPLOYMENT_MARKER_2026_09_20
 // SHARD_ALLOCATION_DEPLOYMENT_MARKER_2026_09_20
 
@@ -23,333 +22,140 @@ function html(body, status = 200) {
   return new Response(body, { status, headers: HTML_HEADERS });
 }
 
-function normalizeSecretKey(raw) {
-  const trimmed = String(raw || "").trim();
-  if (!trimmed) return { ok: false, reason: "EMPTY_SECRET" };
-  if (trimmed.includes("-----BEGIN")) return { ok: false, reason: "PEM_FORMAT_NOT_EXPECTED" };
-
-  let value = trimmed;
-  let detected = "BASE64_STANDARD";
-
-  if (/^[A-Za-z0-9_-]+={0,2}$/.test(value) && /[-_]/.test(value)) {
-    detected = "BASE64URL";
-    value = value.replace(/-/g, "+").replace(/_/g, "/");
-  } else if (!/^[A-Za-z0-9+/]+={0,2}$/.test(value)) {
-    return { ok: false, reason: "UNRECOGNIZED_SECRET_ENCODING" };
-  }
-
-  while (value.length % 4 !== 0) value += "=";
-
-  try {
-    const binary = atob(value);
-    const byteLength = binary.length;
-    if (byteLength !== 32 && byteLength !== 64) {
-      return { ok: false, reason: "UNEXPECTED_ED25519_KEY_LENGTH", detected, byteLength };
-    }
-    return { ok: true, normalized: value, detected, byteLength };
-  } catch {
-    return { ok: false, reason: "BASE64_DECODE_FAILED", detected };
-  }
-}
-
 function statusPayload(env) {
+  const primaryInstalled=Boolean(env.KALSHI_KEY_ID && env.KALSHI_PRIVATE_KEY);
+  const executionInstalled=Boolean(env.KALSHI_EXECUTION_KEY_ID && env.KALSHI_EXECUTION_PRIVATE_KEY);
   return {
     ok: true,
     experiment: env.EXPERIMENT_NAME || "MARKET EDGE — BASELINE REAL",
     isolation: "DEDICATED_WORKER",
+    venue: "KALSHI",
     marketScope: env.MARKET_SCOPE || "BTC_ETH_SOL_XRP_HYPE",
     executionMode: env.EXECUTION_MODE || "LOCKED",
     liveOrderSubmission: env.LIVE_ORDER_SUBMISSION || "DISABLED",
     fundingAuthorized: true,
     expectedFundingUsd: 10,
     fundingScope: "DEPOSIT_PROOF_ONLY",
-    shadowExperimentStarted: false,
+    shadowExperimentStarted: true,
     credentials: {
-      keyIdInstalled: Boolean((env.KALSHI_KEY_ID && env.KALSHI_PRIVATE_KEY) || env.POLYMARKET_US_KEY_ID),
-      secretInstalled: Boolean((env.KALSHI_KEY_ID && env.KALSHI_PRIVATE_KEY) || env.POLYMARKET_US_SECRET),
+      keyIdInstalled: primaryInstalled || executionInstalled,
+      secretInstalled: primaryInstalled || executionInstalled,
+      provider: "KALSHI",
       valuesExposed: false,
     },
     accountConnection: "VERIFY_AT_/account",
     accountBalance: "VERIFY_AT_/account",
-    evidenceLedger: "NOT_YET_STARTED",
-    buildCheckpoint: "2026-09-17T19:50:00-04:00",
-  };
-}
-
-function safeAccountView(response) {
-  const hasArrayEnvelope = Array.isArray(response?.balances);
-  const directBalance =
-    response && typeof response === "object" && !hasArrayEnvelope &&
-    ("currentBalance" in response || "buyingPower" in response)
-      ? response
-      : null;
-
-  const rows = hasArrayEnvelope ? response.balances : [];
-  const usd =
-    rows.find((row) => String(row?.currency || "").toUpperCase() === "USD") ||
-    rows[0] ||
-    directBalance ||
-    null;
-
-  const noBalanceRecord = hasArrayEnvelope && rows.length === 0;
-  const positive = (value) => Number.isFinite(Number(value)) && Number(value) > 0;
-
-  return {
-    responseShape: hasArrayEnvelope ? "BALANCES_ARRAY" : directBalance ? "DIRECT_BALANCE_OBJECT" : "UNKNOWN",
-    balanceRecordCount: hasArrayEnvelope ? rows.length : directBalance ? 1 : 0,
-    noBalanceRecord,
-    fundedRecordPresent: usd?.currentBalance !== null && usd?.currentBalance !== undefined,
-    buyingPowerAvailable: positive(usd?.buyingPower),
-    unsettledFundsPresent: positive(usd?.unsettledFunds),
-    pendingWithdrawalPresent: Array.isArray(usd?.pendingWithdrawals)
-      ? usd.pendingWithdrawals.length > 0
-      : false,
-    sensitiveAmountsExposed: false,
-  };
-}
-
-async function createClient(env) {
-  const credentialsPresent = Boolean(env.POLYMARKET_US_KEY_ID && env.POLYMARKET_US_SECRET);
-  if (!credentialsPresent) return { ok: false, state: "CREDENTIALS_NOT_INSTALLED" };
-
-  const secret = normalizeSecretKey(env.POLYMARKET_US_SECRET);
-  if (!secret.ok) return { ok: false, state: "SECRET_FORMAT_INVALID", secret };
-
-  return {
-    ok: true,
-    secret,
-    client: new PolymarketUS({
-      keyId: String(env.POLYMARKET_US_KEY_ID).trim(),
-      secretKey: secret.normalized,
-    }),
+    evidenceLedger: "KALSHI_BASELINE",
+    buildCheckpoint: "2026-09-24T00:00:00Z",
   };
 }
 
 async function accountProof(env) {
-  const built = await createClient(env);
-
-  if (!built.ok) {
-    return {
-      ok: false,
-      state: built.state,
-      accountConnection: "NOT_VERIFIED",
-      credentialDiagnostics: {
-        secretFormatReason: built.secret?.reason ?? null,
-        detectedEncoding: built.secret?.detected ?? null,
-        decodedByteLength: built.secret?.byteLength ?? null,
-        valuesExposed: false,
-      },
-      fundingAuthorized: false,
-      liveOrderSubmission: "DISABLED",
-    };
-  }
-
   try {
-    const balances = await built.client.account.balances();
-    const account = safeAccountView(balances);
-
+    const proof=await kalshiExecutionBalanceSnapshot(env);
+    if(!proof?.ok) {
+      return {
+        ok:false,state:"KALSHI_ACCOUNT_READ_FAILED",accountConnection:"NOT_VERIFIED",
+        provider:"KALSHI",httpStatus:proof?.httpStatus??null,
+        credentialDiagnostics:{valuesExposed:false},
+        fundingAuthorized:false,liveOrderSubmission:"DISABLED"
+      };
+    }
+    const body=proof?.body||{};
+    const rows=Array.isArray(body?.balance_breakdown)?body.balance_breakdown:[];
+    const aggregate=Number(body?.balance);
+    const hasAggregate=Number.isFinite(aggregate);
+    const funded=hasAggregate ? aggregate>0 : rows.some(x=>Number(x?.balance)>0);
     return {
-      ok: true,
-      state: "AUTHENTICATED_READ_ONLY",
-      accountConnection: "VERIFIED",
-      account,
-      accountState: account.noBalanceRecord
-        ? "AUTHENTICATED_NO_BALANCE_RECORDS"
-        : account.fundedRecordPresent
-          ? "FUNDED_RECORD_PRESENT"
-          : "AUTHENTICATED_BALANCE_SHAPE_UNKNOWN",
-      credentialDiagnostics: {
-        detectedEncoding: built.secret.detected,
-        decodedByteLength: built.secret.byteLength,
-        valuesExposed: false,
+      ok:true,state:"AUTHENTICATED_READ_ONLY",accountConnection:"VERIFIED",provider:"KALSHI",
+      account:{
+        responseShape:rows.length?"KALSHI_BALANCE_BREAKDOWN":"KALSHI_BALANCE",
+        balanceRecordCount:rows.length||Number(hasAggregate),
+        noBalanceRecord:!rows.length&&!hasAggregate,
+        fundedRecordPresent:funded,
+        buyingPowerAvailable:funded,
+        unsettledFundsPresent:false,
+        pendingWithdrawalPresent:false,
+        sensitiveAmountsExposed:false
       },
-      fundingAuthorized: false,
-      expectedFundingUsd: 0,
-      shadowExperimentStarted: false,
-      liveOrderSubmission: "DISABLED",
-      note: account.noBalanceRecord
-        ? "Authenticated successfully. Polymarket US returned an empty balances array; no funded balance record is present yet."
-        : "Authenticated balance read only. No order submission is implemented.",
+      accountState:funded?"FUNDED_RECORD_PRESENT":"AUTHENTICATED_NO_FUNDED_BALANCE",
+      credentialDiagnostics:{valuesExposed:false},
+      fundingAuthorized:false,shadowExperimentStarted:true,liveOrderSubmission:"DISABLED",
+      note:"Authenticated Kalshi balance read only. No order submission is performed by this endpoint."
     };
-  } catch (error) {
+  } catch(error) {
     return {
-      ok: false,
-      state: "AUTHENTICATION_OR_ACCOUNT_READ_FAILED",
-      accountConnection: "NOT_VERIFIED",
-      errorType: error?.name || "Error",
-      message: "Polymarket US account read failed. Sensitive provider error details are suppressed.",
-      credentialDiagnostics: {
-        detectedEncoding: built.secret.detected,
-        decodedByteLength: built.secret.byteLength,
-        valuesExposed: false,
-      },
-      fundingAuthorized: false,
-      liveOrderSubmission: "DISABLED",
+      ok:false,state:"KALSHI_ACCOUNT_READ_FAILED",accountConnection:"NOT_VERIFIED",provider:"KALSHI",
+      errorType:error?.name||"Error",message:"Kalshi account read failed. Sensitive provider details are suppressed.",
+      credentialDiagnostics:{valuesExposed:false},fundingAuthorized:false,liveOrderSubmission:"DISABLED"
     };
   }
 }
 
 async function moneyPathProof(env) {
-  const built = await createClient(env);
-  if (!built.ok) return {ok:false,state:built.state,depositActivity:"NOT_PROVEN",withdrawalActivity:"NOT_PROVEN",cashOutLoop:"NOT_PROVEN",fundingAuthorized:false};
   try {
-    const [balances, deposits, withdrawals] = await Promise.all([
-      built.client.account.balances(),
-      built.client.portfolio.activities({types:["ACTIVITY_TYPE_ACCOUNT_DEPOSIT"],limit:20,sortOrder:"SORT_ORDER_DESCENDING"}),
-      built.client.portfolio.activities({types:["ACTIVITY_TYPE_ACCOUNT_WITHDRAWAL"],limit:20,sortOrder:"SORT_ORDER_DESCENDING"})
-    ]);
-    const account=safeAccountView(balances);
-    const ds=Array.isArray(deposits?.activities)?deposits.activities:[];
-    const ws=Array.isArray(withdrawals?.activities)?withdrawals.activities:[];
-    const hasBuyingPower = account.buyingPowerAvailable;
-    const hasUnsettled = account.unsettledFundsPresent;
-    const hasPendingWithdrawal = account.pendingWithdrawalPresent;
-    const hasBalanceRecord = account.fundedRecordPresent;
+    const proof=await kalshiExecutionBalanceSnapshot(env);
+    if(!proof?.ok) return {ok:false,state:"KALSHI_BALANCE_READ_FAILED",provider:"KALSHI",depositActivity:"NOT_QUERIED",withdrawalActivity:"NOT_QUERIED",cashOutLoop:"NOT_PROVEN",fundingAuthorized:false,sensitiveTextExposed:false};
+    const body=proof?.body||{};
+    const rows=Array.isArray(body?.balance_breakdown)?body.balance_breakdown:[];
+    const aggregate=Number(body?.balance);
+    const funded=(Number.isFinite(aggregate)&&aggregate>0)||rows.some(x=>Number(x?.balance)>0);
     return {
-      ok:true,state:"AUTHENTICATED_MONEY_PATH_READ_ONLY",
-      depositActivity:ds.length?"OBSERVED":"NOT_YET_PROVEN",
-      buyingPower:hasBuyingPower?"AVAILABLE":"NOT_YET_PROVEN",
-      fundsClearing:hasUnsettled?"UNSETTLED_FUNDS_PRESENT":(hasBalanceRecord?"NO_UNSETTLED_FUNDS_REPORTED":"NOT_YET_PROVEN"),
-      fundedBalance:hasBalanceRecord?"OBSERVED":"NOT_YET_PROVEN",
-      withdrawalEligibility:(hasBalanceRecord&&!hasUnsettled)?"BALANCE_PRESENT_NO_UNSETTLED_FUNDS_REPORTED":"NOT_YET_PROVEN",
-      withdrawalActivity:ws.length?"OBSERVED":"NOT_YET_PROVEN",
-      pendingWithdrawal:hasPendingWithdrawal?"OBSERVED":"NONE_REPORTED",
-      cashOutLoop:(ds.length&&ws.length)?"ACTIVITY_OBSERVED_NOT_FULL_LOOP_CERTIFIED":"NOT_YET_PROVEN",
-      depositCount:ds.length,withdrawalCount:ws.length,fundingAuthorized:false,liveOrderSubmission:"DISABLED",sensitiveTextExposed:false
+      ok:true,state:"KALSHI_MONEY_PATH_READ_ONLY",provider:"KALSHI",
+      depositActivity:"NOT_QUERIED",buyingPower:funded?"AVAILABLE":"NO_FUNDED_BALANCE",
+      fundsClearing:"NOT_REPORTED_BY_THIS_READ",fundedBalance:funded?"OBSERVED":"NO_FUNDED_BALANCE",
+      withdrawalEligibility:"NOT_DETERMINED",withdrawalActivity:"NOT_QUERIED",
+      pendingWithdrawal:"NOT_DETERMINED",cashOutLoop:"NOT_PROVEN",
+      fundingAuthorized:false,liveOrderSubmission:"DISABLED",sensitiveTextExposed:false
     };
   } catch {
-    return {ok:false,state:"MONEY_PATH_READ_FAILED",depositActivity:"NOT_PROVEN",withdrawalActivity:"NOT_PROVEN",cashOutLoop:"NOT_PROVEN",fundingAuthorized:false,sensitiveTextExposed:false};
+    return {ok:false,state:"KALSHI_MONEY_PATH_READ_FAILED",provider:"KALSHI",depositActivity:"NOT_QUERIED",withdrawalActivity:"NOT_QUERIED",cashOutLoop:"NOT_PROVEN",fundingAuthorized:false,sensitiveTextExposed:false};
   }
 }
 
 async function previewProof(env) {
-  const built = await createClient(env);
-  if (!built.ok) return { ok: false, state: built.state, submitted: false, liveOrderSubmission: "DISABLED" };
-
   try {
-    const publicClient = new PolymarketUS();
-    const [btcSearch, ethSearch] = await Promise.all([
-      publicClient.search.query({ query: "bitcoin", status: "active", limit: 50 }),
-      publicClient.search.query({ query: "ethereum", status: "active", limit: 50 }),
-    ]);
-    const eventMap = new Map();
-    for (const event of [...(btcSearch?.events||[]), ...(ethSearch?.events||[])]) {
-      const key = String(event?.id ?? event?.slug ?? "");
-      if (key) eventMap.set(key, event);
-    }
-    const crypto = [...eventMap.values()].filter((event) => {
-      const hay = [event?.title,event?.slug,event?.description,event?.series?.title,event?.series?.slug,...(event?.tags||[]).flatMap(t=>[t?.label,t?.slug])].filter(Boolean).join(" ").toLowerCase();
-      return /bitcoin|\bbtc\b|ethereum|\beth\b/.test(hay);
-    });
-    const searchedMarkets = crypto.flatMap((event) =>
-      (Array.isArray(event?.markets) ? event.markets : [])
-        .filter((market) => market?.active && !market?.closed && market?.slug)
-        .map((market) => ({ market, event }))
-    );
-    const eventSlugs = [...new Set(crypto.map((event)=>event?.slug).filter(Boolean))];
-    const listed = eventSlugs.length ? await publicClient.markets.list({ eventSlug:eventSlugs, active:true, closed:false, orderBy:["volume"], orderDirection:"desc", limit:100 }) : {markets:[]};
-    const detailMap = new Map((listed?.markets||[]).filter((market)=>market?.slug).map((market)=>[market.slug,market]));
-    const candidates = searchedMarkets.map(({market,event})=>({market:detailMap.get(market.slug)||market,event}));
-    if (!candidates.length) return { ok:false,state:"NO_ACTIVE_US_BTC_ETH_CANDIDATE",submitted:false,liveOrderSubmission:"DISABLED",fundingAuthorized:false,discovery:{searchEvents:eventMap.size,cryptoEvents:crypto.length,candidates:0,sensitiveTextExposed:false} };
-
-    // Search/event payloads can contain compact market objects. Hydrate each candidate
-    // through the official market-by-slug endpoint before asking for BBO/book data.
-    const hydratedCandidates=[];
-    for (const item of candidates.slice(0,20)) {
-      try {
-        const detail=await publicClient.markets.retrieveBySlug(item.market.slug);
-        hydratedCandidates.push({market:detail?.market||item.market,event:item.event});
-      } catch {
-        hydratedCandidates.push(item);
-      }
-    }
-
-    const diagnostics=[];
-    const marketEvidence=[];
-    for (const { market, event } of hydratedCandidates) {
-      try {
-        const bboRaw = await publicClient.markets.bbo(market.slug);
-        const bbo = bboRaw?.marketData || bboRaw;
-        let askValue = bbo?.bestAsk?.value ?? bbo?.bestAsk;
-        let ask = Number(askValue);
-        if (!Number.isFinite(ask) || ask <= 0) {
-          const bookRaw = await publicClient.markets.book(market.slug);
-          const book = bookRaw?.marketData || bookRaw;
-          const offers = Array.isArray(book?.offers) ? book.offers : [];
-          askValue = offers[0]?.px?.value ?? offers[0]?.px;
-          ask = Number(askValue);
-        }
-        if (!Number.isFinite(ask) || ask <= 0) {
-          const probeBook = await publicClient.markets.book(market.slug).catch(()=>null);
-          marketEvidence.push({slug:market.slug,id:market.id??null,title:market.title||null,outcome:market.outcome||null,active:market.active??null,closed:market.closed??null,state:probeBook?.state||null,bids:Array.isArray(probeBook?.bids)?probeBook.bids.length:0,offers:Array.isArray(probeBook?.offers)?probeBook.offers.length:0});
-          diagnostics.push("NO_VALID_ASK_OR_BOOK_OFFER");
-          continue;
-        }
-        const request={marketSlug:market.slug,intent:"ORDER_INTENT_BUY_LONG",type:"ORDER_TYPE_LIMIT",price:{value:String(askValue),currency:"USD"},quantity:1,tif:"TIME_IN_FORCE_IMMEDIATE_OR_CANCEL",manualOrderIndicator:"MANUAL_ORDER_INDICATOR_AUTOMATIC",synchronousExecution:false};
-        const response=await built.client.orders.preview({request});
-        const order=response?.order||{};
-        return {ok:true,state:"AUTHENTICATED_ORDER_PREVIEW_ACCEPTED",submitted:false,liveOrderSubmission:"DISABLED",fundingAuthorized:false,preview:{eventTitle:event?.title||null,marketSlug:market.slug,marketTitle:market.title||null,outcome:market.outcome||null,type:order.type||request.type,intent:order.intent||request.intent,tif:order.tif||request.tif,price:order.price??request.price,quantity:order.quantity??request.quantity,state:order.state||null,manualOrderIndicator:request.manualOrderIndicator},discovery:{searchEvents:eventMap.size,cryptoEvents:crypto.length,candidates:candidates.length},note:"Polymarket US authenticated preview accepted. No order was created or submitted."};
-      } catch(error) {
-        const raw=String(error?.message||"").toLowerCase();
-        const status=Number(error?.status||error?.statusCode||error?.response?.status||0)||null;
-        let category="UNCLASSIFIED_REJECTION";
-        if(raw.includes("balance")||raw.includes("fund"))category="ACCOUNT_FUNDING_OR_BALANCE";
-        else if(raw.includes("minimum")||raw.includes("quantity")||raw.includes("size"))category="ORDER_SIZE_OR_MINIMUM";
-        else if(raw.includes("price")||raw.includes("tick"))category="PRICE_OR_TICK";
-        else if(raw.includes("market")||raw.includes("slug"))category="MARKET_OR_SLUG";
-        else if(raw.includes("intent")||raw.includes("side"))category="ORDER_INTENT_OR_SIDE";
-        else if(raw.includes("auth")||status===401||status===403)category="AUTHORIZATION";
-        diagnostics.push(category+(status?"_HTTP_"+status:""));
-      }
-    }
-    return {ok:false,state:"SHORT_HORIZON_CANDIDATES_NOT_PREVIEWABLE",submitted:false,liveOrderSubmission:"DISABLED",fundingAuthorized:false,diagnostic:{category:diagnostics[0]||"NO_VALID_BBO",attempted:Math.min(candidates.length,20),allCandidateDiagnostics:[...new Set(diagnostics)].slice(0,6),sensitiveTextExposed:false},discovery:{searchEvents:eventMap.size,cryptoEvents:crypto.length,candidates:candidates.length,marketEvidence:marketEvidence.slice(0,6)}};
+    const shadow=await loadShadowState(env);
+    const opportunities=Array.isArray(shadow?.opportunities)?shadow.opportunities:[];
+    const best=opportunities.slice().sort((a,b)=>Number(b?.score||0)-Number(a?.score||0))[0]||null;
+    if(!best?.marketTicker) return {
+      ok:false,state:"KALSHI_NO_CURRENT_EXECUTION_CANDIDATE",provider:"KALSHI",
+      submitted:false,liveOrderSubmission:"DISABLED",fundingAuthorized:false,
+      discovery:{status:shadow?.status||null,eligibleCount:Number(shadow?.eligibleCount||0),sensitiveTextExposed:false}
+    };
+    const live=await freshKalshiExecutionQuote(env,best);
+    return {
+      ok:Boolean(live?.ok),
+      state:live?.ok?"KALSHI_AUTHENTICATED_QUOTE_VALIDATED":"KALSHI_QUOTE_VALIDATION_HOLD",
+      provider:"KALSHI",submitted:false,liveOrderSubmission:"DISABLED",fundingAuthorized:false,
+      preview:live?.ok?{
+        marketTicker:best.marketTicker,asset:best.asset,outcomeSide:best.outcomeSide,
+        yesAsk:live?.market?.yesAsk??null,yesBid:live?.market?.yesBid??null,
+        noAsk:live?.market?.noAsk??null,noBid:live?.market?.noBid??null,
+        closeTime:live?.market?.closeTime??null
+      }:null,
+      diagnostic:live?.ok?null:{category:live?.reason||"KALSHI_QUOTE_READ_FAILED",httpStatus:live?.httpStatus??null,sensitiveTextExposed:false},
+      discovery:{status:shadow?.status||null,eligibleCount:Number(shadow?.eligibleCount||0)}
+    };
   } catch {
-    return {ok:false,state:"PREVIEW_PROOF_FAILED",submitted:false,liveOrderSubmission:"DISABLED",fundingAuthorized:false};
+    return {ok:false,state:"KALSHI_PREVIEW_PROOF_FAILED",provider:"KALSHI",submitted:false,liveOrderSubmission:"DISABLED",fundingAuthorized:false};
   }
 }
 
-async function marketSnapshot() {
-  const client = new PolymarketUS();
-
-  async function search(query) {
-    try {
-      const result = await client.search.query({ query, status: "active", limit: 6 });
-      const events = Array.isArray(result?.events) ? result.events : [];
-      return events.slice(0, 6).map((event) => ({
-        id: event.id,
-        slug: event.slug,
-        title: event.title,
-        active: event.active,
-        closed: event.closed,
-        volume: event.volume ?? null,
-        liquidity: event.liquidity ?? null,
-        markets: Array.isArray(event.markets)
-          ? event.markets.slice(0, 4).map((market) => ({
-              id: market.id,
-              slug: market.slug,
-              title: market.title,
-              outcome: market.outcome,
-              active: market.active,
-              closed: market.closed,
-              volume: market.volume ?? null,
-              liquidity: market.liquidity ?? null,
-            }))
-          : [],
-      }));
-    } catch {
-      return [];
-    }
-  }
-
-  const [bitcoin, ethereum] = await Promise.all([search("bitcoin"), search("ethereum")]);
-
+async function marketSnapshot(env) {
+  const shadow=await loadShadowState(env);
   return {
-    ok: true,
-    source: "POLYMARKET_US_PUBLIC_API",
-    marketScope: "BTC_ETH_SOL_XRP_HYPE",
-    bitcoin,
-    ethereum,
-    liveOrderSubmission: "DISABLED",
+    ok:true,source:"KALSHI_BASELINE_SHADOW",provider:"KALSHI",
+    marketScope:"BTC_ETH_SOL_XRP_HYPE",
+    status:shadow?.status||"UNKNOWN",
+    lastRunAt:shadow?.lastRunAt||null,
+    eligibleCount:Number(shadow?.eligibleCount||0),
+    opportunities:(Array.isArray(shadow?.opportunities)?shadow.opportunities:[]).slice(0,20).map(o=>({
+      asset:o?.asset||null,ticker:o?.marketTicker||null,outcomeSide:o?.outcomeSide||null,
+      direction:o?.direction||null,score:safeFinite(o?.score),yesAsk:safeFinite(o?.yes),
+      selectedBid:safeFinite(o?.bid),closeTime:o?.closeTime||null,executionEligible:o?.executionEligible===true
+    })),
+    liveOrderSubmission:"DISABLED"
   };
 }
 
@@ -1691,7 +1497,7 @@ function buildPostTradeResearchReview(state){
 }
 
 function realTradeArmed(env) {
-  // Safety interlock: the legacy Polymarket execution controller is intentionally disabled.
+  // Safety interlock: the retired legacy execution controller is intentionally disabled.
   // Kalshi execution must use a separate, later-authorized credential and code path.
   return false;
 }
@@ -2707,10 +2513,10 @@ body{background-color:#030811;background-image:linear-gradient(rgba(31,91,137,.0
   <div class="hero">
     <div class="brand">
       <img class="logo" alt="NFE-OS" src="https://raw.githubusercontent.com/darkbishop43-tech/nfe-labs/main/market-edge-lab/public/nfe-os-logo-market-edge.webp">
-      <div><div class="k">NFE-OS Research Lab · Polymarket US</div><h1>Market Edge — Baseline Real</h1><div class="sub">Real account validation · BTC/ETH/SOL/XRP/HYPE · governed test environment</div></div>
+      <div><div class="k">NFE-OS Research Lab · Kalshi</div><h1>Market Edge — Baseline Real</h1><div class="sub">Real account validation · BTC/ETH/SOL/XRP/HYPE · governed test environment</div></div>
     </div>
   </div>
-  <div class="heroCopy"><div class="k">NFE-OS Research Lab · Polymarket US</div><h1>Market Edge — Baseline Real</h1><div class="sub">Real account validation · BTC/ETH/SOL/XRP/HYPE · governed test environment</div></div>
+  <div class="heroCopy"><div class="k">NFE-OS Research Lab · Kalshi</div><h1>Market Edge — Baseline Real</h1><div class="sub">Real account validation · BTC/ETH/SOL/XRP/HYPE · governed test environment</div></div>
 
   <div class="grid">
     <div class="card"><div class="label">Kalshi Connection</div><div id="conn" class="val">CHECKING…</div><div id="connSub" class="m"></div></div>
@@ -2862,7 +2668,7 @@ body{background-color:#030811;background-image:linear-gradient(rgba(31,91,137,.0
   </details>
 
   <details class="card section"><summary><b>Money Path Proof</b> · funding / withdrawal evidence</summary>
-    <div class="actions" style="justify-content:flex-start;margin-top:10px"><a class="btn" href="https://polymarket.us/" target="_blank" rel="noopener noreferrer" style="text-decoration:none">DEPOSIT $10 · OFFICIAL POLYMARKET US</a><a class="btn" href="https://polymarket.us/" target="_blank" rel="noopener noreferrer" style="text-decoration:none">WITHDRAW · OFFICIAL POLYMARKET US</a></div>
+    <div class="actions" style="justify-content:flex-start;margin-top:10px"><a class="btn" href="https://kalshi.com/" target="_blank" rel="noopener noreferrer" style="text-decoration:none">DEPOSIT / FUND · OFFICIAL KALSHI</a><a class="btn" href="https://kalshi.com/" target="_blank" rel="noopener noreferrer" style="text-decoration:none">WITHDRAW · OFFICIAL KALSHI</a></div>
     <div class="rows" style="margin-top:8px">
       <div class="row"><span>Deposit activity</span><strong id="moneyDeposit">CHECKING…</strong></div>
       <div class="row"><span>Buying power available</span><strong id="moneyBuyingPower">CHECKING…</strong></div>
@@ -2872,7 +2678,7 @@ body{background-color:#030811;background-image:linear-gradient(rgba(31,91,137,.0
       <div class="row"><span>Withdrawal activity</span><strong id="moneyWithdrawal">CHECKING…</strong></div>
       <div class="row"><span>Cash-out loop</span><strong id="moneyLoop">CHECKING…</strong></div>
     </div>
-    <div class="notice"><b>FIRST BANKROLL CONTROL:</b> $10 first account-funding proof, based on the verified minimum encountered in the Founder’s actual card funding path. This does not raise the Baseline trading rule: maximum stake remains $5. Debit card is the intended first funding method. Buying power is not the same as cleared/withdrawable funds. These controls hand money movement to the official Polymarket US site; Baseline Real never receives bank credentials or initiates deposits/withdrawals.</div>
+    <div class="notice"><b>FIRST BANKROLL CONTROL:</b> $10 first account-funding proof, based on the verified minimum encountered in the Founder’s actual card funding path. This does not raise the Baseline trading rule: maximum stake remains $5. Debit card is the intended first funding method. Buying power is not the same as cleared/withdrawable funds. These controls hand money movement to the official Kalshi site; Baseline Real never receives bank credentials or initiates deposits/withdrawals.</div>
     <div class="rows" style="margin-top:8px">
       <div class="row"><span>First account-funding proof</span><strong>$10</strong></div>
       <div class="row"><span>Maximum Baseline trade stake</span><strong>$5</strong></div>
@@ -4124,225 +3930,11 @@ document.getElementById('export')?.addEventListener('click',async()=>{const r=aw
 
     if (url.pathname === "/account") {
       const proof = await accountProof(env);
-      const status = proof.ok ? 200 : proof.state === "SECRET_FORMAT_INVALID" ? 422 : 502;
+      const status = proof.ok ? 200 : 502;
       return json(proof, status);
     }
 
-    if (url.pathname === "/markets") return json(await marketSnapshot());
-
-    // Temporary read-only Polymarket US catalogue proof for the requested
-    // short-horizon BTC/ETH instrument check. No preview or order submission.
-    if (url.pathname === "/crypto-short-horizon-proof") {
-      const client = new PolymarketUS();
-      const found = [];
-      let offset = 0, pages = 0, totalEvents = 0, reachedEnd = false;
-      while (pages < 50) {
-        let result;
-        try { result = await client.events.list({ active: true, limit: 100, offset }); }
-        catch { return json({ok:false,state:"EVENT_CATALOGUE_READ_FAILED",pages,totalEvents,submitted:false}); }
-        const events = Array.isArray(result?.events) ? result.events : [];
-        for (const event of events) {
-          totalEvents++;
-          const markets = Array.isArray(event?.markets) && event.markets.length ? event.markets : [null];
-          for (const market of markets) {
-            const text=[event?.title,event?.slug,event?.description,market?.title,market?.slug,market?.outcome].filter(Boolean).join(" — ");
-            const asset=/bitcoin|\bbtc\b/i.test(text)?"BTC":/ethereum|\beth\b|\bether\b/i.test(text)?"ETH":null;
-            if(!asset) continue;
-            const is15=/15\s*(?:min|minute)|15m\b|quarter[- ]?hour/i.test(text);
-            const intraday=is15||/\b(?:5|10|30|45|60)\s*(?:min|minute)|hourly|this hour|today|daily|intraday/i.test(text);
-            if(intraday) found.push({asset,is15,eventTitle:event?.title||null,eventSlug:event?.slug||null,marketTitle:market?.title||null,marketSlug:market?.slug||null});
-          }
-        }
-        pages++;
-        if(events.length<100){reachedEnd=true;break;}
-        offset+=events.length;
-      }
-      const rows=[...new Map(found.map(x=>[(x.marketSlug||x.eventSlug||JSON.stringify(x)),x])).values()];
-      return json({ok:true,source:"POLYMARKET_US_EVENTS_LIST",pages,totalEvents,reachedEnd,btc15m:rows.filter(x=>x.asset==="BTC"&&x.is15).length,eth15m:rows.filter(x=>x.asset==="ETH"&&x.is15).length,btcIntraday:rows.filter(x=>x.asset==="BTC").length,ethIntraday:rows.filter(x=>x.asset==="ETH").length,matches:rows.slice(0,50),submitted:false,liveOrderSubmission:"DISABLED"});
-    }
-
-    // Read-only Polymarket US short-horizon catalogue diagnostic.
-    // This scans the official US event catalogue directly so fuzzy search cannot
-    // hide BTC/ETH markets. It never previews or submits an order.
-    if (url.pathname === "/crypto-short-horizon-proof") {
-      const client = new PolymarketUS();
-      const matches = [];
-      let offset = 0, pages = 0, totalEvents = 0, reachedEnd = false;
-      while (pages < 60) {
-        let result;
-        try {
-          result = await client.events.list({ active: true, limit: 100, offset });
-        } catch {
-          return json({ok:false,state:"POLYMARKET_US_EVENT_SCAN_FAILED",pages,totalEvents,matches:matches.slice(0,40),submitted:false});
-        }
-        const events = Array.isArray(result?.events) ? result.events
-          : Array.isArray(result?.data?.events) ? result.data.events
-          : Array.isArray(result?.data) ? result.data
-          : Array.isArray(result) ? result : [];
-        for (const event of events) {
-          totalEvents += 1;
-          const markets = Array.isArray(event?.markets) ? event.markets : [];
-          const rows = markets.length ? markets : [null];
-          for (const market of rows) {
-            const text = [event?.title,event?.question,event?.slug,event?.description,market?.title,market?.question,market?.slug,market?.description].filter(Boolean).join(" — ");
-            const asset = /bitcoin|\bbtc\b/i.test(text) ? "BTC" : /ethereum|\beth\b|\bether\b/i.test(text) ? "ETH" : null;
-            if (!asset) continue;
-            const short = /15\s*(?:min|minute)|quarter[- ]?hour|15m\b/i.test(text);
-            const intraday = short || /\b(?:5|10|30|45|60)\s*(?:min|minute)|hourly|this hour|today|daily|intraday/i.test(text);
-            if (!intraday) continue;
-            matches.push({
-              asset,
-              short15m: short,
-              eventTitle:event?.title||event?.question||null,
-              eventSlug:event?.slug||null,
-              marketTitle:market?.title||market?.question||null,
-              marketSlug:market?.slug||null,
-              active:market?.active??event?.active??null,
-              closed:market?.closed??event?.closed??null
-            });
-          }
-        }
-        pages += 1;
-        if (events.length < 100) { reachedEnd = true; break; }
-        offset += events.length;
-      }
-      const dedup=[...new Map(matches.map(x=>[(x.marketSlug||x.eventSlug||JSON.stringify(x)),x])).values()];
-      return json({
-        ok:true,source:"POLYMARKET_US_EVENTS_LIST",pages,totalEvents,reachedEnd,
-        btc15m:dedup.filter(x=>x.asset==="BTC"&&x.short15m).length,
-        eth15m:dedup.filter(x=>x.asset==="ETH"&&x.short15m).length,
-        btcIntraday:dedup.filter(x=>x.asset==="BTC").length,
-        ethIntraday:dedup.filter(x=>x.asset==="ETH").length,
-        matches:dedup.slice(0,40),submitted:false,liveOrderSubmission:"DISABLED"
-      });
-    }
-
-    // Read-only catalogue shape probe for Polymarket US crypto. This intentionally
-    // inspects event/market metadata without previewing or submitting any order.
-    // Read-only targeted US search summary. Keeps the browser output compact and
-    // separates short-horizon candidates from noisy fuzzy-search matches.
-    if (url.pathname === "/us-btc-eth-horizon-proof") {
-      const client = new PolymarketUS();
-      const queries = ["bitcoin today","bitcoin daily","bitcoin hourly","bitcoin 15 minute","BTC today","ethereum today","ethereum daily","ethereum hourly","ethereum 15 minute","ETH today"];
-      const dedup = new Map();
-      const queryCounts = [];
-      for (const query of queries) {
-        try {
-          const result = await client.search.query({ query, status: "active", limit: 50 });
-          const events = Array.isArray(result?.events) ? result.events : [];
-          queryCounts.push({query,count:events.length});
-          for (const event of events) {
-            const markets = Array.isArray(event?.markets)&&event.markets.length?event.markets:[null];
-            for (const market of markets) {
-              const text=[event?.title,event?.question,event?.slug,event?.description,market?.title,market?.question,market?.slug,market?.outcome].filter(Boolean).join(" — ");
-              const asset=/bitcoin|\bbtc\b/i.test(text)?"BTC":/ethereum|\beth\b|\bether\b/i.test(text)?"ETH":null;
-              if(!asset) continue;
-              const startMs=Date.parse(event?.startTime||""), endMs=Date.parse(event?.endTime||"");
-              const durationMs=Number.isFinite(startMs)&&Number.isFinite(endMs)?endMs-startMs:NaN;
-              const explicit15=/15\s*(?:min|minute)|15m\b|quarter[- ]?hour/i.test(text);
-              const explicitHour=/\b(?:hourly|this hour|1\s*hour)\b/i.test(text);
-              const explicitDay=/\b(?:daily|today|tonight|this day|24\s*hour)\b/i.test(text);
-              const timed15=Number.isFinite(durationMs)&&durationMs>=10*60e3&&durationMs<=20*60e3;
-              const timedHour=Number.isFinite(durationMs)&&durationMs>20*60e3&&durationMs<=90*60e3;
-              const timedDay=Number.isFinite(durationMs)&&durationMs>90*60e3&&durationMs<=30*60*60e3;
-              const horizon=(explicit15||timed15)?"15M":(explicitHour||timedHour)?"HOURLY":(explicitDay||timedDay)?"DAILY":null;
-              if(!horizon) continue;
-              const key=String(market?.id||market?.slug||event?.id||event?.slug||text);
-              dedup.set(key,{asset,horizon,eventId:event?.id||null,eventTitle:event?.title||null,eventSlug:event?.slug||null,startTime:event?.startTime||null,endTime:event?.endTime||null,marketId:market?.id||null,marketTitle:market?.title||null,marketSlug:market?.slug||null,active:market?.active??event?.active??null,closed:market?.closed??event?.closed??null});
-            }
-          }
-        } catch (error) { queryCounts.push({query,error:String(error?.message||"SEARCH_FAILED").slice(0,80)}); }
-      }
-      const matches=[...dedup.values()];
-      return json({ok:true,source:"POLYMARKET_US_TARGETED_SEARCH",queryCounts,eligibleShortHorizon:matches.length,btc:matches.filter(x=>x.asset==="BTC").length,eth:matches.filter(x=>x.asset==="ETH").length,matches:matches.slice(0,100),submitted:false,liveOrderSubmission:"DISABLED",realMoneyMoved:false});
-    }
-
-    // Read-only raw inspection of the fuzzy results returned specifically by the
-    // "15 minute" searches. No horizon inference here: expose timing/title/market
-    // metadata so we can determine whether the provider actually has such contracts.
-    if (url.pathname === "/us-15m-search-inspect") {
-      const client = new PolymarketUS();
-      const queries = ["bitcoin 15 minute","ethereum 15 minute"];
-      const out = [];
-      for (const query of queries) {
-        try {
-          const result = await client.search.query({ query, status: "active", limit: 50 });
-          const events = Array.isArray(result?.events) ? result.events : [];
-          out.push({query,count:events.length,events:events.map(event=>({
-            id:event?.id||null,title:event?.title||null,slug:event?.slug||null,
-            startTime:event?.startTime||null,endTime:event?.endTime||null,
-            active:event?.active??null,closed:event?.closed??null,
-            markets:(Array.isArray(event?.markets)?event.markets:[]).map(m=>({
-              id:m?.id||null,title:m?.title||null,question:m?.question||null,
-              slug:m?.slug||null,outcome:m?.outcome||null,
-              active:m?.active??null,closed:m?.closed??null
-            }))
-          }))});
-        } catch (error) {
-          out.push({query,error:String(error?.message||"SEARCH_FAILED").slice(0,100)});
-        }
-      }
-      return json({ok:true,source:"POLYMARKET_US_15M_RAW_INSPECTION",queries:out,submitted:false,liveOrderSubmission:"DISABLED",realMoneyMoved:false});
-    }
-
-    // Read-only search proof: events.list currently exposes no crypto-labelled
-    // catalogue rows, so inspect the official US search surface independently.
-    if (url.pathname === "/us-crypto-search-proof") {
-      const client = new PolymarketUS();
-      const queries = ["crypto","coin","bitcoin","BTC","ethereum","ETH"];
-      const out = [];
-      for (const query of queries) {
-        try {
-          const result = await client.search.query({ query, status: "active", limit: 50 });
-          const events = Array.isArray(result?.events) ? result.events : [];
-          out.push({query,count:events.length,events:events.slice(0,20).map(event=>({
-            id:event?.id||null,title:event?.title||null,slug:event?.slug||null,
-            active:event?.active??null,closed:event?.closed??null,
-            startTime:event?.startTime||null,endTime:event?.endTime||null,
-            markets:(Array.isArray(event?.markets)?event.markets:[]).slice(0,20).map(m=>({
-              id:m?.id||null,title:m?.title||null,slug:m?.slug||null,outcome:m?.outcome||null,
-              active:m?.active??null,closed:m?.closed??null
-            }))
-          }))});
-        } catch (error) {
-          out.push({query,error:String(error?.message||"SEARCH_FAILED").slice(0,100)});
-        }
-      }
-      return json({ok:true,source:"POLYMARKET_US_SEARCH",queries:out,submitted:false,liveOrderSubmission:"DISABLED",realMoneyMoved:false});
-    }
-
-    if (url.pathname === "/us-crypto-catalogue-proof") {
-      const client = new PolymarketUS();
-      const rows = [];
-      let offset = 0, pages = 0, totalEvents = 0, cryptoEvents = 0;
-      while (pages < 30) {
-        const result = await client.events.list({ active: true, limit: 100, offset });
-        const events = Array.isArray(result?.events) ? result.events
-          : Array.isArray(result?.data?.events) ? result.data.events
-          : Array.isArray(result?.data) ? result.data
-          : Array.isArray(result) ? result : [];
-        for (const event of events) {
-          totalEvents++;
-          const markets = Array.isArray(event?.markets) ? event.markets : [];
-          const eventText=[event?.title,event?.question,event?.slug,event?.description].filter(Boolean).join(" — ");
-          for (const market of (markets.length?markets:[null])) {
-            const text=[eventText,market?.title,market?.question,market?.slug,market?.outcome].filter(Boolean).join(" — ");
-            if (!/bitcoin|ethereum|\bbtc\b|\beth\b|\bether\b|crypto/i.test(text)) continue;
-            cryptoEvents++;
-            if (rows.length < 100) rows.push({
-              eventTitle:event?.title||event?.question||null,eventSlug:event?.slug||null,
-              eventStart:event?.startTime||null,eventEnd:event?.endTime||null,
-              marketTitle:market?.title||market?.question||null,marketSlug:market?.slug||null,
-              outcome:market?.outcome||null,active:market?.active??event?.active??null,closed:market?.closed??event?.closed??null
-            });
-          }
-        }
-        pages++;
-        if(events.length<100) break;
-        offset+=events.length;
-      }
-      return json({ok:true,source:"POLYMARKET_US_EVENTS_LIST",pages,totalEvents,cryptoMatches:cryptoEvents,sample:rows,submitted:false,liveOrderSubmission:"DISABLED",realMoneyMoved:false});
-    }
+    if (url.pathname === "/markets") return json(await marketSnapshot(env));
 
     // Authenticated, read-only Kalshi proof for the unchanged Baseline Real rules.
     // Credentials sign GET market-data requests only. No portfolio/order/write endpoint is called.
