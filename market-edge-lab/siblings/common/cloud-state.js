@@ -2,9 +2,9 @@
 // Reads only the isolated sibling Worker. No browser-side paper execution.
 (() => {
   const cfg = window.SIBLING_CONFIG || {};
-  if (!['nfe_reasoning','payne_method'].includes(cfg.key)) return;
-  const route = cfg.key === 'payne_method' ? 'payne' : 'nfe';
-  const label = cfg.key === 'payne_method' ? 'PAYNE' : 'NFE';
+  if (!['nfe_reasoning','payne_method','adaptive_market_lab'].includes(cfg.key)) return;
+  const route = cfg.key === 'payne_method' ? 'payne' : cfg.key === 'adaptive_market_lab' ? 'adaptive' : 'nfe';
+  const label = cfg.key === 'payne_method' ? 'PAYNE' : cfg.key === 'adaptive_market_lab' ? 'ADAPTIVE LAB' : 'NFE';
   const api = `https://market-edge-siblings.darkbishop43.workers.dev/api/state/${route}`;
   const money = n => '$' + Number(n || 0).toFixed(2);
   const esc = s => String(s ?? '').replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
