@@ -831,6 +831,152 @@ async function resolveKalshi15mSeries(env, priorSeries=[]) {
   return resolved;
 }
 
+async function kalshiDiscoveryDiagnostic(env) {
+  const priorState=await loadShadowState(env);
+  let series;
+  try {
+    series=await resolveKalshi15mSeries(env, priorState?.kalshiSeriesCache||[]);
+  } catch(error) {
+    return {
+      ok:false,
+      readOnly:true,
+      diagnostic:"KALSHI_DISCOVERY_DIAGNOSTIC_V1",
+      stage:"SERIES_RESOLUTION",
+      error:String(error?.message||"SERIES_RESOLUTION_FAILED").slice(0,160),
+      sensitiveValuesExposed:false,
+      providerWrites:0,
+      assets:[]
+    };
+  }
+  const now=Date.now();
+  const assets=[];
+  for(const sr of series){
+    const asset=String(sr?.asset||"");
+    const seriesTicker=String(sr?.ticker||"");
+    const item={
+      asset,
+      seriesTicker:seriesTicker||null,
+      seriesDiscoveredFrom:sr?.discoveredFrom||null,
+      seriesMetadataReady:Boolean(sr?.metadataReady),
+      seriesExecutionEligible:Boolean(sr?.executionEligible),
+      settlementSourceCount:Array.isArray(sr?.settlementSources)?sr.settlementSources.length:0,
+      providerHttpStatus:null,
+      providerReadOk:false,
+      providerReadError:null,
+      seenCount:0,
+      rejectedCount:0,
+      acceptedCount:0,
+      executionEligibleCount:0,
+      rejectionReasonCounts:{},
+      rows:[]
+    };
+    if(!seriesTicker){
+      item.providerReadError="SERIES_TICKER_UNAVAILABLE";
+      assets.push(item);
+      continue;
+    }
+    const path="/trade-api/v2/markets?series_ticker="+encodeURIComponent(seriesTicker)+"&status=open&limit=200";
+    let r;
+    try {
+      r=await kalshiShadowGet(env,path);
+      item.providerHttpStatus=r?.status??null;
+      item.providerReadOk=Boolean(r?.ok);
+    } catch(error) {
+      item.providerReadError=String(error?.message||"NETWORK_OR_SIGNING_READ_FAILED").slice(0,120);
+      assets.push(item);
+      continue;
+    }
+    if(!r.ok){
+      item.providerReadError="MARKETS_READ_FAILED_"+r.status;
+      assets.push(item);
+      continue;
+    }
+    const body=await r.json().catch(()=>({}));
+    const markets=Array.isArray(body?.markets)?body.markets:[];
+    item.seenCount=markets.length;
+    const countReason=(reason)=>{item.rejectionReasonCounts[reason]=Number(item.rejectionReasonCounts[reason]||0)+1;};
+    for(const m of markets.slice(0,200)){
+      const yesAsk=normalizeProbability(m?.yes_ask_dollars??m?.yes_ask);
+      const yesBid=normalizeProbability(m?.yes_bid_dollars??m?.yes_bid);
+      const directNoAsk=normalizeProbability(m?.no_ask_dollars??m?.no_ask);
+      const directNoBid=normalizeProbability(m?.no_bid_dollars??m?.no_bid);
+      const noAsk=directNoAsk!==null?directNoAsk:(yesBid!==null?Number((1-yesBid).toFixed(4)):null);
+      const noBid=directNoBid!==null?directNoBid:(yesAsk!==null?Number((1-yesAsk).toFixed(4)):null);
+      const providerStatus=String(m?.status||"").toLowerCase();
+      const openMs=Date.parse(m?.open_time||"");
+      const closeMs=Date.parse(m?.close_time||"");
+      const durationMs=Number.isFinite(openMs)&&Number.isFinite(closeMs)?closeMs-openMs:15*60*1000;
+      const durationSafe=durationMs>=10*60*1000&&durationMs<=20*60*1000;
+      const freshnessMs=Number.isFinite(closeMs)?closeMs-now:NaN;
+      const freshnessSafe=Number.isFinite(freshnessMs)&&freshnessMs>0&&freshnessMs<=20*60*1000;
+      const rejectionReasons=[];
+      if(!m?.ticker) rejectionReasons.push("MISSING_TICKER");
+      if(!["active","open"].includes(providerStatus)) rejectionReasons.push("STATUS_NOT_OPEN_ACTIVE");
+      if(yesAsk===null) rejectionReasons.push("YES_ASK_MISSING");
+      if(yesBid===null) rejectionReasons.push("YES_BID_MISSING");
+      if(noAsk===null) rejectionReasons.push("NO_ASK_MISSING");
+      if(noBid===null) rejectionReasons.push("NO_BID_MISSING");
+      if(yesAsk!==null&&(yesAsk<=0.01||yesAsk>=0.99)) rejectionReasons.push("YES_ASK_OUTSIDE_EXECUTION_RANGE");
+      if(noAsk!==null&&(noAsk<=0.01||noAsk>=0.99)) rejectionReasons.push("NO_ASK_OUTSIDE_EXECUTION_RANGE");
+      if(!Number.isFinite(closeMs)) rejectionReasons.push("CLOSE_TIME_INVALID");
+      else if(freshnessMs<=0) rejectionReasons.push("CLOSE_NOT_FUTURE");
+      else if(freshnessMs>20*60*1000) rejectionReasons.push("CLOSE_MORE_THAN_20_MIN_AWAY");
+      const rejectedByDiscovery=rejectionReasons.length>0;
+      const executionHoldReasons=[];
+      if(!durationSafe) executionHoldReasons.push("DURATION_OUTSIDE_10_TO_20_MIN");
+      if(!sr?.executionEligible) executionHoldReasons.push("SERIES_EXECUTION_INELIGIBLE");
+      if(!freshnessSafe) executionHoldReasons.push("FRESHNESS_UNSAFE");
+      const executionEligible=!rejectedByDiscovery&&Boolean(sr?.executionEligible&&durationSafe&&freshnessSafe);
+      if(rejectedByDiscovery){
+        item.rejectedCount++;
+        for(const reason of rejectionReasons) countReason(reason);
+      }else{
+        item.acceptedCount++;
+        if(executionEligible) item.executionEligibleCount++;
+      }
+      item.rows.push({
+        ticker:m?.ticker||null,
+        providerStatus:m?.status||null,
+        openTime:m?.open_time||null,
+        closeTime:m?.close_time||null,
+        durationMinutes:Number.isFinite(durationMs)?Number((durationMs/60000).toFixed(3)):null,
+        millisecondsToClose:Number.isFinite(freshnessMs)?freshnessMs:null,
+        yesBid,
+        yesAsk,
+        noBid,
+        noAsk,
+        rejectedByDiscovery,
+        rejectionReasons,
+        executionEligible,
+        executionHoldReasons
+      });
+    }
+    assets.push(item);
+  }
+  return {
+    ok:true,
+    readOnly:true,
+    diagnostic:"KALSHI_DISCOVERY_DIAGNOSTIC_V1",
+    observedAt:new Date(now).toISOString(),
+    sensitiveValuesExposed:false,
+    credentialsExposed:false,
+    signaturesExposed:false,
+    authHeadersExposed:false,
+    providerWrites:0,
+    shadowState:{
+      status:priorState?.status||null,
+      lastRunAt:priorState?.lastRunAt||null,
+      lastSuccessfulObservationAt:priorState?.lastSuccessfulObservationAt||null,
+      runs:Number(priorState?.runs||0),
+      eligibleCount:Number(priorState?.eligibleCount||0),
+      seenCount:Number(priorState?.seenCount||0),
+      rejectedCount:Number(priorState?.rejectedCount||0),
+      discoveryReadFailures:Array.isArray(priorState?.discoveryReadFailures)?priorState.discoveryReadFailures:[]
+    },
+    assets
+  };
+}
+
 async function discoverKalshiShadowMarkets(env, priorSeries=[]) {
   const series=await resolveKalshi15mSeries(env, priorSeries);
   const candidates=[]; let seen=0,rejected=0;
@@ -3352,6 +3498,14 @@ export default {
 
   async fetch(request, env) {
     const url = new URL(request.url);
+
+    if (request.method === "GET" && url.pathname === "/diagnostic-kalshi-discovery") {
+      const body=await kalshiDiscoveryDiagnostic(env);
+      return new Response(JSON.stringify(body,null,2),{
+        status:body?.ok===false?502:200,
+        headers:{...JSON_HEADERS,"cache-control":"no-store"}
+      });
+    }
 
     if (request.method === "GET" && url.pathname === "/forensic-historical-orders") {
       const providerPath=new URL("https://external-api.kalshi.com/trade-api/v2/historical/orders");
