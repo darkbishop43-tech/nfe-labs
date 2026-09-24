@@ -1,0 +1,72 @@
+name: Verify Queue And Wide Radar Live
+
+on:
+  push:
+    branches:
+      - market-edge-baseline-real
+    paths:
+      - '.github/workflows/verify-queue-wide-radar-live.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Read live bounded queue and wide radar
+        shell: bash
+        run: |
+          set -euo pipefail
+          BASE='https://market-edge-baseline-real.darkbishop43.workers.dev'
+          curl --fail --silent --show-error "$BASE/execution-test-state" -o /tmp/test.json
+          curl --fail --silent --show-error "$BASE/execution-test-queue-proof" -o /tmp/queue.json
+          curl --fail --silent --show-error "$BASE/wide-radar-state" -o /tmp/radar.json
+          curl --fail --silent --show-error "$BASE/shadow-state" -o /tmp/shadow.json
+          python - <<'PY'
+          import json
+          t=json.load(open('/tmp/test.json'))
+          q=json.load(open('/tmp/queue.json'))
+          r=json.load(open('/tmp/radar.json'))
+          s=json.load(open('/tmp/shadow.json'))
+          core=['BTC','ETH','SOL','XRP','HYPE']
+          added=['ZEC','DOGE','BNB','NEAR']
+          inv={x.get('asset'):x for x in r.get('inventory',[]) if x.get('asset')}
+          cov=r.get('live',{}).get('coverage') or {}
+          out={
+            'execution_test_status':t.get('state',{}).get('status'),
+            'execution_test_armed':t.get('state',{}).get('armed'),
+            'queue_runtime':t.get('queue'),
+            'queue_proof':q,
+            'radar_discovered_series_count':r.get('discoveredSeriesCount'),
+            'provider_impact':r.get('providerImpact'),
+            'frozen':r.get('frozen'),
+            'core_assets_present':{a:a in inv for a in core},
+            'added_assets_present':{a:a in inv for a in added},
+            'live_status':r.get('live',{}).get('status'),
+            'live_last_run':r.get('live',{}).get('lastRunAt'),
+            'live_seen':r.get('live',{}).get('seenCount'),
+            'live_rejected':r.get('live',{}).get('rejectedCount'),
+            'live_coverage':{a:cov.get(a) for a in core+added},
+            'live_opportunities':r.get('live',{}).get('opportunities'),
+            'shadow_entry_score':(s.get('strategy') or {}).get('entryScore'),
+            'shadow_exit_score':(s.get('strategy') or {}).get('exitScore'),
+            'shadow_max_hold_ms':(s.get('strategy') or {}).get('maxHoldMs'),
+            'real_order_submitted_by_validation':False
+          }
+          print(json.dumps(out,indent=2))
+          assert q.get('ok') is True
+          assert q.get('realOrderSubmitted') is False
+          assert q.get('oneStageActive') is True
+          assert q.get('automaticAdvance') is True
+          assert q.get('freshStageIdentity') is True
+          assert q.get('duplicateArmWouldReject') is True
+          assert q.get('stopPreservesOpenPositionManagement') is True
+          assert abs(float(q.get('productionThreshold'))-.80)<1e-9
+          assert int(r.get('discoveredSeriesCount'))==14
+          assert all(a in inv for a in core+added)
+          assert abs(float(r.get('frozen',{}).get('productionEntryScore'))-.80)<1e-9
+          assert abs(float(r.get('frozen',{}).get('exitScore'))-.20)<1e-9
+          assert int(r.get('frozen',{}).get('maxHoldMs'))==300000
+          assert float(r.get('frozen',{}).get('maxEntryDebitUsd'))==1
+          PY
