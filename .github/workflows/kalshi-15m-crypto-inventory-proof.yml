@@ -61,5 +61,14 @@ jobs:
                 'exchange_indexes':sorted(list({m.get('exchange_index') for m in markets if m.get('exchange_index') is not None})),
                 'samples':[sample(m) for m in markets[:3]]
               })
-          print(json.dumps({'series_http':hs,'crypto_series_total':len(rows),'fifteen_minute_series_count':len(out),'series':out},indent=2))
+          # Score-input capability probe: only provider-evidenced single-asset 15m series.
+          spot={}
+          for sym in ['BTC','ETH','SOL','XRP','HYPE','ADA','ZEC','TON','DOGE','BCH','BNB','NEAR']:
+              try:
+                  req=urllib.request.Request('https://api.exchange.coinbase.com/products/'+sym+'-USD/ticker',headers={'User-Agent':'NFE-OS-Kalshi-Inventory/1.0'})
+                  with urllib.request.urlopen(req,timeout=15) as r:
+                      d=json.load(r); spot[sym]={'coinbase_http':r.status,'price':d.get('price')}
+              except Exception as e:
+                  spot[sym]={'coinbase_http':None,'error':type(e).__name__}
+          print(json.dumps({'series_http':hs,'crypto_series_total':len(rows),'fifteen_minute_series_count':len(out),'series':out,'spot_capability':spot},indent=2))
           PY
