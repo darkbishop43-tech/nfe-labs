@@ -12,7 +12,10 @@ permissions:
   contents: read
 
 concurrency:
-  group: market-edge-sibling-paper-cloud
+  # Keep preserved main/Payne collection serialized with itself, while an
+  # Adaptive branch dispatch gets its own lock. Duplicate Adaptive runs still
+  # serialize against one another because they share the same ref name.
+  group: market-edge-sibling-paper-cloud-${{ github.ref_name }}
   cancel-in-progress: false
 
 jobs:
