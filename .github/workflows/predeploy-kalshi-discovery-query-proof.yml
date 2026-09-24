@@ -14,38 +14,73 @@ jobs:
   prove:
     runs-on: ubuntu-latest
     steps:
-      - name: Query new bounded public Kalshi discovery shape
+      - name: Query new bounded public Kalshi discovery shape and apply existing local filters
         shell: bash
         run: |
           set -euo pipefail
-          BASE='https://api.elections.kalshi.com/trade-api/v2/markets'
-          NOW="$(date +%s)"
           python - <<'PY'
-          import json, urllib.request, urllib.parse, time
+          import json, urllib.request, urllib.parse, time, datetime
           base='https://api.elections.kalshi.com/trade-api/v2/markets'
           now=int(time.time())
+
+          def prob(v):
+              if v is None: return None
+              try: n=float(v)
+              except: return None
+              if n>1 and n<=100: n=n/100
+              return n if 0<=n<=1 else None
+
+          grand=0
           for series in ['KXBTC15M','KXETH15M','KXSOL15M','KXXRP15M','KXHYPE15M']:
               q=urllib.parse.urlencode({'series_ticker':series,'min_close_ts':now,'limit':200})
-              url=base+'?'+q
-              try:
-                  with urllib.request.urlopen(url, timeout=20) as r:
-                      data=json.load(r)
-                      rows=data.get('markets') or []
-                      print(json.dumps({
-                          'series':series,
-                          'http':r.status,
-                          'count':len(rows),
-                          'sample':[{
-                              'ticker':m.get('ticker'),
-                              'status':m.get('status'),
-                              'open_time':m.get('open_time'),
-                              'close_time':m.get('close_time'),
-                              'yes_bid_dollars':m.get('yes_bid_dollars'),
-                              'yes_ask_dollars':m.get('yes_ask_dollars'),
-                              'no_bid_dollars':m.get('no_bid_dollars'),
-                              'no_ask_dollars':m.get('no_ask_dollars'),
-                          } for m in rows[:5]]
-                      }, indent=2))
-              except Exception as e:
-                  print(json.dumps({'series':series,'error':repr(e)}))
+              with urllib.request.urlopen(base+'?'+q, timeout=20) as r:
+                  data=json.load(r)
+              rows=data.get('markets') or []
+              accepted=[]
+              reasons={}
+              for m in rows:
+                  yesAsk=prob(m.get('yes_ask_dollars',m.get('yes_ask')))
+                  yesBid=prob(m.get('yes_bid_dollars',m.get('yes_bid')))
+                  noAsk=prob(m.get('no_ask_dollars',m.get('no_ask')))
+                  noBid=prob(m.get('no_bid_dollars',m.get('no_bid')))
+                  status=str(m.get('status') or '').lower()
+                  rs=[]
+                  if not m.get('ticker'): rs.append('MISSING_TICKER')
+                  if status not in ('active','open'): rs.append('STATUS_NOT_OPEN_ACTIVE')
+                  if yesAsk is None: rs.append('YES_ASK_MISSING')
+                  if yesBid is None: rs.append('YES_BID_MISSING')
+                  if noAsk is None and yesBid is not None: noAsk=round(1-yesBid,4)
+                  if noBid is None and yesAsk is not None: noBid=round(1-yesAsk,4)
+                  if noAsk is None: rs.append('NO_ASK_MISSING')
+                  if noBid is None: rs.append('NO_BID_MISSING')
+                  if yesAsk is not None and (yesAsk<=.01 or yesAsk>=.99): rs.append('YES_ASK_OUTSIDE_EXECUTION_RANGE')
+                  if noAsk is not None and (noAsk<=.01 or noAsk>=.99): rs.append('NO_ASK_OUTSIDE_EXECUTION_RANGE')
+                  try:
+                      ot=datetime.datetime.fromisoformat(str(m.get('open_time')).replace('Z','+00:00')).timestamp()
+                      ct=datetime.datetime.fromisoformat(str(m.get('close_time')).replace('Z','+00:00')).timestamp()
+                      duration=ct-ot
+                      remain=ct-time.time()
+                  except:
+                      duration=None; remain=None
+                  if remain is None: rs.append('CLOSE_TIME_INVALID')
+                  elif remain<=0: rs.append('CLOSE_NOT_FUTURE')
+                  elif remain>20*60: rs.append('CLOSE_MORE_THAN_20_MIN_AWAY')
+                  if duration is None or not (10*60<=duration<=20*60): rs.append('DURATION_OUTSIDE_10_TO_20_MIN')
+                  if not rs:
+                      accepted.append({
+                          'ticker':m.get('ticker'),'status':m.get('status'),
+                          'open_time':m.get('open_time'),'close_time':m.get('close_time'),
+                          'yesBid':yesBid,'yesAsk':yesAsk,'noBid':noBid,'noAsk':noAsk,
+                          'minutesToClose':round(remain/60,3),'durationMinutes':round(duration/60,3)
+                      })
+                  else:
+                      for x in rs: reasons[x]=reasons.get(x,0)+1
+              grand += len(accepted)
+              print(json.dumps({
+                  'series':series,'providerCount':len(rows),'acceptedByExistingLocalFilters':len(accepted),
+                  'accepted':accepted[:8],'rejectionReasonCounts':reasons
+              },indent=2))
+          print(json.dumps({'totalAcceptedAcrossFiveSeries':grand}))
+          if grand < 1:
+              raise SystemExit('NO_CURRENT_CANDIDATE_PASSES_EXISTING_LOCAL_FILTERS')
           PY
