@@ -1,0 +1,37 @@
+name: Verify Adaptive Calibration Live
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/verify-adaptive-calibration-live.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify calibration routes and obtain one bounded observation
+        shell: bash
+        run: |
+          set -euo pipefail
+          BASE='https://market-edge-siblings.darkbishop43.workers.dev'
+          sleep 8
+          echo '=== ROOT ==='
+          curl --fail --silent --show-error "$BASE/"
+          echo
+          echo '=== CALIBRATION START ==='
+          curl --fail --silent --show-error "$BASE/api/calibration/run"
+          echo
+          sleep 1
+          echo '=== CALIBRATION STATE ==='
+          curl --fail --silent --show-error "$BASE/api/calibration/state"
+          echo
+          echo '=== ADAPTIVE NORMAL STATE ==='
+          curl --fail --silent --show-error "$BASE/api/state/adaptive"
+          echo
+          echo '=== PAYNE STATE HEADER ==='
+          curl --fail --silent --show-error "$BASE/api/state/payne" | python -c "import json,sys; d=json.load(sys.stdin); print(json.dumps({'lab':d.get('lab'),'mode':d.get('mode'),'balance':d.get('balance'),'realizedPnl':d.get('realizedPnl'),'trades':d.get('trades'),'positions':len(d.get('positions') or [])},indent=2))"
