@@ -1,0 +1,65 @@
+name: Kalshi 15M Crypto Inventory Proof
+
+on:
+  push:
+    branches:
+      - market-edge-baseline-real
+    paths:
+      - '.github/workflows/kalshi-15m-crypto-inventory-proof.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  inventory:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Enumerate official Kalshi crypto series and 15m families
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json, urllib.request, urllib.parse, time, re
+          BASE='https://external-api.kalshi.com/trade-api/v2'
+          def get(path):
+              req=urllib.request.Request(BASE+path,headers={'Accept':'application/json','User-Agent':'NFE-OS-Kalshi-Inventory/1.0'})
+              with urllib.request.urlopen(req,timeout=30) as r:
+                  return r.status,json.load(r)
+          hs,data=get('/series?category='+urllib.parse.quote('Crypto')+'&include_product_metadata=true')
+          rows=data.get('series') or []
+          out=[]
+          for s in rows:
+              ticker=str(s.get('ticker') or '')
+              title=str(s.get('title') or '')
+              freq=str(s.get('frequency') or '')
+              text=(ticker+' '+title+' '+freq).upper()
+              is15=bool(re.search(r'15\s*(M|MIN|MINUTE)',text))
+              if not is15:
+                  continue
+              q=urllib.parse.urlencode({'series_ticker':ticker,'limit':200})
+              try:
+                  mh,md=get('/markets?'+q)
+                  markets=md.get('markets') or []
+              except Exception as e:
+                  mh=None; markets=[]
+              def sample(m):
+                  return {
+                    'ticker':m.get('ticker'),'status':m.get('status'),
+                    'open_time':m.get('open_time'),'close_time':m.get('close_time'),
+                    'exchange_index':m.get('exchange_index'),
+                    'yes_bid_dollars':m.get('yes_bid_dollars',m.get('yes_bid')),
+                    'yes_ask_dollars':m.get('yes_ask_dollars',m.get('yes_ask')),
+                    'no_bid_dollars':m.get('no_bid_dollars',m.get('no_bid')),
+                    'no_ask_dollars':m.get('no_ask_dollars',m.get('no_ask'))
+                  }
+              out.append({
+                'ticker':ticker,'title':title,'frequency':freq,
+                'settlement_sources':s.get('settlement_sources') or [],
+                'product_metadata':s.get('product_metadata'),
+                'market_http':mh,'market_count':len(markets),
+                'statuses':sorted(list({str(m.get('status')) for m in markets})),
+                'exchange_indexes':sorted(list({m.get('exchange_index') for m in markets if m.get('exchange_index') is not None})),
+                'samples':[sample(m) for m in markets[:3]]
+              })
+          print(json.dumps({'series_http':hs,'crypto_series_total':len(rows),'fifteen_minute_series_count':len(out),'series':out},indent=2))
+          PY
