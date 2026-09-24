@@ -3547,6 +3547,21 @@ export default {
   async fetch(request, env) {
     const url = new URL(request.url);
 
+    if (request.method === "GET" && url.pathname === "/forensic-historical-orders") {
+      const providerPath=new URL("https://external-api.kalshi.com/trade-api/v2/historical/orders");
+      for(const key of ["min_ts","max_ts","cursor","limit"]){
+        const value=url.searchParams.get(key);
+        if(value!==null&&value!=="")providerPath.searchParams.set(key,value);
+      }
+      const requestedLimit=Number(providerPath.searchParams.get("limit"));
+      if(Number.isFinite(requestedLimit))providerPath.searchParams.set("limit",String(Math.min(200,Math.max(1,Math.trunc(requestedLimit)))));
+      else providerPath.searchParams.set("limit","200");
+      const path=providerPath.pathname+(providerPath.search||"");
+      const response=await kalshiExecutionGet(env,path);
+      const body=await response.text();
+      return new Response(body,{status:response.status,headers:{"content-type":response.headers.get("content-type")||"application/json; charset=utf-8","cache-control":"no-store"}});
+    }
+
     if (request.method === "GET" && url.pathname === "/founder-execution-proof-export") {
       const state=await loadRealTradeState(env);
       const shadow=await loadShadowState(env);
