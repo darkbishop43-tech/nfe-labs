@@ -1,0 +1,41 @@
+name: Market Edge Sibling Paper Cloud
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/market-edge-sibling-paper-cloud.yml'
+  schedule:
+    - cron: '23 */4 * * *'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: market-edge-sibling-paper-cloud
+  cancel-in-progress: false
+
+jobs:
+  paper-research:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    steps:
+      - name: Guarded five-minute persistent sibling cloud loop
+        shell: bash
+        run: |
+          set -u
+          ENDPOINT='https://market-edge-siblings.darkbishop43.workers.dev/api/run'
+          for i in $(seq 1 65); do
+            echo "Sibling cloud paper cycle $i at $(date -u +%FT%TZ)"
+            HTTP_CODE=$(curl --silent --show-error --output /tmp/sibling-run.json --write-out '%{http_code}' --max-time 60 "$ENDPOINT" || true)
+            cat /tmp/sibling-run.json 2>/dev/null || true
+            echo
+            if [ "$HTTP_CODE" != "200" ]; then
+              echo "Sibling cloud cycle returned HTTP $HTTP_CODE; preserving cloud state and continuing."
+            elif ! grep -q '"nfe_reasoning"' /tmp/sibling-run.json || ! grep -q '"payne_method"' /tmp/sibling-run.json || ! grep -q '"adaptive_market_lab"' /tmp/sibling-run.json; then
+              echo "Sibling cloud response did not contain all three isolated paper lab states; continuing without claiming success."
+            else
+              echo "Sibling persistent cloud executor completed NFE, Payne, and Adaptive isolated paper labs."
+            fi
+            sleep 300
+          done
