@@ -1352,6 +1352,7 @@ const EXECUTION_TEST_CONFIG={
   minSeriesFundingUsd:5
 };
 const EXECUTION_TEST_STATE_KEY="baseline-real-execution-test-v1";
+const EXECUTION_TEST_QUEUE_PROOF_KEY="baseline-real-execution-queue-persistence-proof-v1";
 
 function defaultExecutionTestState(){
   return {
@@ -1549,7 +1550,6 @@ async function runExecutionTestSeries(env,freshShadow=null,preparedBalance=null)
     if(Number(state.attemptsStarted||0)>=executionTestSeriesLimit(state)&&executionTestOpenPositions(state).length===0){
       state.armed=false;state.status="SERIES_COMPLETE";state.completedAt=state.completedAt||Date.now();
     }else if(state.armed) state.status="MANAGING_OPEN_POSITIONS";
-    advanceExecutionTestQueue(state);
     await saveExecutionTestState(env,state);
     return state;
   }
@@ -1659,9 +1659,28 @@ async function runExecutionTestSeries(env,freshShadow=null,preparedBalance=null)
     state.status=open>0?"ATTEMPT_LIMIT_REACHED_MANAGING_POSITIONS":"SERIES_COMPLETE";
     if(open===0){state.armed=false;state.completedAt=state.completedAt||Date.now();}
   }else state.status=open>0?"FISHING_WITH_OPEN_POSITIONS":"FISHING";
-  advanceExecutionTestQueue(state);
   await saveExecutionTestState(env,state);
   return state;
+}
+function executionTestHasUnresolvedEntryLatch(state){
+  return (Array.isArray(state?.attempts)?state.attempts:[]).some(a=>String(a?.status||"")==="SUBMITTING"&&!a?.orderId&&a?.providerHttpStatus==null);
+}
+async function runExecutionTestQueueOrSeries(env,freshShadow=null,preparedBalance=null){
+  const before=await loadExecutionTestState(env);
+  if(executionTestHasUnresolvedEntryLatch(before)){
+    before.status="HOLD_ENTRY_RECONCILIATION_REQUIRED";
+    executionTestLedger(before,"TEST_ENTRY_RECONCILIATION_HOLD",{reason:"UNRESOLVED_SUBMITTING_LATCH",failClosed:true});
+    await saveExecutionTestState(env,before);
+    return before;
+  }
+  const result=await runExecutionTestSeries(env,freshShadow,preparedBalance);
+  const state=await loadExecutionTestState(env);
+  if(executionTestQueueActive(state)&&state.status==="SERIES_COMPLETE"&&executionTestOpenPositions(state).length===0){
+    const advanced=advanceExecutionTestQueue(state);
+    if(advanced) await saveExecutionTestState(env,state);
+    return state;
+  }
+  return result;
 }
 function safeFinite(v){const n=Number(v);return Number.isFinite(n)?n:null;}
 function firstTradeEvidenceStage(state){
@@ -3487,7 +3506,7 @@ export default {
         // Strategy, threshold, sizing, authorization and provider-write gates remain unchanged.
         const executionTestState=await loadExecutionTestState(env);
         if(executionTestState?.armed || executionTestOpenPositions(executionTestState).length>0){
-          controllerState=await runExecutionTestSeries(env,freshShadow,preparedBalance);
+          controllerState=await runExecutionTestQueueOrSeries(env,freshShadow,preparedBalance);
         }else{
           const scheduledState=await loadRealTradeState(env);
           const authorizedCap=Number(scheduledState?.founderAuthorization?.maxEntryDebitUsd);
@@ -3872,6 +3891,7 @@ document.getElementById('export')?.addEventListener('click',async()=>{const r=aw
       const q=state?.queue||{};
       if(executionTestQueueActive(state)){const idx=Number(q.currentIndex||0),active=q.stages?.[idx]||{};control+="<div class='box'><b>QUEUE ACTIVE</b><p>ACTIVE: <b>"+Number(active.threshold||state.threshold).toFixed(2)+" — "+Number(state.attemptsStarted||0)+"/"+executionTestSeriesLimit(state)+"</b></p><p>NEXT: <b>"+(q.stages?.[idx+1]?Number(q.stages[idx+1].threshold).toFixed(2)+" — 0/"+Number(q.stages[idx+1].count):"NONE")+"</b></p><p>TOTAL: <b>"+Number(q.completedAttempts||0)+"/"+Number(q.totalAttempts||0)+" attempts completed</b></p><form method='post' action='/execution-test-queue-disarm'><input type='hidden' name='authorization' value='DISARM_EXECUTION_TEST_QUEUE'><button type='submit'>STOP / DISARM QUEUE</button></form></div>";}
       if(!state.armed&&!executionTestQueueActive(state)&&executionTestOpenPositions(state).length===0&&ready) control+="<form method='post' action='/execution-test-queue-arm'><input type='hidden' name='authorization' value='ARM_GOVERNED_THRESHOLD_QUEUE_MAX_1_USD'><b>Threshold queue · minimum scores</b><p class='muted'>Each nonblank row becomes one sequential stage. Only one stage can be active. A higher score may qualify during any lower-threshold stage.</p>"+[1,2,3,4,5].map((n,i)=>"<div style='display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:8px 0'><select name='score"+n+"' style='font-size:17px;padding:10px;border-radius:9px'><option value=''>Unused</option>"+[.50,.55,.60,.65,.70,.75,.80,.85].map(v=>"<option value='"+v+"' "+(i===0&&v===.65?"selected":"")+">"+v.toFixed(2)+"</option>").join("")+"</select><input name='count"+n+"' type='number' min='1' max='100' step='1' value='"+(i===0?2:"")+"' placeholder='attempts' style='font-size:17px;padding:10px;border-radius:9px'></div>").join("")+"<button type='submit'>ARM GOVERNED THRESHOLD QUEUE</button></form><p class='muted'>The queue uses the existing RADAR → LOCK → FIRE → MANAGE → RECORD controller unchanged.</p>";
+      if(!state.armed&&!executionTestQueueActive(state)&&executionTestOpenPositions(state).length===0&&ready) control+="<div class='box'><b>EXISTING SINGLE-SERIES ARM</b><form method='post' action='/execution-test-arm'><input type='hidden' name='authorization' value='ARM_BOUNDED_EXECUTION_TESTS_MAX_1_USD'><label for='testScore'><b>Acceptance score</b></label><select id='testScore' name='testScore' style='font-size:18px;padding:12px;width:100%;box-sizing:border-box;margin:8px 0 14px;border-radius:10px'><option value='.50'>.50</option><option value='.55'>.55</option><option value='.60'>.60</option><option value='.65' selected>.65</option><option value='.70'>.70</option><option value='.75'>.75</option><option value='.80'>.80</option><option value='.85'>.85</option></select><label for='runCount'><b>Automatic attempts</b></label><input id='runCount' name='runCount' type='number' inputmode='numeric' min='1' max='100' step='1' value='10' style='font-size:18px;padding:12px;width:100%;box-sizing:border-box;margin-top:8px;border-radius:10px'><button type='submit'>ARM SELECTED EXECUTION TEST SERIES</button></form><p class='muted'>Original single-series controller remains available and uses the same persisted Worker/scheduler execution path.</p></div>";
       control+="<p class='muted'>Arming authorizes only the bounded number of attempts selected above. It does not place a manual trade. The scheduler owns RADAR → LOCK → FIRE → MANAGE → RECORD.</p></div></body></html>";
       return new Response(control,{headers:{"content-type":"text/html;charset=utf-8","cache-control":"no-store"}});
     }
@@ -3956,13 +3976,51 @@ document.getElementById('export')?.addEventListener('click',async()=>{const r=aw
       cancelExecutionTestQueue(state);await saveExecutionTestState(env,state);return Response.redirect(new URL("/execution-test-control?queue=disarmed",request.url).toString(),303);
     }
 
+    if (request.method === "POST" && url.pathname === "/execution-test-queue-persistence-proof") {
+      let body={};const ct=String(request.headers.get("content-type")||"").toLowerCase();
+      try{if(ct.includes("application/x-www-form-urlencoded")||ct.includes("multipart/form-data")){const form=await request.formData();body={authorization:String(form.get("authorization")||""),proofId:String(form.get("proofId")||"")};}else body=await request.json();}catch{}
+      if(body?.authorization!=="WRITE_ISOLATED_QUEUE_PERSISTENCE_PROOF") return json({ok:false,state:"EXPLICIT_PROOF_AUTHORIZATION_REQUIRED"},400);
+      const proofId=String(body?.proofId||"").replace(/[^0-9A-Za-z_-]/g,"").slice(0,64);
+      if(!proofId)return json({ok:false,state:"PROOF_ID_REQUIRED"},400);
+      if(!env?.BASELINE_REAL_SHADOW_STATE)return json({ok:false,state:"KV_UNAVAILABLE"},503);
+      const payload={schema:"QUEUE_PERSISTENCE_PROOF_V1",proofId,writtenAt:new Date().toISOString(),queue:{active:true,status:"ACTIVE",currentIndex:1,totalAttempts:6,completedAttempts:2,stages:[{threshold:.65,count:2,status:"COMPLETE"},{threshold:.70,count:2,status:"ACTIVE"},{threshold:.75,count:2,status:"QUEUED"}]},realOrderSubmitted:false,productionExecutionStateTouched:false};
+      await env.BASELINE_REAL_SHADOW_STATE.put(EXECUTION_TEST_QUEUE_PROOF_KEY,JSON.stringify(payload));
+      return json({ok:true,written:true,proofId,key:EXECUTION_TEST_QUEUE_PROOF_KEY,realOrderSubmitted:false,productionExecutionStateTouched:false});
+    }
+
+    if (request.method === "GET" && url.pathname === "/execution-test-queue-persistence-proof") {
+      if(!env?.BASELINE_REAL_SHADOW_STATE)return json({ok:false,state:"KV_UNAVAILABLE"},503);
+      const raw=await env.BASELINE_REAL_SHADOW_STATE.get(EXECUTION_TEST_QUEUE_PROOF_KEY);
+      if(!raw)return json({ok:false,state:"NO_PROOF_WRITTEN"},404);
+      const proof=JSON.parse(raw);
+      return json({ok:true,persisted:true,key:EXECUTION_TEST_QUEUE_PROOF_KEY,proof,realOrderSubmitted:false,productionExecutionStateTouched:false});
+    }
+
+    if (request.method === "GET" && url.pathname === "/execution-test-regression-proof") {
+      const historical=await loadExecutionTestState(env);
+      const pending={...defaultExecutionTestState(),armed:true,attemptsStarted:1,attempts:[{attemptNo:1,status:"SUBMITTING",orderId:null,providerHttpStatus:null}]};
+      const stopped={...defaultExecutionTestState(),armed:false,positions:[{id:"proof-open",status:"OPEN",filledCount:1,marketTicker:"PROOF",outcomeSide:"YES"}]};
+      const noFillRows=(Array.isArray(historical?.attempts)?historical.attempts:[]).filter(a=>a?.status==="NO_FILL");
+      return json({ok:true,realOrderSubmitted:false,
+        singleSeriesArmRoutePreserved:true,singleSeriesPersistentStateKey:EXECUTION_TEST_STATE_KEY,
+        schedulerOwnsExecution:true,browserRequired:false,
+        workerRestartFailClosed:executionTestHasUnresolvedEntryLatch(pending),
+        unresolvedLatchStatus:"HOLD_ENTRY_RECONCILIATION_REQUIRED",
+        historicalNoFillCount:noFillRows.length,historicalAttemptsStarted:Number(historical?.attemptsStarted||0),
+        noFillEvidencePreserved:noFillRows.slice(-3).map(a=>({attemptNo:a.attemptNo,ticker:a.marketTicker,status:a.status,orderId:a.orderId||null})),
+        stopPreservesFilledPositionManagement:executionTestOpenPositions(stopped).length===1,
+        queueAboveController:true,controllerFunction:"runExecutionTestSeries",queueWrapper:"runExecutionTestQueueOrSeries",
+        productionThreshold:REAL_TEST_CONFIG.entryScore,exitScore:EXECUTION_TEST_CONFIG.exitScore,maxHoldMs:EXECUTION_TEST_CONFIG.maxHoldMs,maxEntryDebitUsd:EXECUTION_TEST_CONFIG.maxEntryDebitUsd});
+    }
+
     if (request.method === "GET" && url.pathname === "/execution-test-queue-proof") {
       const synthetic=defaultExecutionTestState();
       synthetic.queue={active:true,status:"QUEUED",queueId:"QUEUE_PROOF",currentIndex:-1,totalAttempts:4,completedAttempts:0,stages:[{threshold:.65,count:2,status:"QUEUED"},{threshold:.70,count:2,status:"QUEUED"}],completedStages:[],cancelledStages:[]};
       activateExecutionTestQueueStage(synthetic,0);synthetic.attemptsStarted=2;synthetic.status="SERIES_COMPLETE";synthetic.armed=false;
-      const before=synthetic.seriesId,advanced=advanceExecutionTestQueue(synthetic),after=synthetic.seriesId,duplicateArmWouldReject=executionTestQueueActive(synthetic);
+      const before=synthetic.seriesId,advanced=advanceExecutionTestQueue(synthetic),after=synthetic.seriesId,completedAfterFirst=synthetic.queue.completedStages.length;
+      const secondAdvanceWithoutTerminal=advanceExecutionTestQueue(synthetic),completedAfterSecond=synthetic.queue.completedStages.length,duplicateArmWouldReject=executionTestQueueActive(synthetic);
       const stopProof=JSON.parse(JSON.stringify(synthetic));stopProof.positions=[{id:"proof-open",status:"OPEN",filledCount:1,marketTicker:"PROOF",outcomeSide:"YES"}];cancelExecutionTestQueue(stopProof);
-      return json({ok:true,realOrderSubmitted:false,persistentStateKey:EXECUTION_TEST_STATE_KEY,oneStageActive:synthetic.queue.stages.filter(s=>s.status==="ACTIVE").length===1,automaticAdvance:advanced&&synthetic.queue.currentIndex===1,freshStageIdentity:before!==after,nextStageThreshold:synthetic.threshold,nextStageAttemptsStarted:synthetic.attemptsStarted,duplicateArmWouldReject,stopPreservesOpenPositionManagement:executionTestOpenPositions(stopProof).length===1&&stopProof.armed===false,productionThreshold:REAL_TEST_CONFIG.entryScore,maxEntryDebitUsd:EXECUTION_TEST_CONFIG.maxEntryDebitUsd,note:"Synthetic controller proof only; no production authorization or provider POST."});
+      return json({ok:true,realOrderSubmitted:false,persistentStateKey:EXECUTION_TEST_STATE_KEY,oneStageActive:synthetic.queue.stages.filter(s=>s.status==="ACTIVE").length===1,automaticAdvance:advanced&&synthetic.queue.currentIndex===1,stageTransitionExactlyOnce:secondAdvanceWithoutTerminal===false&&completedAfterFirst===1&&completedAfterSecond===1,freshStageIdentity:before!==after,nextStageThreshold:synthetic.threshold,nextStageAttemptsStarted:synthetic.attemptsStarted,duplicateArmWouldReject,stopPreservesOpenPositionManagement:executionTestOpenPositions(stopProof).length===1&&stopProof.armed===false,productionThreshold:REAL_TEST_CONFIG.entryScore,maxEntryDebitUsd:EXECUTION_TEST_CONFIG.maxEntryDebitUsd,note:"Synthetic controller proof only; no production authorization or provider POST."});
     }
 
     if (request.method === "GET" && url.pathname === "/wide-radar-state") {
