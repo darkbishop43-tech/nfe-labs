@@ -1,0 +1,75 @@
+name: Verify Market Edge Web Push Zero Money
+
+on:
+  push:
+    branches:
+      - market-edge-baseline-real
+    paths:
+      - '.github/workflows/verify-market-edge-web-push-zero-money.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify deployed notification surface and preserved execution state
+        shell: bash
+        run: |
+          set -euo pipefail
+          BASE="https://market-edge-baseline-real.darkbishop43.workers.dev"
+          curl -fsS "$BASE/health" -o /tmp/health.json
+          curl -fsS "$BASE/push/status" -o /tmp/push-status.json
+          curl -fsS "$BASE/push/config" -o /tmp/push-config.json
+          curl -fsS "$BASE/sw.js" -o /tmp/sw.js
+          curl -fsS "$BASE/execution-test-state" -o /tmp/execution.json
+          node <<'NODE'
+          const fs=require("fs");
+          const health=JSON.parse(fs.readFileSync("/tmp/health.json","utf8"));
+          const ps=JSON.parse(fs.readFileSync("/tmp/push-status.json","utf8"));
+          const pc=JSON.parse(fs.readFileSync("/tmp/push-config.json","utf8"));
+          const ex=JSON.parse(fs.readFileSync("/tmp/execution.json","utf8"));
+          if(!health.ok) throw new Error("health failed");
+          if(!ps.ok||ps.configured!==true||ps.tradingAuthority!==false) throw new Error("push status failed");
+          if(!pc.ok||typeof pc.publicKey!=="string"||pc.publicKey.length<40||pc.tradingAuthority!==false) throw new Error("push config failed");
+          if(ex?.safety?.productionBaselineEntryScore!==0.8) throw new Error("production baseline changed");
+          if(ex?.safety?.maxEntryDebitUsd!==1||ex?.safety?.requiredExchangeIndex!==2) throw new Error("execution invariants changed");
+          if(ex?.state?.armed!==false||ex?.state?.openPositions!==0) throw new Error("execution series not at safe boundary");
+          if(ex?.state?.attemptsStarted!==2||ex?.state?.maxAttempts!==2||ex?.safety?.testEntryScore!==0.65) throw new Error("completed .65 x2 evidence not preserved");
+          const sw=fs.readFileSync("/tmp/sw.js","utf8");
+          if(!sw.includes("showNotification")||!sw.includes("notificationclick")) throw new Error("service worker missing push notification handlers");
+          console.log(JSON.stringify({
+            health:true,
+            pushConfigured:ps.configured,
+            subscribed:ps.subscribed,
+            serviceWorker:ps.serviceWorker,
+            scope:ps.scope,
+            productionBaselineEntryScore:ex.safety.productionBaselineEntryScore,
+            completedThreshold:ex.safety.testEntryScore,
+            attemptsStarted:ex.state.attemptsStarted,
+            maxAttempts:ex.state.maxAttempts,
+            armed:ex.state.armed,
+            openPositions:ex.state.openPositions,
+            index2:ex.funding.index2,
+            queueStatus:ex.queue.status,
+            providerTradingWrites:0,
+            ordersCreated:0,
+            ordersCancelled:0,
+            capitalMovedUsd:0
+          },null,2));
+          NODE
+      - name: Verify notification isolation in source
+        shell: bash
+        run: |
+          set -euo pipefail
+          F="market-edge-lab/real/baseline/src/index.js"
+          grep -q 'TEST_POSITION_OPENED' "$F"
+          grep -q 'TEST_POSITION_CLOSED' "$F"
+          grep -q 'TEST_STALE_POSITION_PROVIDER_FLAT_RECONCILED' "$F"
+          grep -q 'pushDeliverySeen' "$F"
+          grep -q 'sendFounderPushBestEffort' "$F"
+          grep -q 'providerTradingWrites:0' "$F"
+          grep -q 'ctx.waitUntil(dispatchExecutionNotifications(env).catch(()=>{}))' "$F"
