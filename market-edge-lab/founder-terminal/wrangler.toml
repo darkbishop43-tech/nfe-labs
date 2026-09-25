@@ -4,3 +4,7 @@ compatibility_date = "2026-09-25"
 
 [vars]
 MODE = "READ_ONLY_COCKPIT_READER"
+
+[[services]]
+binding = "BASELINE_READ"
+service = "market-edge-baseline-real"
