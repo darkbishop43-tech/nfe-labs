@@ -6,3 +6,7 @@ compatibility_date = "2026-09-25"
 directory = "./public"
 binding = "ASSETS"
 run_worker_first = true
+
+[[services]]
+binding = "BASELINE"
+service = "market-edge-baseline-real"
