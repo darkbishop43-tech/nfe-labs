@@ -1,0 +1,21 @@
+name: Micro Lifecycle Preflight Read Only
+on:
+  push:
+    branches: [market-edge-baseline-real]
+    paths: ['.github/workflows/micro-lifecycle-preflight-read-only.yml']
+permissions: {contents: read}
+jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fresh deployed preflight
+        run: |
+          set -euo pipefail
+          curl -fsS https://market-edge-baseline-real.darkbishop43.workers.dev/micro-lifecycle-validation-control | tee /tmp/preflight.json
+          node <<'NODE'
+          const p=require('/tmp/preflight.json');
+          const required=p.ok&&p.state==='MICRO_LIFECYCLE_PREPARED_NOT_AUTHORIZED'&&p.realOrderSubmitted===false&&p.entryAuthority.includes('LOCKED')&&p.preflight.queueInactive&&p.preflight.noOpenPositions&&p.preflight.index2CashUsd>=1&&p.preflight.triStateReconciliation&&p.preflight.positionFpParser&&p.preflight.paginationExhaustion&&p.preflight.subaccount===0&&p.preflight.exchangeScope==='ALL'&&p.preflight.onePositionLockPrepared&&p.proposed.maxAttempts===1&&p.proposed.maxConcurrent===1&&p.proposed.maxEntryDebitUsd===1;
+          if(!required)throw Error('MICRO_PREFLIGHT_FAILED');
+          console.log('MICRO_PREFLIGHT_PASS='+JSON.stringify(p));
+          console.log('SAFETY='+JSON.stringify({providerWrites:0,capitalMovedUsd:0,ordersSubmitted:0,newQueueArmed:false}));
+          NODE
