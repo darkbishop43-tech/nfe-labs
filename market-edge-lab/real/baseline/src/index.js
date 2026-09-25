@@ -1352,6 +1352,49 @@ const EXECUTION_TEST_CONFIG={
   minSeriesFundingUsd:5
 };
 const EXECUTION_TEST_STATE_KEY="baseline-real-execution-test-v1";
+
+// Founder Manual sleeve V1: accounting/control-plane state only.
+// No manual entry write route is authorized by this build.
+const FOUNDER_MANUAL_LEDGER_KEY="founder-manual-ledger-v1";
+const FOUNDER_MANUAL_CAPITAL_KEY="founder-manual-capital-v1";
+const FOUNDER_MANUAL_SOURCE="FOUNDER_MANUAL";
+const AUTO_BASELINE_SOURCE="AUTO_BASELINE";
+async function loadFounderManualLedger(env){
+  if(!env?.BASELINE_REAL_SHADOW_STATE)return{schema:"FOUNDER_MANUAL_LEDGER_V1",source:FOUNDER_MANUAL_SOURCE,records:[]};
+  try{const raw=await env.BASELINE_REAL_SHADOW_STATE.get(FOUNDER_MANUAL_LEDGER_KEY);if(raw)return JSON.parse(raw)}catch{}
+  return{schema:"FOUNDER_MANUAL_LEDGER_V1",source:FOUNDER_MANUAL_SOURCE,records:[]};
+}
+async function loadFounderManualCapital(env){
+  if(!env?.BASELINE_REAL_SHADOW_STATE)return{schema:"FOUNDER_MANUAL_CAPITAL_V1",source:FOUNDER_MANUAL_SOURCE,allocatedUsd:0,status:"UNFUNDED_LOCKED"};
+  try{const raw=await env.BASELINE_REAL_SHADOW_STATE.get(FOUNDER_MANUAL_CAPITAL_KEY);if(raw)return JSON.parse(raw)}catch{}
+  return{schema:"FOUNDER_MANUAL_CAPITAL_V1",source:FOUNDER_MANUAL_SOURCE,allocatedUsd:0,status:"UNFUNDED_LOCKED"};
+}
+function founderManualRecordPnl(r){
+  const x=Number(r?.realizedPnlUsd);return Number.isFinite(x)?x:0;
+}
+function founderManualRecordFees(r){
+  const x=Number(r?.feesUsd??r?.totalFeesUsd);return Number.isFinite(x)?x:0;
+}
+function founderManualOpenExposure(r){
+  if(!["OPEN","EXIT_RETRY","PARTIAL"].includes(String(r?.status||"")))return 0;
+  const x=Number(r?.openExposureUsd??r?.actualDebitUsd);return Number.isFinite(x)?Math.max(0,x):0;
+}
+function autoExecutionAccounting(state){
+  const positions=Array.isArray(state?.positions)?state.positions:[];
+  const attempts=Array.isArray(state?.attempts)?state.attempts:[];
+  let realized=0,fees=0,exposure=0;
+  for(const p of positions){
+    const ef=Number(p?.entryAverageFeePaid)||0,xf=Number(p?.exitAverageFeePaid)||0;fees+=ef+xf;
+    if(["OPEN","EXIT_RETRY"].includes(String(p?.status||""))){
+      const q=Number(p?.filledCount)||0,px=Number(p?.entryAverageFillPrice)||0;exposure+=Math.max(0,q*px+ef);
+    }else if(String(p?.status||"")==="CLOSED"){
+      const q=Number(p?.filledCount)||0,ep=Number(p?.entryAverageFillPrice)||0,xp=Number(p?.exitAverageFillPrice);
+      if(q>0&&Number.isFinite(xp))realized+=q*(xp-ep)-ef-xf;
+    }
+  }
+  return{source:AUTO_BASELINE_SOURCE,positions,attempts,realizedPnlUsd:Number(realized.toFixed(6)),feesUsd:Number(fees.toFixed(6)),openExposureUsd:Number(exposure.toFixed(6))};
+}
+
 const EXECUTION_TEST_QUEUE_PROOF_KEY="baseline-real-execution-queue-persistence-proof-v1";
 
 function defaultExecutionTestState(){
@@ -4937,6 +4980,43 @@ document.getElementById('export')?.addEventListener('click',async()=>{const r=aw
           oneTradeAuthorizationActive:false,
           controllerEnabled:false,postOrdersCalled:false,deleteOrdersCalled:false,submitted:false,realMoneyMoved:false}
       });
+    }
+
+    if (request.method === "GET" && url.pathname === "/founder-capital-ledger") {
+      // Read-only dual-ledger reconciliation. No deposit, transfer, allocation mutation, order or cancel.
+      const [bp,autoState,manualLedger,manualCapital]=await Promise.all([
+        kalshiExecutionBalanceSnapshot(env),loadExecutionTestState(env),loadFounderManualLedger(env),loadFounderManualCapital(env)
+      ]);
+      if(!bp?.ok)return json({ok:false,readOnly:true,state:"PROVIDER_BALANCE_UNAVAILABLE",safety:{providerWrites:0,transfers:0,ordersCreated:0,cancels:0,capitalMovedUsd:0}},502);
+      const body=bp.body||{},rows=Array.isArray(body?.balance_breakdown)?body.balance_breakdown:[];
+      const cashDollars=Number(body?.balance_dollars),cashCents=Number(body?.balance);
+      const providerCashUsd=Number.isFinite(cashDollars)?cashDollars:Number.isFinite(cashCents)?cashCents/100:rows.reduce((s,x)=>s+(Number(x?.balance)||0),0);
+      const providerPortfolioValueUsd=Number.isFinite(Number(body?.portfolio_value))?Number(body.portfolio_value)/100:null;
+      const auto=autoExecutionAccounting(autoState);
+      const manualRecords=Array.isArray(manualLedger?.records)?manualLedger.records:[];
+      const manualAllocated=Math.max(0,Number(manualCapital?.allocatedUsd)||0);
+      const manualExposure=manualRecords.reduce((s,r)=>s+founderManualOpenExposure(r),0);
+      const manualRealized=manualRecords.reduce((s,r)=>s+founderManualRecordPnl(r),0);
+      const manualFees=manualRecords.reduce((s,r)=>s+founderManualRecordFees(r),0);
+      // Existing provider cash remains AUTO-attributable until a separately authorized Founder allocation is persisted.
+      // Founder allocation is currently zero; this route has no mutation method.
+      const autoAllocated=Math.max(0,providerCashUsd-manualAllocated);
+      const autoAvailable=Math.max(0,autoAllocated-auto.openExposureUsd);
+      const manualAvailable=Math.max(0,manualAllocated-manualExposure);
+      const allocationSafe=manualAllocated<=providerCashUsd+1e-9 && autoAllocated+manualAllocated<=providerCashUsd+1e-9;
+      return json({
+        ok:allocationSafe,readOnly:true,state:allocationSafe?"DUAL_LEDGER_RECONCILED":"ALLOCATION_RECONCILIATION_HOLD",
+        provider:{cashUsd:Number(providerCashUsd.toFixed(6)),portfolioValueUsd:providerPortfolioValueUsd,balanceBreakdown:rows.map(x=>({exchangeIndex:Number(x?.exchange_index),balanceUsd:Number(x?.balance)}))},
+        sleeves:{
+          AUTO_BASELINE:{source:AUTO_BASELINE_SOURCE,allocatedCapitalUsd:Number(autoAllocated.toFixed(6)),availableBuyingPowerUsd:Number(autoAvailable.toFixed(6)),openExposureUsd:auto.openExposureUsd,realizedPnlUsd:auto.realizedPnlUsd,unrealizedPnlUsd:null,feesUsd:auto.feesUsd,ledgerRecords:auto.attempts},
+          FOUNDER_MANUAL:{source:FOUNDER_MANUAL_SOURCE,allocatedCapitalUsd:Number(manualAllocated.toFixed(6)),availableBuyingPowerUsd:Number(manualAvailable.toFixed(6)),openExposureUsd:Number(manualExposure.toFixed(6)),realizedPnlUsd:Number(manualRealized.toFixed(6)),unrealizedPnlUsd:null,feesUsd:Number(manualFees.toFixed(6)),ledgerRecords:manualRecords}
+        },
+        reconciliation:{providerCashUsd:Number(providerCashUsd.toFixed(6)),allocatedTotalUsd:Number((autoAllocated+manualAllocated).toFixed(6)),openExposureTotalUsd:Number((auto.openExposureUsd+manualExposure).toFixed(6)),allocationSafe,doubleCounted:false},
+        capitalMechanism:{selected:"KALSHI_SUBACCOUNT_PREFERRED_NOT_YET_CREATED_OR_FUNDED",providerSupportsSubaccounts:true,founderSubaccountNumber:null,founderAllocationPersistedUsd:manualAllocated,fallback:"NFE_OS_LEDGER_ALLOCATION",movementAuthorized:false},
+        manualClose:{status:"DESIGNED_LOCKED",rule:"Only FOUNDER_MANUAL-owned filled quantity; reverse book side; reduce_only=true; exact owned remaining quantity; separate future authorization required"},
+        gates:{manualEntryAuthorized:false,manualExitAuthorized:false,depositAuthorized:false,transferAuthorized:false,founderAllocationSufficient:manualAvailable>0},
+        safety:{providerWrites:0,transfers:0,ordersCreated:0,cancels:0,capitalMovedUsd:0,autoStateMutation:false}
+      },allocationSafe?200:409);
     }
 
     if (request.method === "GET" && url.pathname === "/founder-manual-preview") {
