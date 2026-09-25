@@ -40,4 +40,7 @@ jobs:
             console.log('STAGE='+JSON.stringify(rows));
           }
           console.log('HISTORY_META='+JSON.stringify((st.queueHistory||[]).map(h=>({queueId:h.queueId,status:h.status,stoppedAt:h.stoppedAt}))));
+          for(const ticker of [...new Set(aa.filter(a=>a.fillCount>0).map(a=>a.marketTicker))]){
+            try{const r=await fetch('https://api.elections.kalshi.com/trade-api/v2/markets/'+encodeURIComponent(ticker));const b=await r.json();const m=b.market||b;console.log('MARKET_RESULT='+JSON.stringify({ticker,http:r.status,status:m.status,result:m.result,yesBid:m.yes_bid_dollars??m.yes_bid,yesAsk:m.yes_ask_dollars??m.yes_ask,closeTime:m.close_time,settlementValue:m.settlement_value??null}));}catch(e){console.log('MARKET_RESULT='+JSON.stringify({ticker,error:String(e)}))}
+          }
           NODE
