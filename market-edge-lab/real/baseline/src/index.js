@@ -3741,15 +3741,15 @@ async function founderRunQualifiedTradeNow(){
     const submitted=Boolean(j?.entryOrderPresent||j?.submitted);
     const orderId=j?.entryOrderId||j?.entryOrder?.orderId||null;
     const status=j?.status||j?.controllerStatus||j?.state||("HTTP "+r.status);
-    const source=j?.observationSource?("\nObservation: "+j.observationSource):"";
-    const latency=Number.isFinite(Number(j?.manualLatencyMs))?("\nManual path: "+j.manualLatencyMs+" ms"):"";
+    const source=j?.observationSource?("\\nObservation: "+j.observationSource):"";
+    const latency=Number.isFinite(Number(j?.manualLatencyMs))?("\\nManual path: "+j.manualLatencyMs+" ms"):"";
     if(submitted){
-      alert("FOUNDER RUN RESULT: ORDER SUBMITTED / PRESENT"+(orderId?"\nOrder ID: "+orderId:"")+source+latency);
+      alert("FOUNDER RUN RESULT: ORDER SUBMITTED / PRESENT"+(orderId?"\\nOrder ID: "+orderId:"")+source+latency);
     }else{
-      alert((r.ok?"FOUNDER RUN COMPLETE — NO ORDER SUBMITTED":"FOUNDER RUN BLOCKED")+"\nController: "+status+source+latency+"\nNo gate was overridden.");
+      alert((r.ok?"FOUNDER RUN COMPLETE — NO ORDER SUBMITTED":"FOUNDER RUN BLOCKED")+"\\nController: "+status+source+latency+"\\nNo gate was overridden.");
     }
   }catch(error){
-    alert("FOUNDER RUN ERROR: "+String(error?.message||error||"REQUEST_FAILED")+"\nNo gate was overridden.");
+    alert("FOUNDER RUN ERROR: "+String(error?.message||error||"REQUEST_FAILED")+"\\nNo gate was overridden.");
   }finally{
     if(btn){btn.disabled=false;btn.textContent=priorText;}
     location.reload();
