@@ -1,5 +1,5 @@
 const UPSTREAM="https://market-edge-baseline-real.darkbishop43.workers.dev";
-const ALLOWED=new Set(["/shadow-state","/wide-radar-state","/execution-test-state","/real-trade-state","/founder-manual-preview","/founder-manual-close-preview","/founder-manual-close-proof"]);
+const ALLOWED=new Set(["/shadow-state","/wide-radar-state","/execution-test-state","/real-trade-state","/founder-capital-ledger","/founder-manual-preview","/founder-manual-close-preview","/founder-manual-close-proof"]);
 const CORS={"access-control-allow-origin":"https://raw.githack.com","access-control-allow-methods":"GET,OPTIONS","access-control-allow-headers":"content-type","cache-control":"no-store","x-content-type-options":"nosniff"};
 export default{async fetch(request,env){
   const u=new URL(request.url);
