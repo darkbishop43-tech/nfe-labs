@@ -13,12 +13,12 @@ jobs:
   diagnose:
     runs-on: ubuntu-latest
     steps:
-      - name: Probe endpoint statuses
+      - name: Probe detail endpoint statuses
         shell: bash
         run: |
-          set -euo pipefail
+          set -u
           C='https://market-edge-founder-cockpit.darkbishop43.workers.dev'
-          curl -fsS "$C/api/runtime" -o /tmp/r.json
+          curl -sS "$C/api/runtime" -o /tmp/r.json
           ASSET=$(python - <<'PY'
           import json
           r=json.load(open('/tmp/r.json'));print(r['shadow']['opportunities'][0]['asset'])
@@ -30,8 +30,10 @@ jobs:
           PY
           )
           echo "ASSET=$ASSET TICKER=$TICKER"
-          for url in             "$C/api/ticker?asset=$ASSET"             "$C/api/candles?asset=$ASSET&granularity=60"             "$C/api/market?ticker=$TICKER"             "$C/api/orderbook?ticker=$TICKER"; do
-            echo "URL=$url"
-            curl -sS -w "\nHTTP=%{http_code}\n" "$url" | head -c 5000
-            echo
+          n=0
+          for url in "$C/api/ticker?asset=$ASSET" "$C/api/candles?asset=$ASSET&granularity=60" "$C/api/market?ticker=$TICKER" "$C/api/orderbook?ticker=$TICKER"; do
+            n=$((n+1)); file="/tmp/d$n"
+            code=$(curl -sS -o "$file" -w '%{http_code}' "$url")
+            echo "=== HTTP=$code URL=$url BYTES=$(wc -c < "$file")"
+            cat "$file" | head -c 2500; echo
           done
