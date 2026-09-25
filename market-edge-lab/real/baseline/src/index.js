@@ -1394,6 +1394,19 @@ function advanceExecutionTestQueue(state){
 }
 function cancelExecutionTestQueue(state){
   const q=state?.queue;if(!q)return false;
+  state.queueHistory=Array.isArray(state.queueHistory)?state.queueHistory:[];
+  state.queueHistory.unshift({
+    queueId:q.queueId||null,status:"CANCELLED",stoppedAt:new Date().toISOString(),
+    currentIndex:Number(q.currentIndex??-1),threshold:Number(state?.threshold),
+    attemptsStarted:Number(state?.attemptsStarted||0),
+    openPositions:executionTestOpenPositions(state).length,
+    stages:JSON.parse(JSON.stringify(Array.isArray(q.stages)?q.stages:[])),
+    completedStages:JSON.parse(JSON.stringify(Array.isArray(q.completedStages)?q.completedStages:[])),
+    attempts:JSON.parse(JSON.stringify(Array.isArray(state?.attempts)?state.attempts:[])),
+    positions:JSON.parse(JSON.stringify(Array.isArray(state?.positions)?state.positions:[])),
+    ledger:JSON.parse(JSON.stringify(Array.isArray(state?.ledger)?state.ledger:[]))
+  });
+  state.queueHistory=state.queueHistory.slice(0,20);
   q.active=false;q.status="CANCELLED";
   const idx=Number(q.currentIndex);
   q.cancelledStages=(Array.isArray(q.stages)?q.stages:[]).filter((s,i)=>i>idx).map((s,i)=>({...s,originalIndex:idx+1+i,status:"CANCELLED"}));
@@ -1413,6 +1426,16 @@ async function loadExecutionTestState(env){
 async function saveExecutionTestState(env,state){
   state.updatedAt=new Date().toISOString();
   if(env?.BASELINE_REAL_SHADOW_STATE)await env.BASELINE_REAL_SHADOW_STATE.put(EXECUTION_TEST_STATE_KEY,JSON.stringify(state));
+}
+function executionTestControlToken(state){
+  return [String(state?.seriesId||""),String(state?.queue?.queueId||""),String(state?.armed===true),String(state?.queue?.active===true),String(state?.queue?.status||"")].join("|");
+}
+async function saveExecutionTestRuntimeState(env,state,expectedControlToken){
+  if(!env?.BASELINE_REAL_SHADOW_STATE)return false;
+  const current=await loadExecutionTestState(env);
+  if(executionTestControlToken(current)!==expectedControlToken)return false;
+  await saveExecutionTestState(env,state);
+  return true;
 }
 function executionTestLedger(state,type,payload={}){
   state.ledger=Array.isArray(state.ledger)?state.ledger:[];
@@ -1469,6 +1492,7 @@ function executionTestCandidatePool(shadow,now=Date.now(),threshold=EXECUTION_TE
 }
 async function runExecutionTestSeries(env,freshShadow=null,preparedBalance=null){
   const state=await loadExecutionTestState(env);
+  const runtimeControlToken=executionTestControlToken(state);
   const now=Date.now();
   const shadow=freshShadow&&typeof freshShadow==="object"?freshShadow:await loadShadowState(env);
 
@@ -1550,12 +1574,12 @@ async function runExecutionTestSeries(env,freshShadow=null,preparedBalance=null)
     if(Number(state.attemptsStarted||0)>=executionTestSeriesLimit(state)&&executionTestOpenPositions(state).length===0){
       state.armed=false;state.status="SERIES_COMPLETE";state.completedAt=state.completedAt||Date.now();
     }else if(state.armed) state.status="MANAGING_OPEN_POSITIONS";
-    await saveExecutionTestState(env,state);
+    if(!await saveExecutionTestRuntimeState(env,state,runtimeControlToken))return await loadExecutionTestState(env);
     return state;
   }
   if(!shadow?.assetCoverageReady||shadow?.status!=="LIVE_KALSHI_SHADOW"){
     state.status="WAITING_FOR_LIVE_SHADOW";
-    await saveExecutionTestState(env,state);return state;
+    if(!await saveExecutionTestRuntimeState(env,state,runtimeControlToken))return await loadExecutionTestState(env);return state;
   }
 
   // RADAR: only exact index-2 candidates enter this bounded Founder-selected test series.
@@ -1615,21 +1639,21 @@ async function runExecutionTestSeries(env,freshShadow=null,preparedBalance=null)
     state.attempts.push(attempt);
     state.status="FIRING";
     executionTestLedger(state,"TEST_FIRE_LATCHED",{attemptNo,ticker:candidate.marketTicker,side:candidate.outcomeSide,observedScore:attempt.observedScore,liveScore:attempt.liveScore,liveAsk:attempt.liveAsk,maxDebitUsd:attempt.maximumEntryDebitUsd});
-    await saveExecutionTestState(env,state);
+    if(!await saveExecutionTestRuntimeState(env,state,runtimeControlToken))return await loadExecutionTestState(env);
 
     let r;
     try{r=await executionTestEntryWrite(env,state,payload);}
     catch(error){
       attempt.status="WRITE_ERROR";attempt.error=String(error?.message||error);
       executionTestLedger(state,"TEST_ENTRY_WRITE_ERROR",{attemptNo,ticker:candidate.marketTicker});
-      await saveExecutionTestState(env,state);continue;
+      if(!await saveExecutionTestRuntimeState(env,state,runtimeControlToken))return await loadExecutionTestState(env);continue;
     }
     const body=await r.json().catch(()=>({}));
     attempt.providerHttpStatus=r.status;
     if(!r.ok){
       attempt.status="PROVIDER_REJECTED";attempt.providerResponse=body;
       executionTestLedger(state,"TEST_ENTRY_PROVIDER_REJECTED",{attemptNo,ticker:candidate.marketTicker,httpStatus:r.status});
-      await saveExecutionTestState(env,state);continue;
+      if(!await saveExecutionTestRuntimeState(env,state,runtimeControlToken))return await loadExecutionTestState(env);continue;
     }
     const e=summarizeKalshiV2CreateResponse(body);
     attempt.orderId=e.orderId||null;attempt.fillCount=Number(e.fillCount||0);attempt.remainingCount=Number(e.remainingCount||0);
@@ -1637,7 +1661,7 @@ async function runExecutionTestSeries(env,freshShadow=null,preparedBalance=null)
     if(!(attempt.fillCount>0)){
       attempt.status="NO_FILL";
       executionTestLedger(state,"TEST_ENTRY_NO_FILL",{attemptNo,ticker:candidate.marketTicker,side:candidate.outcomeSide,orderId:attempt.orderId});
-      await saveExecutionTestState(env,state);continue;
+      if(!await saveExecutionTestRuntimeState(env,state,runtimeControlToken))return await loadExecutionTestState(env);continue;
     }
     attempt.status="FILLED";attempt.filledAt=Date.now();
     const position={
@@ -1651,7 +1675,7 @@ async function runExecutionTestSeries(env,freshShadow=null,preparedBalance=null)
     slots--;
     activeTickers.add(String(candidate.marketTicker));
     executionTestLedger(state,"TEST_POSITION_OPENED",{attemptNo,positionId:position.id,ticker:position.marketTicker,side:position.outcomeSide,orderId:position.entryOrderId,filledCount:position.filledCount});
-    await saveExecutionTestState(env,state);
+    if(!await saveExecutionTestRuntimeState(env,state,runtimeControlToken))return await loadExecutionTestState(env);
   }
 
   const open=executionTestOpenPositions(state).length;
@@ -1659,7 +1683,7 @@ async function runExecutionTestSeries(env,freshShadow=null,preparedBalance=null)
     state.status=open>0?"ATTEMPT_LIMIT_REACHED_MANAGING_POSITIONS":"SERIES_COMPLETE";
     if(open===0){state.armed=false;state.completedAt=state.completedAt||Date.now();}
   }else state.status=open>0?"FISHING_WITH_OPEN_POSITIONS":"FISHING";
-  await saveExecutionTestState(env,state);
+  if(!await saveExecutionTestRuntimeState(env,state,runtimeControlToken))return await loadExecutionTestState(env);
   return state;
 }
 function executionTestHasUnresolvedEntryLatch(state){
@@ -3870,7 +3894,7 @@ document.getElementById('export')?.addEventListener('click',async()=>{const r=aw
           attempts:(state.attempts||[]).map(a=>({attemptNo:a.attemptNo,status:a.status,asset:a.asset,ticker:a.marketTicker,side:a.outcomeSide,observedScore:a.observedScore,liveScore:a.liveScore,liveAsk:a.liveAsk,orderId:a.orderId||null,fillCount:Number(a.fillCount||0)}))
         },
         funding:{httpStatus:balanceProof?.httpStatus??null,totalBalance:balanceProof?.body?.balance??null,index0:index0?.balance??null,index2:index2?.balance??null,index2Ready:Number(index2?.balance)>=EXECUTION_TEST_CONFIG.minSeriesFundingUsd},
-        queue:{active:executionTestQueueActive(state),status:state?.queue?.status||"NONE",queueId:state?.queue?.queueId||null,currentIndex:Number(state?.queue?.currentIndex??-1),totalAttempts:Number(state?.queue?.totalAttempts||0),completedAttempts:Number(state?.queue?.completedAttempts||0),stages:Array.isArray(state?.queue?.stages)?state.queue.stages:[],completedStages:(Array.isArray(state?.queue?.completedStages)?state.queue.completedStages:[]).map(x=>({stageIndex:x.stageIndex,seriesId:x.seriesId,threshold:x.threshold,maxAttempts:x.maxAttempts,attemptsStarted:x.attemptsStarted,reason:x.reason,completedAt:x.completedAt})),cancelledStages:Array.isArray(state?.queue?.cancelledStages)?state.queue.cancelledStages:[]},
+        queue:{active:executionTestQueueActive(state),status:state?.queue?.status||"NONE",queueId:state?.queue?.queueId||null,currentIndex:Number(state?.queue?.currentIndex??-1),totalAttempts:Number(state?.queue?.totalAttempts||0),completedAttempts:Number(state?.queue?.completedAttempts||0),stages:Array.isArray(state?.queue?.stages)?state.queue.stages:[],completedStages:(Array.isArray(state?.queue?.completedStages)?state.queue.completedStages:[]).map(x=>({stageIndex:x.stageIndex,seriesId:x.seriesId,threshold:x.threshold,maxAttempts:x.maxAttempts,attemptsStarted:x.attemptsStarted,reason:x.reason,completedAt:x.completedAt})),cancelledStages:Array.isArray(state?.queue?.cancelledStages)?state.queue.cancelledStages:[]},history:(Array.isArray(state?.queueHistory)?state.queueHistory:[]).map(x=>({queueId:x.queueId,status:x.status,stoppedAt:x.stoppedAt,currentIndex:x.currentIndex,threshold:x.threshold,attemptsStarted:x.attemptsStarted,openPositions:x.openPositions,stages:x.stages})),
         safety:{maxEntryDebitUsd:1,maxAttempts:executionTestSeriesLimit(state),maxSelectableAttempts:EXECUTION_TEST_CONFIG.maxSelectableAttempts,maxConcurrent:3,requiredExchangeIndex:2,productionBaselineEntryScore:REAL_TEST_CONFIG.entryScore,testEntryScore:Number(state?.threshold??EXECUTION_TEST_CONFIG.entryScore)}
       });
     }
@@ -3962,6 +3986,12 @@ document.getElementById('export')?.addEventListener('click',async()=>{const r=aw
       const balanceProof=await kalshiExecutionBalanceSnapshot(env),rows=Array.isArray(balanceProof?.body?.balance_breakdown)?balanceProof.body.balance_breakdown:[],index2=Number(rows.find(x=>Number(x?.exchange_index)===2)?.balance);
       if(!balanceProof?.ok||!Number.isFinite(index2)||index2<EXECUTION_TEST_CONFIG.minSeriesFundingUsd)return json({ok:false,state:"INDEX2_FUNDING_NOT_READY",index2Usd:Number.isFinite(index2)?index2:null,requiredUsd:EXECUTION_TEST_CONFIG.minSeriesFundingUsd},409);
       const state=defaultExecutionTestState();
+      state.queueHistory=JSON.parse(JSON.stringify(Array.isArray(current?.queueHistory)?current.queueHistory:[]));
+      if(current?.queue?.queueId){
+        const alreadyArchived=state.queueHistory.some(x=>String(x?.queueId||"")===String(current.queue.queueId));
+        if(!alreadyArchived)state.queueHistory.unshift({queueId:current.queue.queueId,status:current.queue.status||"RETIRED",stoppedAt:current.updatedAt||new Date().toISOString(),currentIndex:Number(current.queue.currentIndex??-1),threshold:Number(current.threshold),attemptsStarted:Number(current.attemptsStarted||0),openPositions:executionTestOpenPositions(current).length,stages:JSON.parse(JSON.stringify(Array.isArray(current.queue.stages)?current.queue.stages:[])),completedStages:JSON.parse(JSON.stringify(Array.isArray(current.queue.completedStages)?current.queue.completedStages:[])),attempts:JSON.parse(JSON.stringify(Array.isArray(current.attempts)?current.attempts:[])),positions:JSON.parse(JSON.stringify(Array.isArray(current.positions)?current.positions:[])),ledger:JSON.parse(JSON.stringify(Array.isArray(current.ledger)?current.ledger:[]))});
+      }
+      state.queueHistory=state.queueHistory.slice(0,20);
       state.queue={active:true,status:"QUEUED",queueId:crypto.randomUUID(),currentIndex:-1,totalAttempts,completedAttempts:0,stages,completedStages:[],cancelledStages:[]};
       state.fundingAtArm={index2Usd:index2,requiredExchangeIndex:2};activateExecutionTestQueueStage(state,0);
       executionTestLedger(state,"EXECUTION_TEST_QUEUE_ARMED",{queueId:state.queue.queueId,stages:stages.map(s=>({threshold:s.threshold,count:s.count})),totalAttempts,maxEntryDebitUsd:1,productionBaselineThreshold:REAL_TEST_CONFIG.entryScore});
