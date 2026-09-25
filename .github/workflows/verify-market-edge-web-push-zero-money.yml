@@ -144,9 +144,16 @@ jobs:
           grep -Fq 'title:"🐟 NFE-OS · PAYNE PAPER FISH"' "$F"
           grep -Fq 'title:"🎣 NFE-OS · REAL FISH"' "$F"
           grep -Fq 'notification:attempt:v1:' "$F"
+          grep -Fq 'TEST_ENTRY_NO_FILL' "$F"
+          grep -Fq 'REAL_NO_FILL_NOTIFY_AFTER_MS=Date.parse("2026-09-25T21:36:00.000Z")' "$F"
+          grep -Fq 'title:"⚪ NFE-OS · ORDER NOT FILLED"' "$F"
+          grep -Fq 'const eventId="no-fill:"+String(authority)+":"+String(attempt.id||event.attemptNo)' "$F"
+          grep -Fq 'title:"🎣 NFE-OS · REAL FISH"' "$F"
+          grep -Fq 'title:"✅ NFE-OS — POSITION CLOSED"' "$F"
+          grep -Fq 'title:"🐟 NFE-OS · PAYNE PAPER FISH"' "$F"
 
       - name: Arm authorized real validation .65 x1 through existing control
-        if: github.event_name == 'push' && github.event.head_commit.message == 'Verify Payne notification isolation and arm authorized .65 x1'
+        if: false
         shell: bash
         run: |
           set -euo pipefail
@@ -184,3 +191,5 @@ jobs:
 # forensic read-only checkpoint after DOGE one-attempt lifecycle
 
 # post-notification-repair zero-money verification
+
+# post-NO_FILL-notification microscopic zero-money verification
