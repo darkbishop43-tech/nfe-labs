@@ -11,11 +11,19 @@ async function getJson(url,timeout=12000){
   catch(e){return{ok:false,status:null,error:e?.name==="AbortError"?"TIMEOUT":"FETCH_FAILED",body:null};}
   finally{clearTimeout(t)}
 }
+async function getBaselineJson(env,path){
+  try{
+    if(!env?.BASELINE_READ)return{ok:false,status:null,error:"BASELINE_READ_BINDING_MISSING",body:null};
+    const r=await env.BASELINE_READ.fetch(new Request("https://baseline-read.internal"+path,{method:"GET",headers:{accept:"application/json","x-nfe-cockpit-mode":"READ_ONLY"}}));
+    let body=null;try{body=await r.json()}catch{}
+    return{ok:r.ok,status:r.status,body};
+  }catch{return{ok:false,status:null,error:"BASELINE_READ_FAILED",body:null}}
+}
 function cleanTicker(v){const s=String(v||"").trim();return /^[A-Z0-9._-]{4,96}$/.test(s)?s:null}
 function num(v){const n=Number(v);return Number.isFinite(n)?n:null}
-async function snapshot(){
+async function snapshot(env){
   const paths=["/health","/status","/account","/shadow-state","/execution-test-state","/real-trade-state","/kalshi-live-mirror-data","/wide-radar-state"];
-  const reads=await Promise.all(paths.map(p=>getJson(BASELINE+p)));
+  const reads=await Promise.all(paths.map(p=>getBaselineJson(env,p)));
   const map=Object.fromEntries(paths.map((p,i)=>[p,{ok:reads[i].ok,status:reads[i].status,body:reads[i].body}]));
   return {
     ok:reads[0].ok,readOnly:true,source:"PUBLIC_BASELINE_READS_ONLY",observedAt:new Date().toISOString(),
@@ -44,12 +52,12 @@ async function candles(product,granularity){
   return {ok:r.ok,readOnly:true,source:"COINBASE_PUBLIC_CANDLES",product,granularity:g,httpStatus:r.status,count:candles.length,candles};
 }
 export default {
- async fetch(req){
+ async fetch(req,env){
    if(req.method==="OPTIONS")return new Response(null,{status:204,headers:JSON_HEADERS});
    const u=new URL(req.url);
    if(req.method!=="GET")return json({ok:false,error:"READ_ONLY_METHOD_NOT_ALLOWED"},405);
    if(u.pathname==="/api/health")return json({ok:true,service:"market-edge-founder-terminal-reader",mode:"READ_ONLY",baseline:BASELINE,safety:{credentials:false,orders:false,writes:false}});
-   if(u.pathname==="/api/snapshot")return json(await snapshot());
+   if(u.pathname==="/api/snapshot")return json(await snapshot(env));
    if(u.pathname==="/api/contract"){const ticker=cleanTicker(u.searchParams.get("ticker"));if(!ticker)return json({ok:false,error:"INVALID_TICKER"},400);return json(await contract(ticker));}
    if(u.pathname==="/api/candles"){const p=String(u.searchParams.get("product")||"").toUpperCase(),g=String(u.searchParams.get("granularity")||"300");const out=await candles(p,g);return json(out,out.ok?200:400);}
    return json({ok:true,service:"market-edge-founder-terminal-reader",routes:["/api/health","/api/snapshot","/api/contract?ticker=...","/api/candles?product=BTC-USD&granularity=300"],readOnly:true});
