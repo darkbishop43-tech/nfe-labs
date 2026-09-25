@@ -1592,30 +1592,66 @@ async function runExecutionTestSeries(env,freshShadow=null,preparedBalance=null)
   const now=Date.now();
   const shadow=freshShadow&&typeof freshShadow==="object"?freshShadow:await loadShadowState(env);
 
-  // PROVIDER RECONCILIATION: Kalshi is authoritative for whether a position is still open.
-  // This is a read-only provider check. If Kalshi is flat for one of our locally OPEN /
-  // EXIT_RETRY positions, retire only that stale local position so it cannot consume a
-  // concurrency slot forever. Never infer flatness from a failed/ambiguous provider read.
-  try{
-    const pr=await kalshiExecutionGet(env,"/trade-api/v2/portfolio/positions?limit=1000");
-    if(pr.ok){
-      const pb=await pr.json().catch(()=>({}));
-      const rows=Array.isArray(pb?.market_positions)?pb.market_positions:Array.isArray(pb?.positions)?pb.positions:[];
-      for(const position of executionTestOpenPositions(state)){
-        const exact=rows.find(x=>String(x?.ticker||x?.market_ticker||"")===String(position?.marketTicker||""))||null;
-        const qty=Number(exact?.position??exact?.quantity??0);
-        const providerFlat=!exact||!Number.isFinite(qty)||Math.abs(qty)<=1e-9;
-        if(providerFlat){
-          position.status="CLOSED";
-          position.closedAt=position.closedAt||Date.now();
-          position.providerReconciledFlat=true;
-          position.providerReconciledAt=new Date().toISOString();
-          position.exitReason=position.exitReason||"PROVIDER_FLAT_RECONCILIATION";
-          executionTestLedger(state,"TEST_STALE_POSITION_PROVIDER_FLAT_RECONCILED",{positionId:position.id,attemptNo:position.attemptNo,ticker:position.marketTicker,side:position.outcomeSide});
-        }
+  // TRI-STATE PROVIDER RECONCILIATION. Ambiguity never means flat.
+  // Missing ticker is UNKNOWN until provider completeness/account/index/pagination semantics are proven.
+  function classifyExecutionProviderPosition(httpOk,body,ticker,meta={}){
+    const base={providerReadAt:meta.providerReadAt||new Date().toISOString(),providerHttpStatus:meta.providerHttpStatus??null,recognizedSchema:null,matchedTicker:null,rawQuantityFieldUsed:null,normalizedQuantity:null,accountContextKnown:false,paginationComplete:false};
+    if(!httpOk)return{classification:"UNKNOWN",reason:"HTTP_FAILURE",...base};
+    if(!body||typeof body!=="object")return{classification:"UNKNOWN",reason:"MALFORMED_JSON_OR_BODY",...base};
+    let rows=null,schema=null;
+    if(Array.isArray(body.market_positions)){rows=body.market_positions;schema="market_positions";}
+    else if(Array.isArray(body.positions)){rows=body.positions;schema="positions";}
+    else return{classification:"UNKNOWN",reason:"UNKNOWN_SCHEMA",...base};
+    base.recognizedSchema=schema;
+    // limit=1000 is requested, but provider pagination/completeness and exchange-index ownership context
+    // are not yet independently proven. Therefore omission of ticker cannot certify FLAT.
+    const matches=rows.filter(x=>String(x?.ticker||x?.market_ticker||"")===String(ticker||""));
+    if(matches.length!==1)return{classification:"UNKNOWN",reason:matches.length>1?"TICKER_AMBIGUOUS":"TICKER_NOT_FOUND_CONTEXT_UNPROVEN",...base};
+    const exact=matches[0],matched=String(exact?.ticker||exact?.market_ticker||"");
+    base.matchedTicker=matched;
+    let raw,field;
+    if(exact?.position!==undefined&&exact?.position!==null&&exact?.position!==""){raw=exact.position;field="position";}
+    else if(exact?.quantity!==undefined&&exact?.quantity!==null&&exact?.quantity!==""){raw=exact.quantity;field="quantity";}
+    else return{classification:"UNKNOWN",reason:"QUANTITY_MISSING",...base};
+    const qty=Number(raw); base.rawQuantityFieldUsed=field;
+    if(!Number.isFinite(qty))return{classification:"UNKNOWN",reason:"QUANTITY_INVALID",...base};
+    base.normalizedQuantity=qty;
+    if(Math.abs(qty)<=1e-9)return{classification:"FLAT",reason:"MATCHED_TICKER_VALID_ZERO_QUANTITY",...base};
+    return{classification:"OPEN",reason:"MATCHED_TICKER_VALID_NONZERO_QUANTITY",...base};
+  }
+  const reconcileTargets=executionTestOpenPositions(state);
+  if(reconcileTargets.length){
+    let pr=null,pb=null,parseOk=false,readError=null,readAt=new Date().toISOString();
+    try{
+      pr=await kalshiExecutionGet(env,"/trade-api/v2/portfolio/positions?limit=1000");
+      if(pr.ok){try{pb=await pr.json();parseOk=Boolean(pb&&typeof pb==="object");}catch(error){readError=String(error?.message||error);}}
+    }catch(error){readError=String(error?.message||error);}
+    for(const position of reconcileTargets){
+      const rec=classifyExecutionProviderPosition(Boolean(pr?.ok&&parseOk),pb,position?.marketTicker,{providerReadAt:readAt,providerHttpStatus:pr?.status??null});
+      position.reconciliationClassification=rec.classification;
+      position.reconciliationReason=rec.reason;
+      position.providerReadAt=rec.providerReadAt;
+      position.providerHttpStatus=rec.providerHttpStatus;
+      position.recognizedSchema=rec.recognizedSchema;
+      position.matchedTicker=rec.matchedTicker;
+      position.rawQuantityFieldUsed=rec.rawQuantityFieldUsed;
+      position.normalizedQuantity=rec.normalizedQuantity;
+      position.accountContextKnown=rec.accountContextKnown;
+      position.paginationComplete=rec.paginationComplete;
+      position.reconciliationRetryRequired=rec.classification==="UNKNOWN";
+      if(readError)position.reconciliationReadError=readError.slice(0,160);
+      if(rec.classification==="FLAT"){
+        position.status="CLOSED";
+        position.closedAt=position.closedAt||Date.now();
+        position.providerReconciledFlat=true;
+        position.providerReconciledAt=new Date().toISOString();
+        position.exitReason=position.exitReason||"PROVIDER_FLAT_RECONCILIATION";
+        executionTestLedger(state,"TEST_STALE_POSITION_PROVIDER_FLAT_RECONCILED",{positionId:position.id,attemptNo:position.attemptNo,ticker:position.marketTicker,side:position.outcomeSide,reconciliationReason:rec.reason});
+      }else if(rec.classification==="UNKNOWN"){
+        executionTestLedger(state,"TEST_POSITION_RECONCILIATION_UNKNOWN_RETAINED",{positionId:position.id,attemptNo:position.attemptNo,ticker:position.marketTicker,side:position.outcomeSide,reconciliationReason:rec.reason});
       }
     }
-  }catch{}
+  }
 
   // MANAGE: every filled position owns its own independent .20 / 5-minute exit.
   for(const position of executionTestOpenPositions(state)){
@@ -3995,7 +4031,7 @@ document.getElementById('export')?.addEventListener('click',async()=>{const r=aw
           status:state.status,armed:Boolean(state.armed),seriesId:state.seriesId||null,
           attemptsStarted:Number(state.attemptsStarted||0),maxAttempts:executionTestSeriesLimit(state),attemptsRemaining:Math.max(0,executionTestSeriesLimit(state)-Number(state.attemptsStarted||0)),
           openPositions:executionTestOpenPositions(state).length,
-          positions:(state.positions||[]).map(p=>({id:p.id,attemptNo:p.attemptNo,status:p.status,asset:p.asset,ticker:p.marketTicker,side:p.outcomeSide,direction:p.direction||null,entryScore:p.entryScore,entryObservedAsk:p.entryObservedAsk??null,entryOrderId:p.entryOrderId||null,filledCount:p.filledCount,entryAverageFillPrice:p.entryAverageFillPrice??null,entryAverageFeePaid:p.entryAverageFeePaid??null,filledAt:p.filledAt,exitReason:p.exitReason||null,exitOrderId:p.exitOrderId||null,exitFilledTotal:p.exitFilledTotal??0,exitAverageFillPrice:p.exitAverageFillPrice??null,exitAverageFeePaid:p.exitAverageFeePaid??null,closedAt:p.closedAt||null})),
+          positions:(state.positions||[]).map(p=>({id:p.id,attemptNo:p.attemptNo,status:p.status,asset:p.asset,ticker:p.marketTicker,side:p.outcomeSide,direction:p.direction||null,entryScore:p.entryScore,entryObservedAsk:p.entryObservedAsk??null,entryOrderId:p.entryOrderId||null,filledCount:p.filledCount,entryAverageFillPrice:p.entryAverageFillPrice??null,entryAverageFeePaid:p.entryAverageFeePaid??null,filledAt:p.filledAt,exitReason:p.exitReason||null,exitOrderId:p.exitOrderId||null,exitFilledTotal:p.exitFilledTotal??0,exitAverageFillPrice:p.exitAverageFillPrice??null,exitAverageFeePaid:p.exitAverageFeePaid??null,closedAt:p.closedAt||null,reconciliationClassification:p.reconciliationClassification||null,reconciliationReason:p.reconciliationReason||null,providerReadAt:p.providerReadAt||null,providerHttpStatus:p.providerHttpStatus??null,recognizedSchema:p.recognizedSchema||null,matchedTicker:p.matchedTicker||null,rawQuantityFieldUsed:p.rawQuantityFieldUsed||null,normalizedQuantity:p.normalizedQuantity??null,accountContextKnown:p.accountContextKnown===true,paginationComplete:p.paginationComplete===true,reconciliationRetryRequired:p.reconciliationRetryRequired===true})),
           attempts:(state.attempts||[]).map(a=>({attemptNo:a.attemptNo,status:a.status,asset:a.asset,ticker:a.marketTicker,side:a.outcomeSide,observedScore:a.observedScore,liveScore:a.liveScore,liveAsk:a.liveAsk,orderId:a.orderId||null,fillCount:Number(a.fillCount||0)}))
         },
         funding:{httpStatus:balanceProof?.httpStatus??null,totalBalance:balanceProof?.body?.balance??null,index0:index0?.balance??null,index2:index2?.balance??null,index2Ready:Number(index2?.balance)>=EXECUTION_TEST_CONFIG.minSeriesFundingUsd},
