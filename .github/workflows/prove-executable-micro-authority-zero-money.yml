@@ -1,0 +1,33 @@
+name: Prove Executable Micro Authority Zero Money
+on:
+  push:
+    branches: [market-edge-baseline-real]
+    paths: ['.github/workflows/prove-executable-micro-authority-zero-money.yml']
+permissions: {contents: read}
+jobs:
+  prove:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prove executable surface without POST
+        run: |
+          set -euo pipefail
+          URL='https://market-edge-baseline-real.darkbishop43.workers.dev/micro-lifecycle-validation-control'
+          curl -fsS -D /tmp/h "$URL" -o /tmp/body
+          grep -q '<form method=.post. action=./micro-lifecycle-validation-control.' /tmp/body
+          grep -q '>AUTHORIZE ONE MICRO LIFECYCLE VALIDATION</button>' /tmp/body
+          if grep -q '<button[^>]*disabled' /tmp/body; then exit 1; fi
+          curl -fsS https://market-edge-baseline-real.darkbishop43.workers.dev/execution-test-state -o /tmp/state
+          node <<'NODE'
+          const fs=require('fs'),p=JSON.parse(fs.readFileSync('/tmp/state','utf8'));
+          if(p?.state?.armed!==false||p?.state?.openPositions!==0||p?.queue?.active!==false)throw Error('AUTHORITY_CHANGED');
+          console.log('LIVE='+JSON.stringify({armed:p.state.armed,openPositions:p.state.openPositions,queueActive:p.queue.active,queueStatus:p.queue.status,index2:p.funding.index2}));
+          NODE
+          SRC=market-edge-lab/real/baseline/src/index.js
+          grep -q 'state.microLifecycleValidation={authorizedAt:' "$SRC"
+          grep -q 'consumed:true,selfRetiring:true,maxAttempts:1,maxConcurrent:1,maxEntryDebitUsd:1' "$SRC"
+          grep -q 'secondAuthorizationAllowed:false' "$SRC"
+          grep -q 'MICRO_LIFECYCLE_AUTHORITY_ALREADY_CONSUMED' "$SRC"
+          grep -q 'state.maxAttempts=1;state.maxConcurrent=1;state.maxEntryDebitUsd=1' "$SRC"
+          grep -q 'state.queue={active:false,status:"MICRO_VALIDATION_ONE_SHOT"' "$SRC"
+          echo 'SAFETY={"providerWrites":0,"ordersSubmitted":0,"capitalMovedUsd":0,"authorization":false,"armed":false}'
