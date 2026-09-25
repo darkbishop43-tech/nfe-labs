@@ -124,9 +124,13 @@ jobs:
           npm init -y >/dev/null 2>&1
           npm install --silent playwright@1.55.0
           npx playwright install chromium >/dev/null
+          python -m http.server 8765 >/tmp/cockpit-http.log 2>&1 &
+          SERVER_PID=$!
+          trap 'kill $SERVER_PID || true' EXIT
+          sleep 1
           cat > shot.mjs <<'JS'
           import { chromium } from 'playwright';
-          const url='https://raw.githack.com/darkbishop43-tech/nfe-labs/founder-terminal-phase2/market-edge-lab/real/baseline/founder-terminal.html';
+          const url='http://127.0.0.1:8765/market-edge-lab/real/baseline/founder-terminal.html';
           const browser=await chromium.launch({headless:true});
           const page=await browser.newPage({viewport:{width:1920,height:1080}});
           await page.goto(url,{waitUntil:'networkidle',timeout:60000});
