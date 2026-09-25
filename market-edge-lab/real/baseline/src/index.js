@@ -1,3 +1,5 @@
+import { sendPushNotification, topicFromString } from "@mmmike/web-push/send";
+
 // CLOUDFLARE DEPLOYMENT MARKER 2026-09-20: XRP recovery V2 proof route ce2252b / 7637a6f
 // SHARD_ROUTING_DEPLOYMENT_MARKER_2026_09_20
 // SHARD_ALLOCATION_DEPLOYMENT_MARKER_2026_09_20
@@ -1352,6 +1354,108 @@ const EXECUTION_TEST_CONFIG={
   minSeriesFundingUsd:1
 };
 const EXECUTION_TEST_STATE_KEY="baseline-real-execution-test-v1";
+
+const PUSH_SUBSCRIPTION_KEY="notification:founder:subscription:v1";
+const PUSH_DELIVERY_PREFIX="notification:delivery:v1:";
+const PUSH_UNKNOWN_PREFIX="notification:unknown:v1:";
+const PUSH_UNKNOWN_WARN_MS=2*60*1000;
+const PUSH_VAPID_SUBJECT="https://github.com/darkbishop43-tech/nfe-labs";
+
+function pushServiceWorkerJs(){
+  return 'self.addEventListener("push",function(event){var data={};try{data=event.data?event.data.json():{};}catch(e){};var title=data.title||"NFE-OS";var options={body:data.body||"",tag:data.tag||undefined,data:{url:data.url||"/"}};event.waitUntil(self.registration.showNotification(title,options));});self.addEventListener("notificationclick",function(event){event.notification.close();var target=(event.notification.data&&event.notification.data.url)||"/";event.waitUntil(self.clients.matchAll({type:"window",includeUncontrolled:true}).then(function(list){for(var i=0;i<list.length;i++){try{if(new URL(list[i].url).origin===self.location.origin){list[i].navigate(target);return list[i].focus();}}catch(e){}}return self.clients.openWindow(target);}));});';
+}
+function validFounderPushSubscription(sub){
+  if(!sub||typeof sub!=="object"||typeof sub.endpoint!=="string"||!sub.keys)return false;
+  let u;try{u=new URL(sub.endpoint);}catch{return false;}
+  return u.protocol==="https:"&&u.hostname==="fcm.googleapis.com"&&typeof sub.keys.p256dh==="string"&&typeof sub.keys.auth==="string";
+}
+async function loadFounderPushSubscription(env){
+  if(!env?.BASELINE_REAL_SHADOW_STATE)return null;
+  try{const raw=await env.BASELINE_REAL_SHADOW_STATE.get(PUSH_SUBSCRIPTION_KEY);return raw?JSON.parse(raw):null;}catch{return null;}
+}
+async function pushDeliverySeen(env,eventId){
+  if(!env?.BASELINE_REAL_SHADOW_STATE)return false;
+  try{return Boolean(await env.BASELINE_REAL_SHADOW_STATE.get(PUSH_DELIVERY_PREFIX+eventId));}catch{return false;}
+}
+async function markPushDelivered(env,eventId,meta={}){
+  if(!env?.BASELINE_REAL_SHADOW_STATE)return;
+  await env.BASELINE_REAL_SHADOW_STATE.put(PUSH_DELIVERY_PREFIX+eventId,JSON.stringify({eventId,deliveredAt:new Date().toISOString(),...meta}));
+}
+async function sendFounderPushBestEffort(env,eventId,payload){
+  try{
+    if(await pushDeliverySeen(env,eventId))return{ok:true,duplicateSuppressed:true,delivered:false};
+    const sub=await loadFounderPushSubscription(env);
+    if(!validFounderPushSubscription(sub))return{ok:false,reason:"NO_VALID_FOUNDER_SUBSCRIPTION",delivered:false};
+    if(!env?.NFE_PUSH_VAPID_PUBLIC_KEY||!env?.NFE_PUSH_VAPID_PRIVATE_KEY)return{ok:false,reason:"VAPID_NOT_CONFIGURED",delivered:false};
+    const topic=await topicFromString(eventId);
+    const delivered=await sendPushNotification(sub,payload,{
+      publicKey:String(env.NFE_PUSH_VAPID_PUBLIC_KEY),
+      privateKey:String(env.NFE_PUSH_VAPID_PRIVATE_KEY),
+      subject:PUSH_VAPID_SUBJECT
+    },{ttl:300,urgency:"high",topic,timeoutMs:8000});
+    if(delivered){
+      await markPushDelivered(env,eventId,{kind:payload?.tag||null});
+      return{ok:true,delivered:true,duplicateSuppressed:false};
+    }
+    return{ok:false,reason:"SUBSCRIPTION_GONE",delivered:false};
+  }catch(error){
+    return{ok:false,reason:String(error?.message||error||"PUSH_FAILED").slice(0,160),delivered:false};
+  }
+}
+function executionPositionPnlText(position){
+  const q=Number(position?.filledCount),entry=Number(position?.entryAverageFillPrice),exit=Number(position?.exitAverageFillPrice);
+  const ef=Number(position?.entryAverageFeePaid||0),xf=Number(position?.exitAverageFeePaid||0);
+  if(!(q>0)||!Number.isFinite(entry)||!Number.isFinite(exit)||!Number.isFinite(ef)||!Number.isFinite(xf))return null;
+  const pnl=q*(exit-entry)-ef-xf;
+  if(!Number.isFinite(pnl))return null;
+  return (pnl>=0?"+":"-")+"$"+Math.abs(pnl).toFixed(2);
+}
+async function dispatchExecutionNotifications(env){
+  try{
+    const state=await loadExecutionTestState(env);
+    const positions=Array.isArray(state?.positions)?state.positions:[];
+    const ledger=Array.isArray(state?.ledger)?state.ledger:[];
+
+    for(const event of ledger){
+      if(event?.type==="TEST_POSITION_OPENED"&&event?.positionId){
+        const position=positions.find(p=>String(p?.id)===String(event.positionId));
+        if(!position||!(Number(position?.filledCount)>0)||!position?.entryOrderId)continue;
+        const eventId="fill:"+String(position.entryOrderId)+":"+String(position.id);
+        const score=Number(position.entryScore);
+        const lines=[String(position.asset||"")+" · "+String(position.outcomeSide||"")];
+        if(Number.isFinite(score))lines.push("Score "+score.toFixed(2));
+        lines.push("Real position filled.","","NFE-OS is managing the position.","Check Kalshi.");
+        await sendFounderPushBestEffort(env,eventId,{title:"🎣 NFE-OS — FISH ON THE HOOK",body:lines.join("\n"),url:"/",tag:eventId});
+      }
+      if((event?.type==="TEST_POSITION_CLOSED"||event?.type==="TEST_STALE_POSITION_PROVIDER_FLAT_RECONCILED")&&event?.positionId){
+        const position=positions.find(p=>String(p?.id)===String(event.positionId));
+        if(!position||String(position?.status)!=="CLOSED")continue;
+        const authoritativeExit=Boolean(position?.providerReconciledFlat===true||(position?.exitOrderId&&Number(position?.exitRemainingCount||0)<=1e-9));
+        if(!authoritativeExit)continue;
+        const closeAuthority=position?.exitOrderId||position?.providerReconciledAt||position?.closedAt||event?.ts;
+        const eventId="close:"+String(closeAuthority)+":"+String(position.id);
+        const lines=[String(position.asset||"")+" · "+String(position.outcomeSide||"")];
+        if(position.exitReason)lines.push("Exit: "+String(position.exitReason).replaceAll("_"," ").toLowerCase());
+        const pnl=executionPositionPnlText(position);if(pnl)lines.push("Net P/L: "+pnl);
+        await sendFounderPushBestEffort(env,eventId,{title:"✅ NFE-OS — POSITION CLOSED",body:lines.join("\n"),url:"/",tag:eventId});
+      }
+    }
+
+    for(const position of executionTestOpenPositions(state)){
+      if(String(position?.reconciliationClassification)!=="UNKNOWN")continue;
+      const unknownKey=PUSH_UNKNOWN_PREFIX+String(position.id);
+      let first=null;try{const raw=await env.BASELINE_REAL_SHADOW_STATE.get(unknownKey);first=raw?JSON.parse(raw):null;}catch{}
+      if(!first?.firstSeenAt){
+        try{await env.BASELINE_REAL_SHADOW_STATE.put(unknownKey,JSON.stringify({firstSeenAt:Date.now(),positionId:position.id}));}catch{}
+        continue;
+      }
+      if(Date.now()-Number(first.firstSeenAt)<PUSH_UNKNOWN_WARN_MS)continue;
+      const eventId="warning:unknown:"+String(position.id);
+      await sendFounderPushBestEffort(env,eventId,{title:"⚠ NFE-OS — POSITION MANAGEMENT WARNING",body:String(position.asset||"")+" · "+String(position.outcomeSide||"")+"\nProvider reconciliation remains UNKNOWN.\nNFE-OS retains ownership; check Market Edge.",url:"/",tag:eventId});
+    }
+  }catch{}
+}
+
 
 // Founder Manual sleeve V1: accounting/control-plane state only.
 // No manual entry write route is authorized by this build.
@@ -2946,6 +3050,12 @@ body{background-color:#030811;background-image:linear-gradient(rgba(31,91,137,.0
   </div>
 
   <div class="card section">
+    <b>Mobile Fish Alerts</b>
+    <div class="m">Background Android Web Push · notification-only · zero trading authority</div>
+    <div class="actions" style="justify-content:flex-start;margin-top:10px"><button id="enablePushBtn" class="btn" type="button">ENABLE NFE-OS NOTIFICATIONS</button><span id="pushStatus" class="pill">NOT ENROLLED</span></div>
+  </div>
+
+  <div class="card section">
     <b>BTC / ETH / SOL / XRP / HYPE · Live 24-Hour Market Display</b>
     <div class="marketGrid">
       <button type="button" class="marketCard marketSelect active" data-chart-asset="btc" aria-pressed="true"><div class="marketTop"><div><div class="label">Bitcoin</div><div id="btcPrice" class="marketPrice">CHECKING…</div></div><div id="btcChange" class="marketChange">—</div></div><svg id="btcChart" class="spark" viewBox="0 0 100 30" preserveAspectRatio="none"></svg></button>
@@ -3667,6 +3777,33 @@ async function authorizeOneBaselineTrade(){
     if(note) note.textContent="AUTO TEST NOT ARMED · "+String(error?.message||error||"REQUEST_FAILED");
   }
 }
+
+async function enableNfePush(){
+  const btn=E('enablePushBtn'),status=E('pushStatus');
+  if(btn){btn.disabled=true;btn.textContent='CONNECTING…';}
+  try{
+    if(!('serviceWorker' in navigator)||!('PushManager' in window)||!('Notification' in window))throw new Error('WEB PUSH NOT SUPPORTED');
+    const cfg=await fetch('/push/config',{cache:'no-store'}).then(r=>r.json());
+    if(!cfg?.ok||!cfg?.publicKey)throw new Error('PUSH SENDER NOT READY');
+    const reg=await navigator.serviceWorker.register('/sw.js',{scope:'/'});
+    await navigator.serviceWorker.ready;
+    const permission=await Notification.requestPermission();
+    if(permission!=='granted')throw new Error('NOTIFICATION PERMISSION '+String(permission).toUpperCase());
+    function keyBytes(s){const p=s+'='.repeat((4-s.length%4)%4),raw=atob(p.replace(/-/g,'+').replace(/_/g,'/')),out=new Uint8Array(raw.length);for(let i=0;i<raw.length;i++)out[i]=raw.charCodeAt(i);return out;}
+    let sub=await reg.pushManager.getSubscription();
+    if(!sub)sub=await reg.pushManager.subscribe({userVisibleOnly:true,applicationServerKey:keyBytes(cfg.publicKey)});
+    const r=await fetch('/push/subscribe',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({subscription:sub.toJSON()})});
+    const j=await r.json().catch(()=>({}));
+    if(!r.ok||!j?.ok)throw new Error(j?.error||('HTTP '+r.status));
+    if(status){status.textContent=j?.test?.delivered?'CONNECTED · TEST SENT':'CONNECTED · TEST PENDING';status.className='pill good';}
+    if(btn){btn.textContent='NFE-OS NOTIFICATIONS ENABLED';}
+  }catch(error){
+    if(status){status.textContent=String(error?.message||error||'PUSH SETUP FAILED');status.className='pill bad';}
+    if(btn){btn.disabled=false;btn.textContent='ENABLE NFE-OS NOTIFICATIONS';}
+  }
+}
+const enablePushBtn=E('enablePushBtn');if(enablePushBtn)enablePushBtn.addEventListener('click',enableNfePush);
+
 </script></body></html>`;
 }
 export default {
@@ -4460,6 +4597,35 @@ document.getElementById('export')?.addEventListener('click',async()=>{const r=aw
       realTradeLedger(state,"KALSHI_SHARD_TRANSFER_ACCEPTED",{transferId:state.shardTransfer.transferId,amountUsd:5,sourceExchangeShard:0,destinationExchangeShard:2});
       await saveRealTradeState(env,state);
       return json({ok:true,state:"KALSHI_SHARD_TRANSFER_REQUEST_ACCEPTED",transferId:state.shardTransfer.transferId,amountUsd:5,fromExchangeIndex:0,toExchangeIndex:2,orderCreated:false,tradeAuthorizationChanged:false,next:"VERIFY BALANCE BEFORE REARMING"});
+    }
+
+
+    if (request.method === "GET" && url.pathname === "/sw.js") {
+      return new Response(pushServiceWorkerJs(),{status:200,headers:{"content-type":"application/javascript; charset=utf-8","cache-control":"no-store","service-worker-allowed":"/","x-content-type-options":"nosniff"}});
+    }
+
+    if (request.method === "GET" && url.pathname === "/push/config") {
+      return json({ok:Boolean(env?.NFE_PUSH_VAPID_PUBLIC_KEY),publicKey:env?.NFE_PUSH_VAPID_PUBLIC_KEY?String(env.NFE_PUSH_VAPID_PUBLIC_KEY):null,serviceWorker:"/sw.js",scope:"/",tradingAuthority:false});
+    }
+
+    if (request.method === "POST" && url.pathname === "/push/subscribe") {
+      const origin=request.headers.get("origin");
+      if(origin!==url.origin)return json({ok:false,error:"SAME_ORIGIN_REQUIRED"},403);
+      let body=null;try{body=await request.json();}catch{return json({ok:false,error:"INVALID_JSON"},400);}
+      const subscription=body?.subscription;
+      if(!validFounderPushSubscription(subscription))return json({ok:false,error:"ANDROID_CHROME_PUSH_SUBSCRIPTION_REQUIRED"},400);
+      const existing=await loadFounderPushSubscription(env);
+      if(existing?.endpoint&&existing.endpoint!==subscription.endpoint)return json({ok:false,error:"FOUNDER_SUBSCRIPTION_ALREADY_ENROLLED"},409);
+      await env.BASELINE_REAL_SHADOW_STATE.put(PUSH_SUBSCRIPTION_KEY,JSON.stringify(subscription));
+      const endpointHash=Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256",new TextEncoder().encode(subscription.endpoint)))).map(b=>b.toString(16).padStart(2,"0")).join("").slice(0,24);
+      const testEventId="synthetic-test:"+endpointHash;
+      const test=await sendFounderPushBestEffort(env,testEventId,{title:"🔔 NFE-OS PUSH TEST",body:"Notifications connected.\nNo trade occurred.",url:"/",tag:testEventId});
+      return json({ok:true,stored:true,test,tradeStateMutation:false,providerTradingWrites:0,ordersCreated:0,ordersCancelled:0,capitalMovedUsd:0});
+    }
+
+    if (request.method === "GET" && url.pathname === "/push/status") {
+      const sub=await loadFounderPushSubscription(env);
+      return json({ok:true,configured:Boolean(env?.NFE_PUSH_VAPID_PUBLIC_KEY&&env?.NFE_PUSH_VAPID_PRIVATE_KEY),subscribed:validFounderPushSubscription(sub),serviceWorker:"/sw.js",scope:"/",tradingAuthority:false});
     }
 
     if (request.method !== "GET") {
