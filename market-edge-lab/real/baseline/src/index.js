@@ -1595,7 +1595,7 @@ async function runExecutionTestSeries(env,freshShadow=null,preparedBalance=null)
   // TRI-STATE PROVIDER RECONCILIATION. Ambiguity never means flat.
   // Missing ticker is UNKNOWN until provider completeness/account/index/pagination semantics are proven.
   function classifyExecutionProviderPosition(httpOk,body,ticker,meta={}){
-    const base={providerReadAt:meta.providerReadAt||new Date().toISOString(),providerHttpStatus:meta.providerHttpStatus??null,recognizedSchema:null,matchedTicker:null,rawQuantityFieldUsed:null,normalizedQuantity:null,accountContextKnown:false,paginationComplete:false};
+    const base={providerReadAt:meta.providerReadAt||new Date().toISOString(),providerHttpStatus:meta.providerHttpStatus??null,recognizedSchema:null,matchedTicker:null,rawQuantityFieldUsed:null,normalizedQuantity:null,subaccount:0,exchangeScope:"ALL",accountContextKnown:true,paginationComplete:meta.paginationComplete===true};
     if(!httpOk)return{classification:"UNKNOWN",reason:"HTTP_FAILURE",...base};
     if(!body||typeof body!=="object")return{classification:"UNKNOWN",reason:"MALFORMED_JSON_OR_BODY",...base};
     let rows=null,schema=null;
@@ -1610,10 +1610,14 @@ async function runExecutionTestSeries(env,freshShadow=null,preparedBalance=null)
     const exact=matches[0],matched=String(exact?.ticker||exact?.market_ticker||"");
     base.matchedTicker=matched;
     let raw,field;
-    if(exact?.position!==undefined&&exact?.position!==null&&exact?.position!==""){raw=exact.position;field="position";}
+    if(exact?.position_fp!==undefined&&exact?.position_fp!==null&&exact?.position_fp!==""){raw=exact.position_fp;field="position_fp";}
+    else if(exact?.position!==undefined&&exact?.position!==null&&exact?.position!==""){raw=exact.position;field="position";}
     else if(exact?.quantity!==undefined&&exact?.quantity!==null&&exact?.quantity!==""){raw=exact.quantity;field="quantity";}
     else return{classification:"UNKNOWN",reason:"QUANTITY_MISSING",...base};
-    const qty=Number(raw); base.rawQuantityFieldUsed=field;
+    base.rawQuantityFieldUsed=field;
+    if(typeof raw==="string"&&raw.trim()!==raw)return{classification:"UNKNOWN",reason:"QUANTITY_MALFORMED_WHITESPACE",...base};
+    if(typeof raw==="string"&&!/^[+-]?(?:\\d+(?:\\.\\d+)?|\\.\\d+)$/.test(raw))return{classification:"UNKNOWN",reason:"QUANTITY_INVALID",...base};
+    const qty=Number(raw);
     if(!Number.isFinite(qty))return{classification:"UNKNOWN",reason:"QUANTITY_INVALID",...base};
     base.normalizedQuantity=qty;
     if(Math.abs(qty)<=1e-9)return{classification:"FLAT",reason:"MATCHED_TICKER_VALID_ZERO_QUANTITY",...base};
@@ -1621,13 +1625,23 @@ async function runExecutionTestSeries(env,freshShadow=null,preparedBalance=null)
   }
   const reconcileTargets=executionTestOpenPositions(state);
   if(reconcileTargets.length){
-    let pr=null,pb=null,parseOk=false,readError=null,readAt=new Date().toISOString();
+    let pr=null,pb=null,parseOk=false,readError=null,readAt=new Date().toISOString(),paginationComplete=false;
     try{
-      pr=await kalshiExecutionGet(env,"/trade-api/v2/portfolio/positions?limit=1000");
-      if(pr.ok){try{pb=await pr.json();parseOk=Boolean(pb&&typeof pb==="object");}catch(error){readError=String(error?.message||error);}}
+      const allRows=[]; let cursor="",pages=0,lastBody=null;
+      do{
+        const path="/trade-api/v2/portfolio/positions?limit=1000&subaccount=0"+(cursor?"&cursor="+encodeURIComponent(cursor):"");
+        pr=await kalshiExecutionGet(env,path);
+        if(!pr.ok)break;
+        let page=null; try{page=await pr.json();}catch(error){readError=String(error?.message||error);break;}
+        if(!page||typeof page!=="object"||!Array.isArray(page.market_positions)){readError="UNKNOWN_SCHEMA";break;}
+        allRows.push(...page.market_positions); lastBody=page; pages++;
+        cursor=typeof page.cursor==="string"?page.cursor:"";
+        if(pages>=100&&cursor){readError="PAGINATION_SAFETY_LIMIT";break;}
+      }while(cursor);
+      if(pr?.ok&&lastBody&&!readError){pb={...lastBody,market_positions:allRows,cursor:""};parseOk=true;paginationComplete=true;}
     }catch(error){readError=String(error?.message||error);}
     for(const position of reconcileTargets){
-      const rec=classifyExecutionProviderPosition(Boolean(pr?.ok&&parseOk),pb,position?.marketTicker,{providerReadAt:readAt,providerHttpStatus:pr?.status??null});
+      const rec=classifyExecutionProviderPosition(Boolean(pr?.ok&&parseOk),pb,position?.marketTicker,{providerReadAt:readAt,providerHttpStatus:pr?.status??null,paginationComplete});
       position.reconciliationClassification=rec.classification;
       position.reconciliationReason=rec.reason;
       position.providerReadAt=rec.providerReadAt;
@@ -1636,6 +1650,8 @@ async function runExecutionTestSeries(env,freshShadow=null,preparedBalance=null)
       position.matchedTicker=rec.matchedTicker;
       position.rawQuantityFieldUsed=rec.rawQuantityFieldUsed;
       position.normalizedQuantity=rec.normalizedQuantity;
+      position.subaccount=rec.subaccount;
+      position.exchangeScope=rec.exchangeScope;
       position.accountContextKnown=rec.accountContextKnown;
       position.paginationComplete=rec.paginationComplete;
       position.reconciliationRetryRequired=rec.classification==="UNKNOWN";
@@ -4031,7 +4047,7 @@ document.getElementById('export')?.addEventListener('click',async()=>{const r=aw
           status:state.status,armed:Boolean(state.armed),seriesId:state.seriesId||null,
           attemptsStarted:Number(state.attemptsStarted||0),maxAttempts:executionTestSeriesLimit(state),attemptsRemaining:Math.max(0,executionTestSeriesLimit(state)-Number(state.attemptsStarted||0)),
           openPositions:executionTestOpenPositions(state).length,
-          positions:(state.positions||[]).map(p=>({id:p.id,attemptNo:p.attemptNo,status:p.status,asset:p.asset,ticker:p.marketTicker,side:p.outcomeSide,direction:p.direction||null,entryScore:p.entryScore,entryObservedAsk:p.entryObservedAsk??null,entryOrderId:p.entryOrderId||null,filledCount:p.filledCount,entryAverageFillPrice:p.entryAverageFillPrice??null,entryAverageFeePaid:p.entryAverageFeePaid??null,filledAt:p.filledAt,exitReason:p.exitReason||null,exitOrderId:p.exitOrderId||null,exitFilledTotal:p.exitFilledTotal??0,exitAverageFillPrice:p.exitAverageFillPrice??null,exitAverageFeePaid:p.exitAverageFeePaid??null,closedAt:p.closedAt||null,reconciliationClassification:p.reconciliationClassification||null,reconciliationReason:p.reconciliationReason||null,providerReadAt:p.providerReadAt||null,providerHttpStatus:p.providerHttpStatus??null,recognizedSchema:p.recognizedSchema||null,matchedTicker:p.matchedTicker||null,rawQuantityFieldUsed:p.rawQuantityFieldUsed||null,normalizedQuantity:p.normalizedQuantity??null,accountContextKnown:p.accountContextKnown===true,paginationComplete:p.paginationComplete===true,reconciliationRetryRequired:p.reconciliationRetryRequired===true})),
+          positions:(state.positions||[]).map(p=>({id:p.id,attemptNo:p.attemptNo,status:p.status,asset:p.asset,ticker:p.marketTicker,side:p.outcomeSide,direction:p.direction||null,entryScore:p.entryScore,entryObservedAsk:p.entryObservedAsk??null,entryOrderId:p.entryOrderId||null,filledCount:p.filledCount,entryAverageFillPrice:p.entryAverageFillPrice??null,entryAverageFeePaid:p.entryAverageFeePaid??null,filledAt:p.filledAt,exitReason:p.exitReason||null,exitOrderId:p.exitOrderId||null,exitFilledTotal:p.exitFilledTotal??0,exitAverageFillPrice:p.exitAverageFillPrice??null,exitAverageFeePaid:p.exitAverageFeePaid??null,closedAt:p.closedAt||null,reconciliationClassification:p.reconciliationClassification||null,reconciliationReason:p.reconciliationReason||null,providerReadAt:p.providerReadAt||null,providerHttpStatus:p.providerHttpStatus??null,recognizedSchema:p.recognizedSchema||null,matchedTicker:p.matchedTicker||null,rawQuantityFieldUsed:p.rawQuantityFieldUsed||null,normalizedQuantity:p.normalizedQuantity??null,subaccount:p.subaccount??0,exchangeScope:p.exchangeScope||"ALL",accountContextKnown:p.accountContextKnown===true,paginationComplete:p.paginationComplete===true,reconciliationRetryRequired:p.reconciliationRetryRequired===true})),
           attempts:(state.attempts||[]).map(a=>({attemptNo:a.attemptNo,status:a.status,asset:a.asset,ticker:a.marketTicker,side:a.outcomeSide,observedScore:a.observedScore,liveScore:a.liveScore,liveAsk:a.liveAsk,orderId:a.orderId||null,fillCount:Number(a.fillCount||0)}))
         },
         funding:{httpStatus:balanceProof?.httpStatus??null,totalBalance:balanceProof?.body?.balance??null,index0:index0?.balance??null,index2:index2?.balance??null,index2Ready:Number(index2?.balance)>=EXECUTION_TEST_CONFIG.minSeriesFundingUsd},
