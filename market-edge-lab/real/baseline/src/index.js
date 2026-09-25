@@ -1732,7 +1732,7 @@ async function runExecutionTestSeries(env,freshShadow=null,preparedBalance=null)
 
   // RADAR: only exact index-2 candidates enter this bounded Founder-selected test series.
   const activeTickers=new Set(executionTestOpenPositions(state).map(p=>String(p.marketTicker)));
-  const activeTestThreshold=Number.isFinite(Number(state?.threshold))?Number(state.threshold):EXECUTION_TEST_CONFIG.entryScore;
+  const activeTestThreshold=(state?.microLifecycleValidation?.consumed===true&&state?.microLifecycleValidation?.selfRetiring===true&&Number(state?.maxAttempts)===1&&Number(state?.maxConcurrent)===1&&Number(state?.maxEntryDebitUsd)<=1)?0.50:(Number.isFinite(Number(state?.threshold))?Number(state.threshold):EXECUTION_TEST_CONFIG.entryScore);
   const candidates=executionTestCandidatePool(shadow,now,activeTestThreshold).filter(o=>!activeTickers.has(String(o.marketTicker)));
   let slots=Math.max(0,Math.max(1,Math.trunc(Number(state?.maxConcurrent||EXECUTION_TEST_CONFIG.maxConcurrent)))-executionTestOpenPositions(state).length);
   let warmedBalance=preparedBalance&&typeof preparedBalance==="object"?preparedBalance:null;
