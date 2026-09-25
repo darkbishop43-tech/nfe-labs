@@ -1,0 +1,32 @@
+name: Read Only Execution Forensics Summary
+on:
+  push:
+    branches: [market-edge-baseline-real]
+    paths: ['.github/workflows/read-only-execution-forensics-summary.yml']
+permissions: {contents: read}
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/setup-node@v4
+        with: {node-version: '22'}
+      - name: Summarize persisted fill versus no-fill evidence
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          npx --yes wrangler@4 kv key get 'baseline-real-execution-test-v1' --namespace-id d110292129c94b26942c25d0c462a17b --remote > /tmp/x.json
+          node <<'NODE'
+          const fs=require('fs'),x=JSON.parse(fs.readFileSync('/tmp/x.json','utf8'));
+          const compact=a=>({attemptNo:a.attemptNo,status:a.status,ts:a.createdAt,threshold:a.threshold,asset:a.asset,ticker:a.marketTicker,side:a.outcomeSide,score:a.liveScore,observedAsk:a.observedAsk,liveAsk:a.liveAsk,liveBid:a.liveBid,spread:Number.isFinite(+a.liveAsk)&&Number.isFinite(+a.liveBid)?+(+a.liveAsk-+a.liveBid).toFixed(4):null,quoteMove:Number.isFinite(+a.liveAsk)&&Number.isFinite(+a.observedAsk)?+(+a.liveAsk-+a.observedAsk).toFixed(4):null,count:a.count,maxDebit:a.maximumEntryDebitUsd,http:a.providerHttpStatus,orderId:a.orderId,fillCount:a.fillCount,avgFill:a.averageFillPrice,fee:a.averageFeePaid});
+          const groups=[];
+          groups.push({name:'CURRENT',queueId:x.queue?.queueId,threshold:x.threshold,attempts:(x.attempts||[]).map(compact)});
+          for(const h of x.queueHistory||[]) for(const st of h.completedStages||[]) groups.push({name:'HIST_STAGE',queueId:h.queueId,stageIndex:st.stageIndex,threshold:st.threshold,attempts:(st.attempts||[]).map(compact)});
+          for(const h of x.queueHistory||[]) if(h.attempts?.length) groups.push({name:'HIST_RETIRED_CURRENT',queueId:h.queueId,threshold:h.threshold,attempts:h.attempts.map(compact)});
+          for(const g of groups){
+            const aa=g.attempts, fills=aa.filter(a=>a.fillCount>0), nf=aa.filter(a=>a.status==='NO_FILL');
+            const avg=(arr,k)=>arr.length?+(arr.reduce((s,a)=>s+(Number(a[k])||0),0)/arr.length).toFixed(4):null;
+            console.log('GROUP='+JSON.stringify({...g,summary:{n:aa.length,fills:fills.length,noFill:nf.length,fillRate:aa.length?+(fills.length/aa.length).toFixed(3):null,fillAvgSpread:avg(fills,'spread'),noFillAvgSpread:avg(nf,'spread'),fillAvgScore:avg(fills,'score'),noFillAvgScore:avg(nf,'score'),fillAvgQuoteMove:avg(fills,'quoteMove'),noFillAvgQuoteMove:avg(nf,'quoteMove')}}));
+          }
+          NODE
