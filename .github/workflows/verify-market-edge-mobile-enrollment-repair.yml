@@ -56,3 +56,5 @@ jobs:
             await browser.close();
           })();
           NODE
+
+# rerun after remaining nested newline escape repair
