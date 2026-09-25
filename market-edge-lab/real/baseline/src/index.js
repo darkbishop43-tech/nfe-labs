@@ -1359,6 +1359,9 @@ const PUSH_SUBSCRIPTION_KEY="notification:founder:subscription:v1";
 const PUSH_DELIVERY_PREFIX="notification:delivery:v1:";
 const PUSH_ATTEMPT_PREFIX="notification:attempt:v1:";
 const PUSH_UNKNOWN_PREFIX="notification:unknown:v1:";
+const PAYNE_PAPER_NOTIFY_ONCE_KEY="notification:payne-paper-once:v1";
+const PAYNE_PAPER_STATE_URL="https://market-edge-siblings.darkbishop43.workers.dev/api/state/payne";
+const PAYNE_PAPER_NOTIFY_AFTER_MS=Date.parse("2026-09-25T20:26:13.972Z");
 const PUSH_UNKNOWN_WARN_MS=2*60*1000;
 const PUSH_VAPID_SUBJECT="https://github.com/darkbishop43-tech/nfe-labs";
 
@@ -1430,6 +1433,29 @@ function executionPositionPnlText(position){
   if(!Number.isFinite(pnl))return null;
   return (pnl>=0?"+":"-")+"$"+Math.abs(pnl).toFixed(2);
 }
+async function dispatchOnePaynePaperFishNotification(env){
+  try{
+    if(!env?.BASELINE_REAL_SHADOW_STATE)return;
+    if(await env.BASELINE_REAL_SHADOW_STATE.get(PAYNE_PAPER_NOTIFY_ONCE_KEY))return;
+    const response=await fetch(PAYNE_PAPER_STATE_URL,{headers:{accept:"application/json"},cf:{cacheTtl:0}});
+    if(!response.ok)return;
+    const state=await response.json().catch(()=>null);
+    if(state?.mode!=="PAPER_ONLY"||state?.lab!=="payne_method")return;
+    const entries=(Array.isArray(state?.ledger)?state.ledger:[])
+      .filter(e=>e?.type==="PAPER_ENTRY"&&Date.parse(e?.ts||e?.entryTs||0)>PAYNE_PAPER_NOTIFY_AFTER_MS)
+      .sort((a,b)=>Date.parse(a?.ts||a?.entryTs||0)-Date.parse(b?.ts||b?.entryTs||0));
+    const event=entries[0];if(!event)return;
+    const identity=String(event.oppKey||event.marketId||event.ts||event.entryTs);
+    const eventId="payne-paper:"+String(event.ts||event.entryTs)+":"+identity;
+    const score=Number(event.score);
+    const direction=String(event.side||event.direction||"—");
+    const lines=["PAPER · Payne opened a paper position",String(event.asset||"")+" · "+direction];
+    if(Number.isFinite(score))lines.push("Score "+score.toFixed(2));
+    const pushResult=await sendFounderPushBestEffort(env,eventId,{title:"🐟 NFE-OS · PAYNE PAPER FISH",body:lines.join("\n"),url:"/",tag:eventId});
+    await persistPushAttemptResult(env,eventId,{notificationType:"PAYNE_PAPER_FISH",positionId:identity,authority:event.ts||event.entryTs||identity},pushResult);
+    await env.BASELINE_REAL_SHADOW_STATE.put(PAYNE_PAPER_NOTIFY_ONCE_KEY,JSON.stringify({eventId,attemptedAt:new Date().toISOString(),success:pushResult?.delivered===true,reason:pushResult?.reason||null}));
+  }catch{}
+}
 async function dispatchExecutionNotifications(env){
   try{
     const state=await loadExecutionTestState(env);
@@ -1445,7 +1471,7 @@ async function dispatchExecutionNotifications(env){
         const lines=[String(position.asset||"")+" · "+String(position.outcomeSide||"")];
         if(Number.isFinite(score))lines.push("Score "+score.toFixed(2));
         lines.push("Real position filled.","","NFE-OS is managing the position.","Check Kalshi.");
-        const pushResult=await sendFounderPushBestEffort(env,eventId,{title:"🎣 NFE-OS — FISH ON THE HOOK",body:lines.join("\n"),url:"/",tag:eventId});
+        const pushResult=await sendFounderPushBestEffort(env,eventId,{title:"🎣 NFE-OS · REAL FISH",body:lines.join("\n"),url:"/",tag:eventId});
         await persistPushAttemptResult(env,eventId,{notificationType:"FISH",positionId:position.id,authority:position.entryOrderId},pushResult);
       }
       if((event?.type==="TEST_POSITION_CLOSED"||event?.type==="TEST_STALE_POSITION_PROVIDER_FLAT_RECONCILED")&&event?.positionId){
@@ -3958,7 +3984,8 @@ export default {
         controllerError=String(error?.message||error||"CONTROLLER_RUNTIME_ERROR").slice(0,160);
       }
 
-      // Notification adapter is downstream/best-effort and cannot block or mutate trading.\n      ctx.waitUntil(dispatchExecutionNotifications(env).catch(()=>{}));\n\n      const traceState=await loadRealTradeState(env);
+      // Notification adapter is downstream/best-effort and cannot block or mutate trading.\n      ctx.waitUntil(dispatchExecutionNotifications(env).catch(()=>{}));
+      ctx.waitUntil(dispatchOnePaynePaperFishNotification(env).catch(()=>{}));\n\n      const traceState=await loadRealTradeState(env);
       const traceTestThreshold=Number(traceState?.founderAuthorization?.testEntryScore);
       const traceEntryThreshold=kalshiAuthorizationValid(traceState)&&Number.isFinite(traceTestThreshold)?traceTestThreshold:REAL_TEST_CONFIG.entryScore;
       const controllerEligible=(freshShadow?.opportunities||[]).filter(o =>
