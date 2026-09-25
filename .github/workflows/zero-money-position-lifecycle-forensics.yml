@@ -1,0 +1,74 @@
+name: Zero Money Position Lifecycle Forensics
+on:
+  push:
+    branches: [market-edge-baseline-real]
+    paths: ['.github/workflows/zero-money-position-lifecycle-forensics.yml']
+permissions: {contents: read}
+jobs:
+  forensic:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/setup-node@v4
+        with: {node-version: '22'}
+      - name: Read-only provider/schema and fixture proof
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          npx --yes wrangler@4 kv key get 'baseline-real-execution-test-v1' --namespace-id d110292129c94b26942c25d0c462a17b --remote > /tmp/state.json
+          curl -fsS 'https://market-edge-baseline-real.darkbishop43.workers.dev/execution-test-state' > /tmp/live.json
+          node <<'NODE'
+          const fs=require('fs');
+          const st=JSON.parse(fs.readFileSync('/tmp/state.json','utf8'));
+          const live=JSON.parse(fs.readFileSync('/tmp/live.json','utf8'));
+          function currentParser(body,ticker){
+            const rows=Array.isArray(body?.market_positions)?body.market_positions:Array.isArray(body?.positions)?body.positions:[];
+            const exact=rows.find(x=>String(x?.ticker||x?.market_ticker||"")===String(ticker||""))||null;
+            const qty=Number(exact?.position??exact?.quantity??0);
+            const providerFlat=!exact||!Number.isFinite(qty)||Math.abs(qty)<=1e-9;
+            return {rows,exact,qty,providerFlat};
+          }
+          function safeParser(httpOk,body,ticker){
+            if(!httpOk)return{state:'UNKNOWN',reason:'HTTP_FAILED'};
+            if(!body||typeof body!=='object')return{state:'UNKNOWN',reason:'BODY_INVALID'};
+            const hasKnownArray=Array.isArray(body.market_positions)||Array.isArray(body.positions);
+            if(!hasKnownArray)return{state:'UNKNOWN',reason:'SCHEMA_UNKNOWN'};
+            const rows=Array.isArray(body.market_positions)?body.market_positions:body.positions;
+            const exact=rows.find(x=>String(x?.ticker||x?.market_ticker||"")===String(ticker||""))||null;
+            if(!exact)return{state:'FLAT',reason:'VALID_AUTHORITATIVE_LIST_NO_TICKER'};
+            const raw=exact.position??exact.quantity;
+            if(raw===undefined||raw===null||raw==='')return{state:'UNKNOWN',reason:'QUANTITY_MISSING',exact};
+            const qty=Number(raw);
+            if(!Number.isFinite(qty))return{state:'UNKNOWN',reason:'QUANTITY_INVALID',exact};
+            return Math.abs(qty)<=1e-9?{state:'FLAT',reason:'ZERO_QUANTITY',qty,exact}:{state:'OPEN',reason:'NONZERO_QUANTITY',qty,exact};
+          }
+          const yes=(st.queue?.completedStages||[]).flatMap(x=>x.positions||[]).find(p=>p.outcomeSide==='YES');
+          const no=(st.queue?.completedStages||[]).flatMap(x=>x.positions||[]).find(p=>p.outcomeSide==='NO');
+          const ticker=yes?.marketTicker||yes?.ticker;
+          const fixtures={
+            yesKnownFill:{market_positions:[{ticker,position:1}]},
+            noKnownFill:{market_positions:[{ticker:no?.marketTicker||no?.ticker,position:-1}]},
+            genuineFlat:{market_positions:[]},
+            missingQty:{market_positions:[{ticker}]},
+            invalidQty:{market_positions:[{ticker,position:'not-a-number'}]},
+            unknownSchema:{data:[{ticker,position:1}]}
+          };
+          console.log('LIVE_SAFETY='+JSON.stringify({status:live?.state?.status,armed:live?.state?.armed,openPositions:live?.state?.openPositions,balance:live?.funding,queue:live?.queue}));
+          console.log('KNOWN_FILL_LOCAL='+JSON.stringify({yes,no}));
+          for(const [name,b] of Object.entries(fixtures))console.log('FIXTURE='+JSON.stringify({name,current:currentParser(b,name==='noKnownFill'?(no?.marketTicker||no?.ticker):ticker),safe:safeParser(true,b,name==='noKnownFill'?(no?.marketTicker||no?.ticker):ticker)}));
+          console.log('FIXTURE='+JSON.stringify({name:'httpFailure',safe:safeParser(false,{},ticker)}));
+          // MANAGE dry-run construction only; no network POST.
+          function exitPayload(p,currentBid){
+            const entrySide=p.outcomeSide==='YES'?'bid':p.outcomeSide==='NO'?'ask':null;
+            const side=entrySide==='bid'?'ask':'bid', yesLeg=p.outcomeSide==='YES'?currentBid:1-currentBid;
+            return {ticker:p.marketTicker||p.ticker,client_order_id:'DRY-RUN-NOT-SUBMITTED',side,count:Number(p.filledCount||1).toFixed(2),price:Number(yesLeg).toFixed(4),time_in_force:'immediate_or_cancel',self_trade_prevention_type:'taker_at_cross',post_only:false,cancel_order_on_pause:true,reduce_only:true};
+          }
+          for(const p of [yes,no].filter(Boolean)){
+            const body={market_positions:[{ticker:p.marketTicker||p.ticker,position:p.outcomeSide==='YES'?1:-1}]};
+            const recon=safeParser(true,body,p.marketTicker||p.ticker);
+            const ageMs=300001,liveBid=.5;
+            console.log('MANAGE_DRY_RUN='+JSON.stringify({side:p.outcomeSide,reconciliation:recon.state,remainsOpen:recon.state==='OPEN',maxHoldEligible:ageMs>=300000,payload:exitPayload(p,liveBid),submitted:false,providerWrites:0,capitalMovedUsd:0}));
+          }
+          console.log('SAFETY='+JSON.stringify({providerWrites:0,capitalMovedUsd:0,stateMutation:false,ordersSubmitted:0}));
+          NODE
