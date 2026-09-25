@@ -1,0 +1,38 @@
+name: Read Only Kalshi Crypto Universe Inventory
+
+on:
+  push:
+    branches: [market-edge-baseline-real]
+    paths:
+      - '.github/workflows/read-only-kalshi-crypto-universe.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  inventory:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Enumerate recurring crypto series without orders
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json,re,urllib.request,urllib.parse,datetime,time
+          BASE='https://api.elections.kalshi.com/trade-api/v2'
+          H={'Accept':'application/json','User-Agent':'NFE-OS-ReadOnly-Crypto-Inventory/1.0'}
+          def get(path):
+              req=urllib.request.Request(BASE+path,headers=H,method='GET')
+              with urllib.request.urlopen(req,timeout=30) as r:
+                  return r.status,json.load(r)
+          hs,d=get('/series?category='+urllib.parse.quote('Crypto')+'&include_product_metadata=true')
+          series=d.get('series') or []
+          compact=[]
+          for s in series:
+              compact.append({
+                'ticker':s.get('ticker'),'title':s.get('title'),'frequency':s.get('frequency'),
+                'settlement_sources':s.get('settlement_sources') or [],
+                'product_metadata':s.get('product_metadata')
+              })
+          print('SERIES_SUMMARY='+json.dumps({'http':hs,'count':len(series),'series':compact},separators=(',',':')))
+          PY
