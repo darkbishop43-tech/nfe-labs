@@ -1897,7 +1897,7 @@ async function runExecutionTestSeries(env,freshShadow=null,preparedBalance=null)
 
   // RADAR: only exact index-2 candidates enter this bounded Founder-selected test series.
   const activeTickers=new Set(executionTestOpenPositions(state).map(p=>String(p.marketTicker)));
-  const activeTestThreshold=(state?.microLifecycleValidation?.consumed===true&&state?.microLifecycleValidation?.selfRetiring===true&&Number(state?.maxAttempts)===1&&Number(state?.maxConcurrent)===1&&Number(state?.maxEntryDebitUsd)<=1)?0.50:(Number.isFinite(Number(state?.threshold))?Number(state.threshold):EXECUTION_TEST_CONFIG.entryScore);
+  const activeTestThreshold=Number.isFinite(Number(state?.threshold))?Number(state.threshold):EXECUTION_TEST_CONFIG.entryScore;
   const candidates=executionTestCandidatePool(shadow,now,activeTestThreshold).filter(o=>!activeTickers.has(String(o.marketTicker)));
   let slots=Math.max(0,Math.max(1,Math.trunc(Number(state?.maxConcurrent||EXECUTION_TEST_CONFIG.maxConcurrent)))-executionTestOpenPositions(state).length);
   let warmedBalance=preparedBalance&&typeof preparedBalance==="object"?preparedBalance:null;
@@ -3980,43 +3980,6 @@ export default {
 
   async fetch(request, env) {
     const url = new URL(request.url);
-
-    if (request.method === "GET" && url.pathname === "/micro-lifecycle-validation-control") {
-      const state=await loadExecutionTestState(env);
-      const balanceProof=await kalshiExecutionBalanceSnapshot(env);
-      const rows=Array.isArray(balanceProof?.body?.balance_breakdown)?balanceProof.body.balance_breakdown:[];
-      const index2=Number(rows.find(x=>Number(x?.exchange_index)===2)?.balance);
-      const openPositions=executionTestOpenPositions(state);
-      const queueInactive=!executionTestQueueActive(state)&&state?.armed!==true;
-      const ready=Boolean(queueInactive&&openPositions.length===0&&balanceProof?.ok&&Number.isFinite(index2)&&index2>=1);
-      const page="<!doctype html><html><head><meta name='viewport' content='width=device-width,initial-scale=1'><title>NFE-OS Micro Lifecycle Validation</title><style>body{font-family:system-ui;background:#050a11;color:#eef7ff;padding:18px;max-width:720px;margin:auto}.box{border:1px solid #294764;background:#0d1724;border-radius:14px;padding:16px;margin:12px 0}.ok{color:#67e49b}.warn{color:#ffd86a}.lock{color:#ff8b8b}button{width:100%;padding:15px;font-size:17px;font-weight:800;border-radius:10px;border:1px solid #d3a53a;background:#182536;color:#ffd86a}code{color:#b9dcff}</style></head><body>"+
-        "<h2>MICROSCOPIC REAL LIFECYCLE VALIDATION</h2>"+
-        "<div class='box'><b>STATE: <span class='warn'>PREPARED / NOT AUTHORIZED</span></b><p>THIS IS A LIFECYCLE TEST, NOT A PROFIT TEST.</p><p><b>ONE REAL ENTRY MAXIMUM.</b></p></div>"+
-        "<div class='box'><b>LOCKED LIMITS</b><p>maxAttempts = <code>1</code><br>maxConcurrent = <code>1</code><br>maxEntryDebitUsd = <code>$1.00</code><br>production threshold = <code>.80</code><br>threshold experiment = <code>NO</code></p></div>"+
-        "<div class='box'><b>FRESH PREFLIGHT</b><p>queue active = <code>"+String(executionTestQueueActive(state))+"</code><br>armed = <code>"+String(state?.armed===true)+"</code><br>open positions = <code>"+openPositions.length+"</code><br>execution cash = <code>"+(Number.isFinite(index2)?"$"+index2.toFixed(4):"UNAVAILABLE")+"</code><br>subaccount = <code>0</code><br>exchange scope = <code>ALL</code></p><p>tri-state = ACTIVE<br>position_fp = ACTIVE<br>pagination exhaustion = ACTIVE</p></div>"+
-        "<div class='box'><b>FOUNDER AUTHORIZATION</b><p>Exactly one attempt. Authorization self-retires when that sole attempt is consumed. NO_FILL also consumes it.</p><form method='post' action='/micro-lifecycle-validation-control'><button type='submit'>AUTHORIZE ONE MICRO LIFECYCLE VALIDATION</button></form></div>"+
-        "<div class='box'><small>Prepared control only · provider writes 0 · orders submitted 0 · capital moved $0</small></div></body></html>";
-      return new Response(page,{status:ready?200:409,headers:{...HTML_HEADERS,"cache-control":"no-store","x-nfe-control":"MICRO_LIFECYCLE_PREPARED_NOT_AUTHORIZED"}});
-    }
-    if (request.method === "POST" && url.pathname === "/micro-lifecycle-validation-control") {
-      const state=await loadExecutionTestState(env);
-      const balanceProof=await kalshiExecutionBalanceSnapshot(env);
-      const rows=Array.isArray(balanceProof?.body?.balance_breakdown)?balanceProof.body.balance_breakdown:[];
-      const index2=Number(rows.find(x=>Number(x?.exchange_index)===2)?.balance);
-      const openPositions=executionTestOpenPositions(state);
-      const consumed=Boolean(state?.microLifecycleValidation?.consumed||state?.microLifecycleValidation?.authorizedAt);
-      const clean=!executionTestQueueActive(state)&&state?.armed!==true&&openPositions.length===0&&Number(state?.attemptsStarted||0)>=0;
-      if(consumed)return json({ok:false,status:"MICRO_LIFECYCLE_AUTHORITY_ALREADY_CONSUMED",armed:Boolean(state?.armed),authorization:false,secondAuthorizationAllowed:false},409);
-      if(!clean||!balanceProof?.ok||!Number.isFinite(index2)||index2<1)return json({ok:false,status:"MICRO_LIFECYCLE_PREFLIGHT_FAILED",armed:Boolean(state?.armed),authorization:false,openPositions:openPositions.length,index2CashUsd:Number.isFinite(index2)?index2:null},409);
-      const priorQueue=state.queue&&typeof state.queue==="object"?JSON.parse(JSON.stringify(state.queue)):null;
-      state.microLifecycleValidation={authorizedAt:new Date().toISOString(),consumed:true,selfRetiring:true,maxAttempts:1,maxConcurrent:1,maxEntryDebitUsd:1,threshold:REAL_TEST_CONFIG.entryScore,secondAuthorizationAllowed:false,priorQueue};
-      state.seriesId=crypto.randomUUID();state.armedAt=Date.now();state.completedAt=null;state.threshold=REAL_TEST_CONFIG.entryScore;state.maxAttempts=1;state.maxConcurrent=1;state.maxEntryDebitUsd=1;state.attemptsStarted=0;state.attempts=[];state.positions=[];state.ledger=[];state.armed=true;state.status="MICRO_LIFECYCLE_AUTHORIZED_FISHING";
-      state.queue={active:false,status:"MICRO_VALIDATION_ONE_SHOT",queueId:null,currentIndex:-1,totalAttempts:1,completedAttempts:0,stages:[],completedStages:[],cancelledStages:[]};
-      executionTestLedger(state,"MICRO_LIFECYCLE_ONE_SHOT_AUTHORIZED",{maxAttempts:1,maxConcurrent:1,maxEntryDebitUsd:1,threshold:REAL_TEST_CONFIG.entryScore,selfRetiring:true});
-      await saveExecutionTestState(env,state);
-      return new Response("<!doctype html><html><head><meta name='viewport' content='width=device-width,initial-scale=1'><title>Micro Lifecycle Authorized</title></head><body style='font-family:system-ui;background:#050a11;color:#eef7ff;padding:20px'><h2>ONE MICRO LIFECYCLE VALIDATION AUTHORIZED</h2><p>Exactly one qualifying entry attempt is authorized.</p><p>NO_FILL consumes the attempt. A fill remains managed until governed exit/flat resolution.</p><p><b>SECOND AUTHORIZATION: DISABLED</b></p></body></html>",{status:200,headers:{...HTML_HEADERS,"cache-control":"no-store","x-nfe-control":"MICRO_LIFECYCLE_ONE_SHOT_AUTHORIZED"}});
-    }
-
 
     if (request.method === "GET" && url.pathname === "/diagnostic-kalshi-discovery") {
       const body=await kalshiDiscoveryDiagnostic(env);
