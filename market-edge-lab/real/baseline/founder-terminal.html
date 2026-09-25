@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>NFE-OS Founder Trader Terminal</title>
+<style>
+:root{--bg:#050a11;--panel:#0d1724;--panel2:#111e2d;--line:#243a55;--gold:#d8b15e;--gold2:#f3d58a;--blue:#79aef8;--text:#f5f7fb;--muted:#91a6be;--green:#67e49b;--yellow:#f0c75e}
+*{box-sizing:border-box}html{scroll-behavior:smooth}body{margin:0;background:radial-gradient(circle at 80% 0,#0d2440 0,transparent 38%),var(--bg);color:var(--text);font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial;min-height:100vh}
+.shell{max-width:1180px;margin:auto;padding:12px clamp(10px,2vw,22px) 32px}
+.top{position:sticky;top:0;z-index:20;background:rgba(5,10,17,.96);backdrop-filter:blur(12px);border:1px solid var(--line);border-radius:16px;padding:10px;margin-bottom:12px;box-shadow:0 12px 30px #0007}
+.brand{display:flex;align-items:center;justify-content:space-between;gap:14px;padding:4px 6px 10px}
+.k{font-size:10px;letter-spacing:.16em;text-transform:uppercase;color:var(--gold)}h1{font-size:22px;margin:2px 0}.muted{font-size:12px;color:var(--muted)}
+.nav{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:7px}.nav a,.nav span{display:flex;align-items:center;justify-content:center;min-height:44px;text-decoration:none;border:1px solid #34506f;background:#0a1421;border-radius:11px;padding:8px;color:var(--text);font-size:12px;font-weight:800;text-align:center}.nav a:hover,.nav a:focus-visible{border-color:var(--gold2);color:var(--gold2);outline:none}.nav .active{border-color:#456f9f;color:#a9d0ff}.nav .unavailable{opacity:.55;cursor:not-allowed}
+.hero,.card{background:linear-gradient(180deg,var(--panel2),var(--panel));border:1px solid var(--line);border-radius:16px}.hero{padding:18px}.hero h2{margin:0 0 7px;font-size:24px}.pill{display:inline-block;border:1px solid #725f34;border-radius:999px;padding:6px 9px;color:var(--gold2);font-size:10px;font-weight:850;margin:4px 5px 0 0}.pill.good{border-color:#2c7650;color:var(--green)}
+.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin-top:10px}.card{padding:15px}.card h3{margin:0 0 7px}.card a{display:inline-block;margin-top:8px;color:#a9d0ff;font-weight:750}.wall{border-left:5px solid var(--green)}.warn{border-left:5px solid var(--yellow)}
+.footer{margin-top:12px;text-align:center;color:var(--muted);font-size:11px}
+@media(max-width:820px){.nav{grid-template-columns:repeat(4,minmax(0,1fr))}.grid{grid-template-columns:1fr}}
+@media(max-width:520px){.shell{padding:8px 8px 22px}.top{border-radius:12px;padding:8px}.brand{align-items:flex-start}.nav{grid-template-columns:repeat(2,minmax(0,1fr))}.nav a,.nav span{min-height:48px;font-size:11px}.hero{padding:14px}.hero h2{font-size:20px}}
+</style>
+</head>
+<body>
+<div class="shell">
+<header class="top">
+  <div class="brand">
+    <div><div class="k">NFE-OS · MARKET EDGE</div><h1>Founder Trader Terminal</h1><div class="muted">One cockpit · separate governed systems</div></div>
+    <span class="pill good">NAVIGATION ONLY</span>
+  </div>
+  <nav class="nav" aria-label="NFE-OS primary navigation">
+    <a class="active" href="https://market-edge-baseline-real.darkbishop43.workers.dev/" target="_blank" rel="noopener">🏠 REAL</a>
+    <a href="https://raw.githack.com/darkbishop43-tech/nfe-labs/adaptive-market-lab/market-edge-lab/siblings/founder-trader-terminal.html" target="_blank" rel="noopener">🧪 PAPER CONTROL</a>
+    <a href="https://raw.githack.com/darkbishop43-tech/nfe-labs/market-edge-sibling-build/market-edge-lab/siblings/payne-method/index.html" target="_blank" rel="noopener">PAYNE</a>
+    <a href="https://raw.githack.com/darkbishop43-tech/nfe-labs/adaptive-market-lab/market-edge-lab/siblings/adaptive-market-lab/index.html" target="_blank" rel="noopener">ADAPTIVE</a>
+    <a href="https://market-edge-universal-observer.darkbishop43.workers.dev/" target="_blank" rel="noopener">🔭 OBSERVER</a>
+    <span class="unavailable" title="No single governed audit page is assigned yet">📊 AUDIT · UNASSIGNED</span>
+    <span class="unavailable" title="No single governed system page is assigned yet">⚙️ SYSTEM · UNASSIGNED</span>
+  </nav>
+</header>
+
+<section class="hero">
+  <div class="k">PROTECTED NAVIGATION SHELL</div>
+  <h2>Operational home without control-plane merging</h2>
+  <div class="muted">Each destination opens its existing governed surface. This page contains no trading credentials, order submission, Paper mutation logic, Observer credentials, bankroll state, or execution authorization.</div>
+  <span class="pill">REAL stays REAL</span><span class="pill">PAPER stays PAPER</span><span class="pill">OBSERVER stays READ ONLY</span>
+</section>
+
+<div class="grid">
+  <section class="card wall"><h3>💰 Baseline Real</h3><div class="muted">Existing live Founder dashboard. Threshold, ARM, scheduler, order logic, ledger, balances and execution remain owned by the existing Baseline Worker.</div><a href="https://market-edge-baseline-real.darkbishop43.workers.dev/" target="_blank" rel="noopener">Open REAL dashboard →</a></section>
+  <section class="card"><h3>🧪 Paper Research</h3><div class="muted">Paper Threshold Controller, Payne, and Adaptive remain separate Paper surfaces. This shell only routes to them.</div><a href="https://raw.githack.com/darkbishop43-tech/nfe-labs/adaptive-market-lab/market-edge-lab/siblings/founder-trader-terminal.html" target="_blank" rel="noopener">Open Paper Control →</a></section>
+  <section class="card"><h3>🔭 Universal Observer</h3><div class="muted">Separate read-only observation project. Authentication investigation and credentials remain owned by the Observer project.</div><a href="https://market-edge-universal-observer.darkbishop43.workers.dev/" target="_blank" rel="noopener">Open Observer →</a></section>
+  <section class="card warn"><h3>📊 Audit / ⚙️ System</h3><div class="muted">No single authoritative Founder page is assigned for these destinations yet. They remain visibly unassigned instead of pointing to an invented or privileged control surface.</div></section>
+</div>
+<div class="footer">NFE-OS · VALIDATION OVER EVERYTHING · NAVIGATION DOES NOT GRANT EXECUTION AUTHORITY</div>
+</div>
+</body>
+</html>
