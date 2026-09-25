@@ -9,7 +9,7 @@ async function getJson(url,timeout=7000){
   try{const r=await fetch(url,{method:'GET',headers:{accept:'application/json'},signal:ctl.signal});const text=await r.text();let body=null;try{body=JSON.parse(text)}catch{}return{ok:r.ok,status:r.status,body};}
   catch(error){return{ok:false,status:0,body:null,error:String(error?.name||'FETCH_FAILED')}}finally{clearTimeout(timer)}
 }
-async function baseline(path){return getJson(BASELINE+path)}
+async function baseline(env,path){\n  const ctl=new AbortController(),timer=setTimeout(()=>ctl.abort(),7000);\n  try{const r=await env.BASELINE.fetch(new Request('https://baseline.internal'+path,{method:'GET',headers:{accept:'application/json'},signal:ctl.signal}));const text=await r.text();let body=null;try{body=JSON.parse(text)}catch{}return{ok:r.ok,status:r.status,body};}\n  catch(error){return{ok:false,status:0,body:null,error:String(error?.name||'FETCH_FAILED')}}finally{clearTimeout(timer)}\n}
 async function currentTickers(){
   const r=await baseline('/shadow-state');
   const set=new Set((r.body?.opportunities||[]).map(x=>String(x?.marketTicker||'')));
@@ -23,7 +23,7 @@ export default{
   if(u.pathname==='/api/health')return json({ok:true,service:'market-edge-founder-cockpit',mode:'READ_ONLY_PRESENTATION',executionAuthority:false,orderRoutes:0,baselineMutation:false});
   if(u.pathname==='/api/runtime'){
     const paths=['/shadow-state','/wide-radar-state','/real-trade-state','/execution-test-state','/kalshi-live-mirror-data','/account','/status'];
-    const res=await Promise.all(paths.map(p=>baseline(p)));
+    const res=await Promise.all(paths.map(p=>baseline(env,p)));
     const coreOk=res[0].ok&&res[3].ok;
     return json({ok:coreOk,state:coreOk?'LIVE_READ_ONLY':'CORE_READ_FAILED',observedAt:new Date().toISOString(),executionAuthority:false,baselineMutation:false,
       sources:Object.fromEntries(paths.map((p,i)=>[p,{ok:res[i].ok,httpStatus:res[i].status}])),
@@ -50,7 +50,7 @@ export default{
   }
   if(u.pathname==='/api/market'||u.pathname==='/api/orderbook'){
     const ticker=safeTicker(u.searchParams.get('ticker'));if(!ticker)return json({ok:false,error:'INVALID_TICKER'},400);
-    const cur=await currentTickers();if(!cur.shadow.ok)return json({ok:false,error:'BASELINE_TICKER_ALLOWLIST_UNAVAILABLE'},502);
+    const cur=await currentTickers(env);if(!cur.shadow.ok)return json({ok:false,error:'BASELINE_TICKER_ALLOWLIST_UNAVAILABLE'},502);
     if(!cur.set.has(ticker))return json({ok:false,error:'TICKER_NOT_IN_CURRENT_BASELINE_OPPORTUNITY_SET'},403);
     const suffix=u.pathname==='/api/market'?'':'/orderbook?depth=10';
     const r=await getJson('https://api.elections.kalshi.com/trade-api/v2/markets/'+encodeURIComponent(ticker)+suffix,8000);
