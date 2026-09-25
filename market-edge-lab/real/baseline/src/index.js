@@ -1395,6 +1395,59 @@ function autoExecutionAccounting(state){
   return{source:AUTO_BASELINE_SOURCE,positions,attempts,realizedPnlUsd:Number(realized.toFixed(6)),feesUsd:Number(fees.toFixed(6)),openExposureUsd:Number(exposure.toFixed(6))};
 }
 
+// Founder Manual Close V1 is PREVIEW-ONLY. No provider write function is reachable from
+// these helpers or routes. A future separately-authorized submit lane must reconcile again.
+function founderManualRemainingCount(record){
+  const entry=Number(record?.entryFillQuantity??record?.fillCount??record?.entryFilledCount??0);
+  const closed=Number(record?.closeFillQuantity??record?.exitFilledTotal??0);
+  return Math.max(0,entry-closed);
+}
+function founderManualClosePayload(record,liveOutcomeBid,clientOrderId,requestedCount){
+  if(String(record?.source||"")!==FOUNDER_MANUAL_SOURCE)return{ok:false,state:"FOUNDER_CLOSE_REJECT_NOT_FOUNDER_OWNED"};
+  const remaining=founderManualRemainingCount(record),requested=Number(requestedCount);
+  if(!(remaining>0))return{ok:false,state:"FOUNDER_CLOSE_REJECT_ZERO_REMAINING"};
+  if(!Number.isFinite(requested)||requested<=0||Math.abs(requested-remaining)>1e-9)return{ok:false,state:"FOUNDER_CLOSE_REJECT_EXACT_REMAINING_REQUIRED",remainingQuantity:remaining,requestedQuantity:Number.isFinite(requested)?requested:null};
+  const outcome=String(record?.outcomeSide||record?.side||"").toUpperCase(),entrySide=kalshiV2BookSide(outcome);
+  if(!entrySide)return{ok:false,state:"FOUNDER_CLOSE_REJECT_INVALID_OUTCOME"};
+  const bid=Number(liveOutcomeBid),yesLegPrice=outcome==="YES"?bid:1-bid;
+  if(!Number.isFinite(bid)||bid<=0||bid>=1||!Number.isFinite(yesLegPrice)||yesLegPrice<=0||yesLegPrice>=1)return{ok:false,state:"FOUNDER_CLOSE_REJECT_INVALID_QUOTE"};
+  const body={ticker:String(record?.ticker||record?.marketTicker||""),client_order_id:String(clientOrderId),side:entrySide==="bid"?"ask":"bid",count:remaining.toFixed(2),price:yesLegPrice.toFixed(4),time_in_force:"immediate_or_cancel",self_trade_prevention_type:"taker_at_cross",post_only:false,cancel_order_on_pause:true,reduce_only:true};
+  if(!body.ticker)return{ok:false,state:"FOUNDER_CLOSE_REJECT_INVALID_TICKER"};
+  return{ok:true,state:"FOUNDER_CLOSE_PREVIEW_READY_LOCKED",remainingQuantity:remaining,body};
+}
+function founderManualCloseDryRun(record,{requestedCount,liveOutcomeBid,quoteAgeMs=0,providerQuantity,autoTickerConflict=false}={}){
+  if(String(record?.source||"")!==FOUNDER_MANUAL_SOURCE)return{ok:false,state:"FOUNDER_CLOSE_REJECT_NOT_FOUNDER_OWNED",providerWrites:0};
+  const remaining=founderManualRemainingCount(record);
+  if(!(remaining>0))return{ok:false,state:"FOUNDER_CLOSE_REJECT_ZERO_REMAINING",providerWrites:0};
+  if(autoTickerConflict)return{ok:false,state:"FOUNDER_CLOSE_REJECT_OWNERSHIP_AMBIGUOUS_AUTO_CONFLICT",providerWrites:0};
+  const pq=Math.abs(Number(providerQuantity));
+  if(!Number.isFinite(pq)||pq+1e-9<remaining)return{ok:false,state:"FOUNDER_CLOSE_REJECT_PROVIDER_POSITION_UNRECONCILED",remainingQuantity:remaining,providerQuantity:Number.isFinite(pq)?pq:null,providerWrites:0};
+  if(!Number.isFinite(Number(quoteAgeMs))||Number(quoteAgeMs)>15000)return{ok:false,state:"FOUNDER_CLOSE_REJECT_STALE_QUOTE",maxQuoteAgeMs:15000,quoteAgeMs:Number(quoteAgeMs),providerWrites:0};
+  const built=founderManualClosePayload(record,liveOutcomeBid,"FOUNDER-CLOSE-PREVIEW-NOT-SUBMITTED",requestedCount);
+  return{...built,providerWrites:0,submitted:false,manualCloseAuthorized:false};
+}
+async function founderManualClosePreview(env,record,requestedCount){
+  if(String(record?.source||"")!==FOUNDER_MANUAL_SOURCE)return{ok:false,state:"FOUNDER_CLOSE_REJECT_NOT_FOUNDER_OWNED",providerWrites:0};
+  const ticker=String(record?.ticker||record?.marketTicker||""),remaining=founderManualRemainingCount(record);
+  if(!ticker||!(remaining>0))return{ok:false,state:!ticker?"FOUNDER_CLOSE_REJECT_INVALID_TICKER":"FOUNDER_CLOSE_REJECT_ZERO_REMAINING",providerWrites:0};
+  const autoState=await loadExecutionTestState(env);
+  const autoConflict=executionTestOpenPositions(autoState).some(p=>String(p?.marketTicker||"")===ticker);
+  if(autoConflict)return{ok:false,state:"FOUNDER_CLOSE_REJECT_OWNERSHIP_AMBIGUOUS_AUTO_CONFLICT",ticker,providerWrites:0};
+  const pr=await kalshiExecutionGet(env,"/trade-api/v2/portfolio/positions?limit=1000");
+  if(!pr.ok)return{ok:false,state:"FOUNDER_CLOSE_REJECT_PROVIDER_POSITION_READ_FAILED",providerHttpStatus:pr.status,providerWrites:0};
+  const pb=await pr.json().catch(()=>({})),rows=Array.isArray(pb?.market_positions)?pb.market_positions:Array.isArray(pb?.positions)?pb.positions:[];
+  const exact=rows.find(x=>String(x?.ticker||x?.market_ticker||"")===ticker)||null,pq=Math.abs(Number(exact?.position??exact?.quantity));
+  if(!exact||!Number.isFinite(pq)||pq+1e-9<remaining)return{ok:false,state:"FOUNDER_CLOSE_REJECT_PROVIDER_POSITION_UNRECONCILED",ticker,remainingQuantity:remaining,providerQuantity:Number.isFinite(pq)?pq:null,providerWrites:0};
+  const qr=await kalshiExecutionGet(env,"/trade-api/v2/markets/"+encodeURIComponent(ticker)),quoteReadAt=Date.now();
+  if(!qr.ok)return{ok:false,state:"FOUNDER_CLOSE_REJECT_QUOTE_READ_FAILED",providerHttpStatus:qr.status,providerWrites:0};
+  const qb=await qr.json().catch(()=>({})),m=qb?.market||qb,outcome=String(record?.outcomeSide||record?.side||"").toUpperCase();
+  const liveBid=normalizeProbability(outcome==="YES"?(m?.yes_bid_dollars??m?.yes_bid):(m?.no_bid_dollars??m?.no_bid));
+  const result=founderManualCloseDryRun(record,{requestedCount,liveOutcomeBid:liveBid,quoteAgeMs:Date.now()-quoteReadAt,providerQuantity:pq,autoTickerConflict:false});
+  if(!result.ok)return{...result,ticker,providerHttpStatus:qr.status};
+  const fee=kalshiGeneralTakerFeeUsd(liveBid,remaining,1),estimatedProceeds=Number.isFinite(fee)?Number((remaining*liveBid-fee).toFixed(4)):null;
+  return{...result,source:FOUNDER_MANUAL_SOURCE,ticker,outcomeSide:outcome,providerPositionQuantity:pq,quote:{liveOutcomeBid:liveBid,readAt:new Date(quoteReadAt).toISOString(),maxAgeMs:15000},estimated:{grossProceedsUsd:Number((remaining*liveBid).toFixed(4)),feeUsd:fee,netProceedsUsd:estimatedProceeds},providerRequestPreview:{method:"POST",path:"/trade-api/v2/portfolio/events/orders",body:result.body},ledgerPersistenceSchema:["entryOrderId","entryFillQuantity","remainingQuantity","closeOrderId","closeFillQuantity","closeAveragePrice","closeFee","realizedPnlUsd","finalState","closedAt"],interlocks:{manualEntryAuthorized:false,manualCloseAuthorized:false,providerWriteRoutePresent:false,submitted:false}};
+
+
 const EXECUTION_TEST_QUEUE_PROOF_KEY="baseline-real-execution-queue-persistence-proof-v1";
 
 function defaultExecutionTestState(){
@@ -4980,6 +5033,26 @@ document.getElementById('export')?.addEventListener('click',async()=>{const r=aw
           oneTradeAuthorizationActive:false,
           controllerEnabled:false,postOrdersCalled:false,deleteOrdersCalled:false,submitted:false,realMoneyMoved:false}
       });
+    }
+
+    if (request.method === "GET" && url.pathname === "/founder-manual-close-preview") {
+      const recordId=String(url.searchParams.get("recordId")||"").trim(),requestedCount=Number(url.searchParams.get("count"));
+      const ledger=await loadFounderManualLedger(env),records=Array.isArray(ledger?.records)?ledger.records:[];
+      const record=records.find(r=>String(r?.id||r?.recordId||r?.entryOrderId||"")===recordId)||null;
+      if(!record)return json({ok:false,state:"FOUNDER_CLOSE_REJECT_POSITION_NOT_FOUND_OR_UNOWNED",source:FOUNDER_MANUAL_SOURCE,providerWrites:0,submitted:false,manualCloseAuthorized:false},404);
+      const result=await founderManualClosePreview(env,record,requestedCount);
+      return json(result,result.ok?200:409);
+    }
+
+    if (request.method === "GET" && url.pathname === "/founder-manual-close-proof") {
+      const founder={id:"MOCK-FOUNDER-1",source:FOUNDER_MANUAL_SOURCE,ticker:"KXMOCK15M-TEST",outcomeSide:"YES",entryOrderId:"MOCK-ENTRY",entryFillQuantity:3,closeFillQuantity:1,status:"OPEN"};
+      const auto={...founder,id:"MOCK-AUTO-1",source:AUTO_BASELINE_SOURCE};
+      const valid=founderManualCloseDryRun(founder,{requestedCount:2,liveOutcomeBid:.42,quoteAgeMs:100,providerQuantity:2});
+      const autoRejected=founderManualCloseDryRun(auto,{requestedCount:2,liveOutcomeBid:.42,quoteAgeMs:100,providerQuantity:2});
+      const oversized=founderManualCloseDryRun(founder,{requestedCount:3,liveOutcomeBid:.42,quoteAgeMs:100,providerQuantity:2});
+      const stale=founderManualCloseDryRun(founder,{requestedCount:2,liveOutcomeBid:.42,quoteAgeMs:16001,providerQuantity:2});
+      const ambiguous=founderManualCloseDryRun(founder,{requestedCount:2,liveOutcomeBid:.42,quoteAgeMs:100,providerQuantity:2,autoTickerConflict:true});
+      return json({ok:Boolean(valid.ok&&!autoRejected.ok&&!oversized.ok&&!stale.ok&&!ambiguous.ok),state:"FOUNDER_MANUAL_CLOSE_V1_ZERO_WRITE_PROOF",validFounderSample:valid,autoOwnedRejected:autoRejected,oversizedRejected:oversized,staleQuoteRejected:stale,ambiguousOwnershipRejected:ambiguous,assertions:{reverseBookSide:valid?.body?.side==="ask",reduceOnly:valid?.body?.reduce_only===true,exactRemainingQuantity:valid?.body?.count==="2.00",providerWrites:0,capitalMovedUsd:0,autoStateMutation:false,manualEntryAuthorized:false,manualCloseAuthorized:false},persistenceSchema:["entryOrderId","entryFillQuantity","remainingQuantity","closeOrderId","closeFillQuantity","closeAveragePrice","closeFee","realizedPnlUsd","finalState","closedAt"]});
     }
 
     if (request.method === "GET" && url.pathname === "/founder-capital-ledger") {
