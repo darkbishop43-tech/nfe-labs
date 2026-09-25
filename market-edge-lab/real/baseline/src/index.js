@@ -1349,7 +1349,7 @@ const EXECUTION_TEST_CONFIG={
   maxSelectableAttempts:100,
   maxConcurrent:3,
   requiredExchangeIndex:2,
-  minSeriesFundingUsd:5
+  minSeriesFundingUsd:1
 };
 const EXECUTION_TEST_STATE_KEY="baseline-real-execution-test-v1";
 
