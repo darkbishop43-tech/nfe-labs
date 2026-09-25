@@ -20,7 +20,8 @@ jobs:
           set -euo pipefail
           npx --yes wrangler@4 kv key get 'baseline-real-execution-test-v1' --namespace-id d110292129c94b26942c25d0c462a17b --remote > /tmp/state.json
           node <<'NODE'
-          (async()=>{\n          const fs=require('fs'),crypto=require('crypto');
+          (async()=>{
+          const fs=require('fs'),crypto=require('crypto');
           const st=JSON.parse(fs.readFileSync('/tmp/state.json','utf8'));
           const base='https://api.elections.kalshi.com/trade-api/v2';
           const keyId=process.env.KALSHI_EXECUTION_KEY_ID;
@@ -59,4 +60,5 @@ jobs:
           console.log('LOCAL_POSITIONS='+JSON.stringify(st.positions||[]));
           console.log('LOCAL_LEDGER='+JSON.stringify(st.ledger||[]));
           console.log('QUEUE_HISTORY='+JSON.stringify(st.queueHistory||[]));
+          })().catch(e=>{console.error(e);process.exit(1)});
           NODE
