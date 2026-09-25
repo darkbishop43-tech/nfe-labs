@@ -1,0 +1,61 @@
+name: Preflight Founder Navigation Baseline
+
+on:
+  push:
+    branches: [market-edge-baseline-real]
+    paths:
+      - '.github/workflows/preflight-founder-navigation.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Capture known-good live state and destinations
+        shell: bash
+        run: |
+          set -euo pipefail
+          B='https://market-edge-baseline-real.darkbishop43.workers.dev'
+          P='https://market-edge-siblings.darkbishop43.workers.dev'
+          O='https://market-edge-universal-observer.darkbishop43.workers.dev'
+          curl -fsS "$B/" -o /tmp/root.html
+          curl -fsS "$B/shadow-state" -o /tmp/shadow.json
+          curl -fsS "$B/execution-test-state" -o /tmp/exec.json
+          curl -fsS "$B/status" -o /tmp/status.json
+          curl -fsS "$B/wide-radar-state" -o /tmp/radar.json
+          curl -fsS "$P/api/paper-thresholds" -o /tmp/paper.json
+          curl -fsS "$P/api/state/payne" -o /tmp/payne.json
+          curl -fsS "$P/api/state/adaptive" -o /tmp/adaptive.json
+          curl -fsS "$O/" -o /tmp/observer.html
+          python - <<'PY'
+          import json,re
+          J=lambda p:json.load(open(p))
+          sh,ex,st,rad,pap,pa,ad=map(J,['/tmp/shadow.json','/tmp/exec.json','/tmp/status.json','/tmp/radar.json','/tmp/paper.json','/tmp/payne.json','/tmp/adaptive.json'])
+          html=open('/tmp/root.html',encoding='utf-8').read()
+          obs=open('/tmp/observer.html',encoding='utf-8').read()
+          out={
+            'baseline_root_ok':'Market Edge' in html and 'Baseline Real' in html,
+            'shadow_status':sh.get('status'),'shadow_lastRunAt':sh.get('lastRunAt'),
+            'shadow_entryScore':(sh.get('strategy') or {}).get('entryScore'),
+            'shadow_exitScore':(sh.get('strategy') or {}).get('exitScore'),
+            'shadow_opportunity_count':len(sh.get('opportunities') or []),
+            'execution_status':(ex.get('state') or {}).get('status'),
+            'execution_armed':(ex.get('state') or {}).get('armed'),
+            'execution_attemptsStarted':(ex.get('state') or {}).get('attemptsStarted'),
+            'status_marketScope':st.get('marketScope'),
+            'radar_live_status':(rad.get('live') or {}).get('status'),
+            'radar_last_run':(rad.get('live') or {}).get('lastRunAt'),
+            'paper_thresholds':pap,
+            'payne':{'balance':pa.get('balance'),'realizedPnl':pa.get('realizedPnl'),'trades':pa.get('trades'),'positions':len(pa.get('positions') or []),'lastRunAt':pa.get('lastRunAt')},
+            'adaptive':{'balance':ad.get('balance'),'realizedPnl':ad.get('realizedPnl'),'trades':ad.get('trades'),'positions':len(ad.get('positions') or []),'lastRunAt':ad.get('lastRunAt')},
+            'observer_root_ok':'UNIVERSAL OBSERVER' in obs.upper()
+          }
+          print(json.dumps(out,indent=2))
+          assert out['baseline_root_ok']
+          assert out['shadow_entryScore']==.80
+          assert pap['thresholds']['payne_method']['activeThreshold']==.65
+          assert pap['thresholds']['adaptive_market_lab']['activeThreshold']==.65
+          assert out['observer_root_ok']
+          PY
