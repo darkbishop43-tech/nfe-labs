@@ -124,7 +124,7 @@ jobs:
           npm init -y >/dev/null 2>&1
           npm install --silent playwright@1.55.0
           npx playwright install chromium >/dev/null
-          cat > /tmp/shot.mjs <<'JS'
+          cat > shot.mjs <<'JS'
           import { chromium } from 'playwright';
           const url='https://raw.githack.com/darkbishop43-tech/nfe-labs/founder-terminal-phase2/market-edge-lab/real/baseline/founder-terminal.html';
           const browser=await chromium.launch({headless:true});
@@ -143,7 +143,7 @@ jobs:
           console.log(JSON.stringify({mobile:{bodyScrollWidth:await mobile.evaluate(()=>document.body.scrollWidth),viewport:390}}));
           await browser.close();
           JS
-          node /tmp/shot.mjs
+          node shot.mjs
 
       - uses: actions/upload-artifact@v4
         with:
