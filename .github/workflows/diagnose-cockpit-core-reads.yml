@@ -1,0 +1,26 @@
+name: Diagnose Cockpit Core Reads
+
+on:
+  push:
+    branches: [founder-cockpit-phase2]
+    paths:
+      - '.github/workflows/diagnose-cockpit-core-reads.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Capture direct and cockpit statuses
+        shell: bash
+        run: |
+          set -u
+          B='https://market-edge-baseline-real.darkbishop43.workers.dev'
+          C='https://market-edge-founder-cockpit.darkbishop43.workers.dev'
+          for u in "$B/shadow-state" "$B/execution-test-state" "$B/wide-radar-state" "$B/kalshi-live-mirror-data" "$B/real-trade-state" "$B/account" "$B/status" "$C/api/runtime"; do
+            echo "=== $u"
+            curl -sS -w "\nHTTP=%{http_code}\n" "$u" | head -c 9000
+            echo
+          done
