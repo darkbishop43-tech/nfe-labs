@@ -1,0 +1,43 @@
+name: Verify Position FP Pagination Zero Money
+on:
+  push:
+    branches: [market-edge-baseline-real]
+    paths: ['.github/workflows/verify-position-fp-pagination-zero-money.yml']
+permissions: {contents: read}
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Zero money schema and management proof
+        run: |
+          set -euo pipefail
+          SRC=market-edge-lab/real/baseline/src/index.js
+          grep -q 'position_fp' "$SRC"
+          grep -q 'subaccount=0' "$SRC"
+          grep -q 'encodeURIComponent(cursor)' "$SRC"
+          grep -q 'paginationComplete=true' "$SRC"
+          node <<'NODE'
+          const fs=require('fs'),src=fs.readFileSync('market-edge-lab/real/baseline/src/index.js','utf8');
+          const m=src.match(/function classifyExecutionProviderPosition\(httpOk,body,ticker,meta=\{\}\)\{([\s\S]*?)\n  \}\n  const reconcileTargets/);
+          if(!m)throw Error('classifier missing');
+          const c=new Function('return function classifyExecutionProviderPosition(httpOk,body,ticker,meta={}){'+m[1]+'\n}')(),t='T';
+          const cases=[
+            ['FP_POS',true,{market_positions:[{ticker:t,position_fp:'1.00'}]},true,'OPEN'],
+            ['FP_NEG',true,{market_positions:[{ticker:t,position_fp:'-1.00'}]},true,'OPEN'],
+            ['FP_ZERO',true,{market_positions:[{ticker:t,position_fp:'0.00'}]},true,'FLAT'],
+            ['MISSING',true,{market_positions:[{ticker:t}]},true,'UNKNOWN'],
+            ['INVALID',true,{market_positions:[{ticker:t,position_fp:'x'}]},true,'UNKNOWN'],
+            ['WHITESPACE',true,{market_positions:[{ticker:t,position_fp:' 1.00 '}]},true,'UNKNOWN'],
+            ['UNKNOWN_SCHEMA',true,{data:[]},true,'UNKNOWN'],
+            ['TICKER_MISMATCH_COMPLETE',true,{market_positions:[{ticker:'OTHER',position_fp:'1.00'}]},true,'UNKNOWN'],
+            ['PAGINATION_INCOMPLETE',true,{market_positions:[{ticker:'OTHER',position_fp:'1.00'}],cursor:'NEXT'},false,'UNKNOWN']
+          ];
+          for(const [name,ok,b,complete,want] of cases){const r=c(ok,b,t,{providerReadAt:'fixture',providerHttpStatus:ok?200:500,paginationComplete:complete});if(r.classification!==want)throw Error(name);console.log('CASE='+JSON.stringify({name,...r}));}
+          for(const outcome of ['YES','NO'])for(const rec of ['OPEN','UNKNOWN']){
+            const payload={ticker:t,client_order_id:'DRY-RUN-NOT-SUBMITTED',side:outcome==='YES'?'ask':'bid',count:'1.00',price:'0.5000',time_in_force:'immediate_or_cancel',self_trade_prevention_type:'taker_at_cross',post_only:false,cancel_order_on_pause:true,reduce_only:true};
+            console.log('MANAGE='+JSON.stringify({outcome,reconciliation:rec,locallyOwned:true,retryRequired:rec==='UNKNOWN',scoreExitEligible:.19<=.20,maxHoldExitEligible:300001>=300000,payload,submitted:false}));
+          }
+          console.log('SAFETY='+JSON.stringify({providerWrites:0,capitalMovedUsd:0,ordersSubmitted:0,newQueueArmed:false}));
+          NODE
+          curl -fsS https://market-edge-baseline-real.darkbishop43.workers.dev/execution-test-state | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const j=JSON.parse(s);console.log("RUNTIME="+JSON.stringify({status:j?.state?.status,armed:j?.state?.armed,openPositions:j?.state?.openPositions,queue:j?.queue,funding:j?.funding}))})'
