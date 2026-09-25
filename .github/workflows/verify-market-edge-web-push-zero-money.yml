@@ -156,11 +156,11 @@ jobs:
           const ex=require("/tmp/pre-arm.json");
           if(ex?.state?.armed!==false||ex?.state?.openPositions!==0)throw new Error("unsafe pre-arm state");
           if(ex?.safety?.productionBaselineEntryScore!==0.8||ex?.safety?.maxEntryDebitUsd!==1)throw new Error("protected execution invariant changed");
-          const idx=Number(ex?.funding?.index2Usd);
+          const idx=Number(ex?.funding?.index2);
           if(!Number.isFinite(idx)||idx<1)throw new Error("existing Index 2 capital does not satisfy $1 gate");
           console.log("PRE_ARM="+JSON.stringify({armed:ex.state.armed,openPositions:ex.state.openPositions,index2Usd:idx,productionBaseline:ex.safety.productionBaselineEntryScore}));
           NODE
-          curl -fsS -L -X POST "$BASE/execution-test-arm"             -H 'content-type: application/x-www-form-urlencoded'             --data 'authorization=ARM_BOUNDED_EXECUTION_TESTS_MAX_1_USD&testScore=.65&runCount=1'             -o /tmp/arm-result.html
+          curl -fsS -X POST "$BASE/execution-test-arm"             -H 'content-type: application/x-www-form-urlencoded'             --data 'authorization=ARM_BOUNDED_EXECUTION_TESTS_MAX_1_USD&testScore=.65&runCount=1'             -o /tmp/arm-result.html
           curl -fsS "$BASE/execution-test-state" -o /tmp/post-arm.json
           node - <<'NODE'
           const ex=require("/tmp/post-arm.json");
