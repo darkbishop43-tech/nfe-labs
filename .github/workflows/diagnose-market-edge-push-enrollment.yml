@@ -1,0 +1,57 @@
+name: Diagnose Market Edge Push Enrollment
+
+on:
+  push:
+    branches: [market-edge-baseline-real]
+    paths: ['.github/workflows/diagnose-market-edge-push-enrollment.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install browser diagnostic
+        run: |
+          npm install --no-save playwright@1.55.0
+          npx playwright install --with-deps chromium
+      - name: Trace existing enrollment click
+        run: |
+          node <<'NODE'
+          const { chromium }=require('playwright');
+          (async()=>{
+            const browser=await chromium.launch({headless:true});
+            const context=await browser.newContext({permissions:[]});
+            const page=await context.newPage();
+            const errors=[];
+            page.on('pageerror',e=>errors.push('PAGEERROR '+e.message));
+            page.on('console',m=>{if(m.type()==='error')errors.push('CONSOLE '+m.text())});
+            await page.goto('https://market-edge-baseline-real.darkbishop43.workers.dev/',{waitUntil:'domcontentloaded'});
+            await page.waitForSelector('#enablePushBtn');
+            const before=await page.evaluate(()=>({
+              button:document.querySelector('#enablePushBtn')?.textContent,
+              status:document.querySelector('#pushStatus')?.textContent,
+              permission:typeof Notification==='undefined'?'unavailable':Notification.permission,
+              notification:typeof Notification!=='undefined',
+              serviceWorker:'serviceWorker' in navigator,
+              pushManager:'PushManager' in window,
+              handler:typeof window.enableNfePush
+            }));
+            await page.click('#enablePushBtn');
+            await page.waitForTimeout(1500);
+            const after=await page.evaluate(()=>({
+              button:document.querySelector('#enablePushBtn')?.textContent,
+              status:document.querySelector('#pushStatus')?.textContent,
+              permission:typeof Notification==='undefined'?'unavailable':Notification.permission
+            }));
+            console.log(JSON.stringify({before,after,errors},null,2));
+            if(before.button===after.button && before.status===after.status) process.exitCode=2;
+            await browser.close();
+          })();
+          NODE
