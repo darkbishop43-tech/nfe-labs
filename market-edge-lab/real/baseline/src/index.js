@@ -3984,8 +3984,11 @@ export default {
         controllerError=String(error?.message||error||"CONTROLLER_RUNTIME_ERROR").slice(0,160);
       }
 
-      // Notification adapter is downstream/best-effort and cannot block or mutate trading.\n      ctx.waitUntil(dispatchExecutionNotifications(env).catch(()=>{}));
-      ctx.waitUntil(dispatchOnePaynePaperFishNotification(env).catch(()=>{}));\n\n      const traceState=await loadRealTradeState(env);
+      // Notification adapter is downstream/best-effort and cannot block or mutate trading.
+      ctx.waitUntil(dispatchExecutionNotifications(env).catch(()=>{}));
+      ctx.waitUntil(dispatchOnePaynePaperFishNotification(env).catch(()=>{}));
+
+      const traceState=await loadRealTradeState(env);
       const traceTestThreshold=Number(traceState?.founderAuthorization?.testEntryScore);
       const traceEntryThreshold=kalshiAuthorizationValid(traceState)&&Number.isFinite(traceTestThreshold)?traceTestThreshold:REAL_TEST_CONFIG.entryScore;
       const controllerEligible=(freshShadow?.opportunities||[]).filter(o =>
