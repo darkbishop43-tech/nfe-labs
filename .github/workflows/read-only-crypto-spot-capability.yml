@@ -1,0 +1,32 @@
+name: Read Only Crypto Spot Capability
+
+on:
+  push:
+    branches: [market-edge-baseline-real]
+    paths:
+      - '.github/workflows/read-only-crypto-spot-capability.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check public spot inputs for discovered Kalshi assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json,urllib.request
+          assets=['BTC','ETH','SOL','XRP','HYPE','ZEC','DOGE','BNB','NEAR','ADA','TON','BCH']
+          out={}
+          for a in assets:
+              try:
+                  req=urllib.request.Request('https://api.exchange.coinbase.com/products/'+a+'-USD/ticker',headers={'User-Agent':'NFE-OS-ReadOnly-Spot-Capability/1.0'})
+                  with urllib.request.urlopen(req,timeout=15) as r:
+                      d=json.load(r);out[a]={'http':r.status,'price_present':bool(d.get('price'))}
+              except Exception as e:
+                  out[a]={'http':None,'price_present':False,'error':type(e).__name__}
+          print('SPOT='+json.dumps(out,separators=(',',':')))
+          PY
