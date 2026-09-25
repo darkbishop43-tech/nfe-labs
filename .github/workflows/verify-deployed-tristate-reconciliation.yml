@@ -1,0 +1,60 @@
+name: Verify Deployed Tri-State Reconciliation
+on:
+  push:
+    branches: [market-edge-baseline-real]
+    paths: ['.github/workflows/verify-deployed-tristate-reconciliation.yml']
+permissions: {contents: read}
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: {node-version: '22'}
+      - name: Deployed source plus zero-money acceptance
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          SRC=market-edge-lab/real/baseline/src/index.js
+          grep -q 'classification:"UNKNOWN",reason:"QUANTITY_MISSING"' "$SRC"
+          grep -q 'classification:"FLAT",reason:"MATCHED_TICKER_VALID_ZERO_QUANTITY"' "$SRC"
+          grep -q 'TEST_POSITION_RECONCILIATION_UNKNOWN_RETAINED' "$SRC"
+          grep -q 'reconciliationClassification:p.reconciliationClassification' "$SRC"
+          curl -fsS https://market-edge-baseline-real.darkbishop43.workers.dev/execution-test-state > /tmp/runtime.json
+          npx --yes wrangler@4 deployments list --name market-edge-baseline-real > /tmp/deployments.txt
+          cat /tmp/deployments.txt
+          node <<'NODE'
+          const fs=require('fs'),src=fs.readFileSync('market-edge-lab/real/baseline/src/index.js','utf8'),rt=JSON.parse(fs.readFileSync('/tmp/runtime.json','utf8'));
+          const m=src.match(/function classifyExecutionProviderPosition\(httpOk,body,ticker,meta=\{\}\)\{([\s\S]*?)\n  \}\n  const reconcileTargets/);
+          if(!m)throw Error('deployed-source classifier not found in committed deployment source');
+          const classify=new Function('return function classifyExecutionProviderPosition(httpOk,body,ticker,meta={}){'+m[1]+'\n}')();
+          const t='FIXTURE-TICKER';
+          const cases=[
+            ['YES_OPEN',true,{market_positions:[{ticker:t,position:1}]},'OPEN'],
+            ['NO_OPEN',true,{market_positions:[{ticker:t,position:-1}]},'OPEN'],
+            ['VALID_ZERO',true,{market_positions:[{ticker:t,position:0}]},'FLAT'],
+            ['MISSING_QUANTITY',true,{market_positions:[{ticker:t}]},'UNKNOWN'],
+            ['INVALID_QUANTITY',true,{market_positions:[{ticker:t,position:'bad'}]},'UNKNOWN'],
+            ['UNKNOWN_SCHEMA',true,{data:[{ticker:t,position:1}]},'UNKNOWN'],
+            ['HTTP_FAILURE',false,{},'UNKNOWN'],
+            ['TICKER_MISMATCH',true,{market_positions:[{ticker:'OTHER',position:1}]},'UNKNOWN'],
+            ['TICKER_AMBIGUOUS',true,{market_positions:[{ticker:t,position:1},{ticker:t,position:1}]},'UNKNOWN']
+          ];
+          for(const [name,ok,b,expected] of cases){const r=classify(ok,b,t,{providerReadAt:'fixture',providerHttpStatus:ok?200:500}); if(r.classification!==expected)throw Error(name+' expected '+expected+' got '+r.classification); console.log('TRISTATE='+JSON.stringify({name,...r,localCloseAllowed:r.classification==='FLAT'}));}
+          // Pagination/incomplete result is deliberately UNKNOWN because omission cannot certify flat.
+          const pag=classify(true,{market_positions:[{ticker:'OTHER',position:1}],cursor:'MORE'},t,{providerReadAt:'fixture',providerHttpStatus:200});
+          if(pag.classification!=='UNKNOWN')throw Error('pagination omission must be UNKNOWN');
+          console.log('TRISTATE='+JSON.stringify({name:'PAGINATION_INCOMPLETE',...pag,localCloseAllowed:false}));
+          function exitPayload(outcome,currentBid){const side=outcome==='YES'?'ask':'bid',yesLeg=outcome==='YES'?currentBid:1-currentBid;return{ticker:t,client_order_id:'DRY-RUN-NOT-SUBMITTED',side,count:'1.00',price:yesLeg.toFixed(4),time_in_force:'immediate_or_cancel',self_trade_prevention_type:'taker_at_cross',post_only:false,cancel_order_on_pause:true,reduce_only:true};}
+          for(const outcome of ['YES','NO'])for(const reconciliation of ['OPEN','UNKNOWN']){
+            const locallyOwned=true,ageMs=300001,score=.19;
+            const p=exitPayload(outcome,.5);
+            console.log('MANAGE='+JSON.stringify({outcome,reconciliation,locallyOwned,scoreExitEligible:score<=.20,maxHoldExitEligible:ageMs>=300000,payload:p,submitted:false,providerWrites:0,capitalMovedUsd:0}));
+          }
+          console.log('RUNTIME='+JSON.stringify({status:rt?.state?.status,armed:rt?.state?.armed,openPositions:rt?.state?.openPositions,queue:rt?.queue,funding:rt?.funding}));
+          console.log('OBSERVABILITY='+JSON.stringify(['reconciliationClassification','reconciliationReason','providerReadAt','providerHttpStatus','recognizedSchema','matchedTicker','rawQuantityFieldUsed','normalizedQuantity','accountContextKnown','paginationComplete','reconciliationRetryRequired']));
+          console.log('CONTEXT='+JSON.stringify({accountIndexContext:'NOT_YET_PROVEN',reason:'positions request has no exchange_index/subaccount selector; source deliberately records accountContextKnown=false and paginationComplete=false'}));
+          console.log('SAFETY='+JSON.stringify({providerWrites:0,capitalMovedUsd:0,ordersSubmitted:0,runtimeMoneyMutation:false,newQueueArmed:false}));
+          NODE
