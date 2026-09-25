@@ -75,3 +75,5 @@ jobs:
           grep -Fq 'ctx.waitUntil(dispatchExecutionNotifications(env).catch(()=>{}))' "$F"
 
 # verification rerun after notification adapter wiring
+
+# verification rerun after mobile enrollment parser repair
