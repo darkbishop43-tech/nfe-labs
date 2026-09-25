@@ -1,0 +1,36 @@
+name: Probe Execution Disarm Acceptance
+on:
+  push:
+    branches: [market-edge-baseline-real]
+    paths: ['.github/workflows/probe-execution-disarm-acceptance.yml']
+permissions: {contents: read}
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Read-only live acceptance
+        run: |
+          set -euo pipefail
+          R='https://market-edge-baseline-real.darkbishop43.workers.dev'
+          echo '=== READBACK 1 ==='
+          curl -fsS "$R/execution-test-state" | tee /tmp/state1.json
+          echo
+          echo '=== WAIT FOR POST-DISARM SCHEDULER CYCLE ==='
+          sleep 75
+          echo '=== READBACK 2 ==='
+          curl -fsS "$R/execution-test-state" | tee /tmp/state2.json
+          echo
+          node <<'NODE'
+          const fs=require('fs');
+          const a=JSON.parse(fs.readFileSync('/tmp/state1.json','utf8'));
+          const b=JSON.parse(fs.readFileSync('/tmp/state2.json','utf8'));
+          const summary=x=>({
+            status:x.state?.status, armed:x.state?.armed, openPositions:x.state?.openPositions,
+            queue:x.queue, history:x.history, funding:x.funding, safety:x.safety
+          });
+          console.log('ACCEPTANCE_1='+JSON.stringify(summary(a)));
+          console.log('ACCEPTANCE_2='+JSON.stringify(summary(b)));
+          if(a.state?.armed||a.queue?.active||Number(a.state?.openPositions)!==0) process.exitCode=21;
+          if(b.state?.armed||b.queue?.active||Number(b.state?.openPositions)!==0) process.exitCode=22;
+          if(Number(b.safety?.productionBaselineEntryScore)!==0.80) process.exitCode=23;
+          NODE
