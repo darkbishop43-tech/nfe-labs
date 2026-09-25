@@ -24,10 +24,11 @@ export default{
   if(u.pathname==='/api/runtime'){
     const paths=['/shadow-state','/wide-radar-state','/real-trade-state','/execution-test-state','/kalshi-live-mirror-data','/account','/status'];
     const res=await Promise.all(paths.map(p=>baseline(p)));
-    const bad=res.find(x=>!x.ok);
-    if(bad)return json({ok:false,state:'BASELINE_READ_INCOMPLETE',httpStatus:bad.status,executionAuthority:false},502);
-    return json({ok:true,observedAt:new Date().toISOString(),executionAuthority:false,baselineMutation:false,
-      shadow:res[0].body,wideRadar:res[1].body,realTradeState:res[2].body,executionTestState:res[3].body,mirror:res[4].body,account:res[5].body,status:res[6].body});
+    const coreOk=res[0].ok&&res[3].ok;
+    return json({ok:coreOk,state:coreOk?'LIVE_READ_ONLY':'CORE_READ_FAILED',observedAt:new Date().toISOString(),executionAuthority:false,baselineMutation:false,
+      sources:Object.fromEntries(paths.map((p,i)=>[p,{ok:res[i].ok,httpStatus:res[i].status}])),
+      shadow:res[0].ok?res[0].body:null,wideRadar:res[1].ok?res[1].body:null,realTradeState:res[2].ok?res[2].body:null,
+      executionTestState:res[3].ok?res[3].body:null,mirror:res[4].ok?res[4].body:null,account:res[5].ok?res[5].body:null,status:res[6].ok?res[6].body:null},coreOk?200:502);
   }
   if(u.pathname==='/api/ticker'){
     const asset=String(u.searchParams.get('asset')||'').toUpperCase();
