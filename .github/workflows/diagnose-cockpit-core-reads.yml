@@ -19,8 +19,33 @@ jobs:
           set -u
           B='https://market-edge-baseline-real.darkbishop43.workers.dev'
           C='https://market-edge-founder-cockpit.darkbishop43.workers.dev'
+          n=0
           for u in "$B/shadow-state" "$B/execution-test-state" "$B/wide-radar-state" "$B/kalshi-live-mirror-data" "$B/real-trade-state" "$B/account" "$B/status" "$C/api/runtime"; do
-            echo "=== $u"
-            curl -sS -w "\nHTTP=%{http_code}\n" "$u" | head -c 9000
-            echo
+            n=$((n+1)); file="/tmp/r$n"
+            code=$(curl -sS -o "$file" -w '%{http_code}' "$u")
+            echo "=== HTTP=$code URL=$u BYTES=$(wc -c < "$file")"
+            python - "$file" <<'PY'
+          import sys
+          s=open(sys.argv[1],encoding='utf-8',errors='replace').read()
+          print(s[:700].replace('\n',' '))
+          PY
+          done
+
+          # Probe the four cockpit detail routes without failing the diagnostic.
+          curl -sS "$C/api/runtime" -o /tmp/runtime.json
+          ASSET=$(python - <<'PY'
+          import json
+          r=json.load(open('/tmp/runtime.json'));print((r.get('shadow') or {}).get('opportunities',[{}])[0].get('asset','BTC'))
+          PY
+          )
+          TICKER=$(python - <<'PY'
+          import json
+          r=json.load(open('/tmp/runtime.json'));print((r.get('shadow') or {}).get('opportunities',[{}])[0].get('marketTicker',''))
+          PY
+          )
+          for u in "$C/api/ticker?asset=$ASSET" "$C/api/candles?asset=$ASSET&granularity=60" "$C/api/market?ticker=$TICKER" "$C/api/orderbook?ticker=$TICKER"; do
+            n=$((n+1)); file="/tmp/r$n"
+            code=$(curl -sS -o "$file" -w '%{http_code}' "$u")
+            echo "=== HTTP=$code URL=$u BYTES=$(wc -c < "$file")"
+            cat "$file"; echo
           done
