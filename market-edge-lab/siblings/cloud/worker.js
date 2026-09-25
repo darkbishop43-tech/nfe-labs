@@ -6,6 +6,25 @@
 const FEED='https://market-edge-lab.darkbishop43.workers.dev/api/state';
 const MAX_STAKE=5, MAX_OPEN=6, MAX_HOLD_MS=5*60*1000, COOLDOWN_MS=5*60*1000;
 const labs=['nfe_reasoning','payne_method','adaptive_market_lab'];
+const PAPER_THRESHOLD_ALLOWED=['payne_method','adaptive_market_lab'];
+const PAPER_THRESHOLD_VALUES=[.50,.55,.60,.65,.70,.75,.80,.85,.90];
+const PAPER_THRESHOLD_PREFIX='control:paper_threshold:';
+const paperThresholdValid=v=>PAPER_THRESHOLD_VALUES.some(x=>Math.abs(Number(v)-x)<1e-9);
+const paperThresholdKey=lab=>PAPER_THRESHOLD_PREFIX+lab;
+async function loadPaperThreshold(env,lab){
+  if(!PAPER_THRESHOLD_ALLOWED.includes(lab))return{supported:false,lab,activeThreshold:null,status:'UNSUPPORTED'};
+  const saved=await env.SIBLING_STATE.get(paperThresholdKey(lab),'json');
+  const active=paperThresholdValid(saved?.activeThreshold)?Number(saved.activeThreshold):.80;
+  return{supported:true,lab,activeThreshold:active,status:'VERIFIED',updatedAt:saved?.updatedAt||null};
+}
+async function setPaperThreshold(env,lab,requested){
+  if(!PAPER_THRESHOLD_ALLOWED.includes(lab))return{ok:false,lab,status:'UNSUPPORTED_TARGET',requestedThreshold:Number(requested)};
+  if(!paperThresholdValid(requested))return{ok:false,lab,status:'INVALID_THRESHOLD',requestedThreshold:Number(requested)};
+  const previous=await loadPaperThreshold(env,lab),record={schema:'PAPER_THRESHOLD_V1',lab,activeThreshold:Number(requested),updatedAt:now(),scope:'PAPER_ONLY_NEW_ENTRIES'};
+  await env.SIBLING_STATE.put(paperThresholdKey(lab),JSON.stringify(record));
+  const verified=await loadPaperThreshold(env,lab);
+  return{ok:verified.activeThreshold===Number(requested),lab,requestedThreshold:Number(requested),previousThreshold:previous.activeThreshold,activeThreshold:verified.activeThreshold,status:verified.activeThreshold===Number(requested)?'VERIFIED':'NOT_VERIFIED'};
+}
 const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
 const num=v=>Number(v||0);
 const q=o=>o.question||o.title||o.marketQuestion||o.slug||'Unknown market';
@@ -19,9 +38,9 @@ const marketId=o=>String(o.id??o.marketId??o.conditionId??o.slug??q(o));
 const key=o=>`${marketId(o)}:${o.positionOutcome||'YES'}:${side(o)}`;
 const now=()=>new Date().toISOString();
 function fresh(lab){return{mode:'PAPER_ONLY',lab,balance:100,realizedPnl:0,positions:[],ledger:[],trades:0,createdAt:now(),lastRunAt:null}}
-function analyzePayne(o){const sc=score(o),ed=edge(o),mv=Math.abs(move(o));const radar=sc>=.50,lock=radar&&sc>=.65&&ed>0,trigger=lock&&sc>=.80&&mv>=.002;return{label:trigger?'PULL TRIGGER':lock?'LOCK IN':radar?'RADAR':'PASS',confidence:Math.round(sc*100)}}
+function analyzePayne(o,entryThreshold=.80){const sc=score(o),ed=edge(o),mv=Math.abs(move(o));const radar=sc>=.50,lock=radar&&sc>=.65&&ed>0,trigger=lock&&sc>=entryThreshold&&mv>=.002;return{label:trigger?'PULL TRIGGER':lock?'LOCK IN':radar?'RADAR':'PASS',confidence:Math.round(sc*100),entryThreshold}}
 function analyzeNfe(o,os){const a=asset(o),sd=side(o),sc=score(o),ed=edge(o);const peers=os.filter(x=>asset(x)===a&&side(x)===sd).sort((x,y)=>score(y)-score(x));const rank=Math.max(1,peers.findIndex(x=>key(x)===key(o))+1);const opposite=os.filter(x=>asset(x)===a&&side(x)!==sd).sort((x,y)=>score(y)-score(x))[0];const oppScore=opposite?score(opposite):null;let label='REJECT';if(sc>=.80&&ed>0&&rank===1&&(oppScore==null||sc>=oppScore+.05))label='ENTER';else if(sc>=.65||rank===1)label='WATCH';return{label,confidence:clamp(Math.round(sc*100),35,95),rank,oppositeScore:oppScore}}
-function decision(lab,o,os){return (lab==='payne_method'||lab==='adaptive_market_lab')?analyzePayne(o):analyzeNfe(o,os)}
+function decision(lab,o,os,entryThreshold=.80){return (lab==='payne_method'||lab==='adaptive_market_lab')?analyzePayne(o,entryThreshold):analyzeNfe(o,os)}
 function action(lab){return (lab==='payne_method'||lab==='adaptive_market_lab')?'PULL TRIGGER':'ENTER'}
 function opps(s){const a=s?.opportunities||s?.eligible||s?.candidates||[];return Array.isArray(a)?a:[]}
 function lastExit(st,k){return(st.ledger||[]).slice().reverse().find(x=>x.type==='PAPER_EXIT'&&x.oppKey===k)}
@@ -29,8 +48,8 @@ function close(st,p,o,reason){const exit=o?price(o):p.entry;if(!(exit>0)||!(p.en
 function open(st,o,d){const entry=price(o),stake=Math.min(MAX_STAKE,st.balance);if(!(entry>0&&entry<1)||stake<=0)return false;const p={oppKey:key(o),marketId:marketId(o),question:q(o),asset:asset(o),side:side(o),positionOutcome:o.positionOutcome||'YES',stake,entry,score:score(o),edge:edge(o),decision:d.label,decisionEvidence:d,entryTs:now()};st.balance-=stake;st.positions.push(p);st.ledger.push({type:'PAPER_ENTRY',lab:st.lab,ts:p.entryTs,...p});return true}
 async function load(env,lab){const x=await env.SIBLING_STATE.get(`state:${lab}`,'json');return x||fresh(lab)}
 async function save(env,lab,st){await env.SIBLING_STATE.put(`state:${lab}`,JSON.stringify(st))}
-async function runLab(env,lab,s){const st=await load(env,lab),os=opps(s);for(const p of [...st.positions]){const o=os.find(x=>key(x)===p.oppKey),held=Date.now()-Date.parse(p.entryTs),d=o?decision(lab,o,os):{label:'MISSING'};if(held>=MAX_HOLD_MS)close(st,p,o,'max_hold');else if(!o)close(st,p,null,'market_missing');else if(d.label!==action(lab))close(st,p,o,'decision_exit')}
-const openKeys=new Set(st.positions.map(p=>p.oppKey));for(const o of os.slice().sort((a,b)=>score(b)-score(a)||edge(b)-edge(a))){if(st.positions.length>=MAX_OPEN)break;const k=key(o);if(openKeys.has(k))continue;const d=decision(lab,o,os);if(d.label!==action(lab))continue;const le=lastExit(st,k);if(le&&Date.now()-Date.parse(le.ts)<COOLDOWN_MS)continue;if(open(st,o,d))openKeys.add(k)}st.lastRunAt=now();st.sharedSnapshotAt=s.lastRunAt||s.updatedAt||null;await save(env,lab,st);return st}
+async function runLab(env,lab,s){const st=await load(env,lab),os=opps(s),thresholdState=await loadPaperThreshold(env,lab),entryThreshold=thresholdState.supported?thresholdState.activeThreshold:.80;for(const p of [...st.positions]){const o=os.find(x=>key(x)===p.oppKey),held=Date.now()-Date.parse(p.entryTs);if(held>=MAX_HOLD_MS)close(st,p,o,'max_hold');else if(!o)close(st,p,null,'market_missing');else{const originalEntryThreshold=paperThresholdValid(p.entryThreshold)?Number(p.entryThreshold):.80;const d=decision(lab,o,os,originalEntryThreshold);if(d.label!==action(lab))close(st,p,o,'decision_exit')}}
+const openKeys=new Set(st.positions.map(p=>p.oppKey));for(const o of os.slice().sort((a,b)=>score(b)-score(a)||edge(b)-edge(a))){if(st.positions.length>=MAX_OPEN)break;const k=key(o);if(openKeys.has(k))continue;const d=decision(lab,o,os,entryThreshold);if(d.label!==action(lab))continue;const le=lastExit(st,k);if(le&&Date.now()-Date.parse(le.ts)<COOLDOWN_MS)continue;const before=st.positions.length;if(open(st,o,d)){openKeys.add(k);const p=st.positions[st.positions.length-1];if(st.positions.length>before&&p){p.entryThreshold=entryThreshold;const le=st.ledger[st.ledger.length-1];if(le?.type==='PAPER_ENTRY')le.entryThreshold=entryThreshold;}}}st.activeEntryThreshold=entryThreshold;st.thresholdRuntimeVerified=true;st.lastRunAt=now();st.sharedSnapshotAt=s.lastRunAt||s.updatedAt||null;await save(env,lab,st);return st}
 async function run(env){const r=await fetch(FEED,{headers:{accept:'application/json'},cf:{cacheTtl:0}});if(!r.ok)throw Error(`shared feed ${r.status}`);const s=await r.json();const result={};for(const lab of labs)result[lab]=await runLab(env,lab,s);return result}
 
 const CALIBRATION_KEY='state:adaptive_market_lab:execution_calibration:v1';
@@ -118,4 +137,8 @@ async function runCalibration(env){
 }
 
 const json=x=>new Response(JSON.stringify(x,null,2),{headers:{'content-type':'application/json','access-control-allow-origin':'*','cache-control':'no-store'}});
-export default {async scheduled(e,env,ctx){ctx.waitUntil(run(env));ctx.waitUntil(runCalibration(env))},async fetch(req,env){const u=new URL(req.url);try{if(u.pathname==='/api/calibration/run')return json(await runCalibration(env));if(u.pathname==='/api/calibration/state')return json(await calLoad(env));if(u.pathname==='/api/run')return json(await run(env));if(u.pathname==='/api/state/nfe')return json(await load(env,'nfe_reasoning'));if(u.pathname==='/api/state/payne')return json(await load(env,'payne_method'));if(u.pathname==='/api/state/adaptive')return json(await load(env,'adaptive_market_lab'));if(u.pathname==='/api/state')return json({nfe:await load(env,'nfe_reasoning'),payne:await load(env,'payne_method'),adaptive:await load(env,'adaptive_market_lab')});return json({name:'NFE-OS Market Edge Sibling Cloud Executor',mode:'PAPER_ONLY',baseline:'UNTOUCHED',routes:['/api/run','/api/state','/api/state/nfe','/api/state/payne','/api/state/adaptive','/api/calibration/run','/api/calibration/state']})}catch(e){return new Response(JSON.stringify({ok:false,error:String(e?.message||e)}),{status:500,headers:{'content-type':'application/json','access-control-allow-origin':'*'}})}}};
+export default {async scheduled(e,env,ctx){ctx.waitUntil(run(env));ctx.waitUntil(runCalibration(env))},async fetch(req,env){const u=new URL(req.url);try{
+if(u.pathname==='/api/paper-thresholds'&&req.method==='GET')return json({mode:'PAPER_ONLY',allowlist:PAPER_THRESHOLD_ALLOWED,realTargetsAccepted:false,thresholds:{payne_method:await loadPaperThreshold(env,'payne_method'),adaptive_market_lab:await loadPaperThreshold(env,'adaptive_market_lab')}});
+if(u.pathname==='/api/paper-threshold'&&req.method==='POST'){const b=await req.json().catch(()=>({}));if(!PAPER_THRESHOLD_ALLOWED.includes(String(b?.lab||'')))return new Response(JSON.stringify({ok:false,status:'UNSUPPORTED_TARGET',realTargetsAccepted:false}),{status:400,headers:{'content-type':'application/json','access-control-allow-origin':'*'}});return json(await setPaperThreshold(env,String(b.lab),Number(b.threshold)));}
+if(u.pathname==='/api/paper-thresholds/apply-all'&&req.method==='POST'){const b=await req.json().catch(()=>({}));if(!paperThresholdValid(b?.threshold))return new Response(JSON.stringify({ok:false,status:'INVALID_THRESHOLD',realTargetsAccepted:false}),{status:400,headers:{'content-type':'application/json','access-control-allow-origin':'*'}});const results=[];for(const lab of PAPER_THRESHOLD_ALLOWED)results.push(await setPaperThreshold(env,lab,Number(b.threshold)));return json({ok:results.every(x=>x.ok),scope:'SUPPORTED_PAPER_LABS_ONLY',realTargetsAccepted:false,requestedThreshold:Number(b.threshold),results});}
+if(u.pathname==='/api/calibration/run')return json(await runCalibration(env));if(u.pathname==='/api/calibration/state')return json(await calLoad(env));if(u.pathname==='/api/run')return json(await run(env));if(u.pathname==='/api/state/nfe')return json(await load(env,'nfe_reasoning'));if(u.pathname==='/api/state/payne')return json(await load(env,'payne_method'));if(u.pathname==='/api/state/adaptive')return json(await load(env,'adaptive_market_lab'));if(u.pathname==='/api/state')return json({nfe:await load(env,'nfe_reasoning'),payne:await load(env,'payne_method'),adaptive:await load(env,'adaptive_market_lab')});return json({name:'NFE-OS Market Edge Sibling Cloud Executor',mode:'PAPER_ONLY',baseline:'UNTOUCHED',routes:['/api/run','/api/state','/api/state/nfe','/api/state/payne','/api/state/adaptive','/api/paper-thresholds','/api/paper-threshold','/api/paper-thresholds/apply-all','/api/calibration/run','/api/calibration/state']})}catch(e){return new Response(JSON.stringify({ok:false,error:String(e?.message||e)}),{status:500,headers:{'content-type':'application/json','access-control-allow-origin':'*'}})}}};
