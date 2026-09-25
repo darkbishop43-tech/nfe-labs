@@ -1,0 +1,39 @@
+name: Prove Micro Lifecycle Control Surface
+on:
+  push:
+    branches: [market-edge-baseline-real]
+    paths: ['.github/workflows/prove-micro-lifecycle-control-surface.yml']
+permissions: {contents: read}
+jobs:
+  prove:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Exact live route and safety proof
+        run: |
+          set -euo pipefail
+          URL='https://market-edge-baseline-real.darkbishop43.workers.dev/micro-lifecycle-validation-control'
+          code=$(curl -sS -D /tmp/h -o /tmp/body -w '%{http_code}' "$URL")
+          echo "HTTP=$code"
+          cat /tmp/h
+          cat /tmp/body
+          test "$code" = 200
+          grep -q 'content-type: text/html' /tmp/h
+          grep -q 'x-nfe-control: MICRO_LIFECYCLE_PREPARED_NOT_AUTHORIZED' /tmp/h
+          grep -q 'MICROSCOPIC REAL LIFECYCLE VALIDATION' /tmp/body
+          grep -q 'PREPARED / NOT AUTHORIZED' /tmp/body
+          grep -q 'ONE REAL ENTRY MAXIMUM' /tmp/body
+          grep -q 'THIS IS A LIFECYCLE TEST, NOT A PROFIT TEST' /tmp/body
+          grep -q 'maxAttempts = <code>1' /tmp/body
+          grep -q 'maxConcurrent = <code>1' /tmp/body
+          grep -q 'maxEntryDebitUsd = <code>\$1.00' /tmp/body
+          grep -q 'production threshold = <code>.80' /tmp/body
+          grep -q 'open positions = <code>0' /tmp/body
+          grep -q '🔒 AUTHORIZE ONE MICRO LIFECYCLE VALIDATION' /tmp/body
+          grep -q 'disabled' /tmp/body
+          curl -fsS https://market-edge-baseline-real.darkbishop43.workers.dev/execution-test-state > /tmp/state
+          node <<'NODE'
+          const p=require('/tmp/state');
+          if(p?.state?.armed!==false||p?.state?.openPositions!==0||p?.queue?.active!==false)throw Error('LIVE_AUTHORITY_NOT_LOCKED');
+          console.log('LIVE_STATE='+JSON.stringify({armed:p.state.armed,openPositions:p.state.openPositions,queueActive:p.queue.active,queueStatus:p.queue.status,index2:p.funding.index2}));
+          console.log('SAFETY='+JSON.stringify({providerWrites:0,ordersSubmitted:0,capitalMovedUsd:0,newQueueArmed:false,authorization:false}));
+          NODE
