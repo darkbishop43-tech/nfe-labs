@@ -1,0 +1,58 @@
+name: Verify Market Edge Mobile Enrollment Repair
+
+on:
+  push:
+    branches: [market-edge-baseline-real]
+    paths: ['.github/workflows/verify-market-edge-mobile-enrollment-repair.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install Chromium
+        run: |
+          npm install --no-save playwright@1.55.0
+          npx playwright install --with-deps chromium
+      - name: Verify live parser and enrollment state machine
+        run: |
+          node <<'NODE'
+          const { chromium }=require('playwright');
+          (async()=>{
+            const browser=await chromium.launch({headless:true});
+            const context=await browser.newContext({permissions:[]});
+            const page=await context.newPage();
+            const errors=[];
+            page.on('pageerror',e=>errors.push('PAGEERROR '+e.message));
+            page.on('console',m=>{if(m.type()==='error')errors.push('CONSOLE '+m.text())});
+            await page.goto('https://market-edge-baseline-real.darkbishop43.workers.dev/',{waitUntil:'domcontentloaded'});
+            await page.waitForSelector('#enablePushBtn');
+            const before=await page.evaluate(()=>({
+              status:document.querySelector('#pushStatus')?.textContent,
+              permission:Notification.permission,
+              handler:typeof window.enableNfePush,
+              sw:'serviceWorker' in navigator,
+              push:'PushManager' in window
+            }));
+            await page.click('#enablePushBtn');
+            await page.waitForTimeout(500);
+            const after=await page.evaluate(()=>({
+              status:document.querySelector('#pushStatus')?.textContent,
+              permission:Notification.permission,
+              handler:typeof window.enableNfePush
+            }));
+            console.log(JSON.stringify({before,after,errors},null,2));
+            if(errors.some(x=>x.startsWith('PAGEERROR'))) throw new Error('live page has JavaScript parser/runtime error');
+            if(before.handler!=='function') throw new Error('enableNfePush handler unavailable');
+            if(after.status==='NOT ENROLLED') throw new Error('enrollment click remained silent');
+            if(before.permission==='denied' && after.status!=='PERMISSION BLOCKED') throw new Error('denied permission not surfaced');
+            await browser.close();
+          })();
+          NODE
