@@ -1446,7 +1446,7 @@ async function founderManualClosePreview(env,record,requestedCount){
   if(!result.ok)return{...result,ticker,providerHttpStatus:qr.status};
   const fee=kalshiGeneralTakerFeeUsd(liveBid,remaining,1),estimatedProceeds=Number.isFinite(fee)?Number((remaining*liveBid-fee).toFixed(4)):null;
   return{...result,source:FOUNDER_MANUAL_SOURCE,ticker,outcomeSide:outcome,providerPositionQuantity:pq,quote:{liveOutcomeBid:liveBid,readAt:new Date(quoteReadAt).toISOString(),maxAgeMs:15000},estimated:{grossProceedsUsd:Number((remaining*liveBid).toFixed(4)),feeUsd:fee,netProceedsUsd:estimatedProceeds},providerRequestPreview:{method:"POST",path:"/trade-api/v2/portfolio/events/orders",body:result.body},ledgerPersistenceSchema:["entryOrderId","entryFillQuantity","remainingQuantity","closeOrderId","closeFillQuantity","closeAveragePrice","closeFee","realizedPnlUsd","finalState","closedAt"],interlocks:{manualEntryAuthorized:false,manualCloseAuthorized:false,providerWriteRoutePresent:false,submitted:false}};
-
+}
 
 const EXECUTION_TEST_QUEUE_PROOF_KEY="baseline-real-execution-queue-persistence-proof-v1";
 
