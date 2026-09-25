@@ -1,0 +1,70 @@
+name: Read Only Kalshi Short Horizon Crypto Detail
+
+on:
+  push:
+    branches: [market-edge-baseline-real]
+    paths:
+      - '.github/workflows/read-only-kalshi-short-horizon-detail.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  inventory:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Inspect official hourly and fifteen-minute crypto series
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json,urllib.request,urllib.parse,datetime,time
+          BASE='https://api.elections.kalshi.com/trade-api/v2'
+          H={'Accept':'application/json','User-Agent':'NFE-OS-ReadOnly-ShortHorizon/1.0'}
+          def get(path):
+              req=urllib.request.Request(BASE+path,headers=H,method='GET')
+              with urllib.request.urlopen(req,timeout=30) as r:
+                  return r.status,json.load(r)
+          def duration(m):
+              try:
+                  o=datetime.datetime.fromisoformat(str(m.get('open_time')).replace('Z','+00:00'))
+                  c=datetime.datetime.fromisoformat(str(m.get('close_time')).replace('Z','+00:00'))
+                  return round((c-o).total_seconds()/60,2)
+              except:return None
+          _,sd=get('/series?category='+urllib.parse.quote('Crypto')+'&include_product_metadata=true')
+          selected=[s for s in (sd.get('series') or []) if s.get('frequency') in ('fifteen_min','hourly')]
+          out=[]
+          now=int(time.time())
+          for s in selected:
+              ticker=s.get('ticker')
+              def read(params):
+                  try:
+                      hs,d=get('/markets?'+urllib.parse.urlencode({'series_ticker':ticker,'limit':20,**params}))
+                      ms=d.get('markets') or []
+                      return {'http':hs,'count':len(ms),'rows':ms}
+                  except Exception as e:
+                      return {'http':None,'count':0,'rows':[],'error':type(e).__name__}
+              cur=read({'status':'open'})
+              fut=read({'min_close_ts':now})
+              # choose up to 2 useful rows, preferring current then nearest future
+              samples=(cur['rows'][:2] if cur['rows'] else fut['rows'][:2])
+              ss=[]
+              for m in samples:
+                  ss.append({
+                    'ticker':m.get('ticker'),'event_ticker':m.get('event_ticker'),'title':m.get('title'),'subtitle':m.get('subtitle'),
+                    'status':m.get('status'),'open_time':m.get('open_time'),'close_time':m.get('close_time'),'duration_minutes':duration(m),
+                    'yes_bid':m.get('yes_bid_dollars',m.get('yes_bid')),'yes_ask':m.get('yes_ask_dollars',m.get('yes_ask')),
+                    'no_bid':m.get('no_bid_dollars',m.get('no_bid')),'no_ask':m.get('no_ask_dollars',m.get('no_ask')),
+                    'volume':m.get('volume_fp',m.get('volume')),'liquidity':m.get('liquidity_dollars',m.get('liquidity')),
+                    'can_close_early':m.get('can_close_early'),'rules_primary':m.get('rules_primary'),'rules_secondary':m.get('rules_secondary'),
+                    'exchange_index':m.get('exchange_index')
+                  })
+              out.append({
+                'series':ticker,'series_title':s.get('title'),'frequency':s.get('frequency'),
+                'settlement_sources':s.get('settlement_sources') or [],
+                'current_open_count':cur['count'],'future_count':fut['count'],
+                'current_http':cur['http'],'future_http':fut['http'],'samples':ss
+              })
+              time.sleep(.03)
+          print('DETAIL='+json.dumps({'count':len(out),'rows':out},separators=(',',':')))
+          PY
