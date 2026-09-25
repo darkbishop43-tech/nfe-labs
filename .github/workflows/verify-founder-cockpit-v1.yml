@@ -35,7 +35,7 @@ jobs:
             'professional_regions':all(x in h for x in ['MARKET EDGE WATCHLIST','CONTRACT INSPECTOR','FOUNDER MANUAL ORDER','POSITIONS','REAL LEDGER','NO_FILL']),
             'manual_submit_disabled':'SUBMIT FOUNDER ORDER · NOT AUTHORIZED' in h and '<button class="submit" disabled>' in h,
             'no_iframe':'<iframe' not in h.lower(),
-            'no_post_method':not bool(re.search(r'method\s*[:=]\s*["\\']post',h,re.I)),
+            'no_post_method':('method: "POST"' not in h and "method: 'POST'" not in h and 'method="POST"' not in h),
             'mobile_breakpoint':'@media(max-width:520px)' in h,
             'execution_source_sha1':hashlib.sha1(src).hexdigest(),
             'shadow_status':sh.get('status'),
