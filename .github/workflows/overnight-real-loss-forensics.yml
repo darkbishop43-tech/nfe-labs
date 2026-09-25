@@ -33,5 +33,11 @@ jobs:
           console.log('ATTEMPTS='+JSON.stringify(aa));
           console.log('POSITIONS='+JSON.stringify(st.positions||[]));
           console.log('LEDGER='+JSON.stringify(st.ledger||[]));
-          console.log('HISTORY='+JSON.stringify(st.queueHistory||[]));
+          const stages=[...(st.queue?.completedStages||[]),{threshold:st.threshold,attempts:st.attempts||[],positions:st.positions||[]}];
+          for(const g of stages){
+            const ps=g.positions||[];
+            const rows=(g.attempts||[]).map(a=>{const p=ps.find(p=>p.id===a.id||p.entryOrderId===a.orderId);return {stage:g.threshold,n:a.attemptNo,status:a.status,ts:a.createdAt,asset:a.asset,ticker:a.marketTicker,side:a.outcomeSide,score:a.liveScore,ask:a.liveAsk,count:a.count,fill:a.fillCount,avg:a.averageFillPrice,fee:a.averageFeePaid,filledAt:a.filledAt,pos:p?{status:p.status,entryPrice:p.entryAverageFillPrice,entryFee:p.entryAverageFeePaid,filledAt:p.filledAt,closedAt:p.closedAt,exitReason:p.exitReason,exitOrderId:p.exitOrderId,exitFilled:p.exitFilledTotal,exitPrice:p.exitAverageFillPrice,exitFee:p.exitAverageFeePaid,providerFlat:p.providerReconciledFlat}:null}});
+            console.log('STAGE='+JSON.stringify(rows));
+          }
+          console.log('HISTORY_META='+JSON.stringify((st.queueHistory||[]).map(h=>({queueId:h.queueId,status:h.status,stoppedAt:h.stoppedAt}))));
           NODE
