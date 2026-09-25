@@ -66,10 +66,10 @@ jobs:
         run: |
           set -euo pipefail
           F="market-edge-lab/real/baseline/src/index.js"
-          grep -q 'TEST_POSITION_OPENED' "$F"
-          grep -q 'TEST_POSITION_CLOSED' "$F"
-          grep -q 'TEST_STALE_POSITION_PROVIDER_FLAT_RECONCILED' "$F"
-          grep -q 'pushDeliverySeen' "$F"
-          grep -q 'sendFounderPushBestEffort' "$F"
-          grep -q 'providerTradingWrites:0' "$F"
-          grep -q 'ctx.waitUntil(dispatchExecutionNotifications(env).catch(()=>{}))' "$F"
+          grep -Fq 'TEST_POSITION_OPENED' "$F"
+          grep -Fq 'TEST_POSITION_CLOSED' "$F"
+          grep -Fq 'TEST_STALE_POSITION_PROVIDER_FLAT_RECONCILED' "$F"
+          grep -Fq 'pushDeliverySeen' "$F"
+          grep -Fq 'sendFounderPushBestEffort' "$F"
+          grep -Fq 'providerTradingWrites:0' "$F"
+          grep -Fq 'ctx.waitUntil(dispatchExecutionNotifications(env).catch(()=>{}))' "$F"
