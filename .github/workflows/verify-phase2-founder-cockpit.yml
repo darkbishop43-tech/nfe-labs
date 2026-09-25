@@ -1,0 +1,133 @@
+name: Verify Phase 2 Founder Cockpit
+
+on:
+  push:
+    branches:
+      - founder-terminal-phase2
+    paths:
+      - 'market-edge-lab/real/baseline/founder-terminal.html'
+      - 'market-edge-lab/founder-terminal/**'
+      - '.github/workflows/verify-phase2-founder-cockpit.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Verify live read-only cockpit and protected engines
+        shell: bash
+        run: |
+          set -euo pipefail
+          COCKPIT='https://raw.githack.com/darkbishop43-tech/nfe-labs/founder-terminal-phase2/market-edge-lab/real/baseline/founder-terminal.html'
+          READER='https://market-edge-founder-terminal.darkbishop43.workers.dev'
+          BASE='https://market-edge-baseline-real.darkbishop43.workers.dev'
+          PAPER='https://market-edge-siblings.darkbishop43.workers.dev'
+          OBS='https://market-edge-universal-observer.darkbishop43.workers.dev'
+
+          curl -fsS "$COCKPIT" -o /tmp/cockpit.html
+          curl -fsS "$READER/api/health" -o /tmp/reader-health.json
+          curl -fsS "$READER/api/snapshot" -o /tmp/snapshot.json
+          curl -fsS "$BASE/shadow-state" -o /tmp/shadow.json
+          curl -fsS "$BASE/execution-test-state" -o /tmp/exec.json
+          curl -fsS "$PAPER/api/paper-thresholds" -o /tmp/paper.json
+          curl -fsS "$OBS/" -o /tmp/observer.html
+
+          python - <<'PY'
+          import json,subprocess,re,urllib.request
+          J=lambda p:json.load(open(p))
+          snap=J('/tmp/snapshot.json'); sh=J('/tmp/shadow.json'); ex=J('/tmp/exec.json'); paper=J('/tmp/paper.json')
+          html=open('/tmp/cockpit.html',encoding='utf-8').read(); obs=open('/tmp/observer.html',encoding='utf-8').read()
+          wide=(snap.get('endpoints',{}).get('/wide-radar-state',{}).get('body') or {})
+          ops=(wide.get('live',{}).get('opportunities') or sh.get('opportunities') or [])
+          assert ops, 'no opportunities'
+          o=ops[0]; ticker=o.get('ticker') or o.get('marketTicker'); asset=o.get('asset')
+          product={'BTC':'BTC-USD','ETH':'ETH-USD','SOL':'SOL-USD','XRP':'XRP-USD','HYPE':'HYPE-USD','ZEC':'ZEC-USD','DOGE':'DOGE-USD','BNB':'BNB-USD','NEAR':'NEAR-USD'}.get(asset)
+          assert ticker and product
+          def get(url):
+            with urllib.request.urlopen(url,timeout=20) as r:return r.status,json.load(r)
+          ch,c=get('https://market-edge-founder-terminal.darkbishop43.workers.dev/api/contract?ticker='+ticker)
+          hh,h=get('https://market-edge-founder-terminal.darkbishop43.workers.dev/api/candles?product='+product+'&granularity=300')
+          subprocess.run(['git','fetch','origin','market-edge-baseline-real:refs/remotes/origin/market-edge-baseline-real'],check=True,stdout=subprocess.DEVNULL)
+          protected=subprocess.check_output(['git','rev-parse','origin/market-edge-baseline-real:market-edge-lab/real/baseline/src/index.js'],text=True).strip()
+          phase2=subprocess.check_output(['git','rev-parse','HEAD:market-edge-lab/real/baseline/src/index.js'],text=True).strip()
+          out={
+            'cockpit_loaded':'FOUNDER COCKPIT · PHASE 2' in html,
+            'professional_regions':all(x in html for x in ['MARKET / WATCHLIST','CONTRACT / ORDER TICKET','POSITIONS','NO_FILL']),
+            'manual_submit_locked':'NOT AUTHORIZED' in html and 'FOUNDER_MANUAL (FUTURE)' in html,
+            'no_manual_post':not bool(re.search(r'method\s*:\s*["\']POST',html,re.I)),
+            'reader_health':J('/tmp/reader-health.json'),
+            'snapshot_ok':snap.get('ok'),'snapshot_read_only':snap.get('readOnly'),
+            'opportunity_count':len(ops),'selected_probe':{'asset':asset,'ticker':ticker},
+            'contract_http':ch,'contract_ok':c.get('ok'),'contract_orderbook_http':c.get('orderbookHttpStatus'),
+            'candles_http':hh,'candle_count':c.get('count') if False else h.get('count'),'candle_source':h.get('source'),
+            'baseline_entry':(sh.get('strategy') or {}).get('entryScore'),
+            'baseline_exit':(sh.get('strategy') or {}).get('exitScore'),
+            'baseline_status':sh.get('status'),'baseline_last_run':sh.get('lastRunAt'),
+            'arm':(ex.get('state') or {}).get('armed'),'execution_status':(ex.get('state') or {}).get('status'),
+            'attempts_started':(ex.get('state') or {}).get('attemptsStarted'),
+            'payne_threshold':paper.get('thresholds',{}).get('payne_method',{}).get('activeThreshold'),
+            'adaptive_threshold':paper.get('thresholds',{}).get('adaptive_market_lab',{}).get('activeThreshold'),
+            'observer_separate':'UNIVERSAL OBSERVER' in obs.upper(),
+            'protected_blob_expected':'22cd2de7a1adfafa17756784d4f951c52b20ceae',
+            'protected_blob_live_branch':protected,'protected_blob_phase2':phase2,
+            'mobile_css':'@media(max-width:980px)' in html and '@media(max-width:560px)' in html
+          }
+          print(json.dumps(out,indent=2))
+          assert out['cockpit_loaded'] and out['professional_regions']
+          assert out['manual_submit_locked'] and out['no_manual_post']
+          assert snap.get('readOnly') is True
+          assert c.get('readOnly') is True and c.get('ok') is True
+          assert h.get('readOnly') is True and h.get('count',0)>20
+          assert out['baseline_entry']==.80 and out['baseline_exit']==.20
+          assert out['arm'] is True
+          assert out['payne_threshold']==.65 and out['adaptive_threshold']==.65
+          assert out['observer_separate']
+          assert protected==phase2=='22cd2de7a1adfafa17756784d4f951c52b20ceae'
+          PY
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Capture desktop and mobile visual proof
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm init -y >/dev/null 2>&1
+          npm install --silent playwright@1.55.0
+          npx playwright install chromium >/dev/null
+          cat > /tmp/shot.mjs <<'JS'
+          import { chromium } from 'playwright';
+          const url='https://raw.githack.com/darkbishop43-tech/nfe-labs/founder-terminal-phase2/market-edge-lab/real/baseline/founder-terminal.html';
+          const browser=await chromium.launch({headless:true});
+          const page=await browser.newPage({viewport:{width:1920,height:1080}});
+          await page.goto(url,{waitUntil:'networkidle',timeout:60000});
+          await page.waitForTimeout(7000);
+          await page.screenshot({path:'phase2-desktop.png',fullPage:false});
+          const live=await page.locator('#liveState').innerText();
+          const watch=await page.locator('#watchCount').innerText();
+          const locked=await page.locator('.locked').innerText();
+          console.log(JSON.stringify({desktop:{live,watch,locked}}));
+          const mobile=await browser.newPage({viewport:{width:390,height:844},deviceScaleFactor:1});
+          await mobile.goto(url,{waitUntil:'networkidle',timeout:60000});
+          await mobile.waitForTimeout(5000);
+          await mobile.screenshot({path:'phase2-mobile.png',fullPage:true});
+          console.log(JSON.stringify({mobile:{bodyScrollWidth:await mobile.evaluate(()=>document.body.scrollWidth),viewport:390}}));
+          await browser.close();
+          JS
+          node /tmp/shot.mjs
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: phase2-founder-cockpit-visual-proof
+          path: |
+            phase2-desktop.png
+            phase2-mobile.png
+          if-no-files-found: error
