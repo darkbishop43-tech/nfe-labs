@@ -41,3 +41,5 @@ jobs:
           console.log('SAFETY='+JSON.stringify({providerWrites:0,capitalMovedUsd:0,ordersSubmitted:0,newQueueArmed:false}));
           NODE
           curl -fsS https://market-edge-baseline-real.darkbishop43.workers.dev/execution-test-state | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const j=JSON.parse(s);console.log("RUNTIME="+JSON.stringify({status:j?.state?.status,armed:j?.state?.armed,openPositions:j?.state?.openPositions,queue:j?.queue,funding:j?.funding}))})'
+
+# rerun after fixed-point validator correction
