@@ -73,3 +73,5 @@ jobs:
           grep -Fq 'sendFounderPushBestEffort' "$F"
           grep -Fq 'providerTradingWrites:0' "$F"
           grep -Fq 'ctx.waitUntil(dispatchExecutionNotifications(env).catch(()=>{}))' "$F"
+
+# verification rerun after notification adapter wiring
