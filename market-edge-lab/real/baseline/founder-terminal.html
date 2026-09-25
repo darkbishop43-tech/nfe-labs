@@ -44,7 +44,14 @@ body{background-image:linear-gradient(#0a111a88 1px,transparent 1px),linear-grad
 <div><div class="k">EDGE</div><div class="v" id="iEdge">—</div></div><div><div class="k">TIME LEFT</div><div class="v" id="iTime">—</div></div>
 <div><div class="k">CLOSE</div><div class="v" id="iClose">—</div></div><div><div class="k">AUTO ELIGIBLE</div><div class="v" id="iEligible">—</div></div>
 </div></div>
-<div class="ticket"><div class="tickethead"><span>FOUNDER MANUAL ORDER</span><span class="badge lock">LOCKED</span></div><div class="sidebtns"><button class="yes" disabled>BUY YES</button><button class="no" disabled>BUY NO</button></div><div class="fields"><label>LIMIT PRICE<input id="limitPrice" value="—" disabled></label><label>SIZE<input value="1" disabled></label><label>TIME IN FORCE<input value="IOC" disabled></label><label>EST. COST<input value="—" disabled></label></div><button class="submit" disabled>🔒 SUBMIT FOUNDER ORDER · NOT AUTHORIZED</button><div class="locknote">UI ONLY · ZERO ORDER / CANCEL / TRANSFER AUTHORITY</div></div></section>
+<div class="ticket"><div class="tickethead"><span>FOUNDER MANUAL ORDER</span><span class="badge lock">REVIEW ONLY · LOCKED</span></div>
+<div class="sidebtns"><button class="yes" id="manualYes">BUY YES</button><button class="no" id="manualNo">BUY NO</button></div>
+<div class="fields"><label>ORDER MODE<input id="manualMode" value="IOC" disabled></label><label>LIMIT PRICE<input id="limitPrice" value="—"></label><label>SIZE<input id="manualSize" value="1" inputmode="numeric"></label><label>TIME IN FORCE<input id="manualTif" value="IMMEDIATE_OR_CANCEL" disabled></label><label>EST. MAX COST<input id="manualCost" value="—" disabled></label><label>FUNDING<input id="manualFunding" value="—" disabled></label></div>
+<button class="submit" id="manualReview">REVIEW EXACT ORDER · NO SUBMIT</button>
+<div class="locknote" id="manualStatus">V1: IOC ONLY · 1 CONTRACT · MAX $1 DEBIT · REAL SUBMISSION 🔒 LOCKED</div>
+<pre id="manualPreview" style="white-space:pre-wrap;max-height:180px;overflow:auto;font-size:10px;color:#9fb0c3;margin:8px 0 0">Select contract + YES/NO, then review.</pre>
+<button class="submit" disabled>🔒 SUBMIT FOUNDER ORDER · NOT AUTHORIZED</button>
+<div class="locknote">BUILD AUTHORIZATION ≠ TRADE AUTHORIZATION · ZERO MANUAL PROVIDER WRITES IN V1 BUILD</div></div></section>
 </main>
 
 <section class="lower"><div class="tabs"><button class="on" data-tab="positions">POSITIONS</button><button data-tab="orders">ORDERS</button><button data-tab="ledger">REAL LEDGER</button><button data-tab="nofill">NO_FILL</button><button data-tab="log">SYSTEM / EVENT LOG</button></div><div class="tabpanel" id="tabPanel"><div class="empty">Awaiting authoritative runtime evidence…</div></div></section>
@@ -83,7 +90,7 @@ function renderWatch(){
  [...$('watchRows').querySelectorAll('tr[data-i]')].forEach(tr=>tr.onclick=()=>{state.selected=ops[Number(tr.dataset.i)];renderWatch();renderInspector();loadChart(state.selected.asset)});
  renderInspector();
 }
-function renderInspector(){const o=state.selected;if(!o)return;setText('contractTitle',(o.asset||'')+' · '+(o.side||o.direction||''));setText('iAsset',o.asset);setText('iDir',o.side||o.direction);setText('iTicker',o.ticker);setText('iScore',num(o.score,3));setText('iAsk',num(o.ask,4));setText('iBid',num(o.bid,4));setText('iEdge',num(o.edge,4));setText('iTime',left(o.closeTime));setText('iClose',o.closeTime?new Date(o.closeTime).toLocaleTimeString():'—');setText('iEligible',o.executionEligible?'YES':'NO');$('limitPrice').value=Number.isFinite(Number(o.ask))?Number(o.ask).toFixed(3):'—'}
+function renderInspector(){const o=state.selected;if(!o)return;setText('contractTitle',(o.asset||'')+' · '+(o.side||o.direction||''));setText('iAsset',o.asset);setText('iDir',o.side||o.direction);setText('iTicker',o.ticker);setText('iScore',num(o.score,3));setText('iAsk',num(o.ask,4));setText('iBid',num(o.bid,4));setText('iEdge',num(o.edge,4));setText('iTime',left(o.closeTime));setText('iClose',o.closeTime?new Date(o.closeTime).toLocaleTimeString():'—');setText('iEligible',o.executionEligible?'YES':'NO');state.manualSide=state.manualSide||String(o.side||'YES').toUpperCase();$('limitPrice').value=Number.isFinite(Number(o.ask))?Number(o.ask).toFixed(4):'—';$('manualCost').value='REVIEW REQUIRED';$('manualFunding').value='REVIEW REQUIRED';$('manualPreview').textContent='Selected '+(o.ticker||'—')+' · choose YES/NO and REVIEW. Real submission remains locked.'}
 async function loadChart(asset){
  setText('chartAsset',asset||'—');setText('chartState','LOADING');$('chartMsg').textContent='Loading genuine Coinbase 15m history…';$('chartSvg').innerHTML='';
  const map={BTC:'BTC-USD',ETH:'ETH-USD',SOL:'SOL-USD',XRP:'XRP-USD',HYPE:'HYPE-USD',ZEC:'ZEC-USD',DOGE:'DOGE-USD',BNB:'BNB-USD',NEAR:'NEAR-USD',ADA:'ADA-USD',TON:'TON-USD',BCH:'BCH-USD'};
@@ -101,6 +108,23 @@ function renderTab(){
  else {heads=['TIME','EVENT','DETAIL'];rows=[[new Date().toLocaleTimeString(),'COCKPIT','Read-only staging cockpit connected to governed runtime endpoints'],[state.shadow?.lastRunAt||'—','SCHEDULER',state.shadow?.status||'—']]}
  $('tabPanel').innerHTML=rows.length?'<table class="tbl"><thead><tr>'+heads.map(h=>'<th>'+h+'</th>').join('')+'</tr></thead><tbody>'+rows.map(r=>'<tr>'+r.map((v,i)=>'<td style="text-align:'+(i?'right':'left')+'">'+esc(v)+'</td>').join('')+'</tr>').join('')+'</tbody></table>':'<div class="empty">No authoritative records available for this panel.</div>'
 }
+async function reviewManual(){
+ const o=state.selected;if(!o){$('manualStatus').textContent='FAIL CLOSED · SELECT A LIVE CONTRACT';return}
+ const side=state.manualSide||'YES',count=Number($('manualSize').value),price=Number($('limitPrice').value);
+ $('manualStatus').textContent='REFRESHING PROVIDER QUOTE + FUNDING · NO SUBMIT';
+ try{
+  const q='?ticker='+encodeURIComponent(o.ticker)+'&side='+encodeURIComponent(side)+'&mode=IOC&count='+encodeURIComponent(count)+'&price='+encodeURIComponent(price);
+  const x=await get('/founder-manual-preview'+q);
+  $('manualCost').value=money(x?.sizing?.estimatedMaxDebitUsd);
+  $('manualFunding').value=money(x?.sizing?.index2Usd);
+  $('manualStatus').textContent=x.state+' · SOURCE '+x.source+' · SUBMITTED '+String(x.submitted).toUpperCase();
+  $('manualPreview').textContent=JSON.stringify({source:x.source,contract:x.contract,sizing:x.sizing,providerRequestPreview:x.providerRequestPreview,ownership:x.ownership,cancelPreview:x.cancelPreview,closePreview:x.closePreview,interlocks:x.interlocks},null,2);
+  if(Number.isFinite(Number(x?.contract?.selectedAsk)))$('limitPrice').value=Number(x.contract.selectedAsk).toFixed(4);
+ }catch(e){$('manualCost').value='—';$('manualFunding').value='—';$('manualStatus').textContent='FAIL CLOSED · '+String(e.message||e);$('manualPreview').textContent='No order submitted. Refresh quote and review again.'}
+}
+$('manualYes').onclick=()=>{state.manualSide='YES';const o=state.selected;if(o&&Number.isFinite(Number(o.ask)))$('limitPrice').value=Number(o.ask).toFixed(4);$('manualStatus').textContent='YES SELECTED · REVIEW REQUIRED'};
+$('manualNo').onclick=()=>{state.manualSide='NO';const o=state.selected;const noAsk=Number.isFinite(Number(o?.ask))?1-Number(o.bid):NaN;if(Number.isFinite(noAsk))$('limitPrice').value=noAsk.toFixed(4);$('manualStatus').textContent='NO SELECTED · REVIEW REQUIRED'};
+$('manualReview').onclick=reviewManual;
 async function refresh(){
  try{const [shadow,exec,real,radar]=await Promise.all([get('/shadow-state'),get('/execution-test-state'),get('/real-trade-state'),get('/wide-radar-state')]);state.shadow=shadow;state.exec=exec;state.real=real;state.radar=radar;$('connDot').className='dot live';setText('conn','LIVE');renderTop();renderWatch();renderTab();if(!state._chart&&state.selected){state._chart=true;loadChart(state.selected.asset)}setText('lastUpdate','LAST UPDATE '+new Date().toLocaleTimeString())}
  catch(e){$('connDot').className='dot bad';setText('conn','READ BLOCKED');setText('lastUpdate','LIVE READ UNAVAILABLE · '+e.message);renderTop()}

@@ -4939,6 +4939,61 @@ document.getElementById('export')?.addEventListener('click',async()=>{const r=aw
       });
     }
 
+    if (request.method === "GET" && url.pathname === "/founder-manual-preview") {
+      // FOUNDER_MANUAL V1 is REVIEW-ONLY. This route performs authenticated reads only.
+      // There is deliberately no manual entry POST route in this build.
+      const ticker=String(url.searchParams.get("ticker")||"").trim();
+      const outcomeSide=String(url.searchParams.get("side")||"").toUpperCase();
+      const orderMode=String(url.searchParams.get("mode")||"IOC").toUpperCase();
+      const requestedCount=Number(url.searchParams.get("count")||0);
+      const requestedLimit=Number(url.searchParams.get("price"));
+      const source="FOUNDER_MANUAL";
+      if(!ticker||(outcomeSide!=="YES"&&outcomeSide!=="NO")) return json({ok:false,state:"MANUAL_PREVIEW_INVALID_CONTRACT",source,submitted:false},400);
+      if(orderMode!=="IOC") return json({ok:false,state:"MANUAL_V1_MODE_NOT_PROVEN",source,supportedOrderModes:["IOC"],marketOrderDirectlySupported:false,restingLimitEnabled:false,submitted:false},400);
+      if(!Number.isInteger(requestedCount)||requestedCount!==1) return json({ok:false,state:"MANUAL_V1_ONE_CONTRACT_ONLY",source,submitted:false},400);
+      try{
+        const marketResponse=await kalshiExecutionGet(env,"/trade-api/v2/markets/"+encodeURIComponent(ticker));
+        const marketBody=await marketResponse.json().catch(()=>({}));
+        const m=marketBody?.market||marketBody;
+        const yesAsk=normalizeProbability(m?.yes_ask_dollars??m?.yes_ask),yesBid=normalizeProbability(m?.yes_bid_dollars??m?.yes_bid);
+        const noAsk=normalizeProbability(m?.no_ask_dollars??m?.no_ask),noBid=normalizeProbability(m?.no_bid_dollars??m?.no_bid);
+        const selectedAsk=outcomeSide==="YES"?yesAsk:noAsk;
+        const selectedBid=outcomeSide==="YES"?yesBid:noBid;
+        const closeTime=m?.close_time||null,closeMs=Date.parse(closeTime||"");
+        const tradeable=marketResponse.ok&&String(m?.status||"").toLowerCase()==="open"&&Number.isFinite(selectedAsk)&&selectedAsk>0&&selectedAsk<1&&Number.isFinite(closeMs)&&closeMs>Date.now();
+        if(!tradeable) return json({ok:false,state:"MANUAL_PREVIEW_FAIL_CLOSED_NOT_TRADEABLE",source,ticker,outcomeSide,providerHttpStatus:marketResponse.status,marketStatus:m?.status||null,closeTime,submitted:false},409);
+        // V1 accepts only the exact freshly-read selected ask as its IOC limit preview.
+        // User-entered stale/different prices fail closed instead of silently substituting.
+        if(!Number.isFinite(requestedLimit)||Math.abs(requestedLimit-selectedAsk)>0.000001) return json({ok:false,state:"MANUAL_PREVIEW_PRICE_STALE_REFRESH_REQUIRED",source,ticker,outcomeSide,requestedLimit:Number.isFinite(requestedLimit)?requestedLimit:null,freshSelectedAsk:selectedAsk,quoteReadAt:new Date().toISOString(),submitted:false},409);
+        const fee=kalshiGeneralTakerFeeUsd(selectedAsk,1,1);
+        const premium=Number(selectedAsk.toFixed(4)),maxDebit=Number((premium+(fee||0)).toFixed(4));
+        if(!Number.isFinite(fee)||maxDebit>1) return json({ok:false,state:"MANUAL_V1_MAX_DEBIT_EXCEEDED",source,premiumUsd:premium,estimatedFeeUsd:fee,estimatedMaxDebitUsd:maxDebit,capUsd:1,submitted:false},409);
+        const balanceProof=await kalshiExecutionBalanceSnapshot(env);
+        const rows=Array.isArray(balanceProof?.body?.balance_breakdown)?balanceProof.body.balance_breakdown:[];
+        const index2=Number(rows.find(x=>Number(x?.exchange_index)===2)?.balance);
+        if(!balanceProof?.ok||!Number.isFinite(index2)||index2<maxDebit) return json({ok:false,state:"MANUAL_PREVIEW_FUNDING_NOT_READY",source,index2Usd:Number.isFinite(index2)?index2:null,requiredUsd:maxDebit,submitted:false},409);
+        const candidate={marketTicker:ticker,outcomeSide,yes:selectedAsk};
+        const requestPreview=kalshiV2EntryPayload(candidate,{count:1},"FOUNDER-MANUAL-PREVIEW-NOT-SUBMITTED");
+        const closePreview={
+          method:"POST",path:"/trade-api/v2/portfolio/events/orders",
+          rule:"ONLY AFTER A REAL FOUNDER_MANUAL FILL; reverse book side + reduce_only=true for exact filled quantity",
+          reduceOnlyRequired:true,automaticExit:false
+        };
+        const cancelPreview={method:"DELETE",pathTemplate:"/trade-api/v2/portfolio/events/orders/{order_id}",enabledForRestingOrders:false,reason:"FOUNDER_MANUAL_V1_DOES_NOT_ENABLE_RESTING_ORDERS"};
+        return json({
+          ok:true,state:"FOUNDER_MANUAL_V1_REVIEW_READY_LOCKED",source,manualExecutionAuthorized:false,submitted:false,realMoneyMoved:false,
+          providerSemantics:{marketOrderDirectlySupported:false,supportedOrderModes:["IOC"],restingLimitEnabled:false,yesLongBookSide:"bid",noLongBookSide:"ask",priceScale:"YES-leg fixed-point dollars",timeInForce:"immediate_or_cancel"},
+          contract:{ticker,outcomeSide,marketStatus:m?.status||null,closeTime,yesBid,yesAsk,noBid,noAsk,selectedBid,selectedAsk,quoteReadAt:new Date().toISOString()},
+          sizing:{count:1,premiumUsd:premium,estimatedTakerFeeUsd:fee,estimatedMaxDebitUsd:maxDebit,manualV1CapUsd:1,index2Usd:index2},
+          providerRequestPreview:{method:"POST",path:"/trade-api/v2/portfolio/events/orders",body:requestPreview},
+          ownership:{source:"FOUNDER_MANUAL",autoQueueAttemptConsumed:false,autoStageAdvanced:false,autoExitAdoption:false,manualExitOwnership:true},
+          persistenceSchema:["source","orderMode","ticker","outcomeSide","submittedPrice","submittedCount","providerOrderId","providerStatus","fillCount","averageFillPrice","averageFeePaid","createdAt","finalState"],
+          cancelPreview,closePreview,
+          interlocks:{entryWriteRoutePresent:false,manualSubmitButtonAuthorized:false,explicitFutureFounderTradeAuthorizationRequired:true,staleQuoteFailsClosed:true}
+        });
+      }catch(error){return json({ok:false,state:"MANUAL_PREVIEW_READ_FAILED",source,error:String(error?.message||error).slice(0,160),submitted:false},422);}
+    }
+
     if (url.pathname === "/first-real-trade-evidence") {
       const state=await loadRealTradeState(env);
       return json({ok:true,experiment:"MARKET EDGE — BASELINE REAL",strategyUnchanged:true,entryThreshold:REAL_TEST_CONFIG.entryScore,exitThreshold:REAL_TEST_CONFIG.exitScore,maxHoldMinutes:5,maxFirstTradeExposureUsd:5,oneEntryOnly:true,evidence:publicFirstTradeEvidence(state)});
