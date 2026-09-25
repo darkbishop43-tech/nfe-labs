@@ -3,54 +3,256 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<title>NFE-OS Founder Trader Terminal</title>
+<title>NFE-OS Market Edge · Founder Cockpit Phase 2</title>
 <style>
-:root{--bg:#050a11;--panel:#0d1724;--panel2:#111e2d;--line:#243a55;--gold:#d8b15e;--gold2:#f3d58a;--blue:#79aef8;--text:#f5f7fb;--muted:#91a6be;--green:#67e49b;--yellow:#f0c75e}
-*{box-sizing:border-box}html{scroll-behavior:smooth}body{margin:0;background:radial-gradient(circle at 80% 0,#0d2440 0,transparent 38%),var(--bg);color:var(--text);font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial;min-height:100vh}
-.shell{max-width:1180px;margin:auto;padding:12px clamp(10px,2vw,22px) 32px}
-.top{position:sticky;top:0;z-index:20;background:rgba(5,10,17,.96);backdrop-filter:blur(12px);border:1px solid var(--line);border-radius:16px;padding:10px;margin-bottom:12px;box-shadow:0 12px 30px #0007}
-.brand{display:flex;align-items:center;justify-content:space-between;gap:14px;padding:4px 6px 10px}
-.k{font-size:10px;letter-spacing:.16em;text-transform:uppercase;color:var(--gold)}h1{font-size:22px;margin:2px 0}.muted{font-size:12px;color:var(--muted)}
-.nav{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:7px}.nav a,.nav span{display:flex;align-items:center;justify-content:center;min-height:44px;text-decoration:none;border:1px solid #34506f;background:#0a1421;border-radius:11px;padding:8px;color:var(--text);font-size:12px;font-weight:800;text-align:center}.nav a:hover,.nav a:focus-visible{border-color:var(--gold2);color:var(--gold2);outline:none}.nav .active{border-color:#456f9f;color:#a9d0ff}.nav .unavailable{opacity:.55;cursor:not-allowed}
-.hero,.card{background:linear-gradient(180deg,var(--panel2),var(--panel));border:1px solid var(--line);border-radius:16px}.hero{padding:18px}.hero h2{margin:0 0 7px;font-size:24px}.pill{display:inline-block;border:1px solid #725f34;border-radius:999px;padding:6px 9px;color:var(--gold2);font-size:10px;font-weight:850;margin:4px 5px 0 0}.pill.good{border-color:#2c7650;color:var(--green)}
-.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin-top:10px}.card{padding:15px}.card h3{margin:0 0 7px}.card a{display:inline-block;margin-top:8px;color:#a9d0ff;font-weight:750}.wall{border-left:5px solid var(--green)}.warn{border-left:5px solid var(--yellow)}
-.footer{margin-top:12px;text-align:center;color:var(--muted);font-size:11px}
-@media(max-width:820px){.nav{grid-template-columns:repeat(4,minmax(0,1fr))}.grid{grid-template-columns:1fr}}
-@media(max-width:520px){.shell{padding:8px 8px 22px}.top{border-radius:12px;padding:8px}.brand{align-items:flex-start}.nav{grid-template-columns:repeat(2,minmax(0,1fr))}.nav a,.nav span{min-height:48px;font-size:11px}.hero{padding:14px}.hero h2{font-size:20px}}
+:root{--bg:#03070c;--bg2:#07101a;--panel:#09131f;--panel2:#0c1927;--line:#1b3045;--line2:#294866;--text:#eaf1f8;--muted:#7e94aa;--gold:#d5ad5b;--gold2:#f0d18b;--green:#4de28b;--red:#ff6f7d;--blue:#72aaf7;--yellow:#f2c557;--cyan:#5ee7f0;--shadow:0 12px 35px #0008}
+*{box-sizing:border-box}html,body{height:100%}body{margin:0;background:linear-gradient(180deg,#03070c,#050b13 70%,#040910);color:var(--text);font:12px/1.35 Inter,ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Arial;overflow:hidden}
+button,select,input{font:inherit}.app{height:100vh;display:grid;grid-template-rows:38px 30px 1fr 24px;min-width:980px}
+.topbar{display:grid;grid-template-columns:250px 1fr auto;align-items:center;border-bottom:1px solid var(--line2);background:linear-gradient(180deg,#0a1420,#07101a);box-shadow:0 3px 16px #0009;position:relative;z-index:10}
+.brand{height:100%;display:flex;align-items:center;gap:9px;padding:0 10px;position:relative;overflow:hidden}.brand:before,.brand:after{content:"";position:absolute;top:0;bottom:0;width:58px;background-size:contain;background-repeat:no-repeat;opacity:.22;pointer-events:none}.brand:before{left:0;background-image:url("https://raw.githubusercontent.com/darkbishop43-tech/nfe-labs/market-edge-baseline-real/market-edge-lab/public/market-edge-bull-canon.webp");background-position:left center}.brand:after{right:0;background-image:url("https://raw.githubusercontent.com/darkbishop43-tech/nfe-labs/market-edge-baseline-real/market-edge-lab/public/market-edge-bear-canon.webp");background-position:right center}.brand strong{font-size:13px;letter-spacing:.08em;color:var(--gold2);z-index:1}.brand small{color:var(--muted);z-index:1}
+.nav{display:flex;height:100%;align-items:stretch;min-width:0}.nav a,.nav span{display:flex;align-items:center;padding:0 12px;border-left:1px solid #14283b;color:#aabbd0;text-decoration:none;font-weight:750;font-size:11px;letter-spacing:.03em;white-space:nowrap}.nav a:hover{background:#0e1d2c;color:#fff}.nav .active{color:var(--gold2);box-shadow:inset 0 -2px var(--gold)}.nav .off{opacity:.42}
+.globals{display:flex;align-items:center;gap:10px;padding:0 10px;white-space:nowrap}.g{display:flex;align-items:center;gap:5px;color:var(--muted);font-size:10px}.dot{width:7px;height:7px;border-radius:50%;background:#536779}.dot.good{background:var(--green);box-shadow:0 0 8px #4de28b88}.dot.bad{background:var(--red)}.dot.warn{background:var(--yellow)}
+.risk{display:grid;grid-template-columns:repeat(8,minmax(90px,1fr));border-bottom:1px solid var(--line);background:#050c14}.metric{padding:4px 9px;border-right:1px solid #142536;min-width:0}.metric .lab{font-size:9px;letter-spacing:.08em;color:#668098}.metric .val{font-size:12px;font-weight:850;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.metric .val.good{color:var(--green)}.metric .val.bad{color:var(--red)}
+.workspace{display:grid;grid-template-columns:320px minmax(520px,1fr) 340px;grid-template-rows:minmax(0,1fr) 208px;min-height:0}
+.pane{background:var(--bg2);border-right:1px solid var(--line);border-bottom:1px solid var(--line);min-width:0;min-height:0;overflow:hidden}.paneHead{height:30px;display:flex;align-items:center;justify-content:space-between;padding:0 9px;border-bottom:1px solid var(--line);background:#081421;color:#a9bdd2}.paneHead strong{font-size:10px;letter-spacing:.08em}.tiny{font-size:9px;color:var(--muted)}
+.watch{grid-column:1;grid-row:1;display:grid;grid-template-rows:30px 31px 1fr}.filters{display:grid;grid-template-columns:1fr 88px 76px;border-bottom:1px solid var(--line)}.filters input,.filters select{min-width:0;background:#07111b;color:#d7e2ec;border:0;border-right:1px solid var(--line);padding:0 8px;outline:none}.watchTable{overflow:auto}.thead,.wrow{display:grid;grid-template-columns:34px 50px 48px 58px 58px 48px 48px 48px 52px;align-items:center;min-width:444px}.thead{position:sticky;top:0;background:#08131e;color:#668198;font-size:8px;height:23px;border-bottom:1px solid var(--line);z-index:2}.thead>div,.wrow>div{padding:0 5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.wrow{height:31px;border-bottom:1px solid #102234;color:#bdd0e2;cursor:pointer}.wrow:hover{background:#0c1b29}.wrow.sel{background:#10243a;box-shadow:inset 2px 0 var(--gold)}.wrow.hot .score{color:var(--green);font-weight:900}.wrow.openpos{box-shadow:inset 2px 0 var(--blue)}.coin{width:21px;height:21px;border:1px solid #35516c;border-radius:50%;display:grid;place-items:center;font-weight:900;font-size:9px;background:#0b1825;color:#dce9f5}.coin.BTC{color:#f2b84b}.coin.ETH{color:#a4b7ff}.coin.SOL{color:#8ef9cd}.coin.XRP{color:#d9e5ef}.coin.DOGE{color:#dfc46a}.dir.up{color:var(--green)}.dir.down{color:var(--red)}
+.chartPane{grid-column:2;grid-row:1;display:grid;grid-template-rows:30px 31px minmax(0,1fr) 26px;background:#050c14}.chartTop{display:flex;align-items:center;justify-content:space-between;padding:0 9px;border-bottom:1px solid var(--line)}.symbol{display:flex;align-items:center;gap:8px}.symbol b{font-size:13px}.price{font-size:13px;font-weight:900}.chartCtl{display:flex;align-items:center;gap:4px}.btn,.tf{border:1px solid #25425c;background:#081522;color:#9eb4c8;border-radius:3px;padding:3px 7px;cursor:pointer}.btn:hover,.tf:hover{border-color:#517696;color:#fff}.btn.on,.tf.on{border-color:#8c7340;color:var(--gold2);background:#141b1c}.btn:disabled,.tf:disabled{opacity:.35;cursor:not-allowed}.chartStage{position:relative;min-height:0;overflow:hidden;background-color:#050b12;background-image:linear-gradient(#13243666 1px,transparent 1px),linear-gradient(90deg,#13243666 1px,transparent 1px);background-size:60px 44px}.chartStage canvas{width:100%;height:100%;display:block}.chartLegend{position:absolute;top:7px;left:9px;display:flex;gap:10px;color:#7990a7;font-size:9px;pointer-events:none}.chartTip{position:absolute;display:none;pointer-events:none;background:#07131f;border:1px solid #36536e;padding:5px 7px;border-radius:3px;color:#dbe8f3;font-size:9px;box-shadow:var(--shadow)}.chartStatus{display:flex;align-items:center;gap:12px;padding:0 9px;border-top:1px solid var(--line);color:#698299;font-size:9px}.chartStatus .live{color:var(--green)}
+.right{grid-column:3;grid-row:1;display:grid;grid-template-rows:30px minmax(0,1fr);background:#06101a}.rightBody{overflow:auto}.section{border-bottom:1px solid var(--line);padding:8px 10px}.section h3{font-size:9px;margin:0 0 7px;color:#849db5;letter-spacing:.1em}.kv{display:grid;grid-template-columns:118px 1fr;gap:2px 8px;font-size:10px}.kv div:nth-child(odd){color:#667f96}.kv div:nth-child(even){color:#d3e0eb;text-align:right;overflow:hidden;text-overflow:ellipsis}.bbo{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:7px}.quote{border:1px solid #1d384f;background:#071522;padding:6px}.quote strong{display:block;font-size:13px}.yes strong{color:var(--green)}.no strong{color:var(--red)}
+.depth{margin-top:7px;font-size:9px}.drow{display:grid;grid-template-columns:1fr 1fr 1fr;padding:2px 0;border-top:1px solid #102334}.drow span:nth-child(2),.drow span:nth-child(3){text-align:right}
+.ticket{background:#07121d}.ticketGrid{display:grid;grid-template-columns:1fr 1fr;gap:6px}.ticket label{display:block;font-size:8px;color:#6f879d;margin-bottom:2px}.ticket input,.ticket select{width:100%;background:#040b12;color:#dce7f1;border:1px solid #27445d;padding:6px;border-radius:3px}.sideBtns{display:grid;grid-template-columns:1fr 1fr;gap:5px}.sideBtn{padding:7px;border:1px solid #2c4c66;background:#081421;color:#b8c8d7;font-weight:900}.sideBtn.on.yes{border-color:#2a8454;color:var(--green);background:#092017}.sideBtn.on.no{border-color:#9b4350;color:var(--red);background:#210c10}.locked{width:100%;margin-top:7px;padding:9px;border:1px solid #664f25;background:#1a1408;color:var(--gold2);font-weight:900;letter-spacing:.06em;cursor:not-allowed}.preview{display:grid;grid-template-columns:1fr 1fr;gap:3px 8px;margin-top:6px;font-size:9px}.preview span:nth-child(odd){color:#6f879d}.preview span:nth-child(even){text-align:right}
+.bottom{grid-column:1/4;grid-row:2;display:grid;grid-template-rows:29px 1fr;background:#050c14}.tabs{display:flex;align-items:stretch;border-bottom:1px solid var(--line)}.tab{border:0;border-right:1px solid var(--line);background:#07111c;color:#748ba1;padding:0 14px;font-size:9px;font-weight:850;letter-spacing:.06em;cursor:pointer}.tab.on{color:var(--gold2);background:#0c1722;box-shadow:inset 0 -2px var(--gold)}.tabBody{overflow:auto}.dataTable{width:100%;border-collapse:collapse;table-layout:fixed;font-size:9px}.dataTable th{position:sticky;top:0;background:#08131f;color:#6e879e;text-align:left;padding:5px 7px;border-bottom:1px solid var(--line);font-weight:700}.dataTable td{padding:5px 7px;border-bottom:1px solid #102335;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#b9cbda}.dataTable tr:hover td{background:#091724}.pnlpos{color:var(--green)!important}.pnlneg{color:var(--red)!important}
+.footer{display:flex;align-items:center;justify-content:space-between;padding:0 9px;border-top:1px solid #193047;background:#03070c;color:#607990;font-size:9px}.autoStrip{display:flex;gap:12px;align-items:center}.autoStrip b{color:#c9d7e4}.autoStrip .armed{color:var(--green)}
+.mobileOnly{display:none}
+@media(max-width:980px){body{overflow:auto}.app{height:auto;min-height:100vh;min-width:0;display:block}.topbar{position:sticky;top:0;grid-template-columns:1fr auto;height:auto;min-height:42px}.brand{min-height:42px}.nav{grid-column:1/3;overflow:auto;height:34px;border-top:1px solid var(--line)}.nav a,.nav span{padding:0 10px}.globals{grid-column:2;grid-row:1}.risk{grid-template-columns:repeat(4,1fr)}.workspace{display:block}.pane,.chartPane,.right,.bottom{border-right:0}.watch{height:260px}.chartPane{height:430px}.right{height:auto}.bottom{height:260px}.app>.footer{height:28px;position:sticky;bottom:0}.mobileOnly{display:inline}.chartCtl .desktopTool{display:none}}
+@media(max-width:560px){.globals .g:nth-child(n+4){display:none}.risk{grid-template-columns:repeat(2,1fr)}.workspace{font-size:11px}.watch{height:235px}.chartPane{height:370px}.thead,.wrow{grid-template-columns:32px 48px 45px 54px 54px 45px 45px 45px 50px}.rightBody{max-height:none}.autoStrip{gap:6px;font-size:8px}.brand small{display:none}}
 </style>
 </head>
 <body>
-<div class="shell">
-<header class="top">
-  <div class="brand">
-    <div><div class="k">NFE-OS · MARKET EDGE</div><h1>Founder Trader Terminal</h1><div class="muted">One cockpit · separate governed systems</div></div>
-    <span class="pill good">NAVIGATION ONLY</span>
-  </div>
-  <nav class="nav" aria-label="NFE-OS primary navigation">
-    <a class="active" href="https://market-edge-baseline-real.darkbishop43.workers.dev/" target="_blank" rel="noopener">🏠 REAL</a>
-    <a href="https://raw.githack.com/darkbishop43-tech/nfe-labs/adaptive-market-lab/market-edge-lab/siblings/founder-trader-terminal.html" target="_blank" rel="noopener">🧪 PAPER CONTROL</a>
+<div class="app">
+<header class="topbar">
+  <div class="brand"><strong>NFE-OS MARKET EDGE</strong><small>FOUNDER COCKPIT · PHASE 2</small></div>
+  <nav class="nav">
+    <a class="active" href="https://market-edge-baseline-real.darkbishop43.workers.dev/" target="_blank" rel="noopener">REAL</a>
+    <a href="https://raw.githack.com/darkbishop43-tech/nfe-labs/adaptive-market-lab/market-edge-lab/siblings/founder-trader-terminal.html" target="_blank" rel="noopener">PAPER</a>
     <a href="https://raw.githack.com/darkbishop43-tech/nfe-labs/market-edge-sibling-build/market-edge-lab/siblings/payne-method/index.html" target="_blank" rel="noopener">PAYNE</a>
     <a href="https://raw.githack.com/darkbishop43-tech/nfe-labs/adaptive-market-lab/market-edge-lab/siblings/adaptive-market-lab/index.html" target="_blank" rel="noopener">ADAPTIVE</a>
-    <a href="https://market-edge-universal-observer.darkbishop43.workers.dev/" target="_blank" rel="noopener">🔭 OBSERVER</a>
-    <span class="unavailable" title="No single governed audit page is assigned yet">📊 AUDIT · UNASSIGNED</span>
-    <span class="unavailable" title="No single governed system page is assigned yet">⚙️ SYSTEM · UNASSIGNED</span>
+    <a href="https://market-edge-universal-observer.darkbishop43.workers.dev/" target="_blank" rel="noopener">OBSERVER</a>
+    <span class="off">AUDIT</span><span class="off">SYSTEM</span>
   </nav>
+  <div class="globals">
+    <span class="g"><i id="liveDot" class="dot"></i><b id="liveState">CONNECTING</b></span>
+    <span class="g">KALSHI <b id="providerState">—</b></span>
+    <span class="g">AUTO <b id="autoState">—</b></span>
+    <span class="g">ARM <b id="armState">—</b></span>
+    <span class="g">THR <b id="thresholdState">.80</b></span>
+    <span class="g">OPEN <b id="openCountTop">0</b></span>
+    <span class="g"><b id="clockUTC">--:--:-- UTC</b></span>
+  </div>
 </header>
 
-<section class="hero">
-  <div class="k">PROTECTED NAVIGATION SHELL</div>
-  <h2>Operational home without control-plane merging</h2>
-  <div class="muted">Each destination opens its existing governed surface. This page contains no trading credentials, order submission, Paper mutation logic, Observer credentials, bankroll state, or execution authorization.</div>
-  <span class="pill">REAL stays REAL</span><span class="pill">PAPER stays PAPER</span><span class="pill">OBSERVER stays READ ONLY</span>
+<div class="risk">
+  <div class="metric"><div class="lab">ACCOUNT VALUE</div><div id="accountValue" class="val">UNAVAILABLE</div></div>
+  <div class="metric"><div class="lab">CASH</div><div id="cash" class="val">UPDATING</div></div>
+  <div class="metric"><div class="lab">BUYING POWER</div><div id="buyingPower" class="val">UNAVAILABLE</div></div>
+  <div class="metric"><div class="lab">OPEN EXPOSURE</div><div id="openExposure" class="val">UNAVAILABLE</div></div>
+  <div class="metric"><div class="lab">TODAY P/L $</div><div class="val">UNAVAILABLE</div></div>
+  <div class="metric"><div class="lab">TODAY P/L %</div><div class="val">UNAVAILABLE</div></div>
+  <div class="metric"><div class="lab">LIFETIME REAL P/L</div><div id="lifePnl" class="val">UPDATING</div></div>
+  <div class="metric"><div class="lab">OPEN POSITIONS</div><div id="openCount" class="val">0</div></div>
+</div>
+
+<main class="workspace">
+<section class="pane watch">
+  <div class="paneHead"><strong>MARKET / WATCHLIST</strong><span id="watchCount" class="tiny">0 instruments</span></div>
+  <div class="filters"><input id="search" placeholder="Filter asset / ticker"><select id="scoreFilter"><option value="0">ALL SCORES</option><option value=".5">≥ .50</option><option value=".65">≥ .65</option><option value=".8">≥ .80</option></select><select id="sort"><option value="score">SCORE ↓</option><option value="asset">ASSET</option><option value="time">TIME</option></select></div>
+  <div class="watchTable"><div class="thead"><div></div><div>ASSET</div><div>DIR</div><div>SCORE</div><div>SPOT</div><div>Y BID</div><div>Y ASK</div><div>SPR</div><div>LEFT</div></div><div id="watchRows"></div></div>
 </section>
 
-<div class="grid">
-  <section class="card wall"><h3>💰 Baseline Real</h3><div class="muted">Existing live Founder dashboard. Threshold, ARM, scheduler, order logic, ledger, balances and execution remain owned by the existing Baseline Worker.</div><a href="https://market-edge-baseline-real.darkbishop43.workers.dev/" target="_blank" rel="noopener">Open REAL dashboard →</a></section>
-  <section class="card"><h3>🧪 Paper Research</h3><div class="muted">Paper Threshold Controller, Payne, and Adaptive remain separate Paper surfaces. This shell only routes to them.</div><a href="https://raw.githack.com/darkbishop43-tech/nfe-labs/adaptive-market-lab/market-edge-lab/siblings/founder-trader-terminal.html" target="_blank" rel="noopener">Open Paper Control →</a></section>
-  <section class="card"><h3>🔭 Universal Observer</h3><div class="muted">Separate read-only observation project. Authentication investigation and credentials remain owned by the Observer project.</div><a href="https://market-edge-universal-observer.darkbishop43.workers.dev/" target="_blank" rel="noopener">Open Observer →</a></section>
-  <section class="card warn"><h3>📊 Audit / ⚙️ System</h3><div class="muted">No single authoritative Founder page is assigned for these destinations yet. They remain visibly unassigned instead of pointing to an invented or privileged control surface.</div></section>
+<section class="pane chartPane">
+  <div class="chartTop">
+    <div class="symbol"><span id="chartCoin" class="coin BTC">₿</span><b id="chartAsset">BTC</b><span id="chartPrice" class="price">UPDATING</span><span id="chartMove" class="tiny">—</span></div>
+    <div class="chartCtl"><button class="btn on" data-mode="candles">CANDLES</button><button class="btn" data-mode="line">LINE</button><button class="btn desktopTool" id="smaBtn">SMA20</button><button class="btn desktopTool" id="emaBtn">EMA20</button><button class="btn desktopTool" id="bbBtn">BOLL20</button></div>
+  </div>
+  <div class="chartTop">
+    <div class="chartCtl"><button class="tf" data-g="60">1m</button><button class="tf" disabled title="No direct verified Coinbase 3m feed">3m</button><button class="tf on" data-g="300">5m</button><button class="tf" data-g="900">15m</button><button class="tf" disabled title="No direct verified Coinbase 30m feed">30m</button><button class="tf" data-g="3600">1h</button><button class="tf" disabled title="No direct verified Coinbase 4h feed">4h</button><button class="tf" data-g="86400">1D</button></div>
+    <div class="chartCtl"><button class="btn desktopTool" data-draw="trend">↗ TREND</button><button class="btn desktopTool" data-draw="hline">— H-LINE</button><button class="btn desktopTool" data-draw="measure">↔ MEASURE</button><button class="btn desktopTool" id="clearDraw">CLEAR</button></div>
+  </div>
+  <div id="chartStage" class="chartStage"><canvas id="chart"></canvas><div id="legend" class="chartLegend"></div><div id="chartTip" class="chartTip"></div></div>
+  <div class="chartStatus"><span id="chartSource" class="live">COINBASE PUBLIC CANDLES</span><span id="chartCount">0 bars</span><span>ZOOM: wheel</span><span>PAN: drag</span><span id="drawStatus">DRAW: OFF</span></div>
+</section>
+
+<aside class="pane right">
+  <div class="paneHead"><strong>CONTRACT / ORDER TICKET</strong><span id="contractState" class="tiny">NO SELECTION</span></div>
+  <div class="rightBody">
+    <section class="section"><h3>SELECTED CONTRACT</h3><div id="contractKv" class="kv"><div>ASSET</div><div>—</div><div>TICKER</div><div>—</div></div><div class="bbo"><div class="quote yes"><span class="tiny">YES BID / ASK</span><strong id="yesQuote">— / —</strong></div><div class="quote no"><span class="tiny">NO BID / ASK</span><strong id="noQuote">— / —</strong></div></div><div id="depth" class="depth"><div class="tiny">ORDER BOOK DEPTH · select a live contract</div></div></section>
+    <section class="section ticket"><h3>FOUNDER ORDER TICKET · PRESENTATION ONLY</h3><div class="sideBtns"><button id="yesBtn" class="sideBtn yes on">BUY YES</button><button id="noBtn" class="sideBtn no">BUY NO</button></div><div class="ticketGrid" style="margin-top:6px"><div><label>LIMIT PRICE</label><input id="limitPrice" type="number" min=".01" max=".99" step=".01" placeholder="—"></div><div><label>QUANTITY</label><input id="qty" type="number" min="1" step="1" value="1"></div><div><label>TIME IN FORCE</label><select id="tif"><option>IOC</option></select></div><div><label>FEES</label><input value="UNAVAILABLE" disabled></div></div><div class="preview"><span>EST. COST</span><span id="estCost">—</span><span>MAX PAYOUT</span><span id="maxPayout">$1.00</span><span>SOURCE</span><span>FOUNDER_MANUAL (FUTURE)</span><span>AUTO IMPACT</span><span>NONE / SEPARATE LANE</span></div><button class="locked" disabled>🔒 SUBMIT FOUNDER ORDER · NOT AUTHORIZED</button><div class="tiny" style="margin-top:5px">No real manual execution endpoint exists in this Phase-2 cockpit.</div></section>
+  </div>
+</aside>
+
+<section class="pane bottom">
+  <div class="tabs"><button class="tab on" data-tab="positions">POSITIONS</button><button class="tab" data-tab="orders">OPEN ORDERS</button><button class="tab" data-tab="ledger">REAL TRADE LEDGER</button><button class="tab" data-tab="nofill">NO_FILL</button><button class="tab" data-tab="events">EVENT / SYSTEM LOG</button></div>
+  <div id="tabBody" class="tabBody"></div>
+</section>
+</main>
+
+<footer class="footer">
+  <div class="autoStrip"><span>AUTO <b id="autoFoot">—</b></span><span>ARM <b id="armFoot">—</b></span><span>EXPERIMENT <b id="expFoot">—</b></span><span>STAGE <b id="stageFoot">—</b></span><span>THRESHOLD <b id="thrFoot">.80</b></span><span>ATTEMPTS <b id="attemptFoot">—</b></span><span>OPEN <b id="openFoot">0</b></span><span>NEXT SCAN <b id="scanFoot">—</b></span></div>
+  <div>READ-ONLY COCKPIT · VALIDATION OVER EVERYTHING</div>
+</footer>
 </div>
-<div class="footer">NFE-OS · VALIDATION OVER EVERYTHING · NAVIGATION DOES NOT GRANT EXECUTION AUTHORITY</div>
-</div>
+
+<script>
+const READER="https://market-edge-founder-terminal.darkbishop43.workers.dev";
+const PRODUCT={BTC:"BTC-USD",ETH:"ETH-USD",SOL:"SOL-USD",XRP:"XRP-USD",HYPE:"HYPE-USD",ZEC:"ZEC-USD",DOGE:"DOGE-USD",BNB:"BNB-USD",NEAR:"NEAR-USD"};
+const SYMBOL={BTC:"₿",ETH:"Ξ",SOL:"S",XRP:"X",HYPE:"H",ZEC:"Z",DOGE:"Ð",BNB:"B",NEAR:"N"};
+const $=id=>document.getElementById(id), safe=v=>v==null||v===""?"—":String(v);
+const n=v=>Number.isFinite(Number(v))?Number(v):null;
+const money=v=>n(v)==null?"UNAVAILABLE":Number(v).toLocaleString(undefined,{style:"currency",currency:"USD",maximumFractionDigits:2});
+const pct=v=>n(v)==null?"—":(Number(v)*100).toFixed(2)+"%";
+const cents=v=>n(v)==null?"—":(Number(v)*100).toFixed(1)+"¢";
+const fmt=v=>n(v)==null?"—":Number(v).toLocaleString(undefined,{maximumFractionDigits:6});
+const esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+let SNAP=null, instruments=[], selected=null, selectedDetail=null, chartBars=[], chartMode="candles", granularity=300, visibleCount=90, panOffset=0, dragging=false, dragX=0, drawTool=null, drawings=[], indicators={sma:false,ema:false,bb:false}, activeTab="positions", orderSide="YES";
+function body(path){return SNAP?.endpoints?.[path]?.body||{}}
+function opps(){const w=body("/wide-radar-state");const s=body("/shadow-state");return (w?.live?.opportunities||s?.opportunities||[])}
+function mirror(){return body("/kalshi-live-mirror-data")?.rows||[]}
+function exState(){return body("/execution-test-state")}
+function realState(){return body("/real-trade-state")}
+function assetIcon(a){return '<span class="coin '+esc(a)+'">'+esc(SYMBOL[a]||a?.slice(0,1)||"?")+'</span>'}
+function remaining(t){if(!t)return null;const ms=new Date(t).getTime()-Date.now();if(!Number.isFinite(ms))return null;if(ms<=0)return"0:00";const m=Math.floor(ms/60000),s=Math.floor(ms%60000/1000);return m+":"+String(s).padStart(2,"0")}
+function buildInstruments(){
+ const mm=new Map(mirror().map(x=>[x.ticker,x]));
+ instruments=opps().map(o=>{const m=mm.get(o.ticker||o.marketTicker)||{};return{
+  asset:o.asset||m.asset||"?",ticker:o.ticker||o.marketTicker||m.ticker||"",direction:o.direction||o.outcomeSide||m.direction||m.outcomeSide||"",
+  side:o.outcomeSide||m.outcomeSide||"",score:n(o.score??m.score),edge:n(o.edge??m.edge),spot:n(o.spot??o.spotPrice??m.spot),
+  target:o.target??o.strike??null,yesBid:n(m.yesBid),yesAsk:n(m.yesAsk),noBid:n(m.noBid),noAsk:n(m.noAsk),
+  closeTime:o.closeTime||m.closeTime||null,executionEligible:o.executionEligible===true,status:m.status||null,
+  selectedBid:n(m.selectedBid),selectedAsk:n(m.selectedAsk)
+ }});
+ if(selected){const found=instruments.find(x=>x.ticker===selected.ticker);if(found)selected=found}
+ if(!selected&&instruments.length)selectInstrument(instruments[0],false);
+ renderWatch();
+}
+function renderWatch(){
+ const q=$("search").value.trim().toLowerCase(),min=Number($("scoreFilter").value||0),sort=$("sort").value;
+ let rows=instruments.filter(x=>(x.asset+" "+x.ticker).toLowerCase().includes(q)&&(x.score??0)>=min);
+ rows.sort((a,b)=>sort==="asset"?a.asset.localeCompare(b.asset):sort==="time"?(new Date(a.closeTime||0)-new Date(b.closeTime||0)):(b.score??-1)-(a.score??-1));
+ $("watchCount").textContent=rows.length+" instruments";
+ const openTickers=new Set(openPositions().map(p=>p.marketTicker||p.ticker));
+ $("watchRows").innerHTML=rows.map(x=>{
+  const spread=x.yesAsk!=null&&x.yesBid!=null?x.yesAsk-x.yesBid:null,hot=(x.score??0)>=currentThreshold();
+  return '<div class="wrow '+(selected?.ticker===x.ticker?"sel ":"")+(hot?"hot ":"")+(openTickers.has(x.ticker)?"openpos":"")+'" data-ticker="'+esc(x.ticker)+'"><div>'+assetIcon(x.asset)+'</div><div>'+esc(x.asset)+'</div><div class="dir '+(/UP|YES/i.test(x.direction)?"up":"down")+'">'+esc(x.direction||x.side)+'</div><div class="score">'+(x.score==null?"—":x.score.toFixed(2))+'</div><div>'+fmt(x.spot)+'</div><div>'+cents(x.yesBid)+'</div><div>'+cents(x.yesAsk)+'</div><div>'+cents(spread)+'</div><div>'+safe(remaining(x.closeTime))+'</div></div>';
+ }).join("")||'<div class="tiny" style="padding:12px">No live opportunities match this filter.</div>';
+ document.querySelectorAll(".wrow[data-ticker]").forEach(el=>el.onclick=()=>{const x=instruments.find(v=>v.ticker===el.dataset.ticker);if(x)selectInstrument(x,true)});
+}
+async function selectInstrument(x,load=true){
+ selected=x;localStorage.setItem("nfe-cockpit-selected",x.ticker);renderWatch();renderInspector();
+ $("chartAsset").textContent=x.asset;$("chartCoin").className="coin "+x.asset;$("chartCoin").textContent=SYMBOL[x.asset]||x.asset.slice(0,1);
+ if(load){await Promise.all([loadContract(),loadChart()])}
+}
+async function loadContract(){
+ if(!selected?.ticker)return; $("contractState").textContent="READING PROVIDER…";
+ try{const r=await fetch(READER+"/api/contract?ticker="+encodeURIComponent(selected.ticker),{cache:"no-store"});selectedDetail=await r.json();$("contractState").textContent=selectedDetail.ok?"LIVE READ":"READ UNAVAILABLE";renderInspector();}
+ catch{$("contractState").textContent="READ FAILED";selectedDetail=null;renderInspector()}
+}
+function marketObj(){return selectedDetail?.market||{}}
+function mfield(...keys){const m=marketObj();for(const k of keys)if(m?.[k]!=null&&m[k]!=="")return m[k];return null}
+function renderInspector(){
+ const x=selected||{},m=marketObj(),sett=(m?.settlement_sources||m?.settlementSources||[]),settName=Array.isArray(sett)?sett.map(v=>v?.name||v).filter(Boolean).join(", "):sett;
+ const target=mfield("floor_strike","cap_strike","strike","strike_value","functional_strike"),close=mfield("close_time")||x.closeTime,early=mfield("can_close_early");
+ $("contractKv").innerHTML=[
+  ["ASSET",x.asset],["TICKER",x.ticker],["PROPOSITION",mfield("title")||mfield("subtitle")||"UNAVAILABLE"],["DIRECTION",x.direction||x.side],
+  ["TARGET / STRIKE",target??"UNAVAILABLE"],["SETTLEMENT",settName||"UNAVAILABLE"],["SPOT / REF",x.spot!=null?fmt(x.spot):"UNAVAILABLE"],
+  ["SPREAD",x.yesAsk!=null&&x.yesBid!=null?cents(x.yesAsk-x.yesBid):"UNAVAILABLE"],["TIME REMAINING",remaining(close)||"UNAVAILABLE"],["CLOSE",close?new Date(close).toLocaleString():"UNAVAILABLE"],
+  ["EARLY CLOSE",early==null?"UNAVAILABLE":String(Boolean(early)).toUpperCase()],["NFE SCORE",x.score==null?"UNAVAILABLE":x.score.toFixed(4)],
+  ["AUTO ELIGIBLE",x.executionEligible?"YES":"NO"],["POSITION",openPositions().some(p=>(p.marketTicker||p.ticker)===x.ticker)?"OPEN":"NONE"]
+ ].map(([a,b])=>'<div>'+esc(a)+'</div><div title="'+esc(b)+'">'+esc(b)+'</div>').join("");
+ $("yesQuote").textContent=cents(x.yesBid)+" / "+cents(x.yesAsk);$("noQuote").textContent=cents(x.noBid)+" / "+cents(x.noAsk);
+ renderDepth();
+ const ask=orderSide==="YES"?x.yesAsk:x.noAsk;if(ask!=null&&!$("limitPrice").value)$("limitPrice").value=ask.toFixed(2);updateTicket();
+}
+function renderDepth(){
+ const b=selectedDetail?.orderbook;if(!b){$("depth").innerHTML='<div class="tiny">DEPTH UNAVAILABLE · BBO remains authoritative where present.</div>';return}
+ const yes=Array.isArray(b?.yes)?b.yes:[],no=Array.isArray(b?.no)?b.no:[];
+ const max=Math.max(yes.length,no.length);let h='<div class="drow"><span>SIDE</span><span>PRICE</span><span>QTY</span></div>';
+ for(let i=0;i<Math.min(max,10);i++){if(yes[i])h+='<div class="drow"><span class="yes">YES</span><span>'+cents(yes[i][0])+'</span><span>'+fmt(yes[i][1])+'</span></div>';if(no[i])h+='<div class="drow"><span class="no">NO</span><span>'+cents(no[i][0])+'</span><span>'+fmt(no[i][1])+'</span></div>'}
+ $("depth").innerHTML=h||'<div class="tiny">DEPTH RESPONSE PRESENT · no levels returned.</div>';
+}
+function currentThreshold(){const e=exState();const t=n(e?.safety?.testEntryScore);return e?.state?.armed&&t!=null?t:.80}
+function openPositions(){const e=exState();return (e?.state?.positions||[]).filter(p=>["OPEN","EXIT_RETRY"].includes(p?.status))}
+function attempts(){return exState()?.state?.attempts||[]}
+function updateTop(){
+ const health=SNAP?.endpoints?.["/health"],status=body("/status"),account=body("/account"),e=exState(),real=realState(),open=openPositions(),thr=currentThreshold();
+ $("liveDot").className="dot "+(health?.ok?"good":"bad");$("liveState").textContent=health?.ok?"LIVE":"READ FAIL";
+ $("providerState").textContent=account?.accountConnection||status?.venue||"—";$("autoState").textContent=e?.state?.status||"—";$("armState").textContent=e?.state?.armed?"TRUE":"FALSE";$("thresholdState").textContent=thr.toFixed(2);
+ $("openCountTop").textContent=open.length;$("openCount").textContent=open.length;
+ $("cash").textContent=n(real?.providerCashUsd)!=null?money(real.providerCashUsd):"UPDATING";
+ $("buyingPower").textContent=account?.accountState==="FUNDED_RECORD_PRESENT"?"AVAILABLE · AMOUNT UNAVAILABLE":"UNAVAILABLE";
+ const exp=open.reduce((a,p)=>a+(n(p?.costUsd??p?.entryCostUsd??p?.stakeUsd)??0),0);$("openExposure").textContent=open.length&&exp?money(exp):open.length?"UNAVAILABLE":"$0.00";
+ const life=n(real?.bankrollNetPnlUsd);$("lifePnl").textContent=life==null?"UNAVAILABLE":money(life);$("lifePnl").className="val "+(life>0?"good":life<0?"bad":"");
+ $("autoFoot").textContent=e?.state?.status||"—";$("armFoot").textContent=e?.state?.armed?"TRUE":"FALSE";$("armFoot").className=e?.state?.armed?"armed":"";
+ $("expFoot").textContent=e?.state?.seriesId?String(e.state.seriesId).slice(0,8):"BASELINE";const qi=n(e?.queue?.currentIndex);$("stageFoot").textContent=qi!=null&&qi>=0?String(qi+1):"—";$("thrFoot").textContent=thr.toFixed(2);
+ const started=n(e?.state?.attemptsStarted)??0,max=n(e?.state?.maxAttempts??e?.safety?.maxAttempts);$("attemptFoot").textContent=max!=null?started+"/"+max:String(started);$("openFoot").textContent=open.length;
+}
+async function refreshSnapshot(){
+ try{const r=await fetch(READER+"/api/snapshot",{cache:"no-store"});SNAP=await r.json();updateTop();buildInstruments();renderTab();
+  if(selected){const fresh=instruments.find(x=>x.ticker===selected.ticker);if(fresh){selected=fresh;renderInspector()}}
+ }catch{$("liveDot").className="dot bad";$("liveState").textContent="READ FAIL"}
+}
+async function loadChart(){
+ if(!selected?.asset||!PRODUCT[selected.asset]){$("chartSource").textContent="CANDLE DATA UNAVAILABLE";chartBars=[];drawChart();return}
+ $("chartSource").textContent="LOADING "+PRODUCT[selected.asset]+"…";
+ try{const r=await fetch(READER+"/api/candles?product="+encodeURIComponent(PRODUCT[selected.asset])+"&granularity="+granularity,{cache:"no-store"});const j=await r.json();chartBars=j.candles||[];panOffset=0;visibleCount=Math.min(90,chartBars.length||90);$("chartSource").textContent=j.ok?"COINBASE PUBLIC CANDLES · LIVE":"CANDLE READ FAILED";$("chartCount").textContent=chartBars.length+" bars";drawChart();}
+ catch{$("chartSource").textContent="CANDLE READ FAILED";chartBars=[];drawChart()}
+}
+function ema(vals,p){if(vals.length<p)return[];const k=2/(p+1),out=[];let e=vals[0];for(const v of vals){e=v*k+e*(1-k);out.push(e)}return out}
+function sma(vals,p){return vals.map((_,i)=>i<p-1?null:vals.slice(i-p+1,i+1).reduce((a,b)=>a+b,0)/p)}
+function boll(vals,p=20){const m=sma(vals,p);return vals.map((_,i)=>{if(i<p-1)return null;const a=vals.slice(i-p+1,i+1),mean=m[i],sd=Math.sqrt(a.reduce((s,v)=>s+(v-mean)**2,0)/p);return[mean+2*sd,mean-2*sd]})}
+function drawChart(){
+ const cv=$("chart"),st=$("chartStage"),dpr=devicePixelRatio||1,w=st.clientWidth,h=st.clientHeight;cv.width=Math.max(1,w*dpr);cv.height=Math.max(1,h*dpr);const x=cv.getContext("2d");x.scale(dpr,dpr);x.clearRect(0,0,w,h);
+ if(!chartBars.length){x.fillStyle="#70879c";x.font="12px system-ui";x.fillText("Verified candle data unavailable for selected asset/timeframe.",18,28);return}
+ const end=Math.max(0,chartBars.length-panOffset),start=Math.max(0,end-visibleCount),bars=chartBars.slice(start,end);if(!bars.length)return;
+ const pad={l:48,r:62,t:16,b:25},cw=w-pad.l-pad.r,ch=h-pad.t-pad.b;const highs=bars.map(b=>b.high),lows=bars.map(b=>b.low);let hi=Math.max(...highs),lo=Math.min(...lows);const span=(hi-lo)||1;hi+=span*.06;lo-=span*.06;
+ const px=i=>pad.l+(i+.5)*cw/bars.length,py=v=>pad.t+(hi-v)/(hi-lo)*ch;
+ x.strokeStyle="#13283a";x.lineWidth=1;x.fillStyle="#6f879d";x.font="9px system-ui";for(let i=0;i<5;i++){const yy=pad.t+i*ch/4;x.beginPath();x.moveTo(pad.l,yy);x.lineTo(w-pad.r,yy);x.stroke();const val=hi-(hi-lo)*i/4;x.fillText(val.toFixed(val<10?4:2),w-pad.r+5,yy+3)}
+ if(chartMode==="candles"){const bw=Math.max(1,cw/bars.length*.58);bars.forEach((b,i)=>{const xx=px(i),up=b.close>=b.open;x.strokeStyle=up?"#4de28b":"#ff6f7d";x.fillStyle=x.strokeStyle;x.beginPath();x.moveTo(xx,py(b.high));x.lineTo(xx,py(b.low));x.stroke();const y1=py(Math.max(b.open,b.close)),y2=py(Math.min(b.open,b.close));x.fillRect(xx-bw/2,y1,bw,Math.max(1,y2-y1))})}
+ else{x.strokeStyle="#72aaf7";x.lineWidth=1.6;x.beginPath();bars.forEach((b,i)=>{const xx=px(i),yy=py(b.close);i?x.lineTo(xx,yy):x.moveTo(xx,yy)});x.stroke()}
+ const vols=bars.map(b=>b.volume||0),vmax=Math.max(...vols,1);x.globalAlpha=.22;bars.forEach((b,i)=>{x.fillStyle=b.close>=b.open?"#4de28b":"#ff6f7d";const vh=(b.volume||0)/vmax*ch*.14;x.fillRect(px(i)-1,h-pad.b-vh,2,vh)});x.globalAlpha=1;
+ const closes=bars.map(b=>b.close);
+ function pathSeries(vals,color){x.strokeStyle=color;x.lineWidth=1.2;x.beginPath();let begun=false;vals.forEach((v,i)=>{if(v==null)return;const xx=px(i),yy=py(v);begun?x.lineTo(xx,yy):(x.moveTo(xx,yy),begun=true)});x.stroke()}
+ if(indicators.sma)pathSeries(sma(closes,20),"#f2c557");if(indicators.ema)pathSeries(ema(closes,20),"#5ee7f0");if(indicators.bb){const bb=boll(closes,20);pathSeries(bb.map(v=>v?.[0]??null),"#9b78ff");pathSeries(bb.map(v=>v?.[1]??null),"#9b78ff")}
+ const detail=marketObj(),strike=n(detail?.floor_strike??detail?.cap_strike??detail?.strike??detail?.strike_value);if(strike!=null&&strike>=lo&&strike<=hi){x.strokeStyle="#d5ad5b";x.setLineDash([5,4]);x.beginPath();x.moveTo(pad.l,py(strike));x.lineTo(w-pad.r,py(strike));x.stroke();x.setLineDash([]);x.fillStyle="#f0d18b";x.fillText("KALSHI "+strike,w-pad.r-90,py(strike)-4)}
+ drawings.forEach(d=>{x.strokeStyle=d.kind==="measure"?"#f2c557":"#72aaf7";x.lineWidth=1.2;x.setLineDash(d.kind==="hline"?[5,3]:[]);x.beginPath();if(d.kind==="hline"){x.moveTo(pad.l,d.y1*h);x.lineTo(w-pad.r,d.y1*h)}else{x.moveTo(d.x1*w,d.y1*h);x.lineTo(d.x2*w,d.y2*h)}x.stroke();x.setLineDash([])});
+ const last=bars[bars.length-1];$("chartPrice").textContent=fmt(last.close);$("chartMove").textContent=((last.close-bars[0].open)/bars[0].open*100).toFixed(2)+"%";$("legend").textContent=(selected?.ticker||"")+" · "+new Date(last.time*1000).toISOString();
+ cv._plot={bars,pad,cw,ch,hi,lo,px,py,w,h};
+}
+function pointerToNorm(e){const r=$("chart").getBoundingClientRect();return{x:(e.clientX-r.left)/r.width,y:(e.clientY-r.top)/r.height}}
+function chartMove(e){const p=$("chart")._plot;if(!p)return;const r=$("chart").getBoundingClientRect(),x0=e.clientX-r.left,y0=e.clientY-r.top,i=Math.max(0,Math.min(p.bars.length-1,Math.floor((x0-p.pad.l)/p.cw*p.bars.length)));const b=p.bars[i];if(!b)return;const tip=$("chartTip");tip.style.display="block";tip.style.left=Math.min(r.width-170,x0+12)+"px";tip.style.top=Math.max(8,y0-52)+"px";tip.innerHTML=new Date(b.time*1000).toLocaleString()+"<br>O "+fmt(b.open)+" H "+fmt(b.high)+"<br>L "+fmt(b.low)+" C "+fmt(b.close)+" V "+fmt(b.volume)}
+function chartDown(e){if(drawTool){const p=pointerToNorm(e);if(drawTool==="hline"){drawings.push({kind:"hline",x1:0,y1:p.y,x2:1,y2:p.y});drawTool=null;$("drawStatus").textContent="DRAW: OFF";drawChart();return}if(!window._drawStart){window._drawStart=p;$("drawStatus").textContent="DRAW: SELECT END"}else{drawings.push({kind:drawTool,x1:window._drawStart.x,y1:window._drawStart.y,x2:p.x,y2:p.y});window._drawStart=null;drawTool=null;$("drawStatus").textContent="DRAW: OFF";drawChart()}return}dragging=true;dragX=e.clientX}
+function chartUp(){dragging=false}
+function chartDrag(e){chartMove(e);if(!dragging)return;const dx=e.clientX-dragX;if(Math.abs(dx)>12){panOffset=Math.max(0,Math.min(chartBars.length-visibleCount,panOffset+Math.sign(dx)));dragX=e.clientX;drawChart()}}
+function table(cols,rows){return '<table class="dataTable"><thead><tr>'+cols.map(c=>'<th>'+esc(c)+'</th>').join("")+'</tr></thead><tbody>'+rows.join("")+'</tbody></table>'}
+function td(v,cl=""){return '<td class="'+cl+'" title="'+esc(safe(v))+'">'+esc(safe(v))+'</td>'}
+function renderTab(){
+ const e=exState(),real=realState(),pos=e?.state?.positions||[],att=attempts(),led=real?.ledger||[];
+ if(activeTab==="positions"){const rows=pos.map(p=>'<tr>'+td(p.source||"AUTO")+td(p.asset)+td(p.marketTicker||p.ticker)+td(p.outcomeSide||p.side)+td(p.entryPrice??p.averageFillPrice)+td(p.currentPrice??"UNAVAILABLE")+td(p.filledCount??p.size)+td(p.costUsd??p.entryCostUsd??"UNAVAILABLE")+td(p.pnlUsd??"UNAVAILABLE",n(p.pnlUsd)>0?"pnlpos":n(p.pnlUsd)<0?"pnlneg":"")+td(p.scoreAtEntry??p.liveScore??p.score)+td(p.openedAt?Math.max(0,Math.floor((Date.now()-Number(p.openedAt))/1000))+"s":"UNAVAILABLE")+td(remaining(p.closeTime))+td(p.exitReason??p.status)+'</tr>');$("tabBody").innerHTML=table(["SOURCE","ASSET","TICKER","SIDE","ENTRY","CURRENT","SIZE","COST","P/L $","SCORE","OPEN","LEFT","EXIT GOV"],rows)}
+ else if(activeTab==="orders"){const rows=att.filter(a=>["SUBMITTING","ORDER_OPEN","OPEN"].includes(a.status)).map(a=>'<tr>'+td("AUTO")+td(a.asset)+td(a.marketTicker)+td(a.outcomeSide)+td(a.limitPrice??a.liveAsk)+td(a.orderId)+td(a.status)+td(a.providerHttpStatus)+'</tr>');$("tabBody").innerHTML=table(["SOURCE","ASSET","TICKER","SIDE","LIMIT","ORDER ID","STATUS","HTTP"],rows)}
+ else if(activeTab==="nofill"){const rows=att.filter(a=>a.status==="NO_FILL").map(a=>'<tr>'+td(a.attemptNo)+td(a.asset)+td(a.marketTicker)+td(a.outcomeSide)+td(a.liveScore??a.score)+td(a.liveAsk)+td(a.orderId)+td(a.providerHttpStatus)+td("NO_FILL")+'</tr>');$("tabBody").innerHTML=table(["ATTEMPT","ASSET","TICKER","SIDE","SCORE","ASK","ORDER ID","HTTP","RESULT"],rows)}
+ else if(activeTab==="ledger"){const rows=led.map((x,i)=>'<tr>'+td(x.tradeNo??x.attemptNo??i+1)+td(x.ts??x.time)+td(x.source??"AUTO")+td(x.asset)+td(x.marketTicker??x.ticker)+td(x.direction??x.outcomeSide)+td(x.score??x.liveScore)+td(x.entry??x.entryPrice)+td(x.exit??x.payout??"UNAVAILABLE")+td(x.fee??x.fees??"UNAVAILABLE")+td(x.pnl??x.netPnl??"UNAVAILABLE",n(x.pnl??x.netPnl)>0?"pnlpos":n(x.pnl??x.netPnl)<0?"pnlneg":"")+td(x.result??x.type)+td(x.exitReason??x.reason)+'</tr>');$("tabBody").innerHTML=table(["TRADE #","TIME","SOURCE","ASSET","TICKER","DIR","SCORE","ENTRY","EXIT/PAYOUT","FEES","NET P/L","RESULT","EXIT REASON"],rows)}
+ else{const rows=[...(e?.state?.ledger||[]),...led].sort((a,b)=>new Date(b.ts||0)-new Date(a.ts||0)).slice(0,120).map(x=>'<tr>'+td(x.ts)+td(x.type)+td(x.asset)+td(x.marketTicker??x.ticker)+td(x.status??x.reason??x.message)+'</tr>');$("tabBody").innerHTML=table(["TIME","EVENT","ASSET","TICKER","DETAIL"],rows)}
+}
+function updateTicket(){const q=Math.max(1,Math.trunc(Number($("qty").value)||1)),p=Number($("limitPrice").value);$("maxPayout").textContent=money(q);$("estCost").textContent=Number.isFinite(p)?money(q*p):"UNAVAILABLE"}
+function tick(){ $("clockUTC").textContent=new Date().toISOString().slice(11,19)+" UTC";const s=body("/shadow-state")?.lastRunAt;if(s){const ms=60000-(Date.now()-new Date(s).getTime())%60000;$("scanFoot").textContent=Math.max(0,Math.ceil(ms/1000))+"s"}renderWatch() }
+$("search").oninput=renderWatch;$("scoreFilter").onchange=renderWatch;$("sort").onchange=renderWatch;
+document.querySelectorAll("[data-mode]").forEach(b=>b.onclick=()=>{document.querySelectorAll("[data-mode]").forEach(x=>x.classList.remove("on"));b.classList.add("on");chartMode=b.dataset.mode;drawChart()});
+document.querySelectorAll("[data-g]").forEach(b=>b.onclick=()=>{document.querySelectorAll("[data-g]").forEach(x=>x.classList.remove("on"));b.classList.add("on");granularity=Number(b.dataset.g);loadChart()});
+$("smaBtn").onclick=()=>{indicators.sma=!indicators.sma;$("smaBtn").classList.toggle("on",indicators.sma);drawChart()};$("emaBtn").onclick=()=>{indicators.ema=!indicators.ema;$("emaBtn").classList.toggle("on",indicators.ema);drawChart()};$("bbBtn").onclick=()=>{indicators.bb=!indicators.bb;$("bbBtn").classList.toggle("on",indicators.bb);drawChart()};
+document.querySelectorAll("[data-draw]").forEach(b=>b.onclick=()=>{drawTool=b.dataset.draw;window._drawStart=null;$("drawStatus").textContent="DRAW: "+drawTool.toUpperCase()+" · SELECT START"});$("clearDraw").onclick=()=>{drawings=[];drawTool=null;window._drawStart=null;$("drawStatus").textContent="DRAW: OFF";drawChart()};
+$("chart").addEventListener("mousemove",chartDrag);$("chart").addEventListener("mousedown",chartDown);window.addEventListener("mouseup",chartUp);$("chart").addEventListener("mouseleave",()=>{$("chartTip").style.display="none";dragging=false});$("chart").addEventListener("wheel",e=>{e.preventDefault();visibleCount=Math.max(20,Math.min(chartBars.length||300,visibleCount+(e.deltaY>0?10:-10)));panOffset=Math.min(panOffset,Math.max(0,chartBars.length-visibleCount));drawChart()},{passive:false});
+window.addEventListener("resize",drawChart);
+document.querySelectorAll(".tab").forEach(b=>b.onclick=()=>{document.querySelectorAll(".tab").forEach(x=>x.classList.remove("on"));b.classList.add("on");activeTab=b.dataset.tab;renderTab()});
+$("yesBtn").onclick=()=>{orderSide="YES";$("yesBtn").classList.add("on");$("noBtn").classList.remove("on");if(selected?.yesAsk!=null)$("limitPrice").value=selected.yesAsk.toFixed(2);updateTicket()};$("noBtn").onclick=()=>{orderSide="NO";$("noBtn").classList.add("on");$("yesBtn").classList.remove("on");if(selected?.noAsk!=null)$("limitPrice").value=selected.noAsk.toFixed(2);updateTicket()};$("limitPrice").oninput=updateTicket;$("qty").oninput=updateTicket;
+(async function init(){setInterval(tick,1000);tick();await refreshSnapshot();const saved=localStorage.getItem("nfe-cockpit-selected"),x=instruments.find(v=>v.ticker===saved)||instruments[0];if(x)await selectInstrument(x,true);renderTab();setInterval(refreshSnapshot,5000)})();
+</script>
 </body>
 </html>
