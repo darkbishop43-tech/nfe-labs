@@ -1,0 +1,38 @@
+name: Cockpit Read Only Data Contract Probe
+
+on:
+  push:
+    branches: [market-edge-baseline-real]
+    paths:
+      - '.github/workflows/cockpit-read-only-data-probe.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Capture safe live read-only cockpit inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          B='https://market-edge-baseline-real.darkbishop43.workers.dev'
+          for p in shadow-state wide-radar-state real-trade-state execution-test-state kalshi-live-mirror-data account status; do
+            curl -fsS "$B/$p" -o "/tmp/$p.json"
+          done
+          python - <<'PY'
+          import json
+          def J(n): return json.load(open('/tmp/'+n+'.json'))
+          sh,wr,rt,ex,km,ac,st=map(J,['shadow-state','wide-radar-state','real-trade-state','execution-test-state','kalshi-live-mirror-data','account','status'])
+          out={
+            'shadow':{k:sh.get(k) for k in ['status','lastRunAt','strategy','eligibleCount','seenCount','rejectedCount','positions','ledger','opportunities','assetCoverage']},
+            'wideRadar':wr,
+            'realTradeState':rt,
+            'executionTestState':ex,
+            'mirror':km,
+            'account':ac,
+            'status':st
+          }
+          print(json.dumps(out,indent=2)[:60000])
+          PY
