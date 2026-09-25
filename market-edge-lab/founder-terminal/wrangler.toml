@@ -1,0 +1,6 @@
+name = "market-edge-founder-terminal"
+main = "worker.js"
+compatibility_date = "2026-09-25"
+
+[vars]
+MODE = "READ_ONLY_COCKPIT_READER"
