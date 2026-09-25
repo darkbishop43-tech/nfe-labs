@@ -1,0 +1,77 @@
+name: Consolidate AUTO Bankroll to Index 2
+on:
+  push:
+    branches: [market-edge-baseline-real]
+    paths: ['.github/workflows/consolidate-auto-index2.yml']
+permissions: {contents: read}
+jobs:
+  consolidate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Read, reconcile, consolidate using existing transfer route, verify
+        shell: bash
+        run: |
+          set -euo pipefail
+          B='https://market-edge-baseline-real.darkbishop43.workers.dev'
+          curl -fsS "$B/execution-test-state" -o /tmp/before.json
+          curl -fsS "$B/founder-capital-ledger" -o /tmp/capital-before.json
+          python - <<'PY'
+          import json
+          x=json.load(open('/tmp/before.json')); c=json.load(open('/tmp/capital-before.json'))
+          s=x['state']; f=x['funding']; p=c.get('provider',{})
+          print('PRE_EXECUTION='+json.dumps({'status':s.get('status'),'armed':s.get('armed'),'openPositions':s.get('openPositions'),'attemptsStarted':s.get('attemptsStarted'),'maxAttempts':s.get('maxAttempts')}))
+          print('PRE_FUNDING='+json.dumps(f))
+          print('PRE_PROVIDER='+json.dumps(p))
+          assert s.get('armed') is False and int(s.get('openPositions') or 0)==0
+          rows=p.get('balanceBreakdown') or []
+          by={int(r['exchangeIndex']):float(r['balanceUsd']) for r in rows}
+          total=float(p.get('cashUsd'))
+          assert abs(sum(by.values())-total)<0.0001, (by,total)
+          outside=sum(v for k,v in by.items() if k!=2)
+          print('PRE_RECONCILED='+json.dumps({'totalCashUsd':total,'byIndex':by,'outsideIndex2Usd':outside}))
+          PY
+          OUTSIDE=$(python - <<'PY'
+          import json
+          p=json.load(open('/tmp/capital-before.json'))['provider']; rows=p.get('balanceBreakdown') or []
+          print(f"{sum(float(r['balanceUsd']) for r in rows if int(r['exchangeIndex'])!=2):.4f}")
+          PY
+          )
+          if python - "$OUTSIDE" <<'PY'
+          import sys
+          raise SystemExit(0 if float(sys.argv[1])>0.0000001 else 1)
+          PY
+          then
+            I0=$(python - <<'PY'
+          import json
+          p=json.load(open('/tmp/capital-before.json'))['provider']; rows=p.get('balanceBreakdown') or []
+          print(f"{sum(float(r['balanceUsd']) for r in rows if int(r['exchangeIndex'])==0):.4f}")
+          PY
+          )
+            python - "$OUTSIDE" "$I0" <<'PY'
+          import sys
+          assert abs(float(sys.argv[1])-float(sys.argv[2]))<0.0001, 'AUTHORIZED EXISTING ROUTE ONLY SUPPORTS INDEX0; non-index0 AUTO cash exists'
+          PY
+            curl -fsS -o /tmp/transfer-body -D /tmp/transfer-headers -X POST               -H 'content-type: application/x-www-form-urlencoded'               --data 'authorization=MOVE_INDEX0_TO_INDEX2_FOR_FIVE_EXECUTION_TESTS'               "$B/execution-test-consolidate-index2"
+            echo 'TRANSFER_HEADERS:'; cat /tmp/transfer-headers
+            echo 'TRANSFER_BODY:'; cat /tmp/transfer-body || true
+          else
+            echo 'NO_TRANSFER_REQUIRED'
+          fi
+          curl -fsS "$B/execution-test-state" -o /tmp/after.json
+          curl -fsS "$B/founder-capital-ledger" -o /tmp/capital-after.json
+          python - <<'PY'
+          import json
+          x=json.load(open('/tmp/after.json')); c=json.load(open('/tmp/capital-after.json'))
+          s=x['state']; f=x['funding']; p=c['provider']; rows=p.get('balanceBreakdown') or []
+          by={int(r['exchangeIndex']):float(r['balanceUsd']) for r in rows}; total=float(p['cashUsd'])
+          print('POST_EXECUTION='+json.dumps({'status':s.get('status'),'armed':s.get('armed'),'openPositions':s.get('openPositions'),'attemptsStarted':s.get('attemptsStarted'),'maxAttempts':s.get('maxAttempts')}))
+          print('POST_FUNDING='+json.dumps(f))
+          print('POST_PROVIDER='+json.dumps(p))
+          print('POST_RECONCILED='+json.dumps({'totalCashUsd':total,'byIndex':by,'outsideIndex2Usd':sum(v for k,v in by.items() if k!=2),'index2Usd':by.get(2)}))
+          assert s.get('armed') is False and int(s.get('openPositions') or 0)==0
+          assert abs(sum(by.values())-total)<0.0001
+          assert abs(sum(v for k,v in by.items() if k!=2))<0.0001
+          assert abs(float(by.get(2,0))-total)<0.0001
+          assert abs(float((c.get('sleeves') or {}).get('FOUNDER_MANUAL',{}).get('allocatedCapitalUsd') or 0))<0.0001
+          assert float((c.get('sleeves') or {}).get('AUTO_BASELINE',{}).get('allocatedCapitalUsd') or 0)>0
+          PY
