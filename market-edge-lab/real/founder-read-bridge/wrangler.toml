@@ -2,3 +2,7 @@ name = "market-edge-founder-read"
 main = "src/index.js"
 compatibility_date = "2026-09-25"
 workers_dev = true
+
+[[services]]
+binding = "BASELINE"
+service = "market-edge-baseline-real"
