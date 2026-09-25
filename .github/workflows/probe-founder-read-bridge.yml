@@ -1,0 +1,19 @@
+name: Probe Founder Read Bridge
+on:
+  push:
+    branches: [market-edge-baseline-real]
+    paths: ['.github/workflows/probe-founder-read-bridge.yml']
+permissions: {contents: read}
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Probe
+        run: |
+          R='https://market-edge-founder-read.darkbishop43.workers.dev'
+          for p in health shadow-state wide-radar-state execution-test-state real-trade-state; do
+            echo "=== $p ==="
+            curl -sS -D - "$R/$p" -o "/tmp/$p" || true
+            head -c 300 "/tmp/$p" 2>/dev/null || true
+            echo
+          done
