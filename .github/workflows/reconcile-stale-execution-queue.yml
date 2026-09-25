@@ -1,0 +1,60 @@
+name: Reconcile Stale Execution Queue
+on:
+  push:
+    branches: [market-edge-baseline-real]
+    paths: ['.github/workflows/reconcile-stale-execution-queue.yml']
+permissions: {contents: read}
+jobs:
+  reconcile:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Governed disarm and live acceptance
+        run: |
+          set -euo pipefail
+          R='https://market-edge-baseline-real.darkbishop43.workers.dev'
+          echo '=== BEFORE ==='
+          curl -fsS "$R/execution-test-state" | tee /tmp/before.json
+          node <<'NODE'
+          const fs=require('fs');
+          const x=JSON.parse(fs.readFileSync('/tmp/before.json','utf8'));
+          if(Number(x.state?.openPositions)!==0) throw new Error('OPEN_POSITIONS_BLOCK_DISARM_RECONCILIATION');
+          if(!x.queue?.active || !x.state?.armed) throw new Error('EXPECTED_STALE_ACTIVE_QUEUE_NOT_PRESENT');
+          console.log('BEFORE_QUEUE='+JSON.stringify({queueId:x.queue.queueId,status:x.state.status,armed:x.state.armed,queueActive:x.queue.active,attempts:x.state.attemptsStarted,open:x.state.openPositions,stages:x.queue.stages}));
+          NODE
+          echo '=== REPAIRED GOVERNED DISARM ==='
+          curl -fsS -L -X POST             -H 'content-type: application/x-www-form-urlencoded'             --data 'authorization=DISARM_EXECUTION_TEST_QUEUE'             "$R/execution-test-queue-disarm" | tee /tmp/disarm-response.txt
+          echo
+          echo '=== IMMEDIATE READBACK ==='
+          curl -fsS "$R/execution-test-state" | tee /tmp/after1.json
+          node <<'NODE'
+          const fs=require('fs');
+          const x=JSON.parse(fs.readFileSync('/tmp/after1.json','utf8'));
+          console.log('AFTER_1='+JSON.stringify({status:x.state?.status,armed:x.state?.armed,open:x.state?.openPositions,queue:x.queue,history:x.history,funding:x.funding,safety:x.safety}));
+          if(x.state?.armed) throw new Error('ARMED_AFTER_DISARM');
+          if(x.queue?.active) throw new Error('QUEUE_ACTIVE_AFTER_DISARM');
+          if(Number(x.state?.openPositions)!==0) throw new Error('OPEN_POSITION_AFTER_DISARM');
+          if(!Array.isArray(x.history)||!x.history.some(h=>h.queueId==='f1c86173-9e3f-440f-a3ec-e35490abf2ac')) throw new Error('OLD_QUEUE_NOT_ARCHIVED');
+          NODE
+          echo '=== WAIT THROUGH SCHEDULER INTERVAL ==='
+          sleep 75
+          curl -fsS "$R/execution-test-state" | tee /tmp/after2.json
+          node <<'NODE'
+          const fs=require('fs');
+          const a=JSON.parse(fs.readFileSync('/tmp/after1.json','utf8'));
+          const b=JSON.parse(fs.readFileSync('/tmp/after2.json','utf8'));
+          console.log('AFTER_2='+JSON.stringify({status:b.state?.status,armed:b.state?.armed,open:b.state?.openPositions,queue:b.queue,history:b.history,funding:b.funding,safety:b.safety}));
+          if(b.state?.armed||b.queue?.active||Number(b.state?.openPositions)!==0) throw new Error('DISARM_NOT_STABLE_AFTER_SCHEDULER');
+          if(Number(b.state?.attemptsStarted)!==Number(a.state?.attemptsStarted)) throw new Error('NEW_ATTEMPT_AFTER_DISARM');
+          if(!Array.isArray(b.history)||!b.history.some(h=>h.queueId==='f1c86173-9e3f-440f-a3ec-e35490abf2ac')) throw new Error('HISTORY_LOST_AFTER_SCHEDULER');
+          if(Number(b.safety?.productionBaselineEntryScore)!==0.80) throw new Error('PRODUCTION_BASELINE_CHANGED');
+          if(!b.funding?.index2Ready) throw new Error('FUNDING_NOT_READY');
+          NODE
+          echo '=== FINAL FRESH READBACK ==='
+          sleep 5
+          curl -fsS "$R/execution-test-state" | tee /tmp/after3.json
+          node <<'NODE'
+          const fs=require('fs');
+          const x=JSON.parse(fs.readFileSync('/tmp/after3.json','utf8'));
+          console.log('AFTER_3='+JSON.stringify({status:x.state?.status,armed:x.state?.armed,open:x.state?.openPositions,queue:x.queue,history:x.history,funding:x.funding,safety:x.safety}));
+          if(x.state?.armed||x.queue?.active||Number(x.state?.openPositions)!==0) throw new Error('FINAL_READBACK_NOT_DISARMED');
+          NODE
