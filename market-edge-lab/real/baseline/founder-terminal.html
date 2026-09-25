@@ -171,7 +171,7 @@ async function loadRuntime(){
   $('liveDot').className='dot ok';$('liveState').textContent='LIVE';
   $('providerState').textContent=runtime.account?.accountConnection==='VERIFIED'?'VERIFIED':'CHECK';
   renderTop();renderWatch();renderBottom();
-  if(!selected){const ops=runtime.shadow?.opportunities||[];if(ops.length)selectOpportunity(ops[0])}
+  if(!selected){const ops=mergedRows();if(ops.length)selectOpportunity(ops[0])}
  }catch(e){$('liveDot').className='dot bad';$('liveState').textContent='READ FAIL';console.error(e)}
 }
 setInterval(loadRuntime,5000);loadRuntime();
