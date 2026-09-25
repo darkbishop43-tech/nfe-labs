@@ -1616,7 +1616,7 @@ async function runExecutionTestSeries(env,freshShadow=null,preparedBalance=null)
     else return{classification:"UNKNOWN",reason:"QUANTITY_MISSING",...base};
     base.rawQuantityFieldUsed=field;
     if(typeof raw==="string"&&raw.trim()!==raw)return{classification:"UNKNOWN",reason:"QUANTITY_MALFORMED_WHITESPACE",...base};
-    if(typeof raw==="string"&&!/^[+-]?(?:\\d+(?:\\.\\d+)?|\\.\\d+)$/.test(raw))return{classification:"UNKNOWN",reason:"QUANTITY_INVALID",...base};
+    if(typeof raw==="string"&&!/^[+-]?(?:\d+(?:\.\d+)?|\.\d+)$/.test(raw))return{classification:"UNKNOWN",reason:"QUANTITY_INVALID",...base};
     const qty=Number(raw);
     if(!Number.isFinite(qty))return{classification:"UNKNOWN",reason:"QUANTITY_INVALID",...base};
     base.normalizedQuantity=qty;
