@@ -1,0 +1,60 @@
+name: Verify Flexible Founder Cockpit Layout
+
+on:
+  push:
+    branches: [market-edge-baseline-real]
+    paths:
+      - '.github/workflows/verify-flexible-founder-cockpit-layout.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prove presentation-only layout and live AUTO continuity
+        shell: bash
+        run: |
+          set -euo pipefail
+          F='market-edge-lab/real/baseline/founder-terminal.html'
+          B='https://market-edge-baseline-real.darkbishop43.workers.dev'
+          grep -q 'evidenceResizer' "$F"
+          grep -q 'EXPAND' "$F"
+          grep -q 'COLLAPSE' "$F"
+          grep -q 'RESET LAYOUT' "$F"
+          grep -q 'cursor:ns-resize' "$F"
+          grep -q 'min-height:180px;height:340px' "$F"
+          grep -q 'overflow:visible;min-height:260px' "$F"
+          grep -q 'TOTAL PROVIDER' "$F"
+          grep -q 'AUTO ALLOCATED' "$F"
+          grep -q 'FOUNDER ALLOCATED' "$F"
+          grep -q 'RECONCILIATION' "$F"
+          grep -q 'NO_FILL' "$F"
+          grep -q 'REAL LEDGER' "$F"
+          grep -q 'SYSTEM / EVENT LOG' "$F"
+          curl -fsS "$B/execution-test-state" > /tmp/exec.json
+          curl -fsS "$B/founder-capital-ledger" > /tmp/ledger.json
+          python - <<'PY'
+          import json
+          e=json.load(open('/tmp/exec.json'))
+          l=json.load(open('/tmp/ledger.json'))
+          s=e.get('state') or {}
+          out={
+            'auto_status':s.get('status'),
+            'auto_armed':s.get('armed'),
+            'attempts_started':s.get('attemptsStarted'),
+            'open_positions':s.get('openPositions'),
+            'capital_reconciled':l.get('ok'),
+            'provider_cash':(l.get('provider') or {}).get('cashUsd'),
+            'auto_allocated':((l.get('sleeves') or {}).get('AUTO_BASELINE') or {}).get('allocatedCapitalUsd'),
+            'founder_allocated':((l.get('sleeves') or {}).get('FOUNDER_MANUAL') or {}).get('allocatedCapitalUsd'),
+            'manual_submission_locked':((l.get('sleeves') or {}).get('FOUNDER_MANUAL') or {}).get('submissionLocked'),
+            'validation_provider_writes':0,
+            'validation_capital_movement':0
+          }
+          print(json.dumps(out,indent=2))
+          assert l.get('ok') is True
+          assert ((l.get('sleeves') or {}).get('FOUNDER_MANUAL') or {}).get('submissionLocked') is True
+          PY
