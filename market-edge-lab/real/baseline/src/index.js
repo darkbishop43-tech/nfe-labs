@@ -1357,6 +1357,7 @@ const EXECUTION_TEST_STATE_KEY="baseline-real-execution-test-v1";
 
 const PUSH_SUBSCRIPTION_KEY="notification:founder:subscription:v1";
 const PUSH_DELIVERY_PREFIX="notification:delivery:v1:";
+const PUSH_ATTEMPT_PREFIX="notification:attempt:v1:";
 const PUSH_UNKNOWN_PREFIX="notification:unknown:v1:";
 const PUSH_UNKNOWN_WARN_MS=2*60*1000;
 const PUSH_VAPID_SUBJECT="https://github.com/darkbishop43-tech/nfe-labs";
@@ -1380,6 +1381,25 @@ async function pushDeliverySeen(env,eventId){
 async function markPushDelivered(env,eventId,meta={}){
   if(!env?.BASELINE_REAL_SHADOW_STATE)return;
   await env.BASELINE_REAL_SHADOW_STATE.put(PUSH_DELIVERY_PREFIX+eventId,JSON.stringify({eventId,deliveredAt:new Date().toISOString(),...meta}));
+}
+async function persistPushAttemptResult(env,eventId,meta,result){
+  if(!env?.BASELINE_REAL_SHADOW_STATE)return;
+  const sub=await loadFounderPushSubscription(env);
+  const record={
+    eventId:String(eventId),
+    notificationType:meta?.notificationType||null,
+    positionId:meta?.positionId||null,
+    authority:meta?.authority||null,
+    attemptedAt:new Date().toISOString(),
+    sendAttempted:result?.duplicateSuppressed===true?false:true,
+    success:result?.delivered===true,
+    delivered:result?.delivered===true,
+    duplicateSuppressed:result?.duplicateSuppressed===true,
+    reason:result?.reason||null,
+    dedupeKey:PUSH_DELIVERY_PREFIX+String(eventId),
+    subscriptionPresent:validFounderPushSubscription(sub)
+  };
+  try{await env.BASELINE_REAL_SHADOW_STATE.put(PUSH_ATTEMPT_PREFIX+String(eventId),JSON.stringify(record));}catch{}
 }
 async function sendFounderPushBestEffort(env,eventId,payload){
   try{
@@ -1425,7 +1445,8 @@ async function dispatchExecutionNotifications(env){
         const lines=[String(position.asset||"")+" · "+String(position.outcomeSide||"")];
         if(Number.isFinite(score))lines.push("Score "+score.toFixed(2));
         lines.push("Real position filled.","","NFE-OS is managing the position.","Check Kalshi.");
-        await sendFounderPushBestEffort(env,eventId,{title:"🎣 NFE-OS — FISH ON THE HOOK",body:lines.join("\n"),url:"/",tag:eventId});
+        const pushResult=await sendFounderPushBestEffort(env,eventId,{title:"🎣 NFE-OS — FISH ON THE HOOK",body:lines.join("\n"),url:"/",tag:eventId});
+        await persistPushAttemptResult(env,eventId,{notificationType:"FISH",positionId:position.id,authority:position.entryOrderId},pushResult);
       }
       if((event?.type==="TEST_POSITION_CLOSED"||event?.type==="TEST_STALE_POSITION_PROVIDER_FLAT_RECONCILED")&&event?.positionId){
         const position=positions.find(p=>String(p?.id)===String(event.positionId));
@@ -1437,7 +1458,8 @@ async function dispatchExecutionNotifications(env){
         const lines=[String(position.asset||"")+" · "+String(position.outcomeSide||"")];
         if(position.exitReason)lines.push("Exit: "+String(position.exitReason).replaceAll("_"," ").toLowerCase());
         const pnl=executionPositionPnlText(position);if(pnl)lines.push("Net P/L: "+pnl);
-        await sendFounderPushBestEffort(env,eventId,{title:"✅ NFE-OS — POSITION CLOSED",body:lines.join("\n"),url:"/",tag:eventId});
+        const pushResult=await sendFounderPushBestEffort(env,eventId,{title:"✅ NFE-OS — POSITION CLOSED",body:lines.join("\n"),url:"/",tag:eventId});
+        await persistPushAttemptResult(env,eventId,{notificationType:"CLOSE",positionId:position.id,authority:closeAuthority},pushResult);
       }
     }
 
@@ -3113,7 +3135,7 @@ body{background-color:#030811;background-image:linear-gradient(rgba(31,91,137,.0
   <div class="card section">
     <b>Mobile Fish Alerts</b>
     <div class="m">Background Android Web Push · notification-only · zero trading authority</div>
-    <div class="actions" style="justify-content:flex-start;margin-top:10px"><button id="enablePushBtn" class="btn" type="button">ENABLE NFE-OS NOTIFICATIONS</button><span id="pushStatus" class="pill">NOT ENROLLED</span></div>
+    <div class="actions" style="justify-content:flex-start;margin-top:10px"><button id="enablePushBtn" class="btn" type="button">ENABLE NFE-OS NOTIFICATIONS</button><span id="pushStatus" class="pill">CHECKING ENROLLMENT…</span></div>
   </div>
 
   <div class="card section">
@@ -3838,6 +3860,31 @@ async function authorizeOneBaselineTrade(){
     if(note) note.textContent="AUTO TEST NOT ARMED · "+String(error?.message||error||"REQUEST_FAILED");
   }
 }
+
+async function hydrateNfePushState(){
+  const btn=E('enablePushBtn'),status=E('pushStatus');
+  const setState=(text,kind='warn')=>{if(status){status.textContent=text;status.className='pill '+kind;}};
+  try{
+    const server=await fetch('/push/status',{cache:'no-store'}).then(r=>r.json());
+    if(!server?.configured){setState('SERVER NOT ENROLLED','bad');return;}
+    if(!server?.subscribed){setState('SERVER NOT ENROLLED','warn');return;}
+    if(!('Notification' in window)){setState('SERVER ENROLLED · THIS BROWSER UNKNOWN','warn');return;}
+    if(Notification.permission==='denied'){setState('PERMISSION BLOCKED','bad');return;}
+    if(!('serviceWorker' in navigator)||!('PushManager' in window)){setState('SERVER ENROLLED · THIS BROWSER UNKNOWN','warn');return;}
+    const reg=await navigator.serviceWorker.getRegistration('/');
+    if(!reg){setState('SERVER ENROLLED · THIS BROWSER NOT ENROLLED','warn');return;}
+    const sub=await reg.pushManager.getSubscription();
+    if(sub){
+      setState('SERVER ENROLLED · THIS BROWSER ENROLLED','good');
+      if(btn)btn.textContent='NFE-OS NOTIFICATIONS ENABLED';
+    }else{
+      setState('SERVER ENROLLED · THIS BROWSER NOT ENROLLED','warn');
+    }
+  }catch{
+    setState('SERVER ENROLLED · THIS BROWSER UNKNOWN','warn');
+  }
+}
+hydrateNfePushState();
 
 async function enableNfePush(){
   const btn=E('enablePushBtn'),status=E('pushStatus');
@@ -4664,7 +4711,7 @@ document.getElementById('export')?.addEventListener('click',async()=>{const r=aw
 
     if (request.method === "GET" && url.pathname === "/push/status") {
       const sub=await loadFounderPushSubscription(env);
-      return json({ok:true,configured:Boolean(env?.NFE_PUSH_VAPID_PUBLIC_KEY&&env?.NFE_PUSH_VAPID_PRIVATE_KEY),subscribed:validFounderPushSubscription(sub),serviceWorker:"/sw.js",scope:"/",tradingAuthority:false});
+      return json({ok:true,configured:Boolean(env?.NFE_PUSH_VAPID_PUBLIC_KEY&&env?.NFE_PUSH_VAPID_PRIVATE_KEY),subscribed:validFounderPushSubscription(sub),subscriptionRecordPresent:Boolean(sub),serviceWorker:"/sw.js",scope:"/",tradingAuthority:false});
     }
 
     if (request.method !== "GET") {
