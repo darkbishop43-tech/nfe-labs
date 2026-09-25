@@ -1,0 +1,65 @@
+name: Verify Founder Manual Close V1
+
+on:
+  push:
+    branches: [market-edge-baseline-real]
+    paths:
+      - '.github/workflows/verify-founder-manual-close-v1.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Zero-write close-path regression proof
+        shell: bash
+        run: |
+          set -euo pipefail
+          B='https://market-edge-baseline-real.darkbishop43.workers.dev'
+          R='https://market-edge-founder-read.darkbishop43.workers.dev'
+          curl -fsS "$B/execution-test-state" > /tmp/auto-before.json
+          curl -fsS "$B/founder-capital-ledger" > /tmp/capital-before.json
+          curl -fsS "$B/founder-manual-close-proof" > /tmp/proof.json
+          curl -fsS "$R/founder-manual-close-proof" > /tmp/bridge-proof.json
+          curl -sS -o /tmp/no-position.json -w '%{http_code}' "$B/founder-manual-close-preview?recordId=DOES-NOT-EXIST&count=1" > /tmp/no-position.code
+          curl -fsS "$B/execution-test-state" > /tmp/auto-after.json
+          curl -fsS "$B/founder-capital-ledger" > /tmp/capital-after.json
+          python - <<'PY'
+          import json
+          J=lambda p:json.load(open(p))
+          a0,a1=J('/tmp/auto-before.json'),J('/tmp/auto-after.json')
+          c0,c1=J('/tmp/capital-before.json'),J('/tmp/capital-after.json')
+          p,bp,np=J('/tmp/proof.json'),J('/tmp/bridge-proof.json'),J('/tmp/no-position.json')
+          out={
+            'proof':p,
+            'bridge_proof':bp,
+            'no_real_founder_position_preview':{'http':open('/tmp/no-position.code').read(),'body':np},
+            'auto_before':{'status':a0.get('state',{}).get('status'),'armed':a0.get('state',{}).get('armed'),'seriesId':a0.get('state',{}).get('seriesId'),'attemptsStarted':a0.get('state',{}).get('attemptsStarted'),'threshold':a0.get('state',{}).get('threshold')},
+            'auto_after':{'status':a1.get('state',{}).get('status'),'armed':a1.get('state',{}).get('armed'),'seriesId':a1.get('state',{}).get('seriesId'),'attemptsStarted':a1.get('state',{}).get('attemptsStarted'),'threshold':a1.get('state',{}).get('threshold')},
+            'capital_before':{'providerCashUsd':c0.get('provider',{}).get('cashUsd'),'founderAllocated':c0.get('sleeves',{}).get('FOUNDER_MANUAL',{}).get('allocatedCapitalUsd')},
+            'capital_after':{'providerCashUsd':c1.get('provider',{}).get('cashUsd'),'founderAllocated':c1.get('sleeves',{}).get('FOUNDER_MANUAL',{}).get('allocatedCapitalUsd')},
+            'providerWrites':0,'capitalMovedUsd':0
+          }
+          print(json.dumps(out,indent=2))
+          for x in (p,bp):
+            assert x.get('ok') is True
+            assert x.get('assertions',{}).get('reduceOnly') is True
+            assert x.get('assertions',{}).get('reverseBookSide') is True
+            assert x.get('assertions',{}).get('exactRemainingQuantity') is True
+            assert x.get('assertions',{}).get('providerWrites')==0
+            assert x.get('assertions',{}).get('capitalMovedUsd')==0
+            assert x.get('validFounderSample',{}).get('body',{}).get('reduce_only') is True
+            assert x.get('validFounderSample',{}).get('body',{}).get('count')=='2.00'
+            assert x.get('autoOwnedRejected',{}).get('state')=='FOUNDER_CLOSE_REJECT_NOT_FOUNDER_OWNED'
+            assert x.get('oversizedRejected',{}).get('state')=='FOUNDER_CLOSE_REJECT_EXACT_REMAINING_REQUIRED'
+            assert x.get('staleQuoteRejected',{}).get('state')=='FOUNDER_CLOSE_REJECT_STALE_QUOTE'
+            assert x.get('ambiguousOwnershipRejected',{}).get('state')=='FOUNDER_CLOSE_REJECT_OWNERSHIP_AMBIGUOUS_AUTO_CONFLICT'
+          assert open('/tmp/no-position.code').read()=='404'
+          assert np.get('state')=='FOUNDER_CLOSE_REJECT_POSITION_NOT_FOUND_OR_UNOWNED'
+          # Build validation is read-only; AUTO identity/config and sleeve allocation cannot change.
+          for k in ('seriesId','threshold'):
+            assert a0.get('state',{}).get(k)==a1.get('state',{}).get(k)
+          assert c0.get('sleeves',{}).get('FOUNDER_MANUAL',{}).get('allocatedCapitalUsd')==c1.get('sleeves',{}).get('FOUNDER_MANUAL',{}).get('allocatedCapitalUsd')==0
+          PY
