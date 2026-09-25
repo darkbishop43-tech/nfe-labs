@@ -1796,6 +1796,67 @@ async function runExecutionTestSeries(env,freshShadow=null,preparedBalance=null)
     const payload=kalshiV2ExitPayload(exitState,liveBid,clientId);
     if(!payload){position.status="EXIT_RETRY";position.exitHoldReason="PAYLOAD_BUILD_FAILED";continue;}
     position.exitReason=exitByScore?"SCORE_EXIT":"MAX_HOLD_EXIT";
+
+    // FINAL PRE-EXIT OWNERSHIP GATE: exactly one fresh provider-position reconciliation
+    // at the managed-exit write boundary. No polling, sleeps, confirmation rounds, or
+    // repeated reads. OPEN proceeds directly to the existing reduce-only IOC POST.
+    let preExitResponse=null,preExitBody=null,preExitParseOk=false,preExitReadError=null,preExitPaginationComplete=false;
+    const preExitReadAt=new Date().toISOString();
+    try{
+      const allRows=[];let cursor="",pages=0,lastBody=null;
+      do{
+        const path="/trade-api/v2/portfolio/positions?limit=1000&subaccount=0"+(cursor?"&cursor="+encodeURIComponent(cursor):"");
+        preExitResponse=await kalshiExecutionGet(env,path);
+        if(!preExitResponse.ok)break;
+        let page=null;try{page=await preExitResponse.json();}catch(error){preExitReadError=String(error?.message||error);break;}
+        if(!page||typeof page!=="object"||!Array.isArray(page.market_positions)){preExitReadError="UNKNOWN_SCHEMA";break;}
+        allRows.push(...page.market_positions);lastBody=page;pages++;
+        cursor=typeof page.cursor==="string"?page.cursor:"";
+        if(pages>=100&&cursor){preExitReadError="PAGINATION_SAFETY_LIMIT";break;}
+      }while(cursor);
+      if(preExitResponse?.ok&&lastBody&&!preExitReadError){
+        preExitBody={...lastBody,market_positions:allRows,cursor:""};
+        preExitParseOk=true;
+        preExitPaginationComplete=true;
+      }
+    }catch(error){preExitReadError=String(error?.message||error);}
+    const preExitRec=classifyExecutionProviderPosition(Boolean(preExitResponse?.ok&&preExitParseOk),preExitBody,position.marketTicker,{providerReadAt:preExitReadAt,providerHttpStatus:preExitResponse?.status??null,paginationComplete:preExitPaginationComplete});
+    position.reconciliationClassification=preExitRec.classification;
+    position.reconciliationReason=preExitRec.reason;
+    position.providerReadAt=preExitRec.providerReadAt;
+    position.providerHttpStatus=preExitRec.providerHttpStatus;
+    position.recognizedSchema=preExitRec.recognizedSchema;
+    position.matchedTicker=preExitRec.matchedTicker;
+    position.rawQuantityFieldUsed=preExitRec.rawQuantityFieldUsed;
+    position.normalizedQuantity=preExitRec.normalizedQuantity;
+    position.subaccount=preExitRec.subaccount;
+    position.exchangeScope=preExitRec.exchangeScope;
+    position.accountContextKnown=preExitRec.accountContextKnown;
+    position.paginationComplete=preExitRec.paginationComplete;
+    position.reconciliationRetryRequired=preExitRec.classification==="UNKNOWN";
+    if(preExitReadError)position.reconciliationReadError=preExitReadError.slice(0,160);
+    if(preExitRec.classification==="FLAT"){
+      position.status="CLOSED";
+      position.closedAt=position.closedAt||Date.now();
+      position.providerReconciledFlat=true;
+      position.providerReconciledAt=new Date().toISOString();
+      position.exitReason="PROVIDER_FLAT_RECONCILIATION";
+      executionTestLedger(state,"TEST_STALE_POSITION_PROVIDER_FLAT_RECONCILED",{positionId:position.id,attemptNo:position.attemptNo,ticker:position.marketTicker,side:position.outcomeSide,reconciliationReason:preExitRec.reason,phase:"PRE_EXIT_WRITE"});
+      continue;
+    }
+    if(preExitRec.classification==="UNKNOWN"){
+      position.status="EXIT_RETRY";
+      executionTestLedger(state,"TEST_POSITION_RECONCILIATION_UNKNOWN_RETAINED",{positionId:position.id,attemptNo:position.attemptNo,ticker:position.marketTicker,side:position.outcomeSide,reconciliationReason:preExitRec.reason,phase:"PRE_EXIT_WRITE"});
+      continue;
+    }
+    const freshProviderQuantity=Math.abs(Number(preExitRec.normalizedQuantity));
+    const safeExitQuantity=Math.min(remaining,freshProviderQuantity);
+    if(!(safeExitQuantity>1e-9)){
+      position.status="EXIT_RETRY";
+      position.exitHoldReason="PRE_EXIT_SAFE_QUANTITY_ZERO";
+      continue;
+    }
+    payload.count=Number(safeExitQuantity).toFixed(2);
     position.exitSubmitStartedAt=Date.now();
     let r;
     try{r=await executionTestExitWrite(env,state,position,payload);}
