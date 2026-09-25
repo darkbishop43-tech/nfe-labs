@@ -1,0 +1,37 @@
+name: Diagnose Cockpit Read Only Endpoints
+
+on:
+  push:
+    branches: [founder-cockpit-phase2]
+    paths:
+      - '.github/workflows/diagnose-cockpit-readonly.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Probe endpoint statuses
+        shell: bash
+        run: |
+          set -euo pipefail
+          C='https://market-edge-founder-cockpit.darkbishop43.workers.dev'
+          curl -fsS "$C/api/runtime" -o /tmp/r.json
+          ASSET=$(python - <<'PY'
+          import json
+          r=json.load(open('/tmp/r.json'));print(r['shadow']['opportunities'][0]['asset'])
+          PY
+          )
+          TICKER=$(python - <<'PY'
+          import json
+          r=json.load(open('/tmp/r.json'));print(r['shadow']['opportunities'][0]['marketTicker'])
+          PY
+          )
+          echo "ASSET=$ASSET TICKER=$TICKER"
+          for url in             "$C/api/ticker?asset=$ASSET"             "$C/api/candles?asset=$ASSET&granularity=60"             "$C/api/market?ticker=$TICKER"             "$C/api/orderbook?ticker=$TICKER"; do
+            echo "URL=$url"
+            curl -sS -w "\nHTTP=%{http_code}\n" "$url" | head -c 5000
+            echo
+          done
