@@ -3780,25 +3780,40 @@ async function authorizeOneBaselineTrade(){
 
 async function enableNfePush(){
   const btn=E('enablePushBtn'),status=E('pushStatus');
+  const setPushState=(text,kind='warn')=>{if(status){status.textContent=text;status.className='pill '+kind;}};
   if(btn){btn.disabled=true;btn.textContent='CONNECTING…';}
   try{
-    if(!('serviceWorker' in navigator)||!('PushManager' in window)||!('Notification' in window))throw new Error('WEB PUSH NOT SUPPORTED');
+    if(!('Notification' in window)){setPushState('PUSH UNSUPPORTED','bad');throw new Error('NOTIFICATION API UNAVAILABLE');}
+    if(!('serviceWorker' in navigator)){setPushState('SERVICE WORKER UNAVAILABLE','bad');throw new Error('SERVICE WORKER UNAVAILABLE');}
+    if(!('PushManager' in window)){setPushState('PUSH UNSUPPORTED','bad');throw new Error('PUSH MANAGER UNAVAILABLE');}
+    let permission=Notification.permission;
+    if(permission==='denied'){setPushState('PERMISSION BLOCKED','bad');throw new Error('NOTIFICATION PERMISSION BLOCKED');}
+    if(permission==='default'){
+      setPushState('PERMISSION REQUIRED','warn');
+      permission=await Notification.requestPermission();
+    }
+    if(permission==='denied'){setPushState('PERMISSION BLOCKED','bad');throw new Error('NOTIFICATION PERMISSION BLOCKED');}
+    if(permission!=='granted'){setPushState('PERMISSION REQUIRED','warn');throw new Error('NOTIFICATION PERMISSION NOT GRANTED');}
     const cfg=await fetch('/push/config',{cache:'no-store'}).then(r=>r.json());
-    if(!cfg?.ok||!cfg?.publicKey)throw new Error('PUSH SENDER NOT READY');
+    if(!cfg?.ok||!cfg?.publicKey){setPushState('PUSH SENDER NOT READY','bad');throw new Error('PUSH SENDER NOT READY');}
     const reg=await navigator.serviceWorker.register('/sw.js',{scope:'/'});
     await navigator.serviceWorker.ready;
-    const permission=await Notification.requestPermission();
-    if(permission!=='granted')throw new Error('NOTIFICATION PERMISSION '+String(permission).toUpperCase());
     function keyBytes(s){const p=s+'='.repeat((4-s.length%4)%4),raw=atob(p.replace(/-/g,'+').replace(/_/g,'/')),out=new Uint8Array(raw.length);for(let i=0;i<raw.length;i++)out[i]=raw.charCodeAt(i);return out;}
     let sub=await reg.pushManager.getSubscription();
-    if(!sub)sub=await reg.pushManager.subscribe({userVisibleOnly:true,applicationServerKey:keyBytes(cfg.publicKey)});
+    if(!sub){
+      setPushState('CREATING SUBSCRIPTION','warn');
+      try{sub=await reg.pushManager.subscribe({userVisibleOnly:true,applicationServerKey:keyBytes(cfg.publicKey)});}
+      catch(error){setPushState('SUBSCRIPTION FAILED','bad');throw error;}
+    }
+    setPushState('VERIFYING TEST DELIVERY','warn');
     const r=await fetch('/push/subscribe',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({subscription:sub.toJSON()})});
     const j=await r.json().catch(()=>({}));
-    if(!r.ok||!j?.ok)throw new Error(j?.error||('HTTP '+r.status));
-    if(status){status.textContent=j?.test?.delivered?'CONNECTED · TEST SENT':'CONNECTED · TEST PENDING';status.className='pill good';}
+    if(!r.ok||!j?.ok){setPushState('SUBSCRIPTION FAILED','bad');throw new Error(j?.error||('HTTP '+r.status));}
+    if(j?.test?.delivered){setPushState('ENROLLED · TEST SENT','good');}
+    else{setPushState('TEST DELIVERY FAILED','bad');throw new Error(j?.test?.reason||'TEST DELIVERY FAILED');}
     if(btn){btn.textContent='NFE-OS NOTIFICATIONS ENABLED';}
   }catch(error){
-    if(status){status.textContent=String(error?.message||error||'PUSH SETUP FAILED');status.className='pill bad';}
+    if(status&&status.textContent==='NOT ENROLLED')setPushState('ENROLLMENT FAILED','bad');
     if(btn){btn.disabled=false;btn.textContent='ENABLE NFE-OS NOTIFICATIONS';}
   }
 }
