@@ -1,0 +1,33 @@
+name: Verify Repaired Disarm Stability
+on:
+  push:
+    branches: [market-edge-baseline-real]
+    paths: ['.github/workflows/verify-repaired-disarm-stability.yml']
+permissions: {contents: read}
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify live retired authority
+        run: |
+          set -euo pipefail
+          R='https://market-edge-baseline-real.darkbishop43.workers.dev'
+          readcheck () {
+            local OUT="$1"
+            curl -fsS "$R/execution-test-state" | tee "$OUT"
+            node - "$OUT" <<'NODE'
+          const fs=require('fs'), p=process.argv[2], x=JSON.parse(fs.readFileSync(p,'utf8'));
+          console.log('CHECK='+JSON.stringify({status:x.state?.status,armed:x.state?.armed,attempts:x.state?.attemptsStarted,open:x.state?.openPositions,queue:x.queue,history:x.history,funding:x.funding,safety:x.safety}));
+          if(x.state?.armed||x.queue?.active||Number(x.state?.openPositions)!==0) throw new Error('AUTHORITY_NOT_RETIRED');
+          if(!Array.isArray(x.history)||!x.history.some(h=>h.queueId==='f1c86173-9e3f-440f-a3ec-e35490abf2ac')) throw new Error('HISTORY_NOT_ARCHIVED');
+          if(Number(x.safety?.productionBaselineEntryScore)!==0.80) throw new Error('PRODUCTION_BASELINE_CHANGED');
+          if(!x.funding?.index2Ready) throw new Error('FUNDING_NOT_READY');
+          NODE
+          }
+          echo '=== READBACK A ==='; readcheck /tmp/a.json
+          A=$(node -p "JSON.parse(require('fs').readFileSync('/tmp/a.json')).state.attemptsStarted")
+          echo '=== WAIT 75 SECONDS ==='; sleep 75
+          echo '=== READBACK B ==='; readcheck /tmp/b.json
+          B=$(node -p "JSON.parse(require('fs').readFileSync('/tmp/b.json')).state.attemptsStarted")
+          test "$A" = "$B" || { echo NEW_ATTEMPT_AFTER_DISARM; exit 31; }
+          echo '=== FRESH READBACK C ==='; sleep 5; readcheck /tmp/c.json
