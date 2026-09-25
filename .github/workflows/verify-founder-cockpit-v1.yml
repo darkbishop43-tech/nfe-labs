@@ -20,16 +20,19 @@ jobs:
         run: |
           set -euo pipefail
           B='https://market-edge-baseline-real.darkbishop43.workers.dev'
+          R='https://market-edge-founder-read.darkbishop43.workers.dev'
           U='https://raw.githack.com/darkbishop43-tech/nfe-labs/market-edge-baseline-real/market-edge-lab/real/baseline/founder-terminal.html'
           curl -fsS "$U" -o /tmp/cockpit.html
           for p in shadow-state wide-radar-state execution-test-state real-trade-state; do curl -fsS "$B/$p" -o "/tmp/$p.json"; done
-          curl -sSI "$B/shadow-state" > /tmp/headers.txt
+          curl -sSI "$R/shadow-state" > /tmp/headers.txt
+          curl -fsS "$R/wide-radar-state" -o /tmp/bridge-radar.json
+          curl -fsS "$R/health" -o /tmp/bridge-health.json
           python - <<'PY'
           import json,re,hashlib
           h=open('/tmp/cockpit.html',encoding='utf-8').read()
           src=open('market-edge-lab/real/baseline/src/index.js','rb').read()
           sh=json.load(open('/tmp/shadow-state.json')); wr=json.load(open('/tmp/wide-radar-state.json')); ex=json.load(open('/tmp/execution-test-state.json')); rt=json.load(open('/tmp/real-trade-state.json'))
-          hdr=open('/tmp/headers.txt').read().lower()
+          hdr=open('/tmp/headers.txt').read().lower(); br=json.load(open('/tmp/bridge-radar.json')); bh=json.load(open('/tmp/bridge-health.json'))
           out={
             'cockpit_title':'Founder Trading Cockpit V1' in h,
             'professional_regions':all(x in h for x in ['MARKET EDGE WATCHLIST','CONTRACT INSPECTOR','FOUNDER MANUAL ORDER','POSITIONS','REAL LEDGER','NO_FILL']),
@@ -47,11 +50,18 @@ jobs:
             'exec_armed':(ex.get('state') or {}).get('armed'),
             'attemptsStarted':(ex.get('state') or {}).get('attemptsStarted'),
             'cors_header':next((x.strip() for x in hdr.splitlines() if x.startswith('access-control-allow-origin:')),None),
-            'providerCashUsd':rt.get('providerCashUsd')
+            'providerCashUsd':rt.get('providerCashUsd'),
+            'bridge_ok':bh.get('ok'),
+            'bridge_writes':bh.get('writes'),
+            'bridge_credentials':bh.get('credentials'),
+            'bridge_opportunities':len((br.get('live') or {}).get('opportunities') or []),
+            'cockpit_uses_bridge':'market-edge-founder-read.darkbishop43.workers.dev' in h
           }
           print(json.dumps(out,indent=2))
           assert out['cockpit_title'] and out['professional_regions'] and out['manual_submit_disabled']
           assert out['no_iframe'] and out['no_post_method'] and out['mobile_breakpoint']
           assert out['entryScore']==.8 and out['exitScore']==.2
           assert out['shadow_status']=='LIVE_KALSHI_SHADOW'
+          assert out['cors_header']=='access-control-allow-origin: https://raw.githack.com'
+          assert out['bridge_ok'] and out['bridge_writes']==0 and out['bridge_credentials']==0 and out['cockpit_uses_bridge']
           PY
