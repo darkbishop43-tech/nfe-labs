@@ -39,8 +39,34 @@ jobs:
           curl -fsS "$PAPER/api/paper-thresholds" -o /tmp/paper.json
           curl -fsS "$OBS/" -o /tmp/observer.html
 
+          TICKER=$(python - <<'PY'
+          import json
+          s=json.load(open('/tmp/snapshot.json'))
+          w=(s.get('endpoints',{}).get('/wide-radar-state',{}).get('body') or {})
+          sh=(s.get('endpoints',{}).get('/shadow-state',{}).get('body') or {})
+          ops=(w.get('live',{}).get('opportunities') or sh.get('opportunities') or [])
+          print((ops[0].get('ticker') or ops[0].get('marketTicker')) if ops else '')
+          PY
+          )
+          ASSET=$(python - <<'PY'
+          import json
+          s=json.load(open('/tmp/snapshot.json'))
+          w=(s.get('endpoints',{}).get('/wide-radar-state',{}).get('body') or {})
+          sh=(s.get('endpoints',{}).get('/shadow-state',{}).get('body') or {})
+          ops=(w.get('live',{}).get('opportunities') or sh.get('opportunities') or [])
+          print(ops[0].get('asset','') if ops else '')
+          PY
+          )
+          case "$ASSET" in
+            BTC) PRODUCT='BTC-USD';; ETH) PRODUCT='ETH-USD';; SOL) PRODUCT='SOL-USD';; XRP) PRODUCT='XRP-USD';;
+            HYPE) PRODUCT='HYPE-USD';; ZEC) PRODUCT='ZEC-USD';; DOGE) PRODUCT='DOGE-USD';; BNB) PRODUCT='BNB-USD';; NEAR) PRODUCT='NEAR-USD';;
+            *) echo "Unsupported selected asset $ASSET"; exit 1;;
+          esac
+          curl -fsS -A 'Mozilla/5.0 NFE-OS Verification' "$READER/api/contract?ticker=$TICKER" -o /tmp/contract.json
+          curl -fsS -A 'Mozilla/5.0 NFE-OS Verification' "$READER/api/candles?product=$PRODUCT&granularity=300" -o /tmp/candles.json
+
           python - <<'PY'
-          import json,subprocess,re,urllib.request
+          import json,subprocess,re
           J=lambda p:json.load(open(p))
           snap=J('/tmp/snapshot.json'); sh=J('/tmp/shadow.json'); ex=J('/tmp/exec.json'); paper=J('/tmp/paper.json')
           html=open('/tmp/cockpit.html',encoding='utf-8').read(); obs=open('/tmp/observer.html',encoding='utf-8').read()
@@ -48,12 +74,7 @@ jobs:
           ops=(wide.get('live',{}).get('opportunities') or sh.get('opportunities') or [])
           assert ops, 'no opportunities'
           o=ops[0]; ticker=o.get('ticker') or o.get('marketTicker'); asset=o.get('asset')
-          product={'BTC':'BTC-USD','ETH':'ETH-USD','SOL':'SOL-USD','XRP':'XRP-USD','HYPE':'HYPE-USD','ZEC':'ZEC-USD','DOGE':'DOGE-USD','BNB':'BNB-USD','NEAR':'NEAR-USD'}.get(asset)
-          assert ticker and product
-          def get(url):
-            with urllib.request.urlopen(url,timeout=20) as r:return r.status,json.load(r)
-          ch,c=get('https://market-edge-founder-terminal.darkbishop43.workers.dev/api/contract?ticker='+ticker)
-          hh,h=get('https://market-edge-founder-terminal.darkbishop43.workers.dev/api/candles?product='+product+'&granularity=300')
+          c=J('/tmp/contract.json'); h=J('/tmp/candles.json')
           subprocess.run(['git','fetch','origin','market-edge-baseline-real:refs/remotes/origin/market-edge-baseline-real'],check=True,stdout=subprocess.DEVNULL)
           protected=subprocess.check_output(['git','rev-parse','origin/market-edge-baseline-real:market-edge-lab/real/baseline/src/index.js'],text=True).strip()
           phase2=subprocess.check_output(['git','rev-parse','HEAD:market-edge-lab/real/baseline/src/index.js'],text=True).strip()
@@ -65,8 +86,8 @@ jobs:
             'reader_health':J('/tmp/reader-health.json'),
             'snapshot_ok':snap.get('ok'),'snapshot_read_only':snap.get('readOnly'),
             'opportunity_count':len(ops),'selected_probe':{'asset':asset,'ticker':ticker},
-            'contract_http':ch,'contract_ok':c.get('ok'),'contract_orderbook_http':c.get('orderbookHttpStatus'),
-            'candles_http':hh,'candle_count':c.get('count') if False else h.get('count'),'candle_source':h.get('source'),
+            'contract_ok':c.get('ok'),'contract_market_http':c.get('marketHttpStatus'),'contract_orderbook_http':c.get('orderbookHttpStatus'),
+            'candle_count':h.get('count'),'candle_source':h.get('source'),'candle_upstream_http':h.get('httpStatus'),
             'baseline_entry':(sh.get('strategy') or {}).get('entryScore'),
             'baseline_exit':(sh.get('strategy') or {}).get('exitScore'),
             'baseline_status':sh.get('status'),'baseline_last_run':sh.get('lastRunAt'),
