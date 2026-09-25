@@ -1,0 +1,19 @@
+name: Debug Phase2 Reader Snapshot
+on:
+  push:
+    branches: [founder-terminal-phase2]
+    paths: ['.github/workflows/debug-phase2-reader.yml']
+permissions:
+  contents: read
+jobs:
+  read:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Print reader snapshot status only
+        run: |
+          curl -fsS https://market-edge-founder-terminal.darkbishop43.workers.dev/api/snapshot > /tmp/s.json
+          python - <<'PY'
+          import json
+          j=json.load(open('/tmp/s.json'))
+          print(json.dumps({k:{'ok':v.get('ok'),'status':v.get('status'),'bodyKeys':list((v.get('body') or {}).keys())[:12]} for k,v in (j.get('endpoints') or {}).items()},indent=2))
+          PY
