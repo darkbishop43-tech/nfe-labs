@@ -31,14 +31,23 @@ async function snapshot(env){
     safety:{providerCredentials:false,workerBindings:0,providerWrites:0,orderRoutes:0,cancelRoutes:0,transferRoutes:0,baselineMutation:false}
   };
 }
-async function contract(ticker){
-  const market=await getJson(KALSHI+"/markets/"+encodeURIComponent(ticker));
-  const book=await getJson(KALSHI+"/markets/"+encodeURIComponent(ticker)+"/orderbook?depth=10");
+async function contract(env,ticker){
+  const [baseline,market,book]=await Promise.all([
+    getBaselineJson(env,"/kalshi-live-mirror-data"),
+    getJson(KALSHI+"/markets/"+encodeURIComponent(ticker)),
+    getJson(KALSHI+"/markets/"+encodeURIComponent(ticker)+"/orderbook?depth=10")
+  ]);
+  const mirrorRows=Array.isArray(baseline?.body?.rows)?baseline.body.rows:[];
+  const mirror=mirrorRows.find(x=>String(x?.ticker||"")===ticker)||null;
+  const providerMarket=market.body?.market||market.body||null;
   return {
-    ok:market.ok,readOnly:true,ticker,observedAt:new Date().toISOString(),
-    marketHttpStatus:market.status,market:market.body?.market||market.body||null,
+    ok:Boolean(mirror||market.ok),readOnly:true,ticker,observedAt:new Date().toISOString(),
+    inspectionSource:market.ok?"KALSHI_PUBLIC_EXACT_MARKET":mirror?"BASELINE_AUTHENTICATED_LIVE_MIRROR_FALLBACK":"UNAVAILABLE",
+    baselineMirrorHttpStatus:baseline.status,mirror,
+    marketHttpStatus:market.status,market:providerMarket,
     orderbookHttpStatus:book.status,orderbook:book.ok?(book.body?.orderbook_fp||book.body?.orderbook||book.body):null,
-    safety:{providerWrites:0,orders:0,cancels:0,transfers:0}
+    providerDetailAvailable:market.ok,depthAvailable:book.ok,
+    safety:{providerWrites:0,orders:0,cancels:0,transfers:0,baselineMutation:false}
   };
 }
 async function candles(product,granularity){
@@ -58,7 +67,7 @@ export default {
    if(req.method!=="GET")return json({ok:false,error:"READ_ONLY_METHOD_NOT_ALLOWED"},405);
    if(u.pathname==="/api/health")return json({ok:true,service:"market-edge-founder-terminal-reader",mode:"READ_ONLY",baseline:BASELINE,safety:{credentials:false,orders:false,writes:false}});
    if(u.pathname==="/api/snapshot")return json(await snapshot(env));
-   if(u.pathname==="/api/contract"){const ticker=cleanTicker(u.searchParams.get("ticker"));if(!ticker)return json({ok:false,error:"INVALID_TICKER"},400);return json(await contract(ticker));}
+   if(u.pathname==="/api/contract"){const ticker=cleanTicker(u.searchParams.get("ticker"));if(!ticker)return json({ok:false,error:"INVALID_TICKER"},400);return json(await contract(env,ticker));}
    if(u.pathname==="/api/candles"){const p=String(u.searchParams.get("product")||"").toUpperCase(),g=String(u.searchParams.get("granularity")||"300");const out=await candles(p,g);return json(out,out.ok?200:400);}
    return json({ok:true,service:"market-edge-founder-terminal-reader",routes:["/api/health","/api/snapshot","/api/contract?ticker=...","/api/candles?product=BTC-USD&granularity=300"],readOnly:true});
  }
