@@ -19,3 +19,5 @@ jobs:
           console.log('MICRO_PREFLIGHT_PASS='+JSON.stringify(p));
           console.log('SAFETY='+JSON.stringify({providerWrites:0,capitalMovedUsd:0,ordersSubmitted:0,newQueueArmed:false}));
           NODE
+
+# retry after deployment propagation
