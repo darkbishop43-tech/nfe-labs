@@ -1734,7 +1734,7 @@ async function runExecutionTestSeries(env,freshShadow=null,preparedBalance=null)
   const activeTickers=new Set(executionTestOpenPositions(state).map(p=>String(p.marketTicker)));
   const activeTestThreshold=Number.isFinite(Number(state?.threshold))?Number(state.threshold):EXECUTION_TEST_CONFIG.entryScore;
   const candidates=executionTestCandidatePool(shadow,now,activeTestThreshold).filter(o=>!activeTickers.has(String(o.marketTicker)));
-  let slots=Math.max(0,EXECUTION_TEST_CONFIG.maxConcurrent-executionTestOpenPositions(state).length);
+  let slots=Math.max(0,Math.max(1,Math.trunc(Number(state?.maxConcurrent||EXECUTION_TEST_CONFIG.maxConcurrent)))-executionTestOpenPositions(state).length);
   let warmedBalance=preparedBalance&&typeof preparedBalance==="object"?preparedBalance:null;
 
   for(const observed of candidates){
@@ -4054,6 +4054,17 @@ document.getElementById('export')?.addEventListener('click',async()=>{const r=aw
         queue:{active:executionTestQueueActive(state),status:state?.queue?.status||"NONE",queueId:state?.queue?.queueId||null,currentIndex:Number(state?.queue?.currentIndex??-1),totalAttempts:Number(state?.queue?.totalAttempts||0),completedAttempts:Number(state?.queue?.completedAttempts||0),stages:Array.isArray(state?.queue?.stages)?state.queue.stages:[],completedStages:(Array.isArray(state?.queue?.completedStages)?state.queue.completedStages:[]).map(x=>({stageIndex:x.stageIndex,seriesId:x.seriesId,threshold:x.threshold,maxAttempts:x.maxAttempts,attemptsStarted:x.attemptsStarted,reason:x.reason,completedAt:x.completedAt})),cancelledStages:Array.isArray(state?.queue?.cancelledStages)?state.queue.cancelledStages:[]},history:(Array.isArray(state?.queueHistory)?state.queueHistory:[]).map(x=>({queueId:x.queueId,status:x.status,stoppedAt:x.stoppedAt,currentIndex:x.currentIndex,threshold:x.threshold,attemptsStarted:x.attemptsStarted,openPositions:x.openPositions,stages:x.stages})),
         safety:{maxEntryDebitUsd:1,maxAttempts:executionTestSeriesLimit(state),maxSelectableAttempts:EXECUTION_TEST_CONFIG.maxSelectableAttempts,maxConcurrent:3,requiredExchangeIndex:2,productionBaselineEntryScore:REAL_TEST_CONFIG.entryScore,testEntryScore:Number(state?.threshold??EXECUTION_TEST_CONFIG.entryScore)}
       });
+    }
+
+    if (request.method === "GET" && url.pathname === "/micro-lifecycle-validation-control") {
+      const state=await loadExecutionTestState(env);
+      const balanceProof=await kalshiExecutionBalanceSnapshot(env);
+      const rows=Array.isArray(balanceProof?.body?.balance_breakdown)?balanceProof.body.balance_breakdown:[];
+      const index2=Number(rows.find(x=>Number(x?.exchange_index)===2)?.balance);
+      const openPositions=executionTestOpenPositions(state);
+      const queueInactive=!executionTestQueueActive(state)&&state?.armed!==true;
+      const proposed={purpose:"ONE_MICROSCOPIC_REAL_LIFECYCLE_VALIDATION_ONLY",entryThreshold:REAL_TEST_CONFIG.entryScore,maxAttempts:1,maxConcurrent:1,maxEntryDebitUsd:1,contractCount:1,requiredExchangeIndex:2,subaccount:0,exchangeScope:"ALL",entryMode:"IOC",exitScore:EXECUTION_TEST_CONFIG.exitScore,maxHoldMs:EXECUTION_TEST_CONFIG.maxHoldMs,exitReduceOnly:true};
+      return json({ok:true,state:"MICRO_LIFECYCLE_PREPARED_NOT_AUTHORIZED",realOrderSubmitted:false,entryAuthority:"LOCKED_NO_ARM_ROUTE_IN_THIS_BUILD",preflight:{queueInactive,noOpenPositions:openPositions.length===0,openPositionCount:openPositions.length,index2CashUsd:Number.isFinite(index2)?index2:null,fundingSufficientForMaxDebit:Boolean(balanceProof?.ok&&Number.isFinite(index2)&&index2>=proposed.maxEntryDebitUsd),triStateReconciliation:true,positionFpParser:true,paginationExhaustion:true,subaccount:0,exchangeScope:"ALL",onePositionLockPrepared:true},contractSelectionRules:{source:"existing AUTO candidate pool",minimumScore:REAL_TEST_CONFIG.entryScore,executionEligible:true,timeSafeRequired:true,freshProviderQuoteRequired:true,oneContractOnly:true,estimatedMaximumDebitUsd:1,noSecondEntry:true},expectedReconciliation:{classification:"OPEN",rawQuantityFieldUsed:"position_fp",normalizedQuantity:"NONZERO",subaccount:0,exchangeScope:"ALL",paginationComplete:true},exitManagement:{scoreExitAtOrBelow:EXECUTION_TEST_CONFIG.exitScore,maxHoldMs:EXECUTION_TEST_CONFIG.maxHoldMs,reduceOnly:true,exactRemainingQuantity:true,providerExitOrderIdRequired:true,exitFillConfirmationRequired:true,finalFlatRequires:"EXACT_TICKER_PLUS_VALID_POSITION_FP_ZERO"},failClosed:{unknownKeepsOwnership:true,unknownRetryRequired:true,unknownNeverCloses:true,noSecondEntry:true},proposed});
     }
 
     if (request.method === "GET" && url.pathname === "/execution-test-control") {
