@@ -1,0 +1,79 @@
+name: Verify Founder Navigation Shell
+
+on:
+  push:
+    branches: [market-edge-baseline-real]
+    paths:
+      - '.github/workflows/verify-founder-navigation-shell.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify shell and protected running systems
+        shell: bash
+        run: |
+          set -euo pipefail
+          B='https://market-edge-baseline-real.darkbishop43.workers.dev'
+          SHELL='https://raw.githack.com/darkbishop43-tech/nfe-labs/market-edge-baseline-real/market-edge-lab/real/baseline/founder-terminal.html'
+          PAPER='https://raw.githack.com/darkbishop43-tech/nfe-labs/adaptive-market-lab/market-edge-lab/siblings/founder-trader-terminal.html'
+          PAYNE='https://raw.githack.com/darkbishop43-tech/nfe-labs/market-edge-sibling-build/market-edge-lab/siblings/payne-method/index.html'
+          ADAPT='https://raw.githack.com/darkbishop43-tech/nfe-labs/adaptive-market-lab/market-edge-lab/siblings/adaptive-market-lab/index.html'
+          OBS='https://market-edge-universal-observer.darkbishop43.workers.dev/'
+
+          curl -fsS "$SHELL" -o /tmp/shell.html
+          curl -fsS "$B/" -o /tmp/base.html
+          curl -fsS "$B/shadow-state" -o /tmp/shadow.json
+          curl -fsS "$B/execution-test-state" -o /tmp/exec.json
+          curl -fsS "$B/wide-radar-state" -o /tmp/radar.json
+          curl -fsS "$PAPER" -o /tmp/paper.html
+          curl -fsS "$PAYNE" -o /tmp/payne.html
+          curl -fsS "$ADAPT" -o /tmp/adaptive.html
+          curl -fsS "$OBS" -o /tmp/observer.html
+
+          python - <<'PY'
+          import json,re
+          shell=open('/tmp/shell.html',encoding='utf-8').read()
+          base=open('/tmp/base.html',encoding='utf-8').read()
+          sh=json.load(open('/tmp/shadow.json'))
+          ex=json.load(open('/tmp/exec.json'))
+          rad=json.load(open('/tmp/radar.json'))
+          paper=open('/tmp/paper.html',encoding='utf-8').read()
+          payne=open('/tmp/payne.html',encoding='utf-8').read()
+          adaptive=open('/tmp/adaptive.html',encoding='utf-8').read()
+          observer=open('/tmp/observer.html',encoding='utf-8').read()
+          out={
+            'shell_loaded':'Founder Trader Terminal' in shell,
+            'real_link':B if False else 'https://market-edge-baseline-real.darkbishop43.workers.dev/',
+            'paper_control_loaded':'Paper Lab Thresholds' in paper,
+            'payne_loaded':'PAYNE' in payne.upper(),
+            'adaptive_loaded':'ADAPTIVE' in adaptive.upper(),
+            'observer_loaded':'UNIVERSAL OBSERVER' in observer.upper(),
+            'mobile_viewport':'width=device-width' in shell,
+            'mobile_breakpoints':('@media(max-width:820px)' in shell and '@media(max-width:520px)' in shell),
+            'no_iframe':'<iframe' not in shell.lower(),
+            'shell_has_no_post':not bool(re.search(r'fetch\s*\(|method\s*[:=]\s*["\']POST',shell,re.I)),
+            'baseline_root_loaded':'Market Edge' in base and 'Baseline Real' in base,
+            'shadow_status':sh.get('status'),
+            'shadow_lastRunAt':sh.get('lastRunAt'),
+            'entryScore':(sh.get('strategy') or {}).get('entryScore'),
+            'exitScore':(sh.get('strategy') or {}).get('exitScore'),
+            'opportunities':len(sh.get('opportunities') or []),
+            'execution_status':(ex.get('state') or {}).get('status'),
+            'execution_armed':(ex.get('state') or {}).get('armed'),
+            'execution_attemptsStarted':(ex.get('state') or {}).get('attemptsStarted'),
+            'radar_status':(rad.get('live') or {}).get('status'),
+            'radar_lastRunAt':(rad.get('live') or {}).get('lastRunAt')
+          }
+          print(json.dumps(out,indent=2))
+          assert out['shell_loaded'] and out['baseline_root_loaded']
+          assert out['paper_control_loaded'] and out['payne_loaded'] and out['adaptive_loaded'] and out['observer_loaded']
+          assert out['mobile_viewport'] and out['mobile_breakpoints']
+          assert out['no_iframe'] and out['shell_has_no_post']
+          assert out['entryScore']==.80 and out['exitScore']==.20
+          assert out['shadow_status']=='LIVE_KALSHI_SHADOW'
+          assert out['radar_status']=='LIVE_KALSHI_SHADOW'
+          PY
