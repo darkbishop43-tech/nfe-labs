@@ -10,55 +10,28 @@ jobs:
     steps:
       - uses: actions/setup-node@v4
         with: {node-version: '22'}
-      - name: Read-only KV and provider reconstruction
+      - name: Read-only persisted and authenticated Worker evidence
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          KALSHI_EXECUTION_KEY_ID: ${{ secrets.KALSHI_EXECUTION_KEY_ID }}
-          KALSHI_EXECUTION_PRIVATE_KEY: ${{ secrets.KALSHI_EXECUTION_PRIVATE_KEY }}
         run: |
           set -euo pipefail
           npx --yes wrangler@4 kv key get 'baseline-real-execution-test-v1' --namespace-id d110292129c94b26942c25d0c462a17b --remote > /tmp/state.json
+          echo "=== AUTHENTICATED LIVE READ ==="
+          curl -fsS 'https://market-edge-baseline-real.darkbishop43.workers.dev/execution-test-state' | tee /tmp/live.json
+          echo
           node <<'NODE'
-          (async()=>{
-          const fs=require('fs'),crypto=require('crypto');
-          const st=JSON.parse(fs.readFileSync('/tmp/state.json','utf8'));
-          const base='https://api.elections.kalshi.com/trade-api/v2';
-          const keyId=process.env.KALSHI_EXECUTION_KEY_ID;
-          const pem=process.env.KALSHI_EXECUTION_PRIVATE_KEY;
-          async function get(path){
-            const ts=String(Date.now()), signPath=path.split('?')[0];
-            const sig=crypto.sign('sha256',Buffer.from(ts+'GET'+signPath),{key:pem,padding:crypto.constants.RSA_PKCS1_PSS_PADDING,saltLength:32}).toString('base64');
-            const r=await fetch(base+path,{headers:{accept:'application/json','KALSHI-ACCESS-KEY':keyId,'KALSHI-ACCESS-TIMESTAMP':ts,'KALSHI-ACCESS-SIGNATURE':sig}});
-            const txt=await r.text(); let body;try{body=JSON.parse(txt)}catch{body={raw:txt.slice(0,500)}}
-            return {http:r.status,ok:r.ok,body};
-          }
-          const attempts=[];
-          function add(stage,a,queueId){if(!a)return;attempts.push({queueId,stage,...a});}
-          // Current configured overnight queue plus any completed stages inside it.
-          const qid=st.queue?.queueId;
-          for(const cs of st.queue?.completedStages||[]) for(const a of cs.attempts||[]) add(cs.threshold,a,qid);
-          for(const a of st.attempts||[]) add(st.threshold,a,qid);
-          // Deduplicate queue/stage/attempt/order.
-          const seen=new Set(), aa=[];
-          for(const a of attempts){const k=[a.queueId,a.threshold,a.attemptNo,a.orderId||a.clientOrderId].join('|');if(!seen.has(k)){seen.add(k);aa.push(a)}}
-          const balance=await get('/portfolio/balance');
-          const positions=await get('/portfolio/positions?limit=1000&settlement_status=all');
-          console.log('PROVIDER_BALANCE='+JSON.stringify(balance));
-          console.log('PROVIDER_POSITIONS='+JSON.stringify(positions));
-          console.log('STATE_META='+JSON.stringify({status:st.status,armed:st.armed,seriesId:st.seriesId,threshold:st.threshold,attemptsStarted:st.attemptsStarted,queue:st.queue,fundingProof:st.fundingProof,updatedAt:st.updatedAt}));
-          console.log('ATTEMPT_COUNT='+aa.length);
-          for(const a of aa){
-            const order=a.orderId?await get('/portfolio/orders/'+encodeURIComponent(a.orderId)):null;
-            const fills=a.orderId?await get('/portfolio/fills?order_id='+encodeURIComponent(a.orderId)+'&limit=100'):null;
-            const market=a.marketTicker?await get('/markets/'+encodeURIComponent(a.marketTicker)):null;
-            const pos=(positions.body?.market_positions||positions.body?.positions||[]).find(x=>String(x.ticker||x.market_ticker)===String(a.marketTicker))||null;
-            const localPos=(st.positions||[]).find(p=>p.id===a.id||p.entryOrderId===a.orderId)||null;
-            console.log('ATTEMPT='+JSON.stringify({stage:a.threshold,attemptNo:a.attemptNo,createdAt:a.createdAt,status:a.status,asset:a.asset,ticker:a.marketTicker,side:a.outcomeSide,direction:a.direction,observedScore:a.observedScore,liveScore:a.liveScore,observedAsk:a.observedAsk,liveAsk:a.liveAsk,liveBid:a.liveBid,count:a.count,maxDebit:a.maximumEntryDebitUsd,orderId:a.orderId,fillCount:a.fillCount,avgFill:a.averageFillPrice,entryFee:a.averageFeePaid,filledAt:a.filledAt,providerOrder:order,providerFills:fills,providerMarket:market,providerPosition:pos,localPosition:localPos}));
-            await new Promise(r=>setTimeout(r,90));
-          }
-          console.log('LOCAL_POSITIONS='+JSON.stringify(st.positions||[]));
-          console.log('LOCAL_LEDGER='+JSON.stringify(st.ledger||[]));
-          console.log('QUEUE_HISTORY='+JSON.stringify(st.queueHistory||[]));
-          })().catch(e=>{console.error(e);process.exit(1)});
+          const fs=require('fs');
+          const st=JSON.parse(fs.readFileSync('/tmp/state.json','utf8')), live=JSON.parse(fs.readFileSync('/tmp/live.json','utf8'));
+          const qid=st.queue?.queueId, all=[];
+          const add=(stage,a)=>all.push({queueId:qid,stage,...a});
+          for(const cs of st.queue?.completedStages||[]) for(const a of cs.attempts||[]) add(cs.threshold,a);
+          for(const a of st.attempts||[]) add(st.threshold,a);
+          const seen=new Set(), aa=all.filter(a=>{const k=[a.stage,a.attemptNo,a.orderId||a.clientOrderId].join('|');if(seen.has(k))return false;seen.add(k);return true});
+          console.log('LIVE='+JSON.stringify(live));
+          console.log('STATE_META='+JSON.stringify({status:st.status,armed:st.armed,threshold:st.threshold,attemptsStarted:st.attemptsStarted,queue:st.queue,updatedAt:st.updatedAt}));
+          console.log('ATTEMPTS='+JSON.stringify(aa));
+          console.log('POSITIONS='+JSON.stringify(st.positions||[]));
+          console.log('LEDGER='+JSON.stringify(st.ledger||[]));
+          console.log('HISTORY='+JSON.stringify(st.queueHistory||[]));
           NODE
