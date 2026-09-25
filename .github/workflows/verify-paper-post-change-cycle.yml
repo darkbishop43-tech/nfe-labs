@@ -1,0 +1,50 @@
+name: Verify Paper Post-Change Cycle
+
+on:
+  push:
+    branches: [adaptive-market-lab]
+    paths:
+      - '.github/workflows/verify-paper-post-change-cycle.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Run one ordinary paper cycle at verified runtime threshold
+        shell: bash
+        run: |
+          set -euo pipefail
+          P='https://market-edge-siblings.darkbishop43.workers.dev'
+          curl -fsS "$P/api/paper-thresholds" > /tmp/th-before.json
+          curl -fsS "$P/api/state/payne" > /tmp/p-before.json
+          curl -fsS "$P/api/state/adaptive" > /tmp/a-before.json
+          curl -fsS "$P/api/run" > /tmp/run.json
+          curl -fsS "$P/api/state/payne" > /tmp/p-after.json
+          curl -fsS "$P/api/state/adaptive" > /tmp/a-after.json
+          curl -fsS "$P/api/paper-thresholds" > /tmp/th-after.json
+          python - <<'PY'
+          import json
+          J=lambda p:json.load(open(p))
+          tb,ta=J('/tmp/th-before.json'),J('/tmp/th-after.json')
+          pb,pa=J('/tmp/p-before.json'),J('/tmp/p-after.json')
+          ab,aa=J('/tmp/a-before.json'),J('/tmp/a-after.json')
+          def s(x):return {'balance':x.get('balance'),'realizedPnl':x.get('realizedPnl'),'trades':x.get('trades'),'positions':len(x.get('positions') or []),'ledger':len(x.get('ledger') or []),'lastRunAt':x.get('lastRunAt'),'activeEntryThreshold':x.get('activeEntryThreshold'),'thresholdRuntimeVerified':x.get('thresholdRuntimeVerified')}
+          out={'threshold_before':tb,'payne_before':s(pb),'adaptive_before':s(ab),'payne_after':s(pa),'adaptive_after':s(aa),'threshold_after':ta}
+          print(json.dumps(out,indent=2))
+          assert tb['thresholds']['payne_method']['activeThreshold']==.65
+          assert tb['thresholds']['adaptive_market_lab']['activeThreshold']==.65
+          assert ta['thresholds']['payne_method']['activeThreshold']==.65
+          assert ta['thresholds']['adaptive_market_lab']['activeThreshold']==.65
+          assert pa.get('activeEntryThreshold')==.65 and pa.get('thresholdRuntimeVerified') is True
+          assert aa.get('activeEntryThreshold')==.65 and aa.get('thresholdRuntimeVerified') is True
+          assert pa.get('lastRunAt')!=pb.get('lastRunAt')
+          assert aa.get('lastRunAt')!=ab.get('lastRunAt')
+          # History is monotonic; cycle may add entries/exits but cannot reset evidence.
+          assert len(pa.get('ledger') or [])>=len(pb.get('ledger') or [])
+          assert len(aa.get('ledger') or [])>=len(ab.get('ledger') or [])
+          assert int(pa.get('trades') or 0)>=int(pb.get('trades') or 0)
+          assert int(aa.get('trades') or 0)>=int(ab.get('trades') or 0)
+          PY
