@@ -109,13 +109,29 @@ async function loadChart(asset){
 function draw(rows){const svg=$('chartSvg'),W=800,H=400,pad=34,ps=rows.map(x=>x.p),min=Math.min(...ps),max=Math.max(...ps),rng=max-min||1;const pts=rows.map((x,i)=>[pad+i*(W-pad*2)/(rows.length-1),H-pad-(x.p-min)/rng*(H-pad*2)]);let grid='';for(let i=1;i<5;i++){let y=i*H/5;grid+='<line x1="0" y1="'+y+'" x2="'+W+'" y2="'+y+'" stroke="#142333" stroke-width="1"/>'}const d=pts.map((p,i)=>(i?'L':'M')+p[0].toFixed(1)+' '+p[1].toFixed(1)).join(' ');svg.innerHTML=grid+'<path d="'+d+'" fill="none" stroke="#64a8ff" stroke-width="2" vector-effect="non-scaling-stroke"/><line id="crossX" x1="0" y1="0" x2="0" y2="'+H+'" stroke="#72879b" opacity="0"/><line id="crossY" x1="0" y1="0" x2="'+W+'" y2="0" stroke="#72879b" opacity="0"/>';svg.onmousemove=e=>{const r=svg.getBoundingClientRect(),x=(e.clientX-r.left)/r.width*W,y=(e.clientY-r.top)/r.height*H,cx=$('crossX'),cy=$('crossY');cx.setAttribute('x1',x);cx.setAttribute('x2',x);cy.setAttribute('y1',y);cy.setAttribute('y2',y);cx.setAttribute('opacity','.55');cy.setAttribute('opacity','.55')};svg.onmouseleave=()=>{$('crossX')?.setAttribute('opacity','0');$('crossY')?.setAttribute('opacity','0')}
 }
 function renderTab(){
- const ex=state.exec?.state||{}, attempts=ex.attempts||[], pos=ex.positions||[];let rows=[],heads=[];
- if(state.tab==='positions'){heads=['#','ASSET','TICKER','SIDE','ENTRY SCORE','FILL','STATUS'];rows=pos.map(p=>[p.attemptNo,p.asset,p.ticker,p.side,num(p.entryScore,3),num(p.entryAverageFillPrice,3),p.status])}
+ const ex=state.exec?.state||{}, attempts=ex.attempts||[], pos=ex.positions||[],manual=state.sleeves?.sleeves?.FOUNDER_MANUAL?.ledgerRecords||[];let rows=[],heads=[];
+ if(state.tab==='positions'){
+   heads=['SOURCE','#','ASSET','TICKER','SIDE','ENTRY','REMAINING','STATUS','ACTION'];
+   const autoRows=pos.map(p=>['AUTO_BASELINE',p.attemptNo,p.asset,p.ticker,p.side,num(p.entryAverageFillPrice,3),Math.max(0,Number(p.filledCount||0)-Number(p.exitFilledTotal||0)),p.status,'AUTO MANAGED']);
+   const founderRows=manual.filter(r=>['OPEN','EXIT_RETRY','PARTIAL'].includes(String(r.status||''))).map(r=>['FOUNDER_MANUAL',r.id||r.recordId||r.entryOrderId||'—',r.asset||'—',r.ticker||r.marketTicker||'—',r.outcomeSide||r.side||'—',num(r.averageFillPrice??r.entryAverageFillPrice,3),Math.max(0,Number(r.entryFillQuantity??r.fillCount??0)-Number(r.closeFillQuantity??r.exitFilledTotal??0)),r.status,'REVIEW CLOSE']);
+   rows=[...autoRows,...founderRows];
+   $('tabPanel').innerHTML=rows.length?'<table class="tbl"><thead><tr>'+heads.map(h=>'<th>'+h+'</th>').join('')+'</tr></thead><tbody>'+rows.map((r,ri)=>'<tr>'+r.map((v,i)=>'<td style="text-align:'+(i?'right':'left')+'">'+(i===8&&r[0]==='FOUNDER_MANUAL'?'<button class="tool founder-close-review" data-ri="'+ri+'">REVIEW CLOSE · NO SUBMIT</button>':esc(v))+'</td>').join('')+'</tr>').join('')+'</tbody></table>':'<div class="empty">No authoritative records available for this panel.</div>';
+   [...document.querySelectorAll('.founder-close-review')].forEach(b=>b.onclick=()=>{const row=rows[Number(b.dataset.ri)],id=row?.[1],count=Number(row?.[6]);reviewFounderClose(id,count)});
+   return;
+ }
  else if(state.tab==='nofill'){heads=['ATTEMPT','ASSET','TICKER','SIDE','SCORE','ASK','STATUS'];rows=attempts.filter(a=>String(a.status).includes('NO_FILL')).map(a=>[a.attemptNo,a.asset,a.ticker,a.side,num(a.liveScore??a.observedScore,3),num(a.liveAsk,3),'NO_FILL'])}
- else if(state.tab==='ledger'){heads=['TRADE','ASSET','TICKER','SIDE','SCORE','ENTRY','FEES','RESULT'];rows=pos.filter(p=>Number(p.filledCount)>0).map(p=>[p.attemptNo,p.asset,p.ticker,p.side,num(p.entryScore,3),num(p.entryAverageFillPrice,3),num(p.entryAverageFeePaid,4),p.status])}
- else if(state.tab==='orders'){heads=['ATTEMPT','ASSET','TICKER','ORDER','FILL COUNT','STATUS'];rows=attempts.map(a=>[a.attemptNo,a.asset,a.ticker,a.orderId||'—',a.fillCount??'—',a.status])}
+ else if(state.tab==='ledger'){heads=['SOURCE','TRADE','ASSET','TICKER','SIDE','ENTRY','FEES','RESULT'];rows=[...pos.filter(p=>Number(p.filledCount)>0).map(p=>['AUTO_BASELINE',p.attemptNo,p.asset,p.ticker,p.side,num(p.entryAverageFillPrice,3),num(p.entryAverageFeePaid,4),p.status]),...manual.map(r=>['FOUNDER_MANUAL',r.id||r.entryOrderId||'—',r.asset||'—',r.ticker||r.marketTicker||'—',r.outcomeSide||r.side||'—',num(r.averageFillPrice??r.entryAverageFillPrice,3),num(r.feesUsd??r.totalFeesUsd,4),r.finalState||r.status||'—'])]}
+ else if(state.tab==='orders'){heads=['SOURCE','ATTEMPT','ASSET','TICKER','ORDER','FILL COUNT','STATUS'];rows=[...attempts.map(a=>['AUTO_BASELINE',a.attemptNo,a.asset,a.ticker,a.orderId||'—',a.fillCount??'—',a.status]),...manual.map(r=>['FOUNDER_MANUAL',r.id||'—',r.asset||'—',r.ticker||r.marketTicker||'—',r.entryOrderId||'—',r.entryFillQuantity??r.fillCount??'—',r.status||'—'])]}
  else {heads=['TIME','EVENT','DETAIL'];rows=[[new Date().toLocaleTimeString(),'COCKPIT','Read-only staging cockpit connected to governed runtime endpoints'],[state.shadow?.lastRunAt||'—','SCHEDULER',state.shadow?.status||'—']]}
  $('tabPanel').innerHTML=rows.length?'<table class="tbl"><thead><tr>'+heads.map(h=>'<th>'+h+'</th>').join('')+'</tr></thead><tbody>'+rows.map(r=>'<tr>'+r.map((v,i)=>'<td style="text-align:'+(i?'right':'left')+'">'+esc(v)+'</td>').join('')+'</tr>').join('')+'</tbody></table>':'<div class="empty">No authoritative records available for this panel.</div>'
+}
+async function reviewFounderClose(recordId,count){
+ $('manualStatus').textContent='REFRESHING FOUNDER POSITION + LIVE PROVIDER QUOTE · NO SUBMIT';
+ try{
+  const x=await get('/founder-manual-close-preview?recordId='+encodeURIComponent(recordId)+'&count='+encodeURIComponent(count));
+  $('manualStatus').textContent=x.state+' · SOURCE '+x.source+' · SUBMITTED FALSE';
+  $('manualPreview').textContent=JSON.stringify({source:x.source,ticker:x.ticker,outcomeSide:x.outcomeSide,remainingQuantity:x.remainingQuantity,providerPositionQuantity:x.providerPositionQuantity,quote:x.quote,estimated:x.estimated,providerRequestPreview:x.providerRequestPreview,interlocks:x.interlocks},null,2);
+ }catch(e){$('manualStatus').textContent='FOUNDER CLOSE FAIL CLOSED · '+String(e.message||e);$('manualPreview').textContent='No close submitted. Position ownership/quantity/quote must reconcile before preview.'}
 }
 async function reviewManual(){
  const o=state.selected;if(!o){$('manualStatus').textContent='FAIL CLOSED · SELECT A LIVE CONTRACT';return}
