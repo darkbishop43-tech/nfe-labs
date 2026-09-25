@@ -1,0 +1,46 @@
+name: Verify Founder Manual V1
+on:
+  push:
+    branches: [market-edge-baseline-real]
+    paths: ['.github/workflows/verify-founder-manual-v1.yml']
+permissions: {contents: read}
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/setup-node@v4
+        with: {node-version: '22'}
+      - name: Read-only live acceptance
+        run: |
+          node <<'NODE'
+          const BASE='https://market-edge-baseline-real.darkbishop43.workers.dev';
+          const BR='https://market-edge-founder-read.darkbishop43.workers.dev';
+          async function j(url){const r=await fetch(url,{cache:'no-store'});let x={};try{x=await r.json()}catch{};return {status:r.status,x}}
+          const before=await j(BASE+'/execution-test-state');
+          const sh=await j(BASE+'/shadow-state');
+          const ops=sh.x?.opportunities||sh.x?.live?.opportunities||[];
+          const o=ops.find(v=>v?.marketTicker&&(v?.outcomeSide==='YES'||v?.outcomeSide==='NO'))||ops.find(v=>v?.ticker&&(v?.side==='YES'||v?.side==='NO'));
+          if(!o) throw new Error('NO_LIVE_CONTRACT_FOR_PREVIEW');
+          const ticker=o.marketTicker||o.ticker, side=o.outcomeSide||o.side;
+          let price=Number(o.yes??o.ask);
+          let url=BR+'/founder-manual-preview?ticker='+encodeURIComponent(ticker)+'&side='+side+'&mode=IOC&count=1&price='+encodeURIComponent(price);
+          let p=await j(url);
+          if(p.status===409&&Number.isFinite(Number(p.x?.freshSelectedAsk))){
+            price=Number(p.x.freshSelectedAsk);
+            url=BR+'/founder-manual-preview?ticker='+encodeURIComponent(ticker)+'&side='+side+'&mode=IOC&count=1&price='+encodeURIComponent(price);
+            p=await j(url);
+          }
+          const stale=await j(BR+'/founder-manual-preview?ticker='+encodeURIComponent(ticker)+'&side='+side+'&mode=IOC&count=1&price=0.0001');
+          const unsupported=await j(BR+'/founder-manual-preview?ticker='+encodeURIComponent(ticker)+'&side='+side+'&mode=MARKET&count=1&price='+encodeURIComponent(price));
+          const after=await j(BASE+'/execution-test-state');
+          console.log('AUTO_BEFORE='+JSON.stringify({status:before.x?.state?.status,armed:before.x?.state?.armed,queue:before.x?.queue,attemptsStarted:before.x?.state?.attemptsStarted}));
+          console.log('MANUAL_PREVIEW_HTTP='+p.status);
+          console.log('MANUAL_PREVIEW='+JSON.stringify(p.x));
+          console.log('STALE_PROOF='+JSON.stringify({http:stale.status,state:stale.x?.state,submitted:stale.x?.submitted,freshSelectedAsk:stale.x?.freshSelectedAsk}));
+          console.log('UNSUPPORTED_MARKET_PROOF='+JSON.stringify({http:unsupported.status,state:unsupported.x?.state,supported:unsupported.x?.supportedOrderModes,submitted:unsupported.x?.submitted}));
+          console.log('AUTO_AFTER='+JSON.stringify({status:after.x?.state?.status,armed:after.x?.state?.armed,queue:after.x?.queue,attemptsStarted:after.x?.state?.attemptsStarted}));
+          if(p.status!==200||p.x?.submitted!==false||p.x?.source!=='FOUNDER_MANUAL'||p.x?.manualExecutionAuthorized!==false) process.exit(21);
+          if(stale.x?.state!=='MANUAL_PREVIEW_PRICE_STALE_REFRESH_REQUIRED'||stale.x?.submitted!==false) process.exit(22);
+          if(unsupported.x?.state!=='MANUAL_V1_MODE_NOT_PROVEN'||unsupported.x?.submitted!==false) process.exit(23);
+          if(before.x?.state?.armed!==true||after.x?.state?.armed!==true||before.x?.queue?.active!==true||after.x?.queue?.active!==true) process.exit(24);
+          NODE
