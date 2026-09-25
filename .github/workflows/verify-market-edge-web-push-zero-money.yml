@@ -34,6 +34,7 @@ jobs:
           curl -fsS "$BASE/sw.js" -o /tmp/sw.js
           curl -fsS "$BASE/execution-test-state" -o /tmp/execution.json
           curl -fsS "$BASE/founder-capital-ledger" -o /tmp/capital.json
+          curl -fsS "https://market-edge-siblings.darkbishop43.workers.dev/api/state/payne" -o /tmp/payne.json
           curl -fsS "${auth[@]}" "$KV/baseline-real-execution-test-v1" -o /tmp/execution-kv.json
 
           node <<'NODE' >/tmp/forensic-plan.json
@@ -43,12 +44,14 @@ jobs:
           const pc=JSON.parse(fs.readFileSync("/tmp/push-config.json","utf8"));
           const ex=JSON.parse(fs.readFileSync("/tmp/execution.json","utf8"));
           const cap=JSON.parse(fs.readFileSync("/tmp/capital.json","utf8"));
+          const payne=JSON.parse(fs.readFileSync("/tmp/payne.json","utf8"));
           const kv=JSON.parse(fs.readFileSync("/tmp/execution-kv.json","utf8"));
 
           // Print evidence before assertions so stale historical expectations can never hide current state.
           console.error("CURRENT_EXECUTION_STATE="+JSON.stringify(ex));
           console.error("CURRENT_PUSH_STATUS="+JSON.stringify(ps));
           console.error("CURRENT_CAPITAL_LEDGER="+JSON.stringify(cap));
+          console.error("CURRENT_PAYNE_STATE="+JSON.stringify(payne));
 
           const positions=Array.isArray(kv.positions)?kv.positions:[];
           const attempts=Array.isArray(kv.attempts)?kv.attempts:[];
@@ -91,6 +94,7 @@ jobs:
           }
 
           echo "SERVER_SUBSCRIPTION_RECORD=$(kv_exists 'notification:founder:subscription:v1')"
+          echo "PAYNE_ONE_SHOT_LATCH=$(kv_exists 'notification:payne-paper-once:v1')"
           if [ -n "$fillId" ]; then echo "FILL_DEDUPE_KEY=notification:delivery:v1:$fillId"; echo "FILL_DEDUPE=$(kv_exists "notification:delivery:v1:$fillId")"; else echo "FILL_DEDUPE=UNESTABLISHED"; fi
           if [ -n "$closeId" ]; then echo "CLOSE_DEDUPE_KEY=notification:delivery:v1:$closeId"; echo "CLOSE_DEDUPE=$(kv_exists "notification:delivery:v1:$closeId")"; else echo "CLOSE_DEDUPE=UNESTABLISHED"; fi
 
@@ -135,6 +139,35 @@ jobs:
           grep -Fq 'sendFounderPushBestEffort' "$F"
           grep -Fq 'providerTradingWrites:0' "$F"
           grep -Fq 'ctx.waitUntil(dispatchExecutionNotifications(env).catch(()=>{}))' "$F"
+          grep -Fq 'dispatchOnePaynePaperFishNotification' "$F"
+          grep -Fq 'PAYNE_PAPER_NOTIFY_ONCE_KEY' "$F"
+          grep -Fq 'title:"🐟 NFE-OS · PAYNE PAPER FISH"' "$F"
+          grep -Fq 'title:"🎣 NFE-OS · REAL FISH"' "$F"
+          grep -Fq 'notification:attempt:v1:' "$F"
+
+      - name: Arm authorized real validation .65 x1 through existing control
+        if: github.event_name == 'push' && github.event.head_commit.message == 'Verify Payne notification isolation and arm authorized .65 x1'
+        shell: bash
+        run: |
+          set -euo pipefail
+          BASE="https://market-edge-baseline-real.darkbishop43.workers.dev"
+          curl -fsS "$BASE/execution-test-state" -o /tmp/pre-arm.json
+          node - <<'NODE'
+          const ex=require("/tmp/pre-arm.json");
+          if(ex?.state?.armed!==false||ex?.state?.openPositions!==0)throw new Error("unsafe pre-arm state");
+          if(ex?.safety?.productionBaselineEntryScore!==0.8||ex?.safety?.maxEntryDebitUsd!==1)throw new Error("protected execution invariant changed");
+          const idx=Number(ex?.funding?.index2Usd);
+          if(!Number.isFinite(idx)||idx<1)throw new Error("existing Index 2 capital does not satisfy $1 gate");
+          console.log("PRE_ARM="+JSON.stringify({armed:ex.state.armed,openPositions:ex.state.openPositions,index2Usd:idx,productionBaseline:ex.safety.productionBaselineEntryScore}));
+          NODE
+          curl -fsS -L -X POST "$BASE/execution-test-arm"             -H 'content-type: application/x-www-form-urlencoded'             --data 'authorization=ARM_BOUNDED_EXECUTION_TESTS_MAX_1_USD&testScore=.65&runCount=1'             -o /tmp/arm-result.html
+          curl -fsS "$BASE/execution-test-state" -o /tmp/post-arm.json
+          node - <<'NODE'
+          const ex=require("/tmp/post-arm.json");
+          if(ex?.state?.armed!==true||ex?.state?.attemptsStarted!==0||ex?.state?.openPositions!==0)throw new Error("authorized arm did not reach ARMED_FISHING 0/1");
+          if(ex?.safety?.productionBaselineEntryScore!==0.8||Math.abs(Number(ex?.safety?.testEntryScore)-0.65)>1e-9||Number(ex?.safety?.maxAttempts)!==1)throw new Error("authorized .65 x1 state mismatch");
+          console.log("POST_ARM="+JSON.stringify(ex));
+          NODE
 
 # verification rerun after notification adapter wiring
 
