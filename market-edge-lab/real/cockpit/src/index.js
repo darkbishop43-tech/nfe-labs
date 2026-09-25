@@ -26,9 +26,13 @@ async function baselineJson(env,path){
 }
 
 async function currentTickers(env){
-  const r=await baselineJson(env,'/shadow-state');
-  const set=new Set((r.body?.opportunities||[]).map(x=>String(x?.marketTicker||'')));
-  return {set,shadow:r};
+  const [shadow,mirror]=await Promise.all([
+    baselineJson(env,'/shadow-state'),
+    baselineJson(env,'/kalshi-live-mirror-data')
+  ]);
+  const opportunities=shadow.body?.opportunities||[];
+  const set=new Set(opportunities.map(x=>String(x?.marketTicker||'')));
+  return {set,shadow,mirror,opportunities};
 }
 
 function safeTicker(v){
@@ -104,26 +108,48 @@ export default{
 
       const suffix=u.pathname==='/api/market'?'':'/orderbook?depth=10';
       const r=await publicJson('https://api.elections.kalshi.com/trade-api/v2/markets/'+encodeURIComponent(ticker)+suffix,8000);
-      if(!r.ok)return json({ok:false,error:'KALSHI_PUBLIC_READ_FAILED',httpStatus:r.status},502);
 
       if(u.pathname==='/api/market'){
-        const m=r.body?.market||r.body||{};
+        if(r.ok){
+          const m=r.body?.market||r.body||{};
+          return json({
+            ok:true,available:true,readOnly:true,source:'KALSHI_PUBLIC_MARKET_READ',
+            market:{
+              ticker:m.ticker||ticker,title:m.title||null,subtitle:m.subtitle||null,status:m.status||null,
+              open_time:m.open_time||null,close_time:m.close_time||null,can_close_early:m.can_close_early??null,
+              yes_bid_dollars:m.yes_bid_dollars??m.yes_bid??null,yes_ask_dollars:m.yes_ask_dollars??m.yes_ask??null,
+              no_bid_dollars:m.no_bid_dollars??m.no_bid??null,no_ask_dollars:m.no_ask_dollars??m.no_ask??null,
+              volume:m.volume_fp??m.volume??null,liquidity:m.liquidity_dollars??m.liquidity??null,
+              rules_primary:m.rules_primary||null,rules_secondary:m.rules_secondary||null,
+              exchange_index:m.exchange_index??null
+            }
+          });
+        }
+        const o=cur.opportunities.find(x=>x.marketTicker===ticker)||null;
+        const mr=(cur.mirror.body?.rows||[]).find(x=>x.ticker===ticker)||null;
         return json({
-          ok:true,readOnly:true,source:'KALSHI_PUBLIC_MARKET_READ',
-          market:{
-            ticker:m.ticker||ticker,title:m.title||null,subtitle:m.subtitle||null,status:m.status||null,
-            open_time:m.open_time||null,close_time:m.close_time||null,can_close_early:m.can_close_early??null,
-            yes_bid_dollars:m.yes_bid_dollars??m.yes_bid??null,yes_ask_dollars:m.yes_ask_dollars??m.yes_ask??null,
-            no_bid_dollars:m.no_bid_dollars??m.no_bid??null,no_ask_dollars:m.no_ask_dollars??m.no_ask??null,
-            volume:m.volume_fp??m.volume??null,liquidity:m.liquidity_dollars??m.liquidity??null,
-            rules_primary:m.rules_primary||null,rules_secondary:m.rules_secondary||null,
-            exchange_index:m.exchange_index??null
-          }
+          ok:true,available:Boolean(o),readOnly:true,source:'BASELINE_GOVERNED_READ_FALLBACK',
+          providerDetailStatus:r.status||null,
+          market:o?{
+            ticker, title:o.question||null,subtitle:o.subtitle||null,status:mr?.status||null,
+            open_time:o.openTime||null,close_time:o.closeTime||null,can_close_early:null,
+            yes_bid_dollars:mr?.yesBid??null,yes_ask_dollars:mr?.yesAsk??null,
+            no_bid_dollars:mr?.noBid??null,no_ask_dollars:mr?.noAsk??null,
+            volume:null,liquidity:mr?.liquidityDollars??null,
+            rules_primary:null,rules_secondary:null,exchange_index:o.exchangeIndex??null
+          }:null
         });
       }
 
+      if(!r.ok){
+        return json({
+          ok:true,available:false,readOnly:true,source:'KALSHI_PUBLIC_ORDERBOOK_READ',
+          ticker,providerHttpStatus:r.status||null,reason:r.status===429?'PROVIDER_RATE_LIMITED':'ORDERBOOK_UNAVAILABLE',
+          orderbook:null,orderbook_fp:null
+        });
+      }
       return json({
-        ok:true,readOnly:true,source:'KALSHI_PUBLIC_ORDERBOOK_READ',ticker,
+        ok:true,available:true,readOnly:true,source:'KALSHI_PUBLIC_ORDERBOOK_READ',ticker,
         orderbook:r.body?.orderbook||null,orderbook_fp:r.body?.orderbook_fp||null
       });
     }
