@@ -77,3 +77,5 @@ jobs:
 # verification rerun after notification adapter wiring
 
 # verification rerun after mobile enrollment parser repair
+
+# final safety recheck before Founder mobile release
