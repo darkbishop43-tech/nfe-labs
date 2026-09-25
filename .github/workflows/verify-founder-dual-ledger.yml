@@ -1,0 +1,36 @@
+name: Verify Founder Dual Ledger Isolation
+on:
+  push:
+    branches: [market-edge-baseline-real]
+    paths: ['.github/workflows/verify-founder-dual-ledger.yml']
+permissions: {contents: read}
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Read-only capital and real regression proof
+        shell: bash
+        run: |
+          set -euo pipefail
+          B='https://market-edge-baseline-real.darkbishop43.workers.dev'
+          curl -fsS "$B/execution-test-state" >/tmp/auto-before.json
+          curl -fsS "$B/founder-capital-ledger" >/tmp/ledger.json
+          curl -fsS "$B/execution-test-state" >/tmp/auto-after.json
+          python - <<'PY'
+          import json
+          J=lambda p:json.load(open(p))
+          b,l,a=J('/tmp/auto-before.json'),J('/tmp/ledger.json'),J('/tmp/auto-after.json')
+          print(json.dumps({'ledger':l,'auto_before':b.get('state'),'auto_after':a.get('state')},indent=2))
+          assert l['readOnly'] is True
+          assert l['safety']=={'providerWrites':0,'transfers':0,'ordersCreated':0,'cancels':0,'capitalMovedUsd':0,'autoStateMutation':False}
+          assert l['sleeves']['FOUNDER_MANUAL']['allocatedCapitalUsd']==0
+          assert l['sleeves']['FOUNDER_MANUAL']['availableBuyingPowerUsd']==0
+          assert l['gates']['manualEntryAuthorized'] is False
+          assert l['gates']['manualExitAuthorized'] is False
+          assert l['gates']['depositAuthorized'] is False
+          assert l['gates']['transferAuthorized'] is False
+          assert l['reconciliation']['doubleCounted'] is False
+          assert l['reconciliation']['allocatedTotalUsd']<=l['provider']['cashUsd']+1e-9
+          for k in ['armed','attemptsStarted','maxAttempts','status','seriesId']:
+            assert b['state'].get(k)==a['state'].get(k)
+          PY
