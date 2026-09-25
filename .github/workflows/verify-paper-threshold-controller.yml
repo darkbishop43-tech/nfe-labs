@@ -1,0 +1,91 @@
+name: Verify Paper Threshold Controller
+
+on:
+  push:
+    branches: [adaptive-market-lab]
+    paths:
+      - '.github/workflows/verify-paper-threshold-controller.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Paper-only runtime regression and .65 acceptance
+        shell: bash
+        run: |
+          set -euo pipefail
+          P='https://market-edge-siblings.darkbishop43.workers.dev'
+          R='https://market-edge-baseline-real.darkbishop43.workers.dev'
+          curl -fsS "$P/api/state/payne" > /tmp/payne-before.json
+          curl -fsS "$P/api/state/adaptive" > /tmp/adaptive-before.json
+          curl -fsS "$P/api/paper-thresholds" > /tmp/th-before.json
+          curl -fsS "$R/execution-test-state" > /tmp/real-before.json
+          curl -fsS "$R/shadow-state" > /tmp/real-shadow-before.json
+
+          curl -sS -o /tmp/invalid.json -w '%{http_code}' -X POST -H 'content-type: application/json' --data '{"lab":"payne_method","threshold":0.67}' "$P/api/paper-threshold" > /tmp/invalid.code
+          curl -sS -o /tmp/realtarget.json -w '%{http_code}' -X POST -H 'content-type: application/json' --data '{"lab":"baseline_real","threshold":0.65}' "$P/api/paper-threshold" > /tmp/realtarget.code
+          curl -sS -o /tmp/unknown.json -w '%{http_code}' -X POST -H 'content-type: application/json' --data '{"lab":"unknown","threshold":0.65}' "$P/api/paper-threshold" > /tmp/unknown.code
+
+          curl -fsS -X POST -H 'content-type: application/json' --data '{"threshold":0.65}' "$P/api/paper-thresholds/apply-all" > /tmp/apply.json
+          curl -fsS "$P/api/paper-thresholds" > /tmp/th-after.json
+          curl -fsS "$P/api/state/payne" > /tmp/payne-after.json
+          curl -fsS "$P/api/state/adaptive" > /tmp/adaptive-after.json
+          curl -fsS "$R/execution-test-state" > /tmp/real-after.json
+          curl -fsS "$R/shadow-state" > /tmp/real-shadow-after.json
+
+          # Independent mode proof: change Adaptive alone to .70, verify Payne stays .65, then restore Adaptive to .65 and verify both.
+          curl -fsS -X POST -H 'content-type: application/json' --data '{"lab":"adaptive_market_lab","threshold":0.70}' "$P/api/paper-threshold" > /tmp/independent.json
+          curl -fsS "$P/api/paper-thresholds" > /tmp/th-independent.json
+          curl -fsS -X POST -H 'content-type: application/json' --data '{"lab":"adaptive_market_lab","threshold":0.65}' "$P/api/paper-threshold" > /tmp/restore.json
+          curl -fsS "$P/api/paper-thresholds" > /tmp/th-final.json
+
+          python - <<'PY'
+          import json
+          J=lambda p:json.load(open(p))
+          pb,ab=J('/tmp/payne-before.json'),J('/tmp/adaptive-before.json')
+          pa,aa=J('/tmp/payne-after.json'),J('/tmp/adaptive-after.json')
+          tb,ta,ti,tf=map(J,['/tmp/th-before.json','/tmp/th-after.json','/tmp/th-independent.json','/tmp/th-final.json'])
+          rb,ra=J('/tmp/real-before.json'),J('/tmp/real-after.json')
+          rsb,rsa=J('/tmp/real-shadow-before.json'),J('/tmp/real-shadow-after.json')
+          inv,rt,unk=J('/tmp/invalid.json'),J('/tmp/realtarget.json'),J('/tmp/unknown.json')
+          apply=J('/tmp/apply.json')
+          def snap(x):
+            return {'balance':x.get('balance'),'realizedPnl':x.get('realizedPnl'),'trades':x.get('trades'),'positions':len(x.get('positions') or []),'ledger':len(x.get('ledger') or []),'lastRunAt':x.get('lastRunAt')}
+          out={
+            'paper_pre':{'payne':snap(pb),'adaptive':snap(ab)},
+            'paper_post_apply':{'payne':snap(pa),'adaptive':snap(aa)},
+            'requested_global':.65,'apply_result':apply,'runtime_readback':ta,
+            'independent_runtime_readback':ti,'final_runtime_readback':tf,
+            'invalid_threshold':{'http':open('/tmp/invalid.code').read(),'body':inv},
+            'real_target':{'http':open('/tmp/realtarget.code').read(),'body':rt},
+            'unsupported_target':{'http':open('/tmp/unknown.code').read(),'body':unk},
+            'real_before':{'state':rb.get('state',{}).get('status'),'armed':rb.get('state',{}).get('armed'),'threshold':(rsb.get('strategy') or {}).get('entryScore')},
+            'real_after':{'state':ra.get('state',{}).get('status'),'armed':ra.get('state',{}).get('armed'),'threshold':(rsa.get('strategy') or {}).get('entryScore')},
+          }
+          print(json.dumps(out,indent=2))
+          # No reset/history destruction at control mutation boundary.
+          for b,a in [(pb,pa),(ab,aa)]:
+            assert a.get('balance')==b.get('balance')
+            assert a.get('realizedPnl')==b.get('realizedPnl')
+            assert a.get('trades')==b.get('trades')
+            assert len(a.get('positions') or [])==len(b.get('positions') or [])
+            assert len(a.get('ledger') or [])==len(b.get('ledger') or [])
+          assert apply.get('scope')=='SUPPORTED_PAPER_LABS_ONLY'
+          assert apply.get('realTargetsAccepted') is False
+          assert set(ta.get('allowlist') or [])=={'payne_method','adaptive_market_lab'}
+          assert ta['thresholds']['payne_method']['activeThreshold']==.65
+          assert ta['thresholds']['adaptive_market_lab']['activeThreshold']==.65
+          assert ti['thresholds']['payne_method']['activeThreshold']==.65
+          assert ti['thresholds']['adaptive_market_lab']['activeThreshold']==.70
+          assert tf['thresholds']['payne_method']['activeThreshold']==.65
+          assert tf['thresholds']['adaptive_market_lab']['activeThreshold']==.65
+          assert open('/tmp/invalid.code').read()=='400'
+          assert open('/tmp/realtarget.code').read()=='400'
+          assert open('/tmp/unknown.code').read()=='400'
+          assert rt.get('status')=='UNSUPPORTED_TARGET'
+          assert rb.get('state',{}).get('armed')==ra.get('state',{}).get('armed')
+          assert (rsb.get('strategy') or {}).get('entryScore')==(rsa.get('strategy') or {}).get('entryScore')==.80
+          PY
