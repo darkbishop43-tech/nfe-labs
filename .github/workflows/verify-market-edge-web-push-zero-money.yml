@@ -85,3 +85,5 @@ jobs:
 # post-deploy pre-exit reconciliation zero-money verification
 
 # post-cleanup original-control zero-money verification
+
+# forensic read-only checkpoint after DOGE one-attempt lifecycle
