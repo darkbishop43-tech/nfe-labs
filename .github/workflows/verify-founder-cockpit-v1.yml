@@ -1,0 +1,57 @@
+name: Verify Founder Trading Cockpit V1
+
+on:
+  push:
+    branches: [market-edge-baseline-real]
+    paths:
+      - '.github/workflows/verify-founder-cockpit-v1.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify staging cockpit and protected runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          B='https://market-edge-baseline-real.darkbishop43.workers.dev'
+          U='https://raw.githack.com/darkbishop43-tech/nfe-labs/market-edge-baseline-real/market-edge-lab/real/baseline/founder-terminal.html'
+          curl -fsS "$U" -o /tmp/cockpit.html
+          for p in shadow-state wide-radar-state execution-test-state real-trade-state; do curl -fsS "$B/$p" -o "/tmp/$p.json"; done
+          curl -sSI "$B/shadow-state" > /tmp/headers.txt
+          python - <<'PY'
+          import json,re,hashlib
+          h=open('/tmp/cockpit.html',encoding='utf-8').read()
+          src=open('market-edge-lab/real/baseline/src/index.js','rb').read()
+          sh=json.load(open('/tmp/shadow-state.json')); wr=json.load(open('/tmp/wide-radar-state.json')); ex=json.load(open('/tmp/execution-test-state.json')); rt=json.load(open('/tmp/real-trade-state.json'))
+          hdr=open('/tmp/headers.txt').read().lower()
+          out={
+            'cockpit_title':'Founder Trading Cockpit V1' in h,
+            'professional_regions':all(x in h for x in ['MARKET EDGE WATCHLIST','CONTRACT INSPECTOR','FOUNDER MANUAL ORDER','POSITIONS','REAL LEDGER','NO_FILL']),
+            'manual_submit_disabled':'SUBMIT FOUNDER ORDER · NOT AUTHORIZED' in h and '<button class="submit" disabled>' in h,
+            'no_iframe':'<iframe' not in h.lower(),
+            'no_post_method':not bool(re.search(r'method\s*[:=]\s*["\\']post',h,re.I)),
+            'mobile_breakpoint':'@media(max-width:520px)' in h,
+            'execution_source_sha1':hashlib.sha1(src).hexdigest(),
+            'shadow_status':sh.get('status'),
+            'shadow_lastRunAt':sh.get('lastRunAt'),
+            'entryScore':(wr.get('frozen') or {}).get('productionEntryScore'),
+            'exitScore':(wr.get('frozen') or {}).get('exitScore'),
+            'opportunities':len((wr.get('live') or {}).get('opportunities') or []),
+            'exec_status':(ex.get('state') or {}).get('status'),
+            'exec_armed':(ex.get('state') or {}).get('armed'),
+            'attemptsStarted':(ex.get('state') or {}).get('attemptsStarted'),
+            'cors_header':next((x.strip() for x in hdr.splitlines() if x.startswith('access-control-allow-origin:')),None),
+            'providerCashUsd':rt.get('providerCashUsd')
+          }
+          print(json.dumps(out,indent=2))
+          assert out['cockpit_title'] and out['professional_regions'] and out['manual_submit_disabled']
+          assert out['no_iframe'] and out['no_post_method'] and out['mobile_breakpoint']
+          assert out['entryScore']==.8 and out['exitScore']==.2
+          assert out['shadow_status']=='LIVE_KALSHI_SHADOW'
+          PY
