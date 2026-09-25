@@ -1,0 +1,132 @@
+name: Verify Founder Cockpit Phase 2
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [founder-cockpit-phase2]
+    paths:
+      - '.github/workflows/verify-founder-cockpit-phase2.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Wait for cockpit deployment
+        run: sleep 12
+      - name: Verify cockpit, live data, locks, invariants and responsive render
+        shell: bash
+        run: |
+          set -euo pipefail
+          C='https://market-edge-founder-cockpit.darkbishop43.workers.dev'
+          B='https://market-edge-baseline-real.darkbishop43.workers.dev'
+          P='https://market-edge-siblings.darkbishop43.workers.dev'
+
+          curl -fsS "$C/" -o /tmp/cockpit.html
+          curl -fsS "$C/api/health" -o /tmp/health.json
+          curl -fsS "$C/api/runtime" -o /tmp/runtime.json
+          curl -fsS "$B/shadow-state" -o /tmp/shadow.json
+          curl -fsS "$B/execution-test-state" -o /tmp/exec.json
+          curl -fsS "$P/api/paper-thresholds" -o /tmp/paper.json
+          curl -fsS "https://market-edge-universal-observer.darkbishop43.workers.dev/" -o /tmp/observer.html
+
+          python - <<'PY'
+          import json,re
+          html=open('/tmp/cockpit.html',encoding='utf-8').read()
+          h=json.load(open('/tmp/health.json'));r=json.load(open('/tmp/runtime.json'))
+          sh=json.load(open('/tmp/shadow.json'));ex=json.load(open('/tmp/exec.json'));pap=json.load(open('/tmp/paper.json'))
+          obs=open('/tmp/observer.html',encoding='utf-8').read()
+          ops=r.get('shadow',{}).get('opportunities') or []
+          out={
+            'cockpit_title':'Founder Cockpit' in html,
+            'professional_regions':all(x in html for x in ['MARKET / WATCHLIST','FOUNDER ORDER TICKET','REAL TRADE LEDGER','NO_FILL']),
+            'order_locked':'SUBMIT FOUNDER ORDER · LOCKED' in html and 'REAL MANUAL EXECUTION NOT AUTHORIZED' in html,
+            'health':h,
+            'runtime_ok':r.get('ok'),
+            'opportunities':len(ops),
+            'selected_contract_fields':bool(ops and ops[0].get('marketTicker') and ops[0].get('question')),
+            'production_entry':(sh.get('strategy') or {}).get('entryScore'),
+            'production_exit':(sh.get('strategy') or {}).get('exitScore'),
+            'shadow_status':sh.get('status'),
+            'shadow_lastRunAt':sh.get('lastRunAt'),
+            'auto_status':(ex.get('state') or {}).get('status'),
+            'auto_armed':(ex.get('state') or {}).get('armed'),
+            'auto_attempts':(ex.get('state') or {}).get('attemptsStarted'),
+            'paper_payne':pap.get('thresholds',{}).get('payne_method',{}).get('activeThreshold'),
+            'paper_adaptive':pap.get('thresholds',{}).get('adaptive_market_lab',{}).get('activeThreshold'),
+            'observer_separate':'UNIVERSAL OBSERVER' in obs.upper(),
+            'mobile_breakpoints':'@media(max-width:1050px)' in html and '@media(max-width:620px)' in html,
+            'no_execution_post_routes':h.get('orderRoutes')==0 and h.get('executionAuthority') is False and h.get('baselineMutation') is False
+          }
+          print(json.dumps(out,indent=2))
+          assert out['cockpit_title'] and out['professional_regions'] and out['order_locked']
+          assert out['runtime_ok'] is True and out['opportunities']>0 and out['selected_contract_fields']
+          assert out['production_entry']==.80 and out['production_exit']==.20
+          assert out['shadow_status']=='LIVE_KALSHI_SHADOW'
+          assert out['paper_payne']==.65 and out['paper_adaptive']==.65
+          assert out['observer_separate'] and out['mobile_breakpoints'] and out['no_execution_post_routes']
+          PY
+
+          # Verify genuine chart data and exact current contract/orderbook reads.
+          ASSET=$(python - <<'PY'
+          import json
+          r=json.load(open('/tmp/runtime.json'))
+          print((r['shadow']['opportunities'][0]['asset']))
+          PY
+          )
+          TICKER=$(python - <<'PY'
+          import json
+          r=json.load(open('/tmp/runtime.json'))
+          print((r['shadow']['opportunities'][0]['marketTicker']))
+          PY
+          )
+          curl -fsS "$C/api/candles?asset=$ASSET&granularity=60" -o /tmp/candles.json
+          curl -fsS "$C/api/ticker?asset=$ASSET" -o /tmp/ticker.json
+          curl -fsS "$C/api/market?ticker=$TICKER" -o /tmp/market.json
+          curl -fsS "$C/api/orderbook?ticker=$TICKER" -o /tmp/book.json
+          python - <<'PY'
+          import json
+          c=json.load(open('/tmp/candles.json'));t=json.load(open('/tmp/ticker.json'));m=json.load(open('/tmp/market.json'));b=json.load(open('/tmp/book.json'))
+          out={'candles_source':c.get('source'),'bars':len(c.get('candles') or []),'spot':t.get('price'),'market':m.get('market',{}).get('ticker'),'early_close':m.get('market',{}).get('can_close_early'),'book_ok':b.get('ok')}
+          print(json.dumps(out,indent=2))
+          assert c.get('source')=='COINBASE_PUBLIC_CANDLES' and len(c.get('candles') or [])>20
+          assert isinstance(t.get('price'),(int,float)) and t.get('price')>0
+          assert m.get('ok') is True and b.get('ok') is True
+          PY
+
+      - name: Render desktop and mobile screenshots
+        shell: bash
+        run: |
+          npm init -y >/dev/null 2>&1
+          npm i playwright@1.55.0 >/dev/null 2>&1
+          npx playwright install chromium >/dev/null 2>&1
+          node <<'JS'
+          const {chromium}=require('playwright');
+          (async()=>{
+            const b=await chromium.launch({headless:true});
+            const p=await b.newPage({viewport:{width:1600,height:950},deviceScaleFactor:1});
+            const errors=[];p.on('pageerror',e=>errors.push(String(e)));p.on('console',m=>{if(m.type()==='error')errors.push(m.text())});
+            await p.goto('https://market-edge-founder-cockpit.darkbishop43.workers.dev',{waitUntil:'networkidle',timeout:60000});
+            await p.waitForTimeout(7000);
+            await p.screenshot({path:'cockpit-desktop.png',fullPage:true});
+            const desktop={watchRows:await p.locator('#watchBody tr').count(),chartStatus:await p.locator('#chartStatus').innerText(),ticket:await p.locator('.submit').innerText(),errors};
+            console.log('DESKTOP_PROOF='+JSON.stringify(desktop));
+            if(desktop.watchRows<1||!desktop.chartStatus.includes('COINBASE')||!desktop.ticket.includes('LOCKED')||errors.length)process.exitCode=1;
+            const m=await b.newPage({viewport:{width:390,height:844},deviceScaleFactor:1});
+            await m.goto('https://market-edge-founder-cockpit.darkbishop43.workers.dev',{waitUntil:'networkidle',timeout:60000});
+            await m.waitForTimeout(4000);
+            await m.screenshot({path:'cockpit-mobile.png',fullPage:true});
+            console.log('MOBILE_PROOF='+JSON.stringify({width:await m.evaluate(()=>document.documentElement.scrollWidth),viewport:390,watchRows:await m.locator('#watchBody tr').count()}));
+            if(await m.evaluate(()=>document.documentElement.scrollWidth)>400)process.exitCode=1;
+            await b.close();
+          })();
+          JS
+      - uses: actions/upload-artifact@v4
+        with:
+          name: founder-cockpit-phase2-visual-proof
+          path: |
+            cockpit-desktop.png
+            cockpit-mobile.png
+          retention-days: 14
