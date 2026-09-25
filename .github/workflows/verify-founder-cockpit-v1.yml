@@ -21,7 +21,7 @@ jobs:
           set -euo pipefail
           B='https://market-edge-baseline-real.darkbishop43.workers.dev'
           R='https://market-edge-founder-read.darkbishop43.workers.dev'
-          U='https://raw.githack.com/darkbishop43-tech/nfe-labs/market-edge-baseline-real/market-edge-lab/real/baseline/founder-terminal.html'
+          U='https://raw.githack.com/darkbishop43-tech/nfe-labs/4bbbb62d2d85e2694341feb76068f0e2c0763e7c/market-edge-lab/real/baseline/founder-terminal.html'
           curl -fsS "$U" -o /tmp/cockpit.html
           for p in shadow-state wide-radar-state execution-test-state real-trade-state; do curl -fsS "$B/$p" -o "/tmp/$p.json"; done
           curl -sSI "$R/shadow-state" > /tmp/headers.txt
