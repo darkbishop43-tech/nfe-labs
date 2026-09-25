@@ -83,3 +83,5 @@ jobs:
 # pre-run manual cash-out inspection safety snapshot
 
 # post-deploy pre-exit reconciliation zero-money verification
+
+# post-cleanup original-control zero-money verification
