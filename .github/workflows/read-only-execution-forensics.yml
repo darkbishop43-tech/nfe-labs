@@ -1,0 +1,38 @@
+name: Read Only Execution Forensics
+on:
+  push:
+    branches: [market-edge-baseline-real]
+    paths: ['.github/workflows/read-only-execution-forensics.yml']
+permissions: {contents: read}
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: {node-version: '22'}
+      - name: Read persisted execution evidence only
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          echo '=== EXECUTION TEST KV RAW ==='
+          npx --yes wrangler@4 kv key get 'baseline-real-execution-test-v1' --namespace-id d110292129c94b26942c25d0c462a17b --remote | tee /tmp/execution.json
+          echo
+          echo '=== REAL TRADE KV RAW ==='
+          npx --yes wrangler@4 kv key get 'baseline-real-one-trade-v1' --namespace-id d110292129c94b26942c25d0c462a17b --remote | tee /tmp/real.json
+          echo
+          echo '=== FORENSIC SUMMARY ==='
+          node <<'NODE'
+          const fs=require('fs');
+          for(const [name,p] of [['execution','/tmp/execution.json'],['real','/tmp/real.json']]){
+            const x=JSON.parse(fs.readFileSync(p,'utf8'));
+            console.log(name.toUpperCase()+'_TOP_KEYS='+Object.keys(x).join(','));
+            if(name==='execution'){
+              console.log('CURRENT='+JSON.stringify({status:x.status,armed:x.armed,threshold:x.threshold,attemptsStarted:x.attemptsStarted,queue:x.queue,attempts:x.attempts,positions:x.positions,ledger:x.ledger,queueHistory:x.queueHistory}));
+            } else {
+              console.log('REAL='+JSON.stringify(x));
+            }
+          }
+          NODE
