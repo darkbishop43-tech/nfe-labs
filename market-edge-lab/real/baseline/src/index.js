@@ -4960,7 +4960,8 @@ document.getElementById('export')?.addEventListener('click',async()=>{const r=aw
         const selectedAsk=outcomeSide==="YES"?yesAsk:noAsk;
         const selectedBid=outcomeSide==="YES"?yesBid:noBid;
         const closeTime=m?.close_time||null,closeMs=Date.parse(closeTime||"");
-        const providerStatus=String(m?.status||"").toLowerCase();\n        const tradeable=marketResponse.ok&&(providerStatus==="open"||providerStatus==="active")&&Number.isFinite(selectedAsk)&&selectedAsk>0&&selectedAsk<1&&Number.isFinite(closeMs)&&closeMs>Date.now();
+        const providerStatus=String(m?.status||"").toLowerCase();
+        const tradeable=marketResponse.ok&&(providerStatus==="open"||providerStatus==="active")&&Number.isFinite(selectedAsk)&&selectedAsk>0&&selectedAsk<1&&Number.isFinite(closeMs)&&closeMs>Date.now();
         if(!tradeable) return json({ok:false,state:"MANUAL_PREVIEW_FAIL_CLOSED_NOT_TRADEABLE",source,ticker,outcomeSide,providerHttpStatus:marketResponse.status,marketStatus:m?.status||null,closeTime,submitted:false},409);
         // V1 accepts only the exact freshly-read selected ask as its IOC limit preview.
         // User-entered stale/different prices fail closed instead of silently substituting.
