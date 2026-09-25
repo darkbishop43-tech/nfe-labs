@@ -81,3 +81,5 @@ jobs:
 # final safety recheck before Founder mobile release
 
 # pre-run manual cash-out inspection safety snapshot
+
+# post-deploy pre-exit reconciliation zero-money verification
