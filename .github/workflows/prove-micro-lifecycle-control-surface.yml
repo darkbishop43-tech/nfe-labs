@@ -32,7 +32,7 @@ jobs:
           grep -q 'disabled' /tmp/body
           curl -fsS https://market-edge-baseline-real.darkbishop43.workers.dev/execution-test-state > /tmp/state
           node <<'NODE'
-          const p=require('/tmp/state');
+          const fs=require('fs');const p=JSON.parse(fs.readFileSync('/tmp/state','utf8'));
           if(p?.state?.armed!==false||p?.state?.openPositions!==0||p?.queue?.active!==false)throw Error('LIVE_AUTHORITY_NOT_LOCKED');
           console.log('LIVE_STATE='+JSON.stringify({armed:p.state.armed,openPositions:p.state.openPositions,queueActive:p.queue.active,queueStatus:p.queue.status,index2:p.funding.index2}));
           console.log('SAFETY='+JSON.stringify({providerWrites:0,ordersSubmitted:0,capitalMovedUsd:0,newQueueArmed:false,authorization:false}));
