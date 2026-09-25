@@ -1362,6 +1362,7 @@ const PUSH_UNKNOWN_PREFIX="notification:unknown:v1:";
 const PAYNE_PAPER_NOTIFY_ONCE_KEY="notification:payne-paper-once:v1";
 const PAYNE_PAPER_STATE_URL="https://market-edge-siblings.darkbishop43.workers.dev/api/state/payne";
 const PAYNE_PAPER_NOTIFY_AFTER_MS=Date.parse("2026-09-25T20:26:13.972Z");
+const REAL_NO_FILL_NOTIFY_AFTER_MS=Date.parse("2026-09-25T21:36:00.000Z");
 const PUSH_UNKNOWN_WARN_MS=2*60*1000;
 const PUSH_VAPID_SUBJECT="https://github.com/darkbishop43-tech/nfe-labs";
 
@@ -1463,6 +1464,19 @@ async function dispatchExecutionNotifications(env){
     const ledger=Array.isArray(state?.ledger)?state.ledger:[];
 
     for(const event of ledger){
+      if(event?.type==="TEST_ENTRY_NO_FILL"&&event?.attemptNo){
+        const attempt=(Array.isArray(state?.attempts)?state.attempts:[]).find(a=>Number(a?.attemptNo)===Number(event.attemptNo)&&String(a?.status)==="NO_FILL");
+        const terminalAt=Date.parse(event?.ts||attempt?.createdAt||0);
+        if(!attempt||!Number.isFinite(terminalAt)||terminalAt<=REAL_NO_FILL_NOTIFY_AFTER_MS)continue;
+        const authority=attempt?.orderId||attempt?.clientOrderId||attempt?.id;
+        if(!authority)continue;
+        const eventId="no-fill:"+String(authority)+":"+String(attempt.id||event.attemptNo);
+        const score=Number(attempt.liveScore??attempt.observedScore);
+        const direction=String(attempt.direction||attempt.outcomeSide||event.side||"");
+        const lines=[String(attempt.asset||"")+" · "+direction+(Number.isFinite(score)?" · Score "+score.toFixed(2):""),"No position opened."];
+        const pushResult=await sendFounderPushBestEffort(env,eventId,{title:"⚪ NFE-OS · ORDER NOT FILLED",body:lines.join("\n"),url:"/",tag:eventId});
+        await persistPushAttemptResult(env,eventId,{notificationType:"NO_FILL",positionId:attempt.id||null,authority},pushResult);
+      }
       if(event?.type==="TEST_POSITION_OPENED"&&event?.positionId){
         const position=positions.find(p=>String(p?.id)===String(event.positionId));
         if(!position||!(Number(position?.filledCount)>0)||!position?.entryOrderId)continue;
