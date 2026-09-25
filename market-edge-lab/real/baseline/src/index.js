@@ -1641,8 +1641,17 @@ async function runExecutionTestSeries(env,freshShadow=null,preparedBalance=null)
     executionTestLedger(state,"TEST_FIRE_LATCHED",{attemptNo,ticker:candidate.marketTicker,side:candidate.outcomeSide,observedScore:attempt.observedScore,liveScore:attempt.liveScore,liveAsk:attempt.liveAsk,maxDebitUsd:attempt.maximumEntryDebitUsd});
     if(!await saveExecutionTestRuntimeState(env,state,runtimeControlToken))return await loadExecutionTestState(env);
 
+    // Final authority gate immediately before the provider POST. A DISARM that
+    // lands after this scheduler cycle began must revoke NEW-entry authority even
+    // if this cycle already reached FIRE. Existing reduce-only exit management is
+    // intentionally unaffected.
+    const preSubmitAuthority=await loadExecutionTestState(env);
+    if(executionTestControlToken(preSubmitAuthority)!==runtimeControlToken||!executionTestEntryAuthorized(preSubmitAuthority)){
+      return preSubmitAuthority;
+    }
+
     let r;
-    try{r=await executionTestEntryWrite(env,state,payload);}
+    try{r=await executionTestEntryWrite(env,preSubmitAuthority,payload);}
     catch(error){
       attempt.status="WRITE_ERROR";attempt.error=String(error?.message||error);
       executionTestLedger(state,"TEST_ENTRY_WRITE_ERROR",{attemptNo,ticker:candidate.marketTicker});
