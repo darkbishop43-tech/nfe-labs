@@ -2048,7 +2048,11 @@ async function runExecutionTestSeries(env,freshShadow=null,preparedBalance=null)
         });
       }
       if(Date.now()>=endpointMs){
-        freezePhase1BEndpointComparison({attachment,position,observedAt:Date.now(),hypotheticalExitFeeUsd:null});
+        const hypotheticalBid=Number(p1b?.latestAuthorizedObservation?.providerBid);
+        const hypotheticalQty=Number(position?.filledCount||0);
+        const hypotheticalExitFeeUsd=(hypotheticalBid>0&&hypotheticalQty>0)
+          ?kalshiGeneralTakerFeeUsd(hypotheticalBid,hypotheticalQty,1):null;
+        freezePhase1BEndpointComparison({attachment,position,observedAt:Date.now(),hypotheticalExitFeeUsd});
         executionTestLedger(state,"PHASE1B_SHADOW_60S_ENDPOINT_FROZEN",{
           positionId:position.id,attemptNo:position.attemptNo,ticker:position.marketTicker,
           comparisonStatus:p1b?.comparison?.comparisonStatus||"UNKNOWN / UNPROVEN",
