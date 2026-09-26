@@ -1,0 +1,44 @@
+name: Restore Single Series Disarm UI
+
+on:
+  push:
+    branches: [market-edge-baseline-real]
+    paths:
+      - '.github/workflows/restore-single-series-disarm-ui.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  restore:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: market-edge-baseline-real
+      - name: Restore existing Founder single-series disarm control
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('market-edge-lab/real/baseline/src/index.js')
+          s=p.read_text()
+          route='''if (request.method === "POST" && url.pathname === "/execution-test-disarm")'''
+          assert route in s, 'existing backend single-series disarm route missing'
+          auth='''DISARM_EXECUTION_TEST_SERIES_PRESERVE_HISTORY'''
+          assert auth in s, 'existing backend disarm authorization missing'
+          assert "action='/execution-test-disarm'" not in s, 'Founder single-series disarm UI already present; refusing duplicate'
+          marker='''      if(!state.armed&&!executionTestQueueActive(state)&&executionTestOpenPositions(state).length===0&&ready) control+="<form method='post' action='/execution-test-queue-arm'>'''
+          assert marker in s, 'expected existing execution-test control render boundary missing'
+          restore='''      if(state.armed&&!executionTestQueueActive(state)) control+="<form method='post' action='/execution-test-disarm'><input type='hidden' name='authorization' value='DISARM_EXECUTION_TEST_SERIES_PRESERVE_HISTORY'><button type='submit'>STOP / DISARM SERIES</button></form>";\n'''
+          s=s.replace(marker,restore+marker,1)
+          p.write_text(s)
+          PY
+          git diff --check
+          git diff -- market-edge-lab/real/baseline/src/index.js
+          git config user.name 'NFE-OS Builder'
+          git config user.email 'actions@users.noreply.github.com'
+          git add market-edge-lab/real/baseline/src/index.js
+          git commit -m 'Restore Founder single-series disarm control'
+          git push origin HEAD:market-edge-baseline-real
