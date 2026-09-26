@@ -1807,7 +1807,24 @@ async function runExecutionTestSeries(env,freshShadow=null,preparedBalance=null)
       if(pr?.ok&&lastBody&&!readError){pb={...lastBody,market_positions:allRows,cursor:""};parseOk=true;paginationComplete=true;}
     }catch(error){readError=String(error?.message||error);}
     for(const position of reconcileTargets){
-      const rec=classifyExecutionProviderPosition(Boolean(pr?.ok&&parseOk),pb,position?.marketTicker,{providerReadAt:readAt,providerHttpStatus:pr?.status??null,paginationComplete});
+      let rec=classifyExecutionProviderPosition(Boolean(pr?.ok&&parseOk),pb,position?.marketTicker,{providerReadAt:readAt,providerHttpStatus:pr?.status??null,paginationComplete});
+      // A settled market may disappear from the live positions feed instead of remaining as an explicit
+      // position_fp=0 row. Never infer FLAT from omission alone: certify the exact ticker against the
+      // authenticated settlement ledger before releasing local ownership.
+      if(rec.classification==="UNKNOWN"&&rec.reason==="TICKER_NOT_FOUND_CONTEXT_UNPROVEN"&&paginationComplete){
+        try{
+          const ticker=String(position?.marketTicker||"");
+          const sr=await kalshiExecutionGet(env,"/trade-api/v2/portfolio/settlements?limit=200&subaccount=0&ticker="+encodeURIComponent(ticker));
+          if(sr.ok){
+            const sb=await sr.json().catch(()=>null);
+            const settlements=Array.isArray(sb?.settlements)?sb.settlements:[];
+            const exactSettlement=settlements.find(x=>String(x?.ticker||"")===ticker)||null;
+            if(exactSettlement){
+              rec={...rec,classification:"FLAT",reason:"EXACT_TICKER_SETTLEMENT_CONFIRMED",matchedTicker:ticker,normalizedQuantity:0,settlementConfirmed:true,settledTime:exactSettlement?.settled_time||null,marketResult:exactSettlement?.market_result||null};
+            }
+          }
+        }catch{}
+      }
       position.reconciliationClassification=rec.classification;
       position.reconciliationReason=rec.reason;
       position.providerReadAt=rec.providerReadAt;
