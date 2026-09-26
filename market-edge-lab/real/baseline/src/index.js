@@ -1743,6 +1743,8 @@ function tickerOwnedByAuto(state,ticker){
   const key=String(ticker||"");
   return Boolean(key&&executionTestOpenPositions(state).some(p=>String(p?.marketTicker||"")===key));
 }
+function founderManualTickerEntryAllowed(autoState,ticker){return !tickerOwnedByAuto(autoState,ticker)}
+function autoTickerEntryAllowed(manualLedger,ticker){return !tickerOwnedByFounderManual(manualLedger,ticker)}
 function executionTestClientOrderId(state,attemptNo,phase){
   const seed=String(state?.seriesId||"test").replace(/[^0-9A-Za-z]/g,"").slice(-12);
   return ("nfe-test-"+seed+"-"+String(attemptNo)+"-"+phase).slice(0,64);
@@ -2003,7 +2005,7 @@ async function runExecutionTestSeries(env,freshShadow=null,preparedBalance=null)
   const founderManualLedger=await loadFounderManualLedger(env);
   const founderOwnedTickers=new Set(founderManualOpenRecords(founderManualLedger).map(r=>String(r?.ticker||r?.marketTicker||"")));
   const activeTestThreshold=Number.isFinite(Number(state?.threshold))?Number(state.threshold):EXECUTION_TEST_CONFIG.entryScore;
-  const candidates=executionTestCandidatePool(shadow,now,activeTestThreshold).filter(o=>!activeTickers.has(String(o.marketTicker))&&!founderOwnedTickers.has(String(o.marketTicker)));
+  const candidates=executionTestCandidatePool(shadow,now,activeTestThreshold).filter(o=>!activeTickers.has(String(o.marketTicker))&&autoTickerEntryAllowed(founderManualLedger,String(o.marketTicker)));
   let slots=Math.max(0,Math.max(1,Math.trunc(Number(state?.maxConcurrent||EXECUTION_TEST_CONFIG.maxConcurrent)))-executionTestOpenPositions(state).length);
   let warmedBalance=preparedBalance&&typeof preparedBalance==="object"?preparedBalance:null;
 
@@ -5481,7 +5483,16 @@ document.getElementById('export')?.addEventListener('click',async()=>{const r=aw
       const oversized=founderManualCloseDryRun(founder,{requestedCount:3,liveOutcomeBid:.42,quoteAgeMs:100,providerQuantity:2});
       const stale=founderManualCloseDryRun(founder,{requestedCount:2,liveOutcomeBid:.42,quoteAgeMs:16001,providerQuantity:2});
       const ambiguous=founderManualCloseDryRun(founder,{requestedCount:2,liveOutcomeBid:.42,quoteAgeMs:100,providerQuantity:2,autoTickerConflict:true});
-      return json({ok:Boolean(valid.ok&&!autoRejected.ok&&!oversized.ok&&!stale.ok&&!ambiguous.ok),state:"FOUNDER_MANUAL_CLOSE_V1_ZERO_WRITE_PROOF",validFounderSample:valid,autoOwnedRejected:autoRejected,oversizedRejected:oversized,staleQuoteRejected:stale,ambiguousOwnershipRejected:ambiguous,assertions:{reverseBookSide:valid?.body?.side==="ask",reduceOnly:valid?.body?.reduce_only===true,exactRemainingQuantity:valid?.body?.count==="2.00",providerWrites:0,capitalMovedUsd:0,autoStateMutation:false,manualEntryAuthorized:false,manualCloseAuthorized:false},persistenceSchema:["entryOrderId","entryFillQuantity","remainingQuantity","closeOrderId","closeFillQuantity","closeAveragePrice","closeFee","realizedPnlUsd","finalState","closedAt"]});
+      const autoOwnsA={positions:[{status:"OPEN",marketTicker:"TICKER-A",filledCount:1}]};
+      const founderOwnsC={records:[{source:FOUNDER_MANUAL_SOURCE,status:"OPEN",ticker:"TICKER-C",entryFillQuantity:1,closeFillQuantity:0}]};
+      const mutualExclusion={
+        autoOwnsA_founderARejected:!founderManualTickerEntryAllowed(autoOwnsA,"TICKER-A"),
+        autoOwnsA_founderBEligible:founderManualTickerEntryAllowed(autoOwnsA,"TICKER-B"),
+        founderOwnsC_autoCRejected:!autoTickerEntryAllowed(founderOwnsC,"TICKER-C"),
+        founderOwnsC_autoDEligible:autoTickerEntryAllowed(founderOwnsC,"TICKER-D"),
+        exactTickerOnly:true
+      };
+      return json({ok:Boolean(valid.ok&&!autoRejected.ok&&!oversized.ok&&!stale.ok&&!ambiguous.ok&&Object.values(mutualExclusion).every(Boolean)),state:"FOUNDER_MANUAL_CLOSE_V1_ZERO_WRITE_PROOF",mutualExclusion,validFounderSample:valid,autoOwnedRejected:autoRejected,oversizedRejected:oversized,staleQuoteRejected:stale,ambiguousOwnershipRejected:ambiguous,assertions:{reverseBookSide:valid?.body?.side==="ask",reduceOnly:valid?.body?.reduce_only===true,exactRemainingQuantity:valid?.body?.count==="2.00",providerWrites:0,capitalMovedUsd:0,autoStateMutation:false,manualEntryAuthorized:false,manualCloseAuthorized:false},persistenceSchema:["entryOrderId","entryFillQuantity","remainingQuantity","closeOrderId","closeFillQuantity","closeAveragePrice","closeFee","realizedPnlUsd","finalState","closedAt"]});
     }
 
     if (request.method === "GET" && url.pathname === "/founder-capital-ledger") {
@@ -5561,7 +5572,7 @@ document.getElementById('export')?.addEventListener('click',async()=>{const r=aw
         const [manualCapital,autoState]=await Promise.all([loadFounderManualCapital(env),loadExecutionTestState(env)]);
         const founderAllocated=Math.max(0,Number(manualCapital?.allocatedUsd)||0);
         const autoOpen=executionTestOpenPositions(autoState);
-        const autoTickerConflict=tickerOwnedByAuto(autoState,ticker);
+        const autoTickerConflict=!founderManualTickerEntryAllowed(autoState,ticker);
         if(autoTickerConflict) return json({ok:false,state:"MANUAL_PREVIEW_AUTO_EXACT_TICKER_OWNED",source,ticker,auto:{status:autoState?.status||null,openPositions:autoOpen.length},submitted:false,manualExecutionAuthorized:false},409);
         if(founderAllocated+1e-9<maxDebit) return json({ok:false,state:"MANUAL_PREVIEW_FOUNDER_ALLOCATION_INSUFFICIENT",source,founderAllocatedUsd:founderAllocated,requiredUsd:maxDebit,submitted:false,manualExecutionAuthorized:false},409);
         const candidate={marketTicker:ticker,outcomeSide,yes:selectedAsk};
