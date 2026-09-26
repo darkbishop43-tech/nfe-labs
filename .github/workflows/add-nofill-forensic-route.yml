@@ -1,0 +1,38 @@
+name: Add NO_FILL Forensic Route
+
+on:
+  push:
+    branches: [market-edge-baseline-real]
+    paths:
+      - '.github/workflows/add-nofill-forensic-route.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: market-edge-baseline-real
+      - name: Patch read-only forensic route
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('market-edge-lab/real/baseline/src/index.js')
+          s=p.read_text()
+          marker='''    if (request.method === "GET" && url.pathname === "/execution-test-state") {'''
+          assert marker in s
+          route='''    if (request.method === "GET" && url.pathname === "/execution-test-nofill-forensic") {\n      const state=await loadExecutionTestState(env);\n      const source=(Array.isArray(state?.attempts)?state.attempts:[]).filter(a=>String(a?.status||"")==="NO_FILL").slice(-12);\n      const audited=[];\n      for(const a of source){\n        const outcome=String(a?.outcomeSide||"").toUpperCase();\n        const liveAsk=Number(a?.liveAsk), liveBid=Number(a?.liveBid);\n        const side=kalshiV2BookSide(outcome);\n        const yesLegLimit=Number.isFinite(liveAsk)?(side==="bid"?liveAsk:1-liveAsk):null;\n        let providerHttpStatus=null, providerOrder=null, providerReadError=null;\n        if(a?.orderId){\n          try{\n            const r=await kalshiGetOrderV2(env,String(a.orderId));\n            providerHttpStatus=r.status;\n            const b=await r.json().catch(()=>null);\n            providerOrder=b?.order||b||null;\n          }catch(error){providerReadError=String(error?.message||error).slice(0,160);}\n        }\n        const providerCreatedRaw=providerOrder?.created_time||providerOrder?.created_at||providerOrder?.created_ts||providerOrder?.ts||providerOrder?.ts_ms||null;\n        let providerCreatedMs=null;\n        if(typeof providerCreatedRaw==="number") providerCreatedMs=providerCreatedRaw>1e12?providerCreatedRaw:providerCreatedRaw*1000;\n        else if(providerCreatedRaw) { const x=Date.parse(providerCreatedRaw); if(Number.isFinite(x)) providerCreatedMs=x; }\n        const attemptCreatedMs=Date.parse(a?.createdAt||"");\n        const createdToProviderMs=Number.isFinite(providerCreatedMs)&&Number.isFinite(attemptCreatedMs)?providerCreatedMs-attemptCreatedMs:null;\n        audited.push({\n          attemptNo:a?.attemptNo??null,status:a?.status||null,createdAt:a?.createdAt||null,asset:a?.asset||null,ticker:a?.marketTicker||null,outcomeSide:outcome||null,direction:a?.direction||null,\n          observedScore:a?.observedScore??null,liveScore:a?.liveScore??null,observedAsk:a?.observedAsk??null,liveAsk:Number.isFinite(liveAsk)?liveAsk:null,liveBid:Number.isFinite(liveBid)?liveBid:null,\n          submitted:{side,yesLegLimit:Number.isFinite(yesLegLimit)?Number(yesLegLimit.toFixed(4)):null,count:a?.count??null,timeInForce:"immediate_or_cancel",postOnly:false,reduceOnly:false,clientOrderId:a?.clientOrderId||null},\n          provider:{httpStatus:providerHttpStatus,orderId:a?.orderId||null,fillCount:Number(a?.fillCount||0),remainingCount:a?.remainingCount??null,averageFillPrice:a?.averageFillPrice??null,averageFeePaid:a?.averageFeePaid??null,readError:providerReadError,order:providerOrder,createdToProviderMs},\n          marketability:{atLockQuote:"TARGETED_EXECUTABLE_SIDE_ASK_BY_CONSTRUCTION",atProviderSubmission:"UNKNOWN_WITHOUT_SAME-INSTANT_BOOK_SNAPSHOT",reason:"Exact LOCK ask is used to build IOC limit, but the current state does not persist a same-instant orderbook snapshot at provider arrival."}\n        });\n      }\n      return json({ok:true,readOnly:true,state:"EXECUTION_TEST_NO_FILL_FORENSIC_V1",series:{status:state?.status||null,armed:Boolean(state?.armed),seriesId:state?.seriesId||null,threshold:Number(state?.threshold??EXECUTION_TEST_CONFIG.entryScore),attemptsStarted:Number(state?.attemptsStarted||0),maxAttempts:executionTestSeriesLimit(state),openPositions:executionTestOpenPositions(state).length},audited,safety:{providerWrites:0,stateMutation:false,ordersCreated:0,cancels:0,capitalMovedUsd:0,authorizationConsumed:0}});\n    }\n\n'''
+          p.write_text(s.replace(marker,route+marker,1))
+          PY
+          git diff --check
+          git config user.name 'NFE-OS Builder'
+          git config user.email 'actions@users.noreply.github.com'
+          git add market-edge-lab/real/baseline/src/index.js
+          git commit -m 'Add read-only NO_FILL provider forensic'
+          git push origin HEAD:market-edge-baseline-real
