@@ -1,5 +1,5 @@
 import { sendPushNotification, topicFromString } from "@mmmike/web-push/send";
-import { buildPhase1AShadowAttachment, freezePhase1ACheckpointDecision, phase1AShadowFixtureProof } from "./phase1a-shadow.js";
+import { buildPhase1AShadowAttachment, freezePhase1ACheckpointDecision, authorizePhase1BContinuation, recordPhase1BAuthorizedObservation, freezePhase1BEndpointComparison, phase1AShadowFixtureProof, phase1BShadowFixtureProof } from "./phase1a-shadow.js";
 
 // CLOUDFLARE DEPLOYMENT MARKER 2026-09-20: XRP recovery V2 proof route ce2252b / 7637a6f
 // SHARD_ROUTING_DEPLOYMENT_MARKER_2026_09_20
@@ -1897,6 +1897,10 @@ async function runExecutionTestSeries(env,freshShadow=null,preparedBalance=null)
         closeTime:position?.closeTime||shadowCurrent?.closeTime||null,shadowObservedAt:shadow?.lastRunAt||null
       });
       position.phase1aShadow.checkpointDecision=decision;
+      authorizePhase1BContinuation({
+        attachment:position.phase1aShadow,checkpointAt:now,
+        closeTime:position?.closeTime||shadowCurrent?.closeTime||null
+      });
       position.phase1aShadow.realLifecycleUnaffected=true;
       position.phase1aShadow.realMaxHoldStillMs=EXECUTION_TEST_CONFIG.maxHoldMs;
       executionTestLedger(state,"PHASE1A_SHADOW_FIVE_MINUTE_CHECKPOINT_FROZEN",{
@@ -2009,6 +2013,55 @@ async function runExecutionTestSeries(env,freshShadow=null,preparedBalance=null)
     }else{
       position.status="EXIT_RETRY";
       executionTestLedger(state,"TEST_EXIT_PARTIAL",{positionId:position.id,attemptNo:position.attemptNo,remaining:position.exitRemainingCount});
+    }
+  }
+
+  // PHASE 1B: zero-authority counterfactual observation only AFTER REAL is CLOSED.
+  // Never read beyond the authorized +60-second endpoint. A missed endpoint is UNKNOWN/UNPROVEN.
+  for(const position of (Array.isArray(state?.positions)?state.positions:[])){
+    try{
+      const attachment=position?.phase1aShadow||null;
+      const p1b=attachment?.phase1b||null;
+      if(!attachment||!p1b||p1b.status!=="ACTIVE"||p1b.endpointObservation||position?.status!=="CLOSED")continue;
+      const endpointMs=Date.parse(p1b.authorizedEndpointAt||"");
+      const closeMs=Date.parse(p1b.providerCloseTime||"");
+      if(!Number.isFinite(endpointMs)||!Number.isFinite(closeMs)){
+        p1b.status="COMPLETE";
+        p1b.endpointObservation={frozen:true,authorizedEndpointAt:p1b.authorizedEndpointAt||null,frozenAt:new Date().toISOString(),trustworthyHypotheticalExecutionEvidence:false,hypotheticalExecutionStatus:"UNKNOWN / UNPROVEN",providerBid:null,providerQuoteFresh:false,shadowFresh:false,futureOutcomeObserved:true,reason:"INSUFFICIENT_TIME_OR_TIMING_EVIDENCE"};
+        p1b.comparison={comparisonStatus:"UNKNOWN / UNPROVEN",comparisonBasis:"INSUFFICIENT_TIME_OR_TIMING_EVIDENCE",WHY_BASELINE_AND_SHADOW_DIFFERED:"REAL_BASELINE_FORCED_FIVE_MINUTE_EXIT_WHILE_SHADOW_TIMING_EVIDENCE_WAS_UNUSABLE",checkpointReasonImmutable:true};
+        continue;
+      }
+      const cycleNow=Date.now();
+      const shadowCurrent=(shadow?.opportunities||[]).find(o=>o?.marketTicker===position.marketTicker&&o?.outcomeSide===position.outcomeSide);
+      if(cycleNow<=endpointMs&&cycleNow<closeMs){
+        let exactQuote=null;
+        try{exactQuote=await kalshiLiveOutcomeBid(env,position);}catch{}
+        const providerBid=Number(exactQuote?.bid??shadowCurrent?.bid);
+        const observedAt=Date.now();
+        recordPhase1BAuthorizedObservation({
+          phase1b:p1b,observedAt,
+          providerBid:Number.isFinite(providerBid)?providerBid:null,
+          providerQuoteFresh:Boolean(Number.isFinite(providerBid)&&observedAt<=endpointMs),
+          shadowFresh:Boolean(shadowCurrent&&shadow?.status==="LIVE_KALSHI_SHADOW"),
+          currentScore:shadowCurrent?.score,currentEdge:shadowCurrent?.edge,currentMove:shadowCurrent?.move,
+          shadowObservedAt:shadow?.lastRunAt||null
+        });
+      }
+      if(Date.now()>=endpointMs){
+        freezePhase1BEndpointComparison({attachment,position,observedAt:Date.now(),hypotheticalExitFeeUsd:null});
+        executionTestLedger(state,"PHASE1B_SHADOW_60S_ENDPOINT_FROZEN",{
+          positionId:position.id,attemptNo:position.attemptNo,ticker:position.marketTicker,
+          comparisonStatus:p1b?.comparison?.comparisonStatus||"UNKNOWN / UNPROVEN",
+          trustworthyHypotheticalExecutionEvidence:Boolean(p1b?.endpointObservation?.trustworthyHypotheticalExecutionEvidence),
+          providerWrites:0,shadowTradingAuthority:false
+        });
+      }
+    }catch(error){
+      // Shadow failure is evidence-only. REAL management has already run and must never be blocked here.
+      if(position?.phase1aShadow?.phase1b){
+        position.phase1aShadow.phase1b.lastObservationError=String(error?.message||error).slice(0,160);
+        position.phase1aShadow.phase1b.realLifecycleUnaffected=true;
+      }
     }
   }
 
@@ -5629,6 +5682,17 @@ document.getElementById('export')?.addEventListener('click',async()=>{const r=aw
         continuationDurationAuthorized:false,
         realTradingLogicChanged:false,
         providerWrites:0,capitalMovedUsd:0,newRealAuthorizationConsumed:0
+      });
+    }
+
+    if (request.method === "GET" && url.pathname === "/phase1b-shadow-proof") {
+      return json({
+        ...phase1BShadowFixtureProof(),
+        state:"PHASE1B_SHADOW_60S_ZERO_MONEY_PROOF",
+        continuationDurationMs:60000,minimumRemainingRequiredMs:90000,
+        providerWrites:0,providerEntries:0,providerExits:0,providerCancels:0,
+        capitalMovedUsd:0,newRealAuthorizationConsumed:0,founderCapitalMovedUsd:0,
+        shadowTradingAuthority:false,realExecutionLogicChanged:false
       });
     }
 
