@@ -85,10 +85,14 @@ function renderTop(){
  const started=Number(ex.attemptsStarted),max=Number(ex.maxAttempts);setText('attempts',Number.isFinite(started)&&Number.isFinite(max)?started+' / '+max:'—');
  setText('openPos',Number.isFinite(Number(ex.openPositions))?String(ex.openPositions):'—');
  const lr=Date.parse(sh.lastRunAt||'');if(Number.isFinite(lr)){const sec=Math.max(0,60-Math.floor((Date.now()-lr)/1000)%60);setText('nextScan',sec+'s')}else setText('nextScan','—');
- if(Number.isFinite(Number(real.providerCashUsd))){setText('cash',money(real.providerCashUsd));setText('accountValue',money(real.providerCashUsd));setText('buyPower',money(real.providerCashUsd))}
- else {setText('cash','AWAITING PROVIDER');setText('accountValue','—');setText('buyPower','—')}
- setText('lifePnl',Number.isFinite(Number(real.bankrollNetPnlUsd))?money(real.bankrollNetPnlUsd):'—');
- setText('exposure',Number(ex.openPositions)>0?'OPEN · '+ex.openPositions:'$0.00');
+ const provider=state.sleeves?.provider||{};
+ setText('cash',Number.isFinite(Number(provider.cashUsd))?money(provider.cashUsd):'UNAVAILABLE');
+ setText('accountValue',Number.isFinite(Number(provider.accountValueUsd))?money(provider.accountValueUsd):'UNAVAILABLE');
+ setText('buyPower',Number.isFinite(Number(provider.buyingPowerUsd))?money(provider.buyingPowerUsd):'UNAVAILABLE');
+ setText('exposure',Number.isFinite(Number(provider.openExposureUsd))?money(provider.openExposureUsd):'UNAVAILABLE');
+ setText('lifePnl',Number.isFinite(Number(provider.lifetimeRealPnlUsd))?money(provider.lifetimeRealPnlUsd):'UNAVAILABLE');
+ setText('todayPnl',Number.isFinite(Number(provider.todayPnlUsd))?money(provider.todayPnlUsd):'UNAVAILABLE');
+ setText('todayPct',Number.isFinite(Number(provider.todayPnlPct))?pct(provider.todayPnlPct):'UNAVAILABLE');
 }
 function opportunities(){return state.radar?.live?.opportunities||state.shadow?.opportunities||[]}
 function renderWatch(){
