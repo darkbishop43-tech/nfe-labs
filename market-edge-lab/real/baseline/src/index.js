@@ -2151,8 +2151,48 @@ async function runExecutionTestSeries(env,freshShadow=null,preparedBalance=null)
       return preSubmitAuthority;
     }
 
+    // MICROSCOPIC NO_FILL REPAIR: refresh the SAME exact ticker/side once after the
+    // persisted FIRE latch + authority reload, then submit immediately. No chasing,
+    // no retry loop, no arbitrary crossing, and the existing $1 debit cap remains hard.
+    const preSubmitQuote=await freshKalshiExecutionQuote(env,candidate);
+    if(!preSubmitQuote?.ok){
+      attempt.status="PRE_SUBMIT_QUOTE_HOLD";
+      attempt.preSubmitQuoteAt=new Date().toISOString();
+      attempt.preSubmitQuoteReason=preSubmitQuote?.reason||"READ_FAILED";
+      executionTestLedger(state,"TEST_PRE_SUBMIT_QUOTE_HOLD",{attemptNo,ticker:candidate.marketTicker,side:candidate.outcomeSide,reason:attempt.preSubmitQuoteReason,providerWrite:false});
+      if(!await saveExecutionTestRuntimeState(env,state,runtimeControlToken))return await loadExecutionTestState(env);
+      continue;
+    }
+    const finalCandidate=preSubmitQuote.candidate;
+    if(Number(finalCandidate.score)<activeTestThreshold||Number(finalCandidate.edge)<=0||!kalshiCandidateTimeSafe(finalCandidate,Date.now())){
+      attempt.status="PRE_SUBMIT_REQUALIFICATION_HOLD";
+      attempt.preSubmitQuoteAt=preSubmitQuote.readAt||new Date().toISOString();
+      attempt.preSubmitLiveScore=safeFinite(finalCandidate.score);
+      attempt.preSubmitLiveAsk=safeFinite(finalCandidate.yes);
+      attempt.preSubmitLiveBid=safeFinite(finalCandidate.bid);
+      executionTestLedger(state,"TEST_PRE_SUBMIT_REQUALIFICATION_HOLD",{attemptNo,ticker:finalCandidate.marketTicker,side:finalCandidate.outcomeSide,liveScore:attempt.preSubmitLiveScore,liveAsk:attempt.preSubmitLiveAsk,providerWrite:false});
+      if(!await saveExecutionTestRuntimeState(env,state,runtimeControlToken))return await loadExecutionTestState(env);
+      continue;
+    }
+    const finalSizing=estimateKalshiFeeSafeSize(finalCandidate.yes,EXECUTION_TEST_CONFIG.maxEntryDebitUsd);
+    const finalPayload=finalSizing?.ok?kalshiV2EntryPayload(finalCandidate,finalSizing,clientId):null;
+    if(!finalPayload||Number(finalSizing.totalDebitUsd)>EXECUTION_TEST_CONFIG.maxEntryDebitUsd||Number(finalSizing.count)<1){
+      attempt.status="PRE_SUBMIT_SIZING_HOLD";
+      attempt.preSubmitQuoteAt=preSubmitQuote.readAt||new Date().toISOString();
+      executionTestLedger(state,"TEST_PRE_SUBMIT_SIZING_HOLD",{attemptNo,ticker:finalCandidate.marketTicker,side:finalCandidate.outcomeSide,providerWrite:false});
+      if(!await saveExecutionTestRuntimeState(env,state,runtimeControlToken))return await loadExecutionTestState(env);
+      continue;
+    }
+    attempt.preSubmitQuoteAt=preSubmitQuote.readAt||new Date().toISOString();
+    attempt.preSubmitLiveScore=safeFinite(finalCandidate.score);
+    attempt.preSubmitLiveAsk=safeFinite(finalCandidate.yes);
+    attempt.preSubmitLiveBid=safeFinite(finalCandidate.bid);
+    attempt.preSubmitLimitPrice=Number(finalPayload.price);
+    attempt.preSubmitCount=safeFinite(finalSizing.count);
+    attempt.preSubmitMaximumEntryDebitUsd=safeFinite(finalSizing.totalDebitUsd);
+    attempt.providerSubmitStartedAt=new Date().toISOString();
     let r;
-    try{r=await executionTestEntryWrite(env,preSubmitAuthority,payload);}
+    try{r=await executionTestEntryWrite(env,preSubmitAuthority,finalPayload);}
     catch(error){
       attempt.status="WRITE_ERROR";attempt.error=String(error?.message||error);
       executionTestLedger(state,"TEST_ENTRY_WRITE_ERROR",{attemptNo,ticker:candidate.marketTicker});
@@ -4565,6 +4605,24 @@ document.getElementById('export')?.addEventListener('click',async()=>{const r=aw
       return Response.redirect(new URL("/execution-test-control?funding=MOVED_TO_INDEX2",request.url).toString(),303);
     }
 
+    if (request.method === "POST" && url.pathname === "/execution-test-disarm") {
+      const form=await request.formData().catch(()=>null);
+      if(String(form?.get("authorization")||"")!=="DISARM_EXECUTION_TEST_SERIES_PRESERVE_HISTORY") return json({ok:false,state:"EXPLICIT_TEST_DISARM_AUTHORIZATION_REQUIRED"},400);
+      const state=await loadExecutionTestState(env);
+      if(executionTestOpenPositions(state).length>0) return json({ok:false,state:"OPEN_POSITION_REQUIRES_NORMAL_MANAGEMENT",disarmed:false},409);
+      if(!state?.armed) return json({ok:false,state:"EXECUTION_TEST_NOT_ARMED",disarmed:false},409);
+      state.queueHistory=Array.isArray(state.queueHistory)?state.queueHistory:[];
+      const historyId="SINGLE:"+String(state.seriesId||"");
+      if(!state.queueHistory.some(x=>String(x?.queueId||"")===historyId)){
+        state.queueHistory.unshift({queueId:historyId,status:"DISARMED",stoppedAt:new Date().toISOString(),currentIndex:-1,threshold:Number(state.threshold),attemptsStarted:Number(state.attemptsStarted||0),openPositions:0,stages:[{threshold:Number(state.threshold),count:executionTestSeriesLimit(state),status:"DISARMED"}],completedStages:[],attempts:JSON.parse(JSON.stringify(Array.isArray(state.attempts)?state.attempts:[])),positions:JSON.parse(JSON.stringify(Array.isArray(state.positions)?state.positions:[])),ledger:JSON.parse(JSON.stringify(Array.isArray(state.ledger)?state.ledger:[]))});
+      }
+      state.queueHistory=state.queueHistory.slice(0,20);
+      state.armed=false;state.status="SERIES_DISARMED";state.completedAt=Date.now();
+      executionTestLedger(state,"EXECUTION_TEST_SERIES_DISARMED",{seriesId:state.seriesId,threshold:Number(state.threshold),attemptsStarted:Number(state.attemptsStarted||0),evidencePreserved:true});
+      await saveExecutionTestState(env,state);
+      return json({ok:true,state:state.status,disarmed:true,seriesId:state.seriesId,threshold:Number(state.threshold),attemptsStarted:Number(state.attemptsStarted||0),historyId,providerWrites:0,capitalMovedUsd:0});
+    }
+
     if (request.method === "POST" && url.pathname === "/execution-test-arm") {
       const form=await request.formData().catch(()=>null);
       if(String(form?.get("authorization")||"")!=="ARM_BOUNDED_EXECUTION_TESTS_MAX_1_USD") return json({ok:false,state:"EXPLICIT_TEST_ARM_AUTHORIZATION_REQUIRED"},400);
@@ -4584,6 +4642,7 @@ document.getElementById('export')?.addEventListener('click',async()=>{const r=aw
       const index2=Number(rows.find(x=>Number(x?.exchange_index)===2)?.balance);
       if(!balanceProof?.ok||!Number.isFinite(index2)||index2<EXECUTION_TEST_CONFIG.minSeriesFundingUsd) return json({ok:false,state:"INDEX2_FUNDING_NOT_READY",index2Usd:Number.isFinite(index2)?index2:null,requiredUsd:EXECUTION_TEST_CONFIG.minSeriesFundingUsd},409);
       const state=defaultExecutionTestState();
+      state.queueHistory=JSON.parse(JSON.stringify(Array.isArray(current?.queueHistory)?current.queueHistory:[]));
       state.maxAttempts=requestedAttempts;
       state.threshold=requestedScore;
       state.armed=true;state.status="ARMED_FISHING";state.seriesId=crypto.randomUUID();state.armedAt=Date.now();
