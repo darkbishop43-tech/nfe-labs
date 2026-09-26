@@ -1,0 +1,27 @@
+name: Diagnose Recent NO_FILL State
+
+on:
+  push:
+    branches: [market-edge-baseline-real]
+    paths:
+      - '.github/workflows/diagnose-recent-nofill-state.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Read live execution state
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsS 'https://market-edge-baseline-real.darkbishop43.workers.dev/execution-test-state' -o /tmp/state.json
+          python - <<'PY'
+          import json
+          x=json.load(open('/tmp/state.json'))
+          s=x.get('state') or {}
+          print(json.dumps({k:s.get(k) for k in ['status','armed','seriesId','threshold','attemptsStarted','maxAttempts','maxConcurrent','maxEntryDebitUsd','positions','attempts','ledger','queue','queueHistory']},indent=2))
+          PY
