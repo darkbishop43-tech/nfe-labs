@@ -1,0 +1,46 @@
+name: Deploy NO_FILL Repair And Disarm 80
+
+on:
+  push:
+    branches: [market-edge-baseline-real]
+    paths:
+      - '.github/workflows/deploy-repair-and-disarm-80.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  deploy-disarm:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: market-edge-baseline-real
+      - name: Install
+        working-directory: market-edge-lab/real/baseline
+        run: npm install --no-audit --no-fund
+      - name: Deploy bounded repair
+        working-directory: market-edge-lab/real/baseline
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: npx --yes wrangler@4 deploy
+      - name: Preserve and disarm current single series
+        shell: bash
+        run: |
+          set -euo pipefail
+          B='https://market-edge-baseline-real.darkbishop43.workers.dev'
+          sleep 1
+          curl -fsS -X POST -H 'content-type: application/x-www-form-urlencoded' --data-urlencode 'authorization=DISARM_EXECUTION_TEST_SERIES_PRESERVE_HISTORY' "$B/execution-test-disarm" -o /tmp/disarm.json
+          cat /tmp/disarm.json | python -m json.tool
+          curl -fsS "$B/execution-test-state" -o /tmp/state.json
+          python - <<'PY'
+          import json
+          d=json.load(open('/tmp/disarm.json')); x=json.load(open('/tmp/state.json')); s=x.get('state') or {}
+          print('POST_DISARM='+json.dumps(x,indent=2))
+          assert d.get('ok') is True and d.get('disarmed') is True
+          assert s.get('armed') is False
+          assert int(s.get('openPositions') or 0)==0
+          assert int(s.get('attemptsStarted') or 0)>=3
+          PY
