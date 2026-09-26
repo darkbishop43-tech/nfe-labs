@@ -4465,6 +4465,41 @@ document.getElementById('export')?.addEventListener('click',async()=>{const r=aw
     }
 
 
+    if (request.method === "GET" && url.pathname === "/execution-test-nofill-forensic") {
+      const state=await loadExecutionTestState(env);
+      const source=(Array.isArray(state?.attempts)?state.attempts:[]).filter(a=>String(a?.status||"")==="NO_FILL").slice(-12);
+      const audited=[];
+      for(const a of source){
+        const outcome=String(a?.outcomeSide||"").toUpperCase();
+        const liveAsk=Number(a?.liveAsk), liveBid=Number(a?.liveBid);
+        const side=kalshiV2BookSide(outcome);
+        const yesLegLimit=Number.isFinite(liveAsk)?(side==="bid"?liveAsk:1-liveAsk):null;
+        let providerHttpStatus=null, providerOrder=null, providerReadError=null;
+        if(a?.orderId){
+          try{
+            const r=await kalshiGetOrderV2(env,String(a.orderId));
+            providerHttpStatus=r.status;
+            const b=await r.json().catch(()=>null);
+            providerOrder=b?.order||b||null;
+          }catch(error){providerReadError=String(error?.message||error).slice(0,160);}
+        }
+        const providerCreatedRaw=providerOrder?.created_time||providerOrder?.created_at||providerOrder?.created_ts||providerOrder?.ts||providerOrder?.ts_ms||null;
+        let providerCreatedMs=null;
+        if(typeof providerCreatedRaw==="number") providerCreatedMs=providerCreatedRaw>1e12?providerCreatedRaw:providerCreatedRaw*1000;
+        else if(providerCreatedRaw) { const x=Date.parse(providerCreatedRaw); if(Number.isFinite(x)) providerCreatedMs=x; }
+        const attemptCreatedMs=Date.parse(a?.createdAt||"");
+        const createdToProviderMs=Number.isFinite(providerCreatedMs)&&Number.isFinite(attemptCreatedMs)?providerCreatedMs-attemptCreatedMs:null;
+        audited.push({
+          attemptNo:a?.attemptNo??null,status:a?.status||null,createdAt:a?.createdAt||null,asset:a?.asset||null,ticker:a?.marketTicker||null,outcomeSide:outcome||null,direction:a?.direction||null,
+          observedScore:a?.observedScore??null,liveScore:a?.liveScore??null,observedAsk:a?.observedAsk??null,liveAsk:Number.isFinite(liveAsk)?liveAsk:null,liveBid:Number.isFinite(liveBid)?liveBid:null,
+          submitted:{side,yesLegLimit:Number.isFinite(yesLegLimit)?Number(yesLegLimit.toFixed(4)):null,count:a?.count??null,timeInForce:"immediate_or_cancel",postOnly:false,reduceOnly:false,clientOrderId:a?.clientOrderId||null},
+          provider:{httpStatus:providerHttpStatus,orderId:a?.orderId||null,fillCount:Number(a?.fillCount||0),remainingCount:a?.remainingCount??null,averageFillPrice:a?.averageFillPrice??null,averageFeePaid:a?.averageFeePaid??null,readError:providerReadError,order:providerOrder,createdToProviderMs},
+          marketability:{atLockQuote:"TARGETED_EXECUTABLE_SIDE_ASK_BY_CONSTRUCTION",atProviderSubmission:"UNKNOWN_WITHOUT_SAME-INSTANT_BOOK_SNAPSHOT",reason:"Exact LOCK ask is used to build IOC limit, but the current state does not persist a same-instant orderbook snapshot at provider arrival."}
+        });
+      }
+      return json({ok:true,readOnly:true,state:"EXECUTION_TEST_NO_FILL_FORENSIC_V1",series:{status:state?.status||null,armed:Boolean(state?.armed),seriesId:state?.seriesId||null,threshold:Number(state?.threshold??EXECUTION_TEST_CONFIG.entryScore),attemptsStarted:Number(state?.attemptsStarted||0),maxAttempts:executionTestSeriesLimit(state),openPositions:executionTestOpenPositions(state).length},audited,safety:{providerWrites:0,stateMutation:false,ordersCreated:0,cancels:0,capitalMovedUsd:0,authorizationConsumed:0}});
+    }
+
     if (request.method === "GET" && url.pathname === "/execution-test-state") {
       const state=await loadExecutionTestState(env);
       const balanceProof=await kalshiExecutionBalanceSnapshot(env);
