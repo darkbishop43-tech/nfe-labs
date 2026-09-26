@@ -1,0 +1,38 @@
+name: Fix Phase 1A Shadow Nonblocking Persistence
+on:
+  push:
+    branches: [market-edge-baseline-real]
+    paths: ['.github/workflows/phase1a-shadow-nonblocking-fix.yml']
+permissions:
+  contents: write
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: market-edge-baseline-real
+          fetch-depth: 0
+      - name: Ensure Shadow persistence cannot delay REAL exit
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('market-edge-lab/real/baseline/src/index.js')
+          s=p.read_text()
+          old='''      executionTestLedger(state,"PHASE1A_SHADOW_FIVE_MINUTE_CHECKPOINT_FROZEN",{\n        positionId:position.id,attemptNo:position.attemptNo,ticker:position.marketTicker,\n        decision:decision?.decision||"EXIT",reason:decision?.reason||"INSUFFICIENT_EVIDENCE",\n        futureOutcomeObserved:false,shadowTradingAuthority:false\n      });\n      if(!await saveExecutionTestRuntimeState(env,state,runtimeControlToken))return await loadExecutionTestState(env);\n    }\n    if(!exitByScore&&!exitByTime)continue;'''
+          new='''      executionTestLedger(state,"PHASE1A_SHADOW_FIVE_MINUTE_CHECKPOINT_FROZEN",{\n        positionId:position.id,attemptNo:position.attemptNo,ticker:position.marketTicker,\n        decision:decision?.decision||"EXIT",reason:decision?.reason||"INSUFFICIENT_EVIDENCE",\n        futureOutcomeObserved:false,shadowTradingAuthority:false\n      });\n      const phase1aFrozenBeforeOutcome=await saveExecutionTestRuntimeState(env,state,runtimeControlToken);\n      if(!phase1aFrozenBeforeOutcome){\n        position.phase1aShadow.checkpointDecision=null;\n        position.phase1aShadow.checkpointPersistenceFailed=true;\n      }\n    }\n    if(!exitByScore&&!exitByTime)continue;'''
+          assert old in s, 'Phase1A checkpoint block not found'
+          s=s.replace(old,new,1)
+          p.write_text(s)
+          PY
+          git diff --check
+          grep -F 'const phase1aFrozenBeforeOutcome=await saveExecutionTestRuntimeState' market-edge-lab/real/baseline/src/index.js
+          grep -F 'position.phase1aShadow.checkpointDecision=null' market-edge-lab/real/baseline/src/index.js
+          grep -F 'position.exitReason=exitByScore?"SCORE_EXIT":"MAX_HOLD_EXIT"' market-edge-lab/real/baseline/src/index.js
+          git config user.name 'NFE-OS Builder'
+          git config user.email 'actions@users.noreply.github.com'
+          git add market-edge-lab/real/baseline/src/index.js
+          git commit -m 'Keep real exit independent of Shadow persistence'
+          git push origin HEAD:market-edge-baseline-real
