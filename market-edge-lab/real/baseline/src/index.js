@@ -5506,14 +5506,21 @@ document.getElementById('export')?.addEventListener('click',async()=>{const r=aw
       const autoAvailable=Math.max(0,autoAllocated-auto.openExposureUsd);
       const manualAvailable=Math.max(0,manualAllocated-manualExposure);
       const allocationSafe=manualAllocated<=providerCashUsd+1e-9 && autoAllocated+manualAllocated<=providerCashUsd+1e-9;
+      const providerAccountValueUsd=Number.isFinite(providerPortfolioValueUsd)?providerCashUsd+providerPortfolioValueUsd:providerCashUsd;
+      const totalOpenExposureUsd=Number((auto.openExposureUsd+manualExposure).toFixed(6));
+      const lifetimeBasisUsd=10;
+      const lifetimeRealPnlUsd=Number.isFinite(providerAccountValueUsd)?Number((providerAccountValueUsd-lifetimeBasisUsd).toFixed(6)):null;
+      // No authoritative start-of-day account-value snapshot is persisted yet. Do not invent daily P/L.
+      const todayPnlUsd=null,todayPnlPct=null;
+      const openPositionsCount=executionTestOpenPositions(autoState).length+founderManualOpenRecords(manualLedger).length;
       return json({
         ok:allocationSafe,readOnly:true,state:allocationSafe?"DUAL_LEDGER_RECONCILED":"ALLOCATION_RECONCILIATION_HOLD",
-        provider:{cashUsd:Number(providerCashUsd.toFixed(6)),portfolioValueUsd:providerPortfolioValueUsd,balanceBreakdown:rows.map(x=>({exchangeIndex:Number(x?.exchange_index),balanceUsd:Number(x?.balance)}))},
+        provider:{cashUsd:Number(providerCashUsd.toFixed(6)),portfolioValueUsd:providerPortfolioValueUsd,accountValueUsd:Number(providerAccountValueUsd.toFixed(6)),buyingPowerUsd:Number(providerCashUsd.toFixed(6)),openExposureUsd:totalOpenExposureUsd,openPositionsCount,lifetimeRealPnlUsd,lifetimeBasisUsd,lifetimeBasis:"HISTORICAL_STARTING_CAPITAL",todayPnlUsd,todayPnlPct,todayPnlStatus:"UNAVAILABLE_NO_AUTHORITATIVE_START_OF_DAY_ACCOUNT_VALUE",balanceBreakdown:rows.map(x=>({exchangeIndex:Number(x?.exchange_index),balanceUsd:Number(x?.balance)}))},
         sleeves:{
           AUTO_BASELINE:{source:AUTO_BASELINE_SOURCE,allocatedCapitalUsd:Number(autoAllocated.toFixed(6)),availableBuyingPowerUsd:Number(autoAvailable.toFixed(6)),openExposureUsd:auto.openExposureUsd,realizedPnlUsd:auto.realizedPnlUsd,unrealizedPnlUsd:null,feesUsd:auto.feesUsd,ledgerRecords:auto.attempts},
           FOUNDER_MANUAL:{source:FOUNDER_MANUAL_SOURCE,allocatedCapitalUsd:Number(manualAllocated.toFixed(6)),availableBuyingPowerUsd:Number(manualAvailable.toFixed(6)),openExposureUsd:Number(manualExposure.toFixed(6)),realizedPnlUsd:Number(manualRealized.toFixed(6)),unrealizedPnlUsd:null,feesUsd:Number(manualFees.toFixed(6)),ledgerRecords:manualRecords}
         },
-        reconciliation:{providerCashUsd:Number(providerCashUsd.toFixed(6)),allocatedTotalUsd:Number((autoAllocated+manualAllocated).toFixed(6)),openExposureTotalUsd:Number((auto.openExposureUsd+manualExposure).toFixed(6)),allocationSafe,doubleCounted:false},
+        reconciliation:{providerCashUsd:Number(providerCashUsd.toFixed(6)),allocatedTotalUsd:Number((autoAllocated+manualAllocated).toFixed(6)),openExposureTotalUsd:totalOpenExposureUsd,allocationSafe,doubleCounted:false},
         capitalMechanism:{selected:"KALSHI_SUBACCOUNT_PREFERRED_NOT_YET_CREATED_OR_FUNDED",providerSupportsSubaccounts:true,founderSubaccountNumber:null,founderAllocationPersistedUsd:manualAllocated,fallback:"NFE_OS_LEDGER_ALLOCATION",movementAuthorized:false},
         manualClose:{status:"DESIGNED_LOCKED",rule:"Only FOUNDER_MANUAL-owned filled quantity; reverse book side; reduce_only=true; exact owned remaining quantity; separate future authorization required"},
         gates:{manualEntryAuthorized:false,manualExitAuthorized:false,depositAuthorized:false,transferAuthorized:false,founderAllocationSufficient:manualAvailable>0},
