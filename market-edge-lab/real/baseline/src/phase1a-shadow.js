@@ -259,7 +259,7 @@ export function phase1BShadowFixtureProof(){
   const make=(remainingMs)=>{
     const candidate={marketTicker:"TEST-B",asset:"BTC",outcomeSide:"YES",direction:"UP",score:.80,edge:.05,move:.01,closeTime:new Date(checkpoint+remainingMs).toISOString()};
     const a=buildPhase1AShadowAttachment({position:basePosition,candidate,maxHoldMs:300000,attachedAt:1_000_001});
-    freezePhase1ACheckpointDecision({attachment:a,checkpointAt:checkpoint,currentScore:.84,currentEdge:.06,currentMove:.02,providerBid:.60,providerQuoteFresh:true,shadowFresh:true,closeTime:candidate.closeTime,shadowObservedAt:new Date(checkpoint).toISOString()});
+    a.checkpointDecision=freezePhase1ACheckpointDecision({attachment:a,checkpointAt:checkpoint,currentScore:.84,currentEdge:.06,currentMove:.02,providerBid:.60,providerQuoteFresh:true,shadowFresh:true,closeTime:candidate.closeTime,shadowObservedAt:new Date(checkpoint).toISOString()});
     authorizePhase1BContinuation({attachment:a,checkpointAt:checkpoint,closeTime:candidate.closeTime});
     return a;
   };
