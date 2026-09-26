@@ -1587,9 +1587,13 @@ function founderManualCloseDryRun(record,{requestedCount,liveOutcomeBid,quoteAge
   if(!(remaining>0))return{ok:false,state:"FOUNDER_CLOSE_REJECT_ZERO_REMAINING",providerWrites:0};
   if(autoTickerConflict)return{ok:false,state:"FOUNDER_CLOSE_REJECT_OWNERSHIP_AMBIGUOUS_AUTO_CONFLICT",providerWrites:0};
   const pq=Math.abs(Number(providerQuantity));
-  if(!Number.isFinite(pq)||pq+1e-9<remaining)return{ok:false,state:"FOUNDER_CLOSE_REJECT_PROVIDER_POSITION_UNRECONCILED",remainingQuantity:remaining,providerQuantity:Number.isFinite(pq)?pq:null,providerWrites:0};
+  if(!Number.isFinite(pq))return{ok:false,state:"FOUNDER_CLOSE_REJECT_PROVIDER_POSITION_UNKNOWN",remainingQuantity:remaining,providerQuantity:null,providerWrites:0};
+  if(pq<=1e-9)return{ok:false,state:"FOUNDER_CLOSE_PROVIDER_FLAT_NO_WRITE",remainingQuantity:remaining,providerQuantity:pq,providerWrites:0,reconcileLedgerOnly:true};
+  const safeQuantity=Math.min(remaining,pq);
+  if(!Number.isFinite(Number(requestedCount))||Math.abs(Number(requestedCount)-safeQuantity)>1e-9)return{ok:false,state:"FOUNDER_CLOSE_REJECT_SAFE_QUANTITY_REQUIRED",remainingQuantity:remaining,providerQuantity:pq,safeQuantity,requestedQuantity:Number(requestedCount),providerWrites:0};
   if(!Number.isFinite(Number(quoteAgeMs))||Number(quoteAgeMs)>15000)return{ok:false,state:"FOUNDER_CLOSE_REJECT_STALE_QUOTE",maxQuoteAgeMs:15000,quoteAgeMs:Number(quoteAgeMs),providerWrites:0};
-  const built=founderManualClosePayload(record,liveOutcomeBid,"FOUNDER-CLOSE-PREVIEW-NOT-SUBMITTED",requestedCount);
+  const safeRecord={...record,entryFillQuantity:safeQuantity,closeFillQuantity:0};
+  const built=founderManualClosePayload(safeRecord,liveOutcomeBid,"FOUNDER-CLOSE-PREVIEW-NOT-SUBMITTED",safeQuantity);
   return{...built,providerWrites:0,submitted:false,manualCloseAuthorized:false};
 }
 async function founderManualClosePreview(env,record,requestedCount){
@@ -5525,10 +5529,12 @@ document.getElementById('export')?.addEventListener('click',async()=>{const r=aw
         const fee=kalshiGeneralTakerFeeUsd(selectedAsk,1,1);
         const premium=Number(selectedAsk.toFixed(4)),maxDebit=Number((premium+(fee||0)).toFixed(4));
         if(!Number.isFinite(fee)||maxDebit>1) return json({ok:false,state:"MANUAL_V1_MAX_DEBIT_EXCEEDED",source,premiumUsd:premium,estimatedFeeUsd:fee,estimatedMaxDebitUsd:maxDebit,capUsd:1,submitted:false},409);
-        const balanceProof=await kalshiExecutionBalanceSnapshot(env);
-        const rows=Array.isArray(balanceProof?.body?.balance_breakdown)?balanceProof.body.balance_breakdown:[];
-        const index2=Number(rows.find(x=>Number(x?.exchange_index)===2)?.balance);
-        if(!balanceProof?.ok||!Number.isFinite(index2)||index2<maxDebit) return json({ok:false,state:"MANUAL_PREVIEW_FUNDING_NOT_READY",source,index2Usd:Number.isFinite(index2)?index2:null,requiredUsd:maxDebit,submitted:false},409);
+        const [manualCapital,autoState]=await Promise.all([loadFounderManualCapital(env),loadExecutionTestState(env)]);
+        const founderAllocated=Math.max(0,Number(manualCapital?.allocatedUsd)||0);
+        const autoOpen=executionTestOpenPositions(autoState);
+        const autoActive=Boolean(autoState?.armed||executionTestQueueActive(autoState)||autoOpen.length>0||["ARMED_FISHING","FISHING","MANAGING","EXIT_RETRY"].includes(String(autoState?.status||"")));
+        if(autoActive) return json({ok:false,state:"MANUAL_PREVIEW_AUTO_ACTIVE_FAIL_CLOSED",source,auto:{status:autoState?.status||null,armed:Boolean(autoState?.armed),queueActive:executionTestQueueActive(autoState),openPositions:autoOpen.length},submitted:false,manualExecutionAuthorized:false},409);
+        if(founderAllocated+1e-9<maxDebit) return json({ok:false,state:"MANUAL_PREVIEW_FOUNDER_ALLOCATION_INSUFFICIENT",source,founderAllocatedUsd:founderAllocated,requiredUsd:maxDebit,submitted:false,manualExecutionAuthorized:false},409);
         const candidate={marketTicker:ticker,outcomeSide,yes:selectedAsk};
         const requestPreview=kalshiV2EntryPayload(candidate,{count:1},"FOUNDER-MANUAL-PREVIEW-NOT-SUBMITTED");
         const closePreview={
@@ -5541,12 +5547,12 @@ document.getElementById('export')?.addEventListener('click',async()=>{const r=aw
           ok:true,state:"FOUNDER_MANUAL_V1_REVIEW_READY_LOCKED",source,manualExecutionAuthorized:false,submitted:false,realMoneyMoved:false,
           providerSemantics:{marketOrderDirectlySupported:false,supportedOrderModes:["IOC"],restingLimitEnabled:false,yesLongBookSide:"bid",noLongBookSide:"ask",priceScale:"YES-leg fixed-point dollars",timeInForce:"immediate_or_cancel"},
           contract:{ticker,outcomeSide,marketStatus:m?.status||null,closeTime,yesBid,yesAsk,noBid,noAsk,selectedBid,selectedAsk,quoteReadAt:new Date().toISOString()},
-          sizing:{count:1,premiumUsd:premium,estimatedTakerFeeUsd:fee,estimatedMaxDebitUsd:maxDebit,manualV1CapUsd:1,index2Usd:index2},
+          sizing:{count:1,premiumUsd:premium,estimatedTakerFeeUsd:fee,estimatedMaxDebitUsd:maxDebit,manualV1CapUsd:1,founderAllocatedUsd:founderAllocated},
           providerRequestPreview:{method:"POST",path:"/trade-api/v2/portfolio/events/orders",body:requestPreview},
           ownership:{source:"FOUNDER_MANUAL",autoQueueAttemptConsumed:false,autoStageAdvanced:false,autoExitAdoption:false,manualExitOwnership:true},
           persistenceSchema:["source","orderMode","ticker","outcomeSide","submittedPrice","submittedCount","providerOrderId","providerStatus","fillCount","averageFillPrice","averageFeePaid","createdAt","finalState"],
           cancelPreview,closePreview,
-          interlocks:{entryWriteRoutePresent:false,manualSubmitButtonAuthorized:false,explicitFutureFounderTradeAuthorizationRequired:true,staleQuoteFailsClosed:true}
+          interlocks:{capabilityStaged:true,entryWriteRoutePresent:false,manualEntryAuthorized:false,manualSubmitButtonAuthorized:false,explicitFutureFounderTradeAuthorizationRequired:true,founderCapitalRequired:true,autoMustBeClear:true,staleQuoteFailsClosed:true}
         });
       }catch(error){return json({ok:false,state:"MANUAL_PREVIEW_READ_FAILED",source,error:String(error?.message||error).slice(0,160),submitted:false},422);}
     }
