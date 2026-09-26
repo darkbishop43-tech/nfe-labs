@@ -141,7 +141,7 @@ async function reviewManual(){
   const q='?ticker='+encodeURIComponent(o.ticker)+'&side='+encodeURIComponent(side)+'&mode=IOC&count='+encodeURIComponent(count)+'&price='+encodeURIComponent(price);
   const x=await get('/founder-manual-preview'+q);
   $('manualCost').value=money(x?.sizing?.estimatedMaxDebitUsd);
-  $('manualFunding').value=money(x?.sizing?.index2Usd);
+  $('manualFunding').value=money(x?.sizing?.founderAllocatedUsd);
   $('manualStatus').textContent=x.state+' · SOURCE '+x.source+' · SUBMITTED '+String(x.submitted).toUpperCase();
   $('manualPreview').textContent=JSON.stringify({source:x.source,contract:x.contract,sizing:x.sizing,providerRequestPreview:x.providerRequestPreview,ownership:x.ownership,cancelPreview:x.cancelPreview,closePreview:x.closePreview,interlocks:x.interlocks},null,2);
   if(Number.isFinite(Number(x?.contract?.selectedAsk)))$('limitPrice').value=Number(x.contract.selectedAsk).toFixed(4);
