@@ -1904,7 +1904,11 @@ async function runExecutionTestSeries(env,freshShadow=null,preparedBalance=null)
         decision:decision?.decision||"EXIT",reason:decision?.reason||"INSUFFICIENT_EVIDENCE",
         futureOutcomeObserved:false,shadowTradingAuthority:false
       });
-      if(!await saveExecutionTestRuntimeState(env,state,runtimeControlToken))return await loadExecutionTestState(env);
+      const phase1aFrozenBeforeOutcome=await saveExecutionTestRuntimeState(env,state,runtimeControlToken);
+      if(!phase1aFrozenBeforeOutcome){
+        position.phase1aShadow.checkpointDecision=null;
+        position.phase1aShadow.checkpointPersistenceFailed=true;
+      }
     }
     if(!exitByScore&&!exitByTime)continue;
     if(!(liveBid>0.01&&liveBid<0.99)){
