@@ -1,0 +1,37 @@
+name: Fix Phase 1B Fixture Assignment
+
+on:
+  push:
+    branches: [market-edge-baseline-real]
+    paths:
+      - '.github/workflows/fix-phase1b-fixture-assignment.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: market-edge-baseline-real
+      - name: Assign frozen Phase 1A decision in fixture
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('market-edge-lab/real/baseline/src/phase1a-shadow.js')
+          s=p.read_text()
+          old='''    freezePhase1ACheckpointDecision({attachment:a,checkpointAt:checkpoint,currentScore:.84,currentEdge:.06,currentMove:.02,providerBid:.60,providerQuoteFresh:true,shadowFresh:true,closeTime:candidate.closeTime,shadowObservedAt:new Date(checkpoint).toISOString()});\n    authorizePhase1BContinuation({attachment:a,checkpointAt:checkpoint,closeTime:candidate.closeTime});'''
+          new='''    a.checkpointDecision=freezePhase1ACheckpointDecision({attachment:a,checkpointAt:checkpoint,currentScore:.84,currentEdge:.06,currentMove:.02,providerBid:.60,providerQuoteFresh:true,shadowFresh:true,closeTime:candidate.closeTime,shadowObservedAt:new Date(checkpoint).toISOString()});\n    authorizePhase1BContinuation({attachment:a,checkpointAt:checkpoint,closeTime:candidate.closeTime});'''
+          assert old in s
+          p.write_text(s.replace(old,new,1))
+          PY
+          git diff --check
+          git config user.name 'NFE-OS Builder'
+          git config user.email 'actions@users.noreply.github.com'
+          git add market-edge-lab/real/baseline/src/phase1a-shadow.js
+          git commit -m 'Fix Phase 1B deterministic fixture wiring'
+          git push origin HEAD:market-edge-baseline-real
