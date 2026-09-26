@@ -1,4 +1,4 @@
-const finite=v=>{const n=Number(v);return Number.isFinite(n)?n:null};
+const finite=v=>{if(v===null||v===undefined||v==="")return null;const n=Number(v);return Number.isFinite(n)?n:null};
 
 export function buildPhase1AShadowAttachment({position,candidate,attempt,attachedAt=Date.now(),maxHoldMs=300000}={}){
   const fillCount=finite(position?.filledCount??attempt?.fillCount);
