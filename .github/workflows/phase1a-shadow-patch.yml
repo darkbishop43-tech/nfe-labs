@@ -1,0 +1,55 @@
+name: Apply Phase 1A Shadow Integration
+on:
+  push:
+    branches: [market-edge-baseline-real]
+    paths: ['.github/workflows/phase1a-shadow-patch.yml']
+permissions:
+  contents: write
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: market-edge-baseline-real
+          fetch-depth: 0
+      - name: Patch existing Baseline lifecycle only
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('market-edge-lab/real/baseline/src/index.js')
+          s=p.read_text()
+          imp='import { sendPushNotification, topicFromString } from "@mmmike/web-push/send";\n'
+          add=imp+'import { buildPhase1AShadowAttachment, freezePhase1ACheckpointDecision, phase1AShadowFixtureProof } from "./phase1a-shadow.js";\n'
+          assert imp in s and 'phase1a-shadow.js' not in s
+          s=s.replace(imp,add,1)
+
+          old='''      entryOrderId:attempt.orderId,filledCount:attempt.fillCount,entryAverageFillPrice:attempt.averageFillPrice,\n      entryAverageFeePaid:attempt.averageFeePaid,filledAt:attempt.filledAt,exitFilledTotal:0,exitAttempt:0\n    };'''
+          new='''      entryOrderId:attempt.orderId,filledCount:attempt.fillCount,entryAverageFillPrice:attempt.averageFillPrice,\n      entryAverageFeePaid:attempt.averageFeePaid,filledAt:attempt.filledAt,closeTime:candidate.closeTime||null,exitFilledTotal:0,exitAttempt:0\n    };\n    position.phase1aShadow=buildPhase1AShadowAttachment({position,candidate,attempt,attachedAt:Date.now(),maxHoldMs:EXECUTION_TEST_CONFIG.maxHoldMs});'''
+          assert old in s
+          s=s.replace(old,new,1)
+
+          old2='''    const exitByScore=Boolean(shadowCurrent&&Number(shadowCurrent.score)<=EXECUTION_TEST_CONFIG.exitScore);\n    const exitByTime=age>=EXECUTION_TEST_CONFIG.maxHoldMs;\n    if(!exitByScore&&!exitByTime)continue;'''
+          new2='''    const exitByScore=Boolean(shadowCurrent&&Number(shadowCurrent.score)<=EXECUTION_TEST_CONFIG.exitScore);\n    const exitByTime=age>=EXECUTION_TEST_CONFIG.maxHoldMs;\n    if(exitByTime&&position?.phase1aShadow&&!position.phase1aShadow.checkpointDecision){\n      const exactProviderBid=Number(exactQuote?.bid);\n      const decision=freezePhase1ACheckpointDecision({\n        attachment:position.phase1aShadow,checkpointAt:now,exitScore:EXECUTION_TEST_CONFIG.exitScore,\n        currentScore:shadowCurrent?.score,currentEdge:shadowCurrent?.edge,currentMove:shadowCurrent?.move,\n        providerBid:Number.isFinite(exactProviderBid)?exactProviderBid:null,providerQuoteFresh:Number.isFinite(exactProviderBid),\n        shadowFresh:Boolean(shadowCurrent&&shadow?.status==="LIVE_KALSHI_SHADOW"),\n        closeTime:position?.closeTime||shadowCurrent?.closeTime||null,shadowObservedAt:shadow?.lastRunAt||null\n      });\n      position.phase1aShadow.checkpointDecision=decision;\n      position.phase1aShadow.realLifecycleUnaffected=true;\n      position.phase1aShadow.realMaxHoldStillMs=EXECUTION_TEST_CONFIG.maxHoldMs;\n      executionTestLedger(state,"PHASE1A_SHADOW_FIVE_MINUTE_CHECKPOINT_FROZEN",{\n        positionId:position.id,attemptNo:position.attemptNo,ticker:position.marketTicker,\n        decision:decision?.decision||"EXIT",reason:decision?.reason||"INSUFFICIENT_EVIDENCE",\n        futureOutcomeObserved:false,shadowTradingAuthority:false\n      });\n      if(!await saveExecutionTestRuntimeState(env,state,runtimeControlToken))return await loadExecutionTestState(env);\n    }\n    if(!exitByScore&&!exitByTime)continue;'''
+          assert old2 in s
+          s=s.replace(old2,new2,1)
+
+          route='''    if (url.pathname === "/first-real-trade-evidence") {'''
+          insert='''    if (request.method === "GET" && url.pathname === "/phase1a-shadow-proof") {\n      return json({\n        ...phase1AShadowFixtureProof(),\n        state:"PHASE1A_SHADOW_ZERO_MONEY_PROOF",\n        continuationDurationAuthorized:false,\n        realTradingLogicChanged:false,\n        providerWrites:0,capitalMovedUsd:0,newRealAuthorizationConsumed:0\n      });\n    }\n\n'''+route
+          assert route in s
+          s=s.replace(route,insert,1)
+          p.write_text(s)
+          PY
+          git diff --check
+          grep -F 'phase1a-shadow.js' market-edge-lab/real/baseline/src/index.js
+          grep -F 'PHASE1A_SHADOW_FIVE_MINUTE_CHECKPOINT_FROZEN' market-edge-lab/real/baseline/src/index.js
+          grep -F 'position.exitReason=exitByScore?"SCORE_EXIT":"MAX_HOLD_EXIT"' market-edge-lab/real/baseline/src/index.js
+          grep -F 'const exitByTime=age>=EXECUTION_TEST_CONFIG.maxHoldMs' market-edge-lab/real/baseline/src/index.js
+          grep -F 'Number(o?.score)>=activeThreshold' market-edge-lab/real/baseline/src/index.js
+          git config user.name 'NFE-OS Builder'
+          git config user.email 'actions@users.noreply.github.com'
+          git add market-edge-lab/real/baseline/src/index.js
+          git commit -m 'Attach zero-money Shadow at existing five-minute boundary'
+          git push origin HEAD:market-edge-baseline-real
