@@ -1,0 +1,58 @@
+name: Patch Phase 1B Shadow Runtime
+
+on:
+  push:
+    branches: [market-edge-baseline-real]
+    paths:
+      - 'market-edge-lab/real/baseline/src/phase1a-shadow.js'
+      - '.github/workflows/phase1b-shadow-patch.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: market-edge-baseline-real
+          fetch-depth: 0
+      - name: Patch existing Baseline runtime only
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('market-edge-lab/real/baseline/src/index.js')
+          s=p.read_text()
+
+          old='import { buildPhase1AShadowAttachment, freezePhase1ACheckpointDecision, phase1AShadowFixtureProof } from "./phase1a-shadow.js";'
+          new='import { buildPhase1AShadowAttachment, freezePhase1ACheckpointDecision, authorizePhase1BContinuation, recordPhase1BAuthorizedObservation, freezePhase1BEndpointComparison, phase1AShadowFixtureProof, phase1BShadowFixtureProof } from "./phase1a-shadow.js";'
+          assert old in s
+          s=s.replace(old,new,1)
+
+          old='''      position.phase1aShadow.checkpointDecision=decision;\n      position.phase1aShadow.realLifecycleUnaffected=true;'''
+          new='''      position.phase1aShadow.checkpointDecision=decision;\n      authorizePhase1BContinuation({\n        attachment:position.phase1aShadow,checkpointAt:now,\n        closeTime:position?.closeTime||shadowCurrent?.closeTime||null\n      });\n      position.phase1aShadow.realLifecycleUnaffected=true;'''
+          assert old in s
+          s=s.replace(old,new,1)
+
+          old='''  }\n\n  if(!executionTestEntryAuthorized(state)){'''
+          new='''  }\n\n  // PHASE 1B: zero-authority counterfactual observation only AFTER REAL is CLOSED.\n  // Never read beyond the authorized +60-second endpoint. A missed endpoint is UNKNOWN/UNPROVEN.\n  for(const position of (Array.isArray(state?.positions)?state.positions:[])){\n    try{\n      const attachment=position?.phase1aShadow||null;\n      const p1b=attachment?.phase1b||null;\n      if(!attachment||!p1b||p1b.status!=="ACTIVE"||p1b.endpointObservation||position?.status!=="CLOSED")continue;\n      const endpointMs=Date.parse(p1b.authorizedEndpointAt||"");\n      const closeMs=Date.parse(p1b.providerCloseTime||"");\n      if(!Number.isFinite(endpointMs)||!Number.isFinite(closeMs)){\n        p1b.status="COMPLETE";\n        p1b.endpointObservation={frozen:true,authorizedEndpointAt:p1b.authorizedEndpointAt||null,frozenAt:new Date().toISOString(),trustworthyHypotheticalExecutionEvidence:false,hypotheticalExecutionStatus:"UNKNOWN / UNPROVEN",providerBid:null,providerQuoteFresh:false,shadowFresh:false,futureOutcomeObserved:true,reason:"INSUFFICIENT_TIME_OR_TIMING_EVIDENCE"};\n        p1b.comparison={comparisonStatus:"UNKNOWN / UNPROVEN",comparisonBasis:"INSUFFICIENT_TIME_OR_TIMING_EVIDENCE",WHY_BASELINE_AND_SHADOW_DIFFERED:"REAL_BASELINE_FORCED_FIVE_MINUTE_EXIT_WHILE_SHADOW_TIMING_EVIDENCE_WAS_UNUSABLE",checkpointReasonImmutable:true};\n        continue;\n      }\n      const cycleNow=Date.now();\n      const shadowCurrent=(shadow?.opportunities||[]).find(o=>o?.marketTicker===position.marketTicker&&o?.outcomeSide===position.outcomeSide);\n      if(cycleNow<=endpointMs&&cycleNow<closeMs){\n        let exactQuote=null;\n        try{exactQuote=await kalshiLiveOutcomeBid(env,position);}catch{}\n        const providerBid=Number(exactQuote?.bid??shadowCurrent?.bid);\n        const observedAt=Date.now();\n        recordPhase1BAuthorizedObservation({\n          phase1b:p1b,observedAt,\n          providerBid:Number.isFinite(providerBid)?providerBid:null,\n          providerQuoteFresh:Boolean(Number.isFinite(providerBid)&&observedAt<=endpointMs),\n          shadowFresh:Boolean(shadowCurrent&&shadow?.status==="LIVE_KALSHI_SHADOW"),\n          currentScore:shadowCurrent?.score,currentEdge:shadowCurrent?.edge,currentMove:shadowCurrent?.move,\n          shadowObservedAt:shadow?.lastRunAt||null\n        });\n      }\n      if(Date.now()>=endpointMs){\n        freezePhase1BEndpointComparison({attachment,position,observedAt:Date.now(),hypotheticalExitFeeUsd:null});\n        executionTestLedger(state,"PHASE1B_SHADOW_60S_ENDPOINT_FROZEN",{\n          positionId:position.id,attemptNo:position.attemptNo,ticker:position.marketTicker,\n          comparisonStatus:p1b?.comparison?.comparisonStatus||"UNKNOWN / UNPROVEN",\n          trustworthyHypotheticalExecutionEvidence:Boolean(p1b?.endpointObservation?.trustworthyHypotheticalExecutionEvidence),\n          providerWrites:0,shadowTradingAuthority:false\n        });\n      }\n    }catch(error){\n      // Shadow failure is evidence-only. REAL management has already run and must never be blocked here.\n      if(position?.phase1aShadow?.phase1b){\n        position.phase1aShadow.phase1b.lastObservationError=String(error?.message||error).slice(0,160);\n        position.phase1aShadow.phase1b.realLifecycleUnaffected=true;\n      }\n    }\n  }\n\n  if(!executionTestEntryAuthorized(state)){'''
+          assert old in s
+          s=s.replace(old,new,1)
+
+          old='''    if (url.pathname === "/first-real-trade-evidence") {'''
+          new='''    if (request.method === "GET" && url.pathname === "/phase1b-shadow-proof") {\n      return json({\n        ...phase1BShadowFixtureProof(),\n        state:"PHASE1B_SHADOW_60S_ZERO_MONEY_PROOF",\n        continuationDurationMs:60000,minimumRemainingRequiredMs:90000,\n        providerWrites:0,providerEntries:0,providerExits:0,providerCancels:0,\n        capitalMovedUsd:0,newRealAuthorizationConsumed:0,founderCapitalMovedUsd:0,\n        shadowTradingAuthority:false,realExecutionLogicChanged:false\n      });\n    }\n\n    if (url.pathname === "/first-real-trade-evidence") {'''
+          assert old in s
+          s=s.replace(old,new,1)
+
+          p.write_text(s)
+          PY
+          git diff --check
+          git diff -- market-edge-lab/real/baseline/src/index.js
+          git config user.name 'NFE-OS Builder'
+          git config user.email 'actions@users.noreply.github.com'
+          git add market-edge-lab/real/baseline/src/index.js
+          git commit -m 'Integrate 60-second Phase 1B Shadow window'
+          git push origin HEAD:market-edge-baseline-real
