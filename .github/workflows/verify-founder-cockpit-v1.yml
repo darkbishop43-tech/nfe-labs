@@ -21,18 +21,24 @@ jobs:
           set -euo pipefail
           B='https://market-edge-baseline-real.darkbishop43.workers.dev'
           R='https://market-edge-founder-read.darkbishop43.workers.dev'
-          U='https://raw.githack.com/darkbishop43-tech/nfe-labs/4bbbb62d2d85e2694341feb76068f0e2c0763e7c/market-edge-lab/real/baseline/founder-terminal.html'
+          U='https://raw.githack.com/darkbishop43-tech/nfe-labs/market-edge-baseline-real/market-edge-lab/real/baseline/founder-terminal.html'
           curl -fsS "$U" -o /tmp/cockpit.html
           for p in shadow-state wide-radar-state execution-test-state real-trade-state; do curl -fsS "$B/$p" -o "/tmp/$p.json"; done
           curl -sSI "$R/shadow-state" > /tmp/headers.txt
           curl -fsS "$R/wide-radar-state" -o /tmp/bridge-radar.json
           curl -fsS "$R/health" -o /tmp/bridge-health.json
+          curl -fsS "$B/founder-capital-ledger" -o /tmp/capital.json
+          curl -fsS "$B/founder-manual-close-proof" -o /tmp/close-proof.json
+          cp /tmp/execution-test-state.json /tmp/exec-before.json
+          curl -fsS "$B/execution-test-state" -o /tmp/exec-after.json
           python - <<'PY'
           import json,re,hashlib
           h=open('/tmp/cockpit.html',encoding='utf-8').read()
           src=open('market-edge-lab/real/baseline/src/index.js','rb').read()
           sh=json.load(open('/tmp/shadow-state.json')); wr=json.load(open('/tmp/wide-radar-state.json')); ex=json.load(open('/tmp/execution-test-state.json')); rt=json.load(open('/tmp/real-trade-state.json'))
           hdr=open('/tmp/headers.txt').read().lower(); br=json.load(open('/tmp/bridge-radar.json')); bh=json.load(open('/tmp/bridge-health.json'))
+          cap=json.load(open('/tmp/capital.json')); cp=json.load(open('/tmp/close-proof.json')); eb=json.load(open('/tmp/exec-before.json')); ea=json.load(open('/tmp/exec-after.json'))
+          s=src.decode('utf-8')
           out={
             'cockpit_title':'Founder Trading Cockpit V1' in h,
             'professional_regions':all(x in h for x in ['MARKET EDGE WATCHLIST','CONTRACT INSPECTOR','FOUNDER MANUAL ORDER','POSITIONS','REAL LEDGER','NO_FILL']),
@@ -55,7 +61,26 @@ jobs:
             'bridge_writes':bh.get('writes'),
             'bridge_credentials':bh.get('credentials'),
             'bridge_opportunities':len((br.get('live') or {}).get('opportunities') or []),
-            'cockpit_uses_bridge':'market-edge-founder-read.darkbishop43.workers.dev' in h
+            'cockpit_uses_bridge':'market-edge-founder-read.darkbishop43.workers.dev' in h,
+            'founderAllocationUsd':((cap.get('sleeves') or {}).get('FOUNDER_MANUAL') or {}).get('allocatedCapitalUsd'),
+            'manualEntryAuthorized':(cap.get('gates') or {}).get('manualEntryAuthorized'),
+            'manualExitAuthorized':(cap.get('gates') or {}).get('manualExitAuthorized'),
+            'closeProofOk':cp.get('ok'),
+            'closeReduceOnly':((cp.get('assertions') or {}).get('reduceOnly')),
+            'closeReverseSide':((cp.get('assertions') or {}).get('reverseBookSide')),
+            'closeProviderWrites':((cp.get('assertions') or {}).get('providerWrites')),
+            'autoIdentical':eb.get('state')==ea.get('state'),
+            'entryFounderCapitalGate':'MANUAL_PREVIEW_FOUNDER_ALLOCATION_INSUFFICIENT' in s,
+            'entryAutoGate':'MANUAL_PREVIEW_AUTO_ACTIVE_FAIL_CLOSED' in s,
+            'entryOneContract':'MANUAL_V1_ONE_CONTRACT_ONLY' in s,
+            'entryIocOnly':'MANUAL_V1_MODE_NOT_PROVEN' in s,
+            'entryMaxDebit':'MANUAL_V1_MAX_DEBIT_EXCEEDED' in s,
+            'staleEntry':'MANUAL_PREVIEW_PRICE_STALE_REFRESH_REQUIRED' in s,
+            'closeUnknown':'FOUNDER_CLOSE_REJECT_PROVIDER_POSITION_UNKNOWN' in s,
+            'closeStale':'FOUNDER_CLOSE_REJECT_STALE_QUOTE' in s,
+            'closeAmbiguous':'FOUNDER_CLOSE_REJECT_OWNERSHIP_AMBIGUOUS_AUTO_CONFLICT' in s,
+            'closeSafeQuantity':'safeQuantity=Math.min(remaining,pq)' in s,
+            'manualWriteRouteAbsent':'entryWriteRoutePresent:false' in s and 'providerWriteRoutePresent:false' in s
           }
           print(json.dumps(out,indent=2))
           assert out['cockpit_title'] and out['professional_regions'] and out['manual_submit_disabled']
@@ -64,4 +89,8 @@ jobs:
           assert out['shadow_status']=='LIVE_KALSHI_SHADOW'
           assert out['cors_header']=='access-control-allow-origin: https://raw.githack.com'
           assert out['bridge_ok'] and out['bridge_writes']==0 and out['bridge_credentials']==0 and out['cockpit_uses_bridge']
+          assert out['founderAllocationUsd']==0 and out['manualEntryAuthorized'] is False and out['manualExitAuthorized'] is False
+          assert out['closeProofOk'] and out['closeReduceOnly'] and out['closeReverseSide'] and out['closeProviderWrites']==0
+          assert out['autoIdentical']
+          assert all(out[k] for k in ['entryFounderCapitalGate','entryAutoGate','entryOneContract','entryIocOnly','entryMaxDebit','staleEntry','closeUnknown','closeStale','closeAmbiguous','closeSafeQuantity','manualWriteRouteAbsent'])
           PY
