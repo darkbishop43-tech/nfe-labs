@@ -1,4 +1,5 @@
 import { sendPushNotification, topicFromString } from "@mmmike/web-push/send";
+import { buildPhase1AShadowAttachment, freezePhase1ACheckpointDecision, phase1AShadowFixtureProof } from "./phase1a-shadow.js";
 
 // CLOUDFLARE DEPLOYMENT MARKER 2026-09-20: XRP recovery V2 proof route ce2252b / 7637a6f
 // SHARD_ROUTING_DEPLOYMENT_MARKER_2026_09_20
@@ -1886,6 +1887,25 @@ async function runExecutionTestSeries(env,freshShadow=null,preparedBalance=null)
     const age=now-Number(position?.filledAt||position?.submittedAt||now);
     const exitByScore=Boolean(shadowCurrent&&Number(shadowCurrent.score)<=EXECUTION_TEST_CONFIG.exitScore);
     const exitByTime=age>=EXECUTION_TEST_CONFIG.maxHoldMs;
+    if(exitByTime&&position?.phase1aShadow&&!position.phase1aShadow.checkpointDecision){
+      const exactProviderBid=Number(exactQuote?.bid);
+      const decision=freezePhase1ACheckpointDecision({
+        attachment:position.phase1aShadow,checkpointAt:now,exitScore:EXECUTION_TEST_CONFIG.exitScore,
+        currentScore:shadowCurrent?.score,currentEdge:shadowCurrent?.edge,currentMove:shadowCurrent?.move,
+        providerBid:Number.isFinite(exactProviderBid)?exactProviderBid:null,providerQuoteFresh:Number.isFinite(exactProviderBid),
+        shadowFresh:Boolean(shadowCurrent&&shadow?.status==="LIVE_KALSHI_SHADOW"),
+        closeTime:position?.closeTime||shadowCurrent?.closeTime||null,shadowObservedAt:shadow?.lastRunAt||null
+      });
+      position.phase1aShadow.checkpointDecision=decision;
+      position.phase1aShadow.realLifecycleUnaffected=true;
+      position.phase1aShadow.realMaxHoldStillMs=EXECUTION_TEST_CONFIG.maxHoldMs;
+      executionTestLedger(state,"PHASE1A_SHADOW_FIVE_MINUTE_CHECKPOINT_FROZEN",{
+        positionId:position.id,attemptNo:position.attemptNo,ticker:position.marketTicker,
+        decision:decision?.decision||"EXIT",reason:decision?.reason||"INSUFFICIENT_EVIDENCE",
+        futureOutcomeObserved:false,shadowTradingAuthority:false
+      });
+      if(!await saveExecutionTestRuntimeState(env,state,runtimeControlToken))return await loadExecutionTestState(env);
+    }
     if(!exitByScore&&!exitByTime)continue;
     if(!(liveBid>0.01&&liveBid<0.99)){
       position.status="EXIT_RETRY";
@@ -2097,8 +2117,9 @@ async function runExecutionTestSeries(env,freshShadow=null,preparedBalance=null)
       id:attemptId,attemptNo,status:"OPEN",asset:candidate.asset,marketTicker:candidate.marketTicker,outcomeSide:candidate.outcomeSide,direction:candidate.direction,
       exchangeIndex:candidate.exchangeIndex,entryScore:safeFinite(candidate.score),entryObservedAsk:safeFinite(candidate.yes),
       entryOrderId:attempt.orderId,filledCount:attempt.fillCount,entryAverageFillPrice:attempt.averageFillPrice,
-      entryAverageFeePaid:attempt.averageFeePaid,filledAt:attempt.filledAt,exitFilledTotal:0,exitAttempt:0
+      entryAverageFeePaid:attempt.averageFeePaid,filledAt:attempt.filledAt,closeTime:candidate.closeTime||null,exitFilledTotal:0,exitAttempt:0
     };
+    position.phase1aShadow=buildPhase1AShadowAttachment({position,candidate,attempt,attachedAt:Date.now(),maxHoldMs:EXECUTION_TEST_CONFIG.maxHoldMs});
     state.positions=Array.isArray(state.positions)?state.positions:[];
     state.positions.push(position);
     slots--;
@@ -5595,6 +5616,16 @@ document.getElementById('export')?.addEventListener('click',async()=>{const r=aw
           interlocks:{capabilityStaged:true,entryWriteRoutePresent:false,manualEntryAuthorized:false,manualSubmitButtonAuthorized:false,explicitFutureFounderTradeAuthorizationRequired:true,founderCapitalRequired:true,exactTickerMustNotBeAutoOwned:true,differentTickerMayRemainEligible:true,staleQuoteFailsClosed:true}
         });
       }catch(error){return json({ok:false,state:"MANUAL_PREVIEW_READ_FAILED",source,error:String(error?.message||error).slice(0,160),submitted:false},422);}
+    }
+
+    if (request.method === "GET" && url.pathname === "/phase1a-shadow-proof") {
+      return json({
+        ...phase1AShadowFixtureProof(),
+        state:"PHASE1A_SHADOW_ZERO_MONEY_PROOF",
+        continuationDurationAuthorized:false,
+        realTradingLogicChanged:false,
+        providerWrites:0,capitalMovedUsd:0,newRealAuthorizationConsumed:0
+      });
     }
 
     if (url.pathname === "/first-real-trade-evidence") {
