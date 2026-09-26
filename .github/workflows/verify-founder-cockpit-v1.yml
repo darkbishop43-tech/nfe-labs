@@ -72,9 +72,10 @@ jobs:
             'closeReduceOnly':((cp.get('assertions') or {}).get('reduceOnly')),
             'closeReverseSide':((cp.get('assertions') or {}).get('reverseBookSide')),
             'closeProviderWrites':((cp.get('assertions') or {}).get('providerWrites')),
+            'mutualExclusion':cp.get('mutualExclusion'),
             'autoIdentical':eb.get('state')==ea.get('state'),
             'entryFounderCapitalGate':'MANUAL_PREVIEW_FOUNDER_ALLOCATION_INSUFFICIENT' in s,
-            'entryAutoGate':'MANUAL_PREVIEW_AUTO_ACTIVE_FAIL_CLOSED' in s,
+            'entryExactTickerGate':'MANUAL_PREVIEW_AUTO_EXACT_TICKER_OWNED' in s,
             'entryOneContract':'MANUAL_V1_ONE_CONTRACT_ONLY' in s,
             'entryIocOnly':'MANUAL_V1_MODE_NOT_PROVEN' in s,
             'entryMaxDebit':'MANUAL_V1_MAX_DEBIT_EXCEEDED' in s,
@@ -83,7 +84,15 @@ jobs:
             'closeStale':'FOUNDER_CLOSE_REJECT_STALE_QUOTE' in s,
             'closeAmbiguous':'FOUNDER_CLOSE_REJECT_OWNERSHIP_AMBIGUOUS_AUTO_CONFLICT' in s,
             'closeSafeQuantity':'safeQuantity=Math.min(remaining,pq)' in s,
-            'manualWriteRouteAbsent':'entryWriteRoutePresent:false' in s and 'providerWriteRoutePresent:false' in s
+            'manualWriteRouteAbsent':'entryWriteRoutePresent:false' in s and 'providerWriteRoutePresent:false' in s,
+            'moneyHydratesFromCapitalLedger':"const provider=state.sleeves?.provider||{}" in h,
+            'accountValueUsd':(cap.get('provider') or {}).get('accountValueUsd'),
+            'providerCashUsdLedger':(cap.get('provider') or {}).get('cashUsd'),
+            'buyingPowerUsd':(cap.get('provider') or {}).get('buyingPowerUsd'),
+            'openExposureUsd':(cap.get('provider') or {}).get('openExposureUsd'),
+            'openPositionsCount':(cap.get('provider') or {}).get('openPositionsCount'),
+            'todayPnlStatus':(cap.get('provider') or {}).get('todayPnlStatus'),
+            'lifetimeRealPnlUsd':(cap.get('provider') or {}).get('lifetimeRealPnlUsd')
           }
           print(json.dumps(out,indent=2))
           assert out['cockpit_title'] and out['professional_regions'] and out['manual_submit_disabled']
@@ -94,6 +103,7 @@ jobs:
           assert out['bridge_ok'] and out['bridge_writes']==0 and out['bridge_credentials']==0 and out['cockpit_uses_bridge']
           assert out['founderAllocationUsd']==0 and out['manualEntryAuthorized'] is False and out['manualExitAuthorized'] is False
           assert out['closeProofOk'] and out['closeReduceOnly'] and out['closeReverseSide'] and out['closeProviderWrites']==0
+          assert all((out['mutualExclusion'] or {}).values())
           assert out['autoIdentical']
-          assert all(out[k] for k in ['entryFounderCapitalGate','entryAutoGate','entryOneContract','entryIocOnly','entryMaxDebit','staleEntry','closeUnknown','closeStale','closeAmbiguous','closeSafeQuantity','manualWriteRouteAbsent'])
+          assert all(out[k] for k in ['entryFounderCapitalGate','entryExactTickerGate','entryOneContract','entryIocOnly','entryMaxDebit','staleEntry','closeUnknown','closeStale','closeAmbiguous','closeSafeQuantity','manualWriteRouteAbsent','moneyHydratesFromCapitalLedger'])
           PY
