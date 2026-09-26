@@ -1,0 +1,37 @@
+name: Patch Phase 1B Runtime Fee Reuse Only
+
+on:
+  push:
+    branches: [market-edge-baseline-real]
+    paths:
+      - '.github/workflows/phase1b-fee-runtime-only.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: market-edge-baseline-real
+      - name: Reuse existing taker fee model in runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('market-edge-lab/real/baseline/src/index.js')
+          s=p.read_text()
+          old='''      if(Date.now()>=endpointMs){\n        freezePhase1BEndpointComparison({attachment,position,observedAt:Date.now(),hypotheticalExitFeeUsd:null});'''
+          new='''      if(Date.now()>=endpointMs){\n        const hypotheticalBid=Number(p1b?.latestAuthorizedObservation?.providerBid);\n        const hypotheticalQty=Number(position?.filledCount||0);\n        const hypotheticalExitFeeUsd=(hypotheticalBid>0&&hypotheticalQty>0)\n          ?kalshiGeneralTakerFeeUsd(hypotheticalBid,hypotheticalQty,1):null;\n        freezePhase1BEndpointComparison({attachment,position,observedAt:Date.now(),hypotheticalExitFeeUsd});'''
+          assert old in s
+          p.write_text(s.replace(old,new,1))
+          PY
+          git diff --check
+          git config user.name 'NFE-OS Builder'
+          git config user.email 'actions@users.noreply.github.com'
+          git add market-edge-lab/real/baseline/src/index.js
+          git commit -m 'Reuse existing Kalshi fee model for Phase 1B runtime'
+          git push origin HEAD:market-edge-baseline-real
