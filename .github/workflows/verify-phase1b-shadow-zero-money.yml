@@ -1,0 +1,146 @@
+name: Verify Phase 1B Shadow Zero Money
+
+on:
+  push:
+    branches: [market-edge-baseline-real]
+    paths:
+      - '.github/workflows/verify-phase1b-shadow-zero-money.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: verify-phase1b-shadow-zero-money
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: market-edge-baseline-real
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Capture live state before deploy
+        shell: bash
+        run: |
+          set -euo pipefail
+          B='https://market-edge-baseline-real.darkbishop43.workers.dev'
+          curl -fsS "$B/execution-test-state" -o /tmp/before-exec.json
+          curl -fsS "$B/founder-capital-ledger" -o /tmp/before-capital.json
+          python - <<'PY'
+          import json
+          x=json.load(open('/tmp/before-exec.json')); s=x.get('state') or {}; c=json.load(open('/tmp/before-capital.json'))
+          snap={'status':s.get('status'),'armed':s.get('armed'),'attemptsStarted':s.get('attemptsStarted'),'maxAttempts':s.get('maxAttempts'),'openPositions':s.get('openPositions'),'seriesId':s.get('seriesId'),'queue':s.get('queue')}
+          print('BEFORE_EXEC='+json.dumps(snap))
+          print('BEFORE_CASH='+json.dumps(c.get('provider') or {}))
+          assert s.get('armed') is False
+          assert int(s.get('openPositions') or 0)==0
+          PY
+
+      - name: Deterministic Phase 1A and Phase 1B fixtures
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'NODE'
+          import { phase1AShadowFixtureProof, phase1BShadowFixtureProof } from './market-edge-lab/real/baseline/src/phase1a-shadow.js';
+          const a=phase1AShadowFixtureProof();
+          const b=phase1BShadowFixtureProof();
+          console.log('PHASE1A='+JSON.stringify(a,null,2));
+          console.log('PHASE1B='+JSON.stringify(b,null,2));
+          if(!a.ok||!b.ok) process.exit(1);
+          if(b.caseA?.continuationEligible!==true||b.caseA?.durationMs!==60000) process.exit(1);
+          if(b.caseB?.continuationEligible!==false||b.caseB?.reason!=='INSUFFICIENT_TIME_FOR_BOUNDED_CONTINUATION') process.exit(1);
+          if(b.caseC?.continuationEligible!==false||b.caseC?.reason!=='INSUFFICIENT_TIME_OR_TIMING_EVIDENCE') process.exit(1);
+          if(b.caseD?.trustworthy!==true||b.caseD?.comparisonStatus!=='HELPED') process.exit(1);
+          if(b.caseE?.trustworthy!==false||b.caseE?.comparisonStatus!=='UNKNOWN / UNPROVEN') process.exit(1);
+          if(b.caseF?.realLifecycleUnaffected!==true) process.exit(1);
+          if(b.providerCloseTimeHardBoundary!==true||b.checkpointReasonImmutable!==true) process.exit(1);
+          if(b.providerWrites!==0||b.providerEntries!==0||b.providerExits!==0||b.providerCancels!==0) process.exit(1);
+          if(b.capitalMovedUsd!==0||b.newRealAuthorizationConsumed!==0||b.founderCapitalMovedUsd!==0) process.exit(1);
+          if(b.shadowTradingAuthority!==false||b.realExecutionLogicChanged!==false) process.exit(1);
+          NODE
+
+      - name: Verify protected source invariants
+        shell: bash
+        run: |
+          set -euo pipefail
+          F='market-edge-lab/real/baseline/src/index.js'
+          H='market-edge-lab/real/baseline/src/phase1a-shadow.js'
+          grep -F 'const exitByScore=Boolean(shadowCurrent&&Number(shadowCurrent.score)<=EXECUTION_TEST_CONFIG.exitScore)' "$F"
+          grep -F 'const exitByTime=age>=EXECUTION_TEST_CONFIG.maxHoldMs' "$F"
+          grep -F 'position.exitReason=exitByScore?"SCORE_EXIT":"MAX_HOLD_EXIT"' "$F"
+          grep -F 'executionTestExitWrite(env,state,position,payload)' "$F"
+          grep -F 'reduce_only:true' "$F"
+          grep -F 'TEST_ENTRY_NO_FILL' "$F"
+          grep -F 'position?.status!=="CLOSED"' "$F"
+          grep -F 'cycleNow<=endpointMs&&cycleNow<closeMs' "$F"
+          grep -F 'hypotheticalExitFeeUsd:null' "$F"
+          grep -F 'PHASE1B_CONTINUATION_MS=60_000' "$H"
+          grep -F 'PHASE1B_MIN_REMAINING_MS=90_000' "$H"
+          grep -F 'INSUFFICIENT_TIME_FOR_BOUNDED_CONTINUATION' "$H"
+          grep -F 'INSUFFICIENT_TIME_OR_TIMING_EVIDENCE' "$H"
+          grep -F 'checkpointReasonImmutable:true' "$H"
+          ! grep -F 'executionTestEntryWrite' "$H"
+          ! grep -F 'executionTestExitWrite' "$H"
+          ! grep -F 'kalshiExecutionPost' "$H"
+
+      - name: Install Baseline Real dependencies
+        working-directory: market-edge-lab/real/baseline
+        run: npm install --no-audit --no-fund
+
+      - name: Deploy Baseline Real
+        working-directory: market-edge-lab/real/baseline
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+          npx --yes wrangler@4 deploy | tee /tmp/deploy.log
+
+      - name: Verify live Phase 1B proof and zero-money state
+        shell: bash
+        run: |
+          set -euo pipefail
+          B='https://market-edge-baseline-real.darkbishop43.workers.dev'
+          curl -fsS "$B/phase1a-shadow-proof" -o /tmp/p1a.json
+          curl -fsS "$B/phase1b-shadow-proof" -o /tmp/p1b.json
+          curl -fsS "$B/execution-test-state" -o /tmp/after-exec.json
+          curl -fsS "$B/founder-capital-ledger" -o /tmp/after-capital.json
+          python - <<'PY'
+          import json
+          a=json.load(open('/tmp/p1a.json')); b=json.load(open('/tmp/p1b.json'))
+          before=json.load(open('/tmp/before-exec.json')).get('state') or {}
+          after=json.load(open('/tmp/after-exec.json')).get('state') or {}
+          bc=(json.load(open('/tmp/before-capital.json')).get('provider') or {})
+          ac=(json.load(open('/tmp/after-capital.json')).get('provider') or {})
+          print('LIVE_PHASE1A='+json.dumps(a))
+          print('LIVE_PHASE1B='+json.dumps(b))
+          print('AFTER_EXEC='+json.dumps({'status':after.get('status'),'armed':after.get('armed'),'attemptsStarted':after.get('attemptsStarted'),'maxAttempts':after.get('maxAttempts'),'openPositions':after.get('openPositions'),'seriesId':after.get('seriesId'),'queue':after.get('queue')}))
+          print('AFTER_CASH='+json.dumps(ac))
+          assert a.get('ok') is True
+          assert b.get('ok') is True
+          assert b.get('continuationDurationMs')==60000
+          assert b.get('minimumRemainingRequiredMs')==90000
+          assert (b.get('caseA') or {}).get('continuationEligible') is True
+          assert (b.get('caseB') or {}).get('reason')=='INSUFFICIENT_TIME_FOR_BOUNDED_CONTINUATION'
+          assert (b.get('caseC') or {}).get('reason')=='INSUFFICIENT_TIME_OR_TIMING_EVIDENCE'
+          assert (b.get('caseD') or {}).get('comparisonStatus')=='HELPED'
+          assert (b.get('caseE') or {}).get('comparisonStatus')=='UNKNOWN / UNPROVEN'
+          assert b.get('providerWrites')==0 and b.get('providerEntries')==0 and b.get('providerExits')==0 and b.get('providerCancels')==0
+          assert b.get('capitalMovedUsd')==0 and b.get('newRealAuthorizationConsumed')==0 and b.get('founderCapitalMovedUsd')==0
+          assert b.get('shadowTradingAuthority') is False and b.get('realExecutionLogicChanged') is False
+          assert after.get('armed') is False
+          assert int(after.get('openPositions') or 0)==0
+          assert before.get('seriesId')==after.get('seriesId')
+          assert before.get('attemptsStarted')==after.get('attemptsStarted')
+          assert bc.get('cashUsd')==ac.get('cashUsd')
+          assert bc.get('accountValueUsd')==ac.get('accountValueUsd')
+          PY
