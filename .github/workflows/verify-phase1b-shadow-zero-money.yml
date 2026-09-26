@@ -79,7 +79,7 @@ jobs:
           grep -F 'TEST_ENTRY_NO_FILL' "$F"
           grep -F 'position?.status!=="CLOSED"' "$F"
           grep -F 'cycleNow<=endpointMs&&cycleNow<closeMs' "$F"
-          grep -F 'hypotheticalExitFeeUsd:null' "$F"
+          grep -F 'kalshiGeneralTakerFeeUsd(hypotheticalBid,hypotheticalQty,1)' "$F"
           grep -F 'PHASE1B_CONTINUATION_MS=60_000' "$H"
           grep -F 'PHASE1B_MIN_REMAINING_MS=90_000' "$H"
           grep -F 'INSUFFICIENT_TIME_FOR_BOUNDED_CONTINUATION' "$H"
