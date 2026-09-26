@@ -55,6 +55,8 @@ jobs:
             'exec_status':(ex.get('state') or {}).get('status'),
             'exec_armed':(ex.get('state') or {}).get('armed'),
             'attemptsStarted':(ex.get('state') or {}).get('attemptsStarted'),
+            'maxAttempts':(ex.get('state') or {}).get('maxAttempts'),
+            'activeThreshold':(ex.get('state') or {}).get('threshold'),
             'openPositions':(ex.get('state') or {}).get('openPositions'),
             'queue':(ex.get('state') or {}).get('queue'),
             'positions':(ex.get('state') or {}).get('positions'),
