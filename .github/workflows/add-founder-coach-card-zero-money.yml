@@ -1,6 +1,6 @@
 name: Founder Coach Card UI Integration
 
-# NFE-OS verifier trigger: patch-anchor repair 89387d9
+# NFE-OS verifier trigger: compact Coach Card presentation
 on:
   push:
     branches:
@@ -28,14 +28,13 @@ jobs:
           git diff --check
           grep -q 'FOUNDER COACH CARD' market-edge-lab/real/baseline/src/index.js
           grep -q 'ACTIVE FROZEN CONFIGURATION' market-edge-lab/real/baseline/src/index.js
-          grep -q 'UNLOCK STAKE' market-edge-lab/real/baseline/src/index.js
-          grep -q 'UNLOCK POSITIONS' market-edge-lab/real/baseline/src/index.js
-          grep -q 'RE-LOCK STAKE' market-edge-lab/real/baseline/src/index.js
-          grep -q 'RE-LOCK POSITIONS' market-edge-lab/real/baseline/src/index.js
+          grep -q "id='coachStakeLockButton'" market-edge-lab/real/baseline/src/index.js
+          grep -q "id='coachConcurrentLockButton'" market-edge-lab/real/baseline/src/index.js
+          grep -q "btn.textContent=locked?'UNLOCK':'RE-LOCK'" market-edge-lab/real/baseline/src/index.js
           grep -q 'ARM COACH CARD RUN — NOT ENABLED' market-edge-lab/real/baseline/src/index.js
           grep -q 'ARM_BOUNDED_EXECUTION_TESTS_MAX_1_USD' market-edge-lab/real/baseline/src/index.js
           grep -q 'DISARM_EXECUTION_TEST_SERIES_PRESERVE_HISTORY' market-edge-lab/real/baseline/src/index.js
-          echo 'liveExecutionAuthorityChanged=NO'
+          echo 'functionalLogicChanged=NO'
           echo 'providerWrites=0'
           echo 'capitalMovedUsd=0'
           echo 'ordersSubmitted=0'
@@ -44,5 +43,5 @@ jobs:
           git config user.name 'NFE-OS Builder'
           git config user.email 'actions@users.noreply.github.com'
           git add market-edge-lab/real/baseline/src/index.js
-          git commit -m 'Add Founder lock governance to Coach Card UI'
+          git commit -m 'Compact Founder Coach Card and Original ARM UI'
           git push origin HEAD:market-edge-baseline-real
