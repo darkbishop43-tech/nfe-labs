@@ -1,0 +1,48 @@
+name: Verify Known Good Source Phase A
+
+on:
+  push:
+    branches: [market-edge-baseline-real]
+    paths: ['.github/workflows/verify-known-good-source-phase-a.yml']
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: market-edge-baseline-real
+      - name: Zero-money Phase A source proof
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          s=Path('market-edge-lab/real/baseline/src/index.js').read_text()
+
+          checks={
+            'module_default_1': 'maxEntryDebitUsd:1' in s,
+            'max_concurrent_3': 'maxConcurrent:3' in s,
+            'existing_arm': 'url.pathname === "/execution-test-arm"' in s,
+            'existing_disarm': 'url.pathname === "/execution-test-disarm"' in s,
+            'arm_authority_1': 'ARM_BOUNDED_EXECUTION_TESTS_MAX_1_USD' in s,
+            'threshold_60': "<option value='.60'>.60</option>" in s,
+            'threshold_65': "<option value='.65' selected>.65</option>" in s,
+            'threshold_70': "<option value='.70'>.70</option>" in s,
+            'threshold_75': "<option value='.75'>.75</option>" in s,
+            'threshold_80': "<option value='.80'>.80</option>" in s,
+            'attempt_selector': "name='runCount'" in s and "min='1' max='100'" in s,
+            'original_runtime_initial': 'estimateKalshiFeeSafeSize(candidate.yes,EXECUTION_TEST_CONFIG.maxEntryDebitUsd)' in s,
+            'original_runtime_final': 'estimateKalshiFeeSafeSize(finalCandidate.yes,EXECUTION_TEST_CONFIG.maxEntryDebitUsd)' in s,
+            'no_module_requested_stake': 'maxEntryDebitUsd:requestedStake' not in s,
+            'no_stake_selector': "name='maxEntryDebitUsd'" not in s,
+          }
+          for k,v in checks.items(): print(f'{k}={v}')
+          print('providerWrites=0')
+          print('capitalMovedUsd=0')
+          print('ordersSubmitted=0')
+          assert all(checks.values()), [k for k,v in checks.items() if not v]
+          PY
