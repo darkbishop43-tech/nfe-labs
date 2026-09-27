@@ -1,6 +1,6 @@
 name: Deploy Baseline Real Worker
 
-# NFE-OS deployment trigger: Coach Card lock-governance source commit 70de676
+# NFE-OS deployment trigger: Coach Card governance source commit 5718ff5
 on:
   push:
     branches:
