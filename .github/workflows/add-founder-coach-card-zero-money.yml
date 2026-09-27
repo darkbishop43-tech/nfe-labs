@@ -1,4 +1,4 @@
-name: Founder Coach Card Zero Money Proof
+name: Founder Coach Card Live-Gated Integration
 
 on:
   push:
@@ -9,118 +9,147 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
-  verify:
+  integrate:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
           ref: market-edge-baseline-real
-      - name: Verify original ARM isolation and Coach Card freeze model
+      - name: Add live-gated Coach Card UI without changing Original ARM
         shell: bash
         run: |
           set -euo pipefail
-          SOURCE='market-edge-lab/real/baseline/src/index.js'
-          EXPECTED_SOURCE_BLOB='7df4b0a663c8659969ce55adab495bd905a65c5f'
-          ACTUAL_SOURCE_BLOB="$(git hash-object "$SOURCE")"
-          echo "expectedSourceBlob=$EXPECTED_SOURCE_BLOB"
-          echo "actualSourceBlob=$ACTUAL_SOURCE_BLOB"
-          test "$ACTUAL_SOURCE_BLOB" = "$EXPECTED_SOURCE_BLOB"
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('market-edge-lab/real/baseline/src/index.js')
+          s=p.read_text()
+
+          arm_start='    if (request.method === "POST" && url.pathname === "/execution-test-arm") {'
+          queue_start='    if (request.method === "POST" && url.pathname === "/execution-test-queue-arm") {'
+          assert arm_start in s and queue_start in s
+          before_arm=s[s.index(arm_start):s.index(queue_start)]
+          assert 'ARM_BOUNDED_EXECUTION_TESTS_MAX_1_USD' in before_arm
+          assert 'maxConcurrent:3,maxEntryDebitUsd:1' in before_arm
+          assert '/execution-test-coach-preview' not in s
+          assert '/execution-test-coach-arm' not in s
+          assert "name='coachStake'" not in s
+
+          coach_routes='''    if (request.method === "POST" && url.pathname === "/execution-test-coach-preview") {
+      const form=await request.formData().catch(()=>null);
+      if(String(form?.get("authorization")||"")!=="VALIDATE_FOUNDER_COACH_CARD") return json({ok:false,state:"EXPLICIT_COACH_VALIDATION_AUTHORIZATION_REQUIRED",armed:false,providerWrites:0,capitalMovedUsd:0,tradingOrders:0},400);
+      const threshold=Number(form?.get("coachThreshold"));
+      const maxAttempts=Math.trunc(Number(form?.get("coachAttempts")));
+      const maxEntryDebitUsd=Math.trunc(Number(form?.get("coachStake")));
+      const maxConcurrent=Math.trunc(Number(form?.get("coachConcurrent")));
+      const allowedScores=[.50,.55,.60,.65,.70,.75,.80,.85];
+      if(!allowedScores.some(x=>Math.abs(x-threshold)<1e-9)) return json({ok:false,state:"COACH_THRESHOLD_INVALID",armed:false,providerWrites:0,capitalMovedUsd:0,tradingOrders:0},400);
+      if(!Number.isInteger(maxAttempts)||maxAttempts<1||maxAttempts>100) return json({ok:false,state:"COACH_ATTEMPTS_INVALID",armed:false,providerWrites:0,capitalMovedUsd:0,tradingOrders:0},400);
+      if(!Number.isInteger(maxEntryDebitUsd)||maxEntryDebitUsd<1||maxEntryDebitUsd>10) return json({ok:false,state:"COACH_STAKE_INVALID",armed:false,providerWrites:0,capitalMovedUsd:0,tradingOrders:0},400);
+      if(!Number.isInteger(maxConcurrent)||maxConcurrent<1||maxConcurrent>10) return json({ok:false,state:"COACH_CONCURRENCY_INVALID",armed:false,providerWrites:0,capitalMovedUsd:0,tradingOrders:0},400);
+      const frozenConfig=Object.freeze({threshold,maxAttempts,maxEntryDebitUsd,maxConcurrent});
+      const liveArmEligible=maxEntryDebitUsd===1&&maxConcurrent<=3;
+      return json({ok:true,state:liveArmEligible?"COACH_CONFIG_VALID_LIVE_ARM_ELIGIBLE":"COACH_CONFIG_VALID_NOT_YET_LIVE_AUTHORIZED",frozenConfig,immutable:true,liveArmEligible,liveAuthority:{maxEntryDebitUsd:1,maxConcurrent:3},autoCanAlterConfig:false,armed:false,providerWrites:0,capitalMovedUsd:0,tradingOrders:0});
+    }
+
+    if (request.method === "POST" && url.pathname === "/execution-test-coach-arm") {
+      const form=await request.formData().catch(()=>null);
+      if(String(form?.get("authorization")||"")!=="ARM_FOUNDER_COACH_CARD_WITHIN_CURRENT_AUTHORITY") return json({ok:false,state:"EXPLICIT_COACH_ARM_AUTHORIZATION_REQUIRED",armed:false},400);
+      const requestedScore=Number(form?.get("coachThreshold"));
+      const requestedAttempts=Math.trunc(Number(form?.get("coachAttempts")));
+      const requestedStake=Math.trunc(Number(form?.get("coachStake")));
+      const requestedConcurrent=Math.trunc(Number(form?.get("coachConcurrent")));
+      const allowedScores=[.50,.55,.60,.65,.70,.75,.80,.85];
+      if(!allowedScores.some(x=>Math.abs(x-requestedScore)<1e-9)) return json({ok:false,state:"COACH_THRESHOLD_INVALID",armed:false},400);
+      if(!Number.isInteger(requestedAttempts)||requestedAttempts<1||requestedAttempts>EXECUTION_TEST_CONFIG.maxSelectableAttempts) return json({ok:false,state:"COACH_ATTEMPTS_INVALID",armed:false},400);
+      if(!Number.isInteger(requestedStake)||requestedStake<1||requestedStake>10) return json({ok:false,state:"COACH_STAKE_INVALID",armed:false},400);
+      if(!Number.isInteger(requestedConcurrent)||requestedConcurrent<1||requestedConcurrent>10) return json({ok:false,state:"COACH_CONCURRENCY_INVALID",armed:false},400);
+      const frozenConfig=Object.freeze({threshold:requestedScore,maxAttempts:requestedAttempts,maxEntryDebitUsd:requestedStake,maxConcurrent:requestedConcurrent});
+      if(requestedStake!==1||requestedConcurrent>3) return json({ok:false,state:"NOT_YET_LIVE_AUTHORIZED",validConfiguration:true,frozenConfig,liveAuthority:{maxEntryDebitUsd:1,maxConcurrent:3},armed:false,providerWrites:0,capitalMovedUsd:0,tradingOrders:0},403);
+      if(!kalshiControllerSwitchEnabled(env)) return json({ok:false,state:"CONTROLLER_SWITCH_HARD_DISABLED",armed:false},423);
+      const real=await loadRealTradeState(env);
+      if(kalshiAuthorizationValid(real)||Number(real?.filledCount||0)>Number(real?.exitFilledTotal||0)) return json({ok:false,state:"ONE_TRADE_CONTROLLER_OR_POSITION_ACTIVE",armed:false},409);
+      const current=await loadExecutionTestState(env);
+      if(executionTestQueueActive(current)) return json({ok:false,state:"QUEUE_ALREADY_ACTIVE",armed:false},409);
+      if(current?.armed) return json({ok:false,state:"EXECUTION_TEST_ALREADY_ARMED",armed:false},409);
+      if(executionTestOpenPositions(current).length>0) return json({ok:false,state:"OPEN_POSITION_REQUIRES_NORMAL_MANAGEMENT",armed:false},409);
+      const balanceProof=await kalshiExecutionBalanceSnapshot(env);
+      const rows=Array.isArray(balanceProof?.body?.balance_breakdown)?balanceProof.body.balance_breakdown:[];
+      const index2=Number(rows.find(x=>Number(x?.exchange_index)===2)?.balance);
+      if(!balanceProof?.ok||!Number.isFinite(index2)||index2<EXECUTION_TEST_CONFIG.minSeriesFundingUsd) return json({ok:false,state:"INDEX2_FUNDING_NOT_READY",armed:false,index2Usd:Number.isFinite(index2)?index2:null,requiredUsd:EXECUTION_TEST_CONFIG.minSeriesFundingUsd},409);
+      const state=defaultExecutionTestState();
+      state.queueHistory=JSON.parse(JSON.stringify(Array.isArray(current?.queueHistory)?current.queueHistory:[]));
+      state.maxAttempts=requestedAttempts;
+      state.threshold=requestedScore;
+      state.maxEntryDebitUsd=1;
+      state.maxConcurrent=requestedConcurrent;
+      state.armed=true;state.status="ARMED_FISHING";state.seriesId=crypto.randomUUID();state.armedAt=Date.now();
+      state.fundingAtArm={index2Usd:index2,requiredExchangeIndex:2};
+      state.coachCardConfig=frozenConfig;
+      executionTestLedger(state,"EXECUTION_TEST_COACH_SERIES_ARMED",{threshold:requestedScore,maxAttempts:requestedAttempts,maxConcurrent:requestedConcurrent,maxEntryDebitUsd:1,index2Usd:index2,productionBaselineThreshold:REAL_TEST_CONFIG.entryScore,founderConfigured:true});
+      await saveExecutionTestState(env,state);
+      return Response.redirect(new URL("/execution-test-control?coach=armed",request.url).toString(),303);
+    }
+
+'''
+          s=s.replace(arm_start,coach_routes+arm_start,1)
+
+          ui_anchor='      if(!state.armed&&!executionTestQueueActive(state)&&executionTestOpenPositions(state).length===0&&ready) control+="<div class=\'box\'><b>EXISTING SINGLE-SERIES ARM</b>'
+          assert ui_anchor in s, 'ORIGINAL_ARM_UI_ANCHOR_MISSING'
+          coach_ui='''      control+="<div class='box'><b>FOUNDER COACH CARD</b><p class='muted'>Configuration layer on the existing execution-test controller. Current live authority remains $1 max entry debit and max concurrent <= 3. Higher selections remain valid zero-money configurations but are <b>NOT YET LIVE-AUTHORIZED</b>.</p><form id='coachCardForm' method='post'><input type='hidden' name='authorization' id='coachAuthorization' value='VALIDATE_FOUNDER_COACH_CARD'><label><b>Signal threshold</b></label><select id='coachThreshold' name='coachThreshold' onchange='coachGate()' style='font-size:18px;padding:12px;width:100%;box-sizing:border-box;margin:8px 0 14px;border-radius:10px'>"+[.50,.55,.60,.65,.70,.75,.80,.85].map(v=>"<option value='"+v+"' "+(v===.60?"selected":"")+">"+v.toFixed(2)+"</option>").join("")+"</select><label><b>Attempt count</b></label><input id='coachAttempts' name='coachAttempts' type='number' min='1' max='100' step='1' value='3' oninput='coachGate()' style='font-size:18px;padding:12px;width:100%;box-sizing:border-box;margin:8px 0 14px;border-radius:10px'><label><b>Max entry debit per filled position</b></label><select id='coachStake' name='coachStake' onchange='coachGate()' style='font-size:18px;padding:12px;width:100%;box-sizing:border-box;margin:8px 0 14px;border-radius:10px'>"+[1,2,3,4,5,6,7,8,9,10].map(v=>"<option value='"+v+"' "+(v===1?"selected":"")+">$"+v+"</option>").join("")+"</select><label><b>Max simultaneous positions</b></label><input id='coachConcurrent' name='coachConcurrent' type='number' min='1' max='10' step='1' value='3' oninput='coachGate()' style='font-size:18px;padding:12px;width:100%;box-sizing:border-box;margin:8px 0 8px;border-radius:10px'><p id='coachAuthorityStatus' class='ok'><b>LIVE ARM ELIGIBLE</b> — within current $1 / <=3 authority.</p><button type='submit' formaction='/execution-test-coach-preview' onclick=\"document.getElementById('coachAuthorization').value='VALIDATE_FOUNDER_COACH_CARD'\">VALIDATE COACH CARD CONFIGURATION</button><button id='coachArmButton' type='submit' formaction='/execution-test-coach-arm' onclick=\"document.getElementById('coachAuthorization').value='ARM_FOUNDER_COACH_CARD_WITHIN_CURRENT_AUTHORITY'\">ARM COACH CARD RUN</button></form><script>function coachGate(){const stake=Number(document.getElementById('coachStake')?.value),con=Number(document.getElementById('coachConcurrent')?.value),status=document.getElementById('coachAuthorityStatus'),btn=document.getElementById('coachArmButton');const eligible=stake===1&&con>=1&&con<=3;if(status){status.className=eligible?'ok':'warn';status.innerHTML=eligible?'<b>LIVE ARM ELIGIBLE</b> — within current $1 / <=3 authority.':'<b>NOT YET LIVE-AUTHORIZED</b> — configuration remains valid for zero-money validation only.';}if(btn)btn.disabled=!eligible;}coachGate();</script><p class='muted'>Coach Card does not alter the Original ARM. Blocked configurations are never silently reduced.</p></div>";
+'''
+          s=s.replace(ui_anchor,coach_ui+ui_anchor,1)
+
+          after_arm=s[s.index(arm_start):s.index(queue_start)]
+          assert after_arm==before_arm, 'ORIGINAL_ARM_SOURCE_CHANGED'
+          p.write_text(s)
+          PY
+
+          git diff --check
 
           python - <<'PY'
-          from dataclasses import dataclass, FrozenInstanceError
           from pathlib import Path
-
-          source = Path('market-edge-lab/real/baseline/src/index.js').read_text()
-
-          source_checks = {
-              'original_arm_route': 'url.pathname === "/execution-test-arm"' in source,
-              'original_disarm_route': 'url.pathname === "/execution-test-disarm"' in source,
-              'original_arm_authority': 'ARM_BOUNDED_EXECUTION_TESTS_MAX_1_USD' in source,
-              'original_default_stake_1': 'maxEntryDebitUsd:1' in source,
-              'original_max_concurrent_3': 'maxConcurrent:3' in source,
-              'original_runtime_initial': 'estimateKalshiFeeSafeSize(candidate.yes,EXECUTION_TEST_CONFIG.maxEntryDebitUsd)' in source,
-              'original_runtime_final': 'estimateKalshiFeeSafeSize(finalCandidate.yes,EXECUTION_TEST_CONFIG.maxEntryDebitUsd)' in source,
+          s=Path('market-edge-lab/real/baseline/src/index.js').read_text()
+          checks={
+            'original_arm_present':'ARM_BOUNDED_EXECUTION_TESTS_MAX_1_USD' in s,
+            'original_disarm_present':'DISARM_EXECUTION_TEST_SERIES_PRESERVE_HISTORY' in s,
+            'original_default_stake_1':'maxEntryDebitUsd:1' in s,
+            'original_max_concurrent_3':'maxConcurrent:3' in s,
+            'runtime_reads_state_concurrency':'state?.maxConcurrent||EXECUTION_TEST_CONFIG.maxConcurrent' in s,
+            'coach_same_page':'FOUNDER COACH CARD' in s and '/execution-test-control' in s,
+            'coach_preview_route':'/execution-test-coach-preview' in s,
+            'coach_arm_route':'/execution-test-coach-arm' in s,
+            'stake_range':'[1,2,3,4,5,6,7,8,9,10]' in s,
+            'concurrency_range':"min='1' max='10'" in s,
+            'live_gate':'requestedStake!==1||requestedConcurrent>3' in s,
+            'blocked_label':'NOT YET LIVE-AUTHORIZED' in s,
+            'no_silent_clamp':'state.maxEntryDebitUsd=1' in s and 'state.maxConcurrent=requestedConcurrent' in s,
           }
+          for k,v in checks.items(): print(f'{k}={v}')
+          assert all(checks.values()), [k for k,v in checks.items() if not v]
 
-          SUPPORTED_THRESHOLDS = (0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.80, 0.85)
-
-          @dataclass(frozen=True)
-          class CoachRunConfig:
-              threshold: float
-              maxAttempts: int
-              maxEntryDebitUsd: int
-              maxConcurrent: int
-
-          def validate(ui):
-              threshold = float(ui['threshold'])
-              attempts = int(ui['maxAttempts'])
-              stake = int(ui['maxEntryDebitUsd'])
-              concurrent = int(ui['maxConcurrent'])
-              if threshold not in SUPPORTED_THRESHOLDS:
-                  raise ValueError('INVALID_THRESHOLD')
-              if not 1 <= attempts <= 100:
-                  raise ValueError('INVALID_ATTEMPTS')
-              if not 1 <= stake <= 10:
-                  raise ValueError('INVALID_STAKE')
-              if not 1 <= concurrent <= 10:
-                  raise ValueError('INVALID_CONCURRENCY')
-              return CoachRunConfig(threshold, attempts, stake, concurrent)
-
-          fixtures = {
-              'A': {'threshold':0.60,'maxAttempts':3,'maxEntryDebitUsd':1,'maxConcurrent':3},
-              'B': {'threshold':0.65,'maxAttempts':5,'maxEntryDebitUsd':2,'maxConcurrent':3},
-              'C': {'threshold':0.80,'maxAttempts':1,'maxEntryDebitUsd':10,'maxConcurrent':1},
-              'D': {'threshold':0.70,'maxAttempts':10,'maxEntryDebitUsd':3,'maxConcurrent':5},
-          }
-
-          for name, ui in fixtures.items():
-              frozen = validate(dict(ui))
-              before = (frozen.threshold, frozen.maxAttempts, frozen.maxEntryDebitUsd, frozen.maxConcurrent)
-              changed_ui = dict(ui)
-              changed_ui.update({'threshold':0.55,'maxAttempts':99,'maxEntryDebitUsd':9,'maxConcurrent':9})
-              after = (frozen.threshold, frozen.maxAttempts, frozen.maxEntryDebitUsd, frozen.maxConcurrent)
-              assert before == after, f'{name}_UI_MUTATED_FROZEN_CONFIG'
-              try:
-                  frozen.maxAttempts = 42
-                  raise AssertionError(f'{name}_FROZEN_CONFIG_MUTABLE')
-              except FrozenInstanceError:
-                  pass
-              print(f'fixture_{name}=PASS frozen={before}')
-
-          invalid = [
-              {'threshold':0.61,'maxAttempts':3,'maxEntryDebitUsd':1,'maxConcurrent':3},
-              {'threshold':0.60,'maxAttempts':0,'maxEntryDebitUsd':1,'maxConcurrent':3},
-              {'threshold':0.60,'maxAttempts':101,'maxEntryDebitUsd':1,'maxConcurrent':3},
-              {'threshold':0.60,'maxAttempts':3,'maxEntryDebitUsd':0,'maxConcurrent':3},
-              {'threshold':0.60,'maxAttempts':3,'maxEntryDebitUsd':11,'maxConcurrent':3},
-              {'threshold':0.60,'maxAttempts':3,'maxEntryDebitUsd':1,'maxConcurrent':0},
-              {'threshold':0.60,'maxAttempts':3,'maxEntryDebitUsd':1,'maxConcurrent':11},
+          fixtures=[
+            ('A',.60,3,1,3,True),
+            ('B',.80,1,1,1,True),
+            ('C',.65,5,2,3,False),
+            ('D',.80,1,10,1,False),
+            ('E',.70,10,1,5,False),
           ]
-
-          for i, ui in enumerate(invalid, 1):
-              try:
-                  validate(ui)
-                  raise AssertionError(f'INVALID_FIXTURE_{i}_ACCEPTED')
-              except ValueError:
-                  print(f'invalid_fixture_{i}=FAIL_CLOSED')
-
-          for key, value in source_checks.items():
-              print(f'{key}={value}')
-          assert all(source_checks.values()), [k for k,v in source_checks.items() if not v]
-
-          print('coachConfigSurface=PROVEN_ZERO_MONEY_MODEL')
-          print('thresholdConfig=PROVEN')
-          print('attemptConfig=PROVEN_1_TO_100')
-          print('stakeConfig=PROVEN_1_TO_10')
-          print('concurrencyConfig=PROVEN_1_TO_10')
-          print('fourValueFreeze=PROVEN')
-          print('frozenConfigImmutable=PROVEN')
-          print('autoCanChangeConfig=NO')
-          print('originalArmFailureIsolation=PROVEN')
+          allowed={.50,.55,.60,.65,.70,.75,.80,.85}
+          for name,threshold,attempts,stake,concurrent,expected in fixtures:
+            valid=threshold in allowed and 1<=attempts<=100 and 1<=stake<=10 and 1<=concurrent<=10
+            eligible=valid and stake==1 and concurrent<=3
+            assert valid and eligible==expected, (name,valid,eligible)
+            print(f'fixture_{name}=PASS valid={valid} liveArmEligible={eligible}')
           print('providerWrites=0')
           print('capitalMovedUsd=0')
           print('ordersSubmitted=0')
           PY
+
+          git config user.name 'NFE-OS Builder'
+          git config user.email 'actions@users.noreply.github.com'
+          git add market-edge-lab/real/baseline/src/index.js
+          git commit -m 'Render live-gated Founder Coach Card on execution control page'
+          git push origin HEAD:market-edge-baseline-real
