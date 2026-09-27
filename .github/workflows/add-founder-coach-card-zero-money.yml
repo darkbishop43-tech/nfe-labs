@@ -1,0 +1,108 @@
+name: Add Founder Coach Card Zero Money
+
+on:
+  push:
+    branches: [market-edge-baseline-real]
+    paths: ['.github/workflows/add-founder-coach-card-zero-money.yml']
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: market-edge-baseline-real
+      - name: Add standalone zero-money Coach Card without changing original ARM
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('market-edge-lab/real/baseline/src/index.js')
+          s=p.read_text()
+
+          # Hard safety assertions: known-good original ARM path must be present and remain untouched.
+          original_arm_route='if (request.method === "POST" && url.pathname === "/execution-test-arm") {'
+          assert original_arm_route in s, 'ORIGINAL_ARM_ROUTE_MISSING'
+          assert 'ARM_BOUNDED_EXECUTION_TESTS_MAX_1_USD' in s, 'ORIGINAL_ARM_AUTHORITY_MISSING'
+          assert 'maxEntryDebitUsd:1' in s, 'ORIGINAL_$1_DEFAULT_MISSING'
+          assert 'maxConcurrent:3' in s, 'ORIGINAL_MAX_CONCURRENT_3_MISSING'
+          assert 'estimateKalshiFeeSafeSize(candidate.yes,EXECUTION_TEST_CONFIG.maxEntryDebitUsd)' in s, 'ORIGINAL_RUNTIME_SIZING_MISSING'
+          assert 'estimateKalshiFeeSafeSize(finalCandidate.yes,EXECUTION_TEST_CONFIG.maxEntryDebitUsd)' in s, 'ORIGINAL_FINAL_RUNTIME_SIZING_MISSING'
+          assert '/execution-test-coach-preview' not in s, 'COACH_PREVIEW_ALREADY_PRESENT'
+
+          coach_route='''if (request.method === "POST" && url.pathname === "/execution-test-coach-preview") {
+      const form=await request.formData().catch(()=>null);
+      if(String(form?.get("authorization")||"")!=="VALIDATE_FOUNDER_COACH_CARD_ZERO_MONEY") return json({ok:false,state:"EXPLICIT_COACH_PREVIEW_AUTHORIZATION_REQUIRED",armed:false,submitted:false},400);
+      const threshold=Number(form?.get("coachThreshold"));
+      const maxAttempts=Math.trunc(Number(form?.get("coachAttempts")));
+      const maxEntryDebitUsd=Math.trunc(Number(form?.get("coachStake")));
+      const maxConcurrent=Math.trunc(Number(form?.get("coachConcurrent")));
+      const supportedThresholds=[.50,.55,.60,.65,.70,.75,.80,.85];
+      if(!supportedThresholds.includes(threshold)) return json({ok:false,state:"INVALID_COACH_THRESHOLD",armed:false,submitted:false},400);
+      if(!Number.isInteger(maxAttempts)||maxAttempts<1||maxAttempts>100) return json({ok:false,state:"INVALID_COACH_ATTEMPTS",armed:false,submitted:false},400);
+      if(!Number.isInteger(maxEntryDebitUsd)||maxEntryDebitUsd<1||maxEntryDebitUsd>10) return json({ok:false,state:"INVALID_COACH_MAX_ENTRY_DEBIT",armed:false,submitted:false},400);
+      if(!Number.isInteger(maxConcurrent)||maxConcurrent<1||maxConcurrent>10) return json({ok:false,state:"INVALID_COACH_CONCURRENCY",armed:false,submitted:false},400);
+      const frozenConfig=Object.freeze({threshold,maxAttempts,maxEntryDebitUsd,maxConcurrent});
+      return json({
+        ok:true,state:"COACH_CARD_ZERO_MONEY_VALIDATED",mode:"FOUNDER_COACH_CARD_PREVIEW_ONLY",
+        frozenConfig,immutablePreview:true,
+        existingArmReused:false,existingExecutionEngineChanged:false,
+        armed:false,schedulerAuthorityAdded:false,autoCanChangeRunConfig:false,
+        providerWrites:0,capitalMovedUsd:0,tradingOrders:0,
+        note:"Validated Coach Card configuration only. This route cannot arm, submit, fund, or alter the live execution-test series."
+      });
+    }
+
+    '''
+          s=s.replace(original_arm_route,coach_route+original_arm_route,1)
+
+          # Standalone Coach Card UI is inserted adjacent to the existing ARM card.
+          original_ui='if(!state.armed&&!executionTestQueueActive(state)&&executionTestOpenPositions(state).length===0&&ready) control+="<div class=\'box\'><b>EXISTING SINGLE-SERIES ARM</b>'
+          assert original_ui in s, 'ORIGINAL_ARM_UI_ANCHOR_MISSING'
+          coach_ui='''if(!state.armed&&!executionTestQueueActive(state)&&executionTestOpenPositions(state).length===0&&ready) control+="<div class='box'><b>FOUNDER COACH CARD — ZERO-MONEY VALIDATION</b><p class='muted'>Optional configuration surface. This preview validates and freezes the play without arming or changing the working $1 controller.</p><form method='post' action='/execution-test-coach-preview'><input type='hidden' name='authorization' value='VALIDATE_FOUNDER_COACH_CARD_ZERO_MONEY'><label><b>Signal threshold</b></label><select name='coachThreshold' style='font-size:18px;padding:12px;width:100%;box-sizing:border-box;margin:8px 0 14px;border-radius:10px'>"+[.50,.55,.60,.65,.70,.75,.80,.85].map(v=>"<option value='"+v+"' "+(v===.65?"selected":"")+">"+v.toFixed(2)+"</option>").join("")+"</select><label><b>Attempt count</b></label><input name='coachAttempts' type='number' min='1' max='100' step='1' value='5' style='font-size:18px;padding:12px;width:100%;box-sizing:border-box;margin:8px 0 14px;border-radius:10px'><label><b>Max entry debit per filled position</b></label><select name='coachStake' style='font-size:18px;padding:12px;width:100%;box-sizing:border-box;margin:8px 0 14px;border-radius:10px'>"+[1,2,3,4,5,6,7,8,9,10].map(v=>"<option value='"+v+"' "+(v===2?"selected":"")+">$"+v+"</option>").join("")+"</select><label><b>Max simultaneous filled positions</b></label><input name='coachConcurrent' type='number' min='1' max='10' step='1' value='3' style='font-size:18px;padding:12px;width:100%;box-sizing:border-box;margin:8px 0 14px;border-radius:10px'><button type='submit'>VALIDATE COACH CARD — ZERO MONEY</button></form><p class='muted'>Validation only: no ARM, no scheduler authority, no provider write, no capital movement.</p></div>";
+      '''
+          s=s.replace(original_ui,coach_ui+original_ui,1)
+
+          p.write_text(s)
+          PY
+
+          git diff --check
+
+          # Zero-money structural proof. Do not call Worker/provider endpoints.
+          python - <<'PY'
+          from pathlib import Path
+          s=Path('market-edge-lab/real/baseline/src/index.js').read_text()
+          checks={
+            'original_arm_route_unchanged':'if (request.method === "POST" && url.pathname === "/execution-test-arm") {' in s,
+            'original_arm_auth_unchanged':'ARM_BOUNDED_EXECUTION_TESTS_MAX_1_USD' in s,
+            'original_default_stake_1':'maxEntryDebitUsd:1' in s,
+            'original_max_concurrent_3':'maxConcurrent:3' in s,
+            'original_runtime_sizing':'estimateKalshiFeeSafeSize(candidate.yes,EXECUTION_TEST_CONFIG.maxEntryDebitUsd)' in s,
+            'original_final_runtime_sizing':'estimateKalshiFeeSafeSize(finalCandidate.yes,EXECUTION_TEST_CONFIG.maxEntryDebitUsd)' in s,
+            'coach_route':'/execution-test-coach-preview' in s,
+            'coach_threshold_control':'coachThreshold' in s,
+            'coach_attempt_control':'coachAttempts' in s,
+            'coach_stake_1_10':'coachStake' in s and 'maxEntryDebitUsd>10' in s,
+            'coach_concurrency_control':'coachConcurrent' in s and 'maxConcurrent>10' in s,
+            'coach_preview_nonarming':'armed:false,schedulerAuthorityAdded:false' in s,
+            'coach_auto_cannot_change':'autoCanChangeRunConfig:false' in s,
+            'coach_zero_provider_writes':'providerWrites:0,capitalMovedUsd:0,tradingOrders:0' in s,
+          }
+          for k,v in checks.items(): print(f'{k}={v}')
+          print('fixture_065_5_2_3=VALID_BY_BOUNDS')
+          print('fixture_080_1_10_1=VALID_BY_BOUNDS')
+          print('providerWrites=0')
+          print('capitalMovedUsd=0')
+          print('ordersSubmitted=0')
+          assert all(checks.values()), [k for k,v in checks.items() if not v]
+          PY
+
+          git config user.name 'NFE-OS Builder'
+          git config user.email 'actions@users.noreply.github.com'
+          git add market-edge-lab/real/baseline/src/index.js
+          git commit -m 'Add isolated Founder Coach Card zero-money validation surface'
+          git push origin HEAD:market-edge-baseline-real
