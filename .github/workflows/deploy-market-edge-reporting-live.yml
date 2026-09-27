@@ -1,0 +1,161 @@
+name: Deploy Isolated Market Edge Reporting
+
+on:
+  push:
+    branches: [market-edge-daily-ledger-preview-20260926]
+    paths:
+      - 'market-edge-reporting-live/**'
+      - '.github/workflows/deploy-market-edge-reporting-live.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  deploy-reporting-only:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: market-edge-daily-ledger-preview-20260926
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Verify production branch is not checkout target
+        run: |
+          test "$(git branch --show-current)" = "market-edge-daily-ledger-preview-20260926"
+          echo "PRODUCTION_HEAD=$(git ls-remote origin refs/heads/market-edge-baseline-real | cut -f1)"
+      - name: Install reporting-only dependencies
+        working-directory: market-edge-reporting-live
+        run: npm install --no-audit --no-fund
+      - name: Validate Cloudflare credentials
+        run: |
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      - name: Create or reuse isolated reporting KV
+        id: kv
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          API="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/storage/kv/namespaces"
+          curl -fsS -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "$API?per_page=100" -o /tmp/kv.json
+          KV_ID=$(python - <<'PY'
+          import json
+          d=json.load(open('/tmp/kv.json'))
+          for x in d.get('result',[]):
+              if x.get('title')=='market-edge-reporting-live':
+                  print(x['id']); break
+          PY
+          )
+          if [ -z "$KV_ID" ]; then
+            curl -fsS -X POST -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -H 'Content-Type: application/json' --data '{"title":"market-edge-reporting-live"}' "$API" -o /tmp/kv-create.json
+            KV_ID=$(python - <<'PY'
+          import json
+          d=json.load(open('/tmp/kv-create.json'))
+          assert d.get('success'), d
+          print(d['result']['id'])
+          PY
+          )
+          fi
+          echo "kv_id=$KV_ID" >> "$GITHUB_OUTPUT"
+          echo "ISOLATED_REPORTING_KV_READY=true"
+      - name: Generate isolated reporting config
+        working-directory: market-edge-reporting-live
+        env:
+          KV_ID: ${{ steps.kv.outputs.kv_id }}
+        run: |
+          cat > wrangler.toml <<EOF
+          name = "market-edge-reporting-live"
+          main = "src/index.js"
+          compatibility_date = "2026-09-26"
+
+          [triggers]
+          crons = ["0 4 * * *", "0 5 * * *"]
+
+          [[kv_namespaces]]
+          binding = "REPORTING"
+          id = "$KV_ID"
+          EOF
+          cat wrangler.toml
+      - name: Deploy isolated reporting Worker
+        id: deploy
+        working-directory: market-edge-reporting-live
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          npx wrangler deploy 2>&1 | tee /tmp/deploy.log
+          grep -E 'Current Version ID:|market-edge-reporting-live.*workers.dev|schedule:' /tmp/deploy.log || true
+      - name: Install reporting admin secret
+        working-directory: market-edge-reporting-live
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          TOKEN=$(python - <<'PY'
+          import secrets
+          print(secrets.token_urlsafe(32))
+          PY
+          )
+          printf '%s' "$TOKEN" | npx wrangler secret put REPORTING_ADMIN_TOKEN >/tmp/secret.log
+          echo "$TOKEN" > /tmp/reporting-token
+          chmod 600 /tmp/reporting-token
+      - name: Live read-only ledger verification and first real Sep 26 snapshot
+        shell: bash
+        run: |
+          set -euo pipefail
+          URL='https://market-edge-reporting-live.darkbishop43.workers.dev'
+          TOKEN=$(cat /tmp/reporting-token)
+          for i in $(seq 1 12); do
+            if curl -fsS "$URL/health" -o /tmp/health.json; then break; fi
+            sleep 5
+          done
+          cat /tmp/health.json
+          python - <<'PY'
+          import json
+          h=json.load(open('/tmp/health.json'))
+          assert h['ok'] and h['tradingAuthority'] is False and h['providerWrites']==0
+          assert h['timezone']=='America/New_York'
+          PY
+          curl -fsS "$URL/api/live" -o /tmp/live.json
+          python - <<'PY'
+          import json
+          x=json.load(open('/tmp/live.json'))
+          assert x['source']=='LIVE_READ_ONLY_MARKET_EDGE_DATA'
+          assert x['tradingAuthority'] is False and x['providerWrites']==0
+          assert x['reportingTimezone']=='America/New_York'
+          print('LIVE_SERIES',json.dumps(x.get('currentSeries'),sort_keys=True))
+          print('LIVE_EXECUTION',json.dumps(x.get('execution'),sort_keys=True))
+          print('LIVE_CAPITAL',json.dumps(x.get('capital'),sort_keys=True))
+          PY
+          curl -fsS -X POST -H "x-report-token: $TOKEN" "$URL/admin/finalize?date=2026-09-26" -o /tmp/snapshot.json
+          python - <<'PY'
+          import json
+          x=json.load(open('/tmp/snapshot.json'))
+          assert x['reportingDate']=='2026-09-26' and x['finalized'] is True
+          assert x['source']=='LIVE_READ_ONLY_MARKET_EDGE_DATA'
+          assert x['tradingAuthority'] is False and x['providerWrites']==0
+          print('SNAPSHOT_ID',x['snapshotId'])
+          print('SNAPSHOT_DATA_STATUS',x['dataStatus'])
+          PY
+          curl -fsS "$URL/api/reports/2026-09-26.json" -o /tmp/report.json
+          curl -fsS "$URL/reports/2026-09-26.pdf" -o /tmp/report.pdf
+          test "$(wc -c </tmp/report.pdf)" -gt 1000
+          echo "PDF_BYTES=$(wc -c </tmp/report.pdf)"
+          echo "LIVE_LEDGER_URL=$URL/"
+          echo "PDF_URL=$URL/reports/2026-09-26.pdf"
+      - name: Verify production branch remained untouched
+        run: |
+          BEFORE='5d7ad8e627bb09d2a81f37aa07b8043e4ac38224'
+          AFTER=$(git ls-remote origin refs/heads/market-edge-baseline-real | cut -f1)
+          echo "PRODUCTION_HEAD_AFTER=$AFTER"
+          test "$AFTER" = "$BEFORE"
+          echo 'PRODUCTION_BRANCH_UNCHANGED=true'
