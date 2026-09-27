@@ -6,6 +6,7 @@ on:
       - market-edge-baseline-real
     paths:
       - '.github/workflows/add-founder-coach-card-zero-money.yml'
+      - '.github/scripts/render-founder-coach-card-ui.py'
   workflow_dispatch:
 
 permissions:
@@ -18,23 +19,29 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: market-edge-baseline-real
-      - name: Apply safe Coach Card UI patch
+      - name: Apply safe Coach Card UI governance patch
         run: python .github/scripts/render-founder-coach-card-ui.py
-      - name: Verify zero-money boundaries
+      - name: Verify zero-money lock boundaries
         run: |
           set -euo pipefail
           git diff --check
           grep -q 'FOUNDER COACH CARD' market-edge-lab/real/baseline/src/index.js
-          grep -q '/execution-test-coach-preview' market-edge-lab/real/baseline/src/index.js
+          grep -q 'ACTIVE FROZEN CONFIGURATION' market-edge-lab/real/baseline/src/index.js
+          grep -q 'UNLOCK STAKE' market-edge-lab/real/baseline/src/index.js
+          grep -q 'UNLOCK POSITIONS' market-edge-lab/real/baseline/src/index.js
+          grep -q 'RE-LOCK STAKE' market-edge-lab/real/baseline/src/index.js
+          grep -q 'RE-LOCK POSITIONS' market-edge-lab/real/baseline/src/index.js
           grep -q 'ARM COACH CARD RUN — NOT ENABLED' market-edge-lab/real/baseline/src/index.js
           grep -q 'ARM_BOUNDED_EXECUTION_TESTS_MAX_1_USD' market-edge-lab/real/baseline/src/index.js
+          grep -q 'DISARM_EXECUTION_TEST_SERIES_PRESERVE_HISTORY' market-edge-lab/real/baseline/src/index.js
+          echo 'liveExecutionAuthorityChanged=NO'
           echo 'providerWrites=0'
           echo 'capitalMovedUsd=0'
           echo 'ordersSubmitted=0'
-      - name: Commit UI-only source change
+      - name: Commit UI-governance source change
         run: |
           git config user.name 'NFE-OS Builder'
           git config user.email 'actions@users.noreply.github.com'
           git add market-edge-lab/real/baseline/src/index.js
-          git commit -m 'Render Founder Coach Card zero-money UI on execution control page'
+          git commit -m 'Add Founder lock governance to Coach Card UI'
           git push origin HEAD:market-edge-baseline-real
