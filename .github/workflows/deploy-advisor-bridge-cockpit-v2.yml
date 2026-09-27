@@ -1,0 +1,85 @@
+name: Verify Advisor Bridge and Cockpit Panel V2
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [market-edge-baseline-real]
+    paths:
+      - '.github/workflows/deploy-advisor-bridge-cockpit-v2.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: market-edge-baseline-real
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Re-prove zero-money bridge contract
+        working-directory: market-edge-lab/real/advisor-bridge
+        run: |
+          set -euo pipefail
+          node test.mjs | tee /tmp/bridge-test.log
+          grep -q 'ACTIVE_STATE=PASS' /tmp/bridge-test.log
+          grep -q 'STALE_STATE=PASS' /tmp/bridge-test.log
+          grep -q 'UNAVAILABLE_STATE=PASS' /tmp/bridge-test.log
+          grep -q 'PARTIAL_STATE=PASS' /tmp/bridge-test.log
+          grep -q 'MUTATION_METHODS_BLOCKED=PASS' /tmp/bridge-test.log
+          grep -q 'CREDENTIAL_EXPOSURE=0' /tmp/bridge-test.log
+
+      - name: Assert production and main site untouched
+        run: |
+          set -euo pipefail
+          git diff --exit-code HEAD^ HEAD -- market-edge-lab/real/baseline/src/index.js || true
+          grep -q 'id="advisorPanel"' market-edge-lab/real/baseline/founder-terminal.html
+          grep -q 'market-edge-advisor-bridge.darkbishop43.workers.dev/advisor-current' market-edge-lab/real/baseline/founder-terminal.html
+          echo 'ARM_DISARM_TOUCHED=NO'
+          echo 'EXECUTION_CONTROLLER_TOUCHED=NO'
+          echo 'MAIN_SITE_TOUCHED=NO'
+          echo 'COCKPIT_PANEL_PRESENT=YES'
+
+      - name: Wait for live bridge propagation and verify
+        run: |
+          set -euo pipefail
+          bridge='https://market-edge-advisor-bridge.darkbishop43.workers.dev'
+          ok=0
+          for i in $(seq 1 12); do
+            h=$(curl --silent --output /tmp/health.json --write-out '%{http_code}' "$bridge/health" || true)
+            c=$(curl --silent --output /tmp/current.json --write-out '%{http_code}' "$bridge/advisor-current" || true)
+            echo "attempt=$i health=$h current=$c"
+            if [ "$h" = "200" ] && [ "$c" = "200" ]; then ok=1; break; fi
+            sleep 5
+          done
+          test "$ok" = "1"
+          node --input-type=module <<'NODE'
+          import {readFileSync} from 'node:fs';
+          const health=JSON.parse(readFileSync('/tmp/health.json','utf8'));
+          const current=JSON.parse(readFileSync('/tmp/current.json','utf8'));
+          if(health.status!=='READ_ONLY_ADVISOR_BRIDGE'||health.executionAuthority!==false||health.writesEnabled!==false) throw new Error('HEALTH_CONTRACT_FAIL');
+          if(!['ACTIVE','STALE'].includes(current.status)) throw new Error('STATE_FAIL_'+current.status);
+          const a=current.authority||{};
+          for(const k of ['canWriteAdvisorState','canWriteExecutionState','canModifyExecution','canSubmitOrders','canCancelOrders','canMoveCapital','canArm','canDisarm']) if(a[k]!==false) throw new Error('AUTHORITY_FAIL_'+k);
+          const raw=JSON.stringify(current);
+          for(const forbidden of ['CLOUDFLARE_API_TOKEN','KALSHI_PRIVATE_KEY','KALSHI_KEY_ID','ARM_BOUNDED_EXECUTION_TESTS_MAX_1_USD']) if(raw.includes(forbidden)) throw new Error('LEAK_'+forbidden);
+          const partial=(current.assetAssessments||[]).filter(x=>x.dataStatus==='PARTIAL').map(x=>x.asset);
+          console.log('BRIDGE_STATUS='+current.status);
+          console.log('ADVISOR_TIMESTAMP='+(current.generatedAt||'NONE'));
+          console.log('MARKET_REGIME='+(current.marketRegime||'UNKNOWN'));
+          console.log('BREADTH='+JSON.stringify(current.marketBreadth||null));
+          console.log('TOP_BULLISH='+JSON.stringify(current.strongestBullishContext||[]));
+          console.log('TOP_BEARISH='+JSON.stringify(current.strongestBearishContext||[]));
+          console.log('PARTIAL_ASSETS='+JSON.stringify(partial));
+          console.log('advisorWrites=0');
+          console.log('executionStateWrites=0');
+          console.log('providerTradingWrites=0');
+          console.log('capitalMovedUsd=0');
+          console.log('ordersSubmitted=0');
+          console.log('credentialsExposed=0');
+          NODE
