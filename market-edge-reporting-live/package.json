@@ -1,0 +1,11 @@
+{
+  "name": "market-edge-reporting-live",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "pdf-lib": "^1.17.1"
+  },
+  "devDependencies": {
+    "wrangler": "^4.42.0"
+  }
+}
