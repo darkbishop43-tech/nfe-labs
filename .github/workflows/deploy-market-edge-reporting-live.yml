@@ -87,6 +87,18 @@ jobs:
           service = "market-edge-baseline-real"
           EOF
           cat wrangler.toml
+      - name: Enforce truthful late-cutoff status for backfills
+        working-directory: market-edge-reporting-live
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('src/live.js')
+          s=p.read_text()
+          old="async function finalize(env,date){const s=await gather(env,date);s.finalized=true;"
+          new="async function finalize(env,date){const s=await gather(env,date);const lp=localParts();if(date<ymd(lp)&&!(lp.hour==='00'&&lp.minute==='00')){s.dataStatus='PARTIAL';s.reportingCutoffStatus='LATE_CUTOFF_BACKFILL';s.reportingCutoffNote='Reporting infrastructure was deployed after the scheduled midnight cutoff; source reads are authoritative at backfill time but not an exact 00:00 freeze.';}s.finalized=true;"
+          assert old in s
+          p.write_text(s.replace(old,new,1))
+          PY
       - name: Deploy isolated reporting Worker
         working-directory: market-edge-reporting-live
         env:
@@ -155,8 +167,10 @@ jobs:
           assert x['reportingDate']=='2026-09-26' and x['finalized'] is True
           assert x['source']=='LIVE_READ_ONLY_MARKET_EDGE_DATA'
           assert x['tradingAuthority'] is False and x['providerWrites']==0
+          assert x['dataStatus']=='PARTIAL' and x['reportingCutoffStatus']=='LATE_CUTOFF_BACKFILL'
           print('SNAPSHOT_ID',x['snapshotId'])
           print('SNAPSHOT_DATA_STATUS',x['dataStatus'])
+          print('SNAPSHOT_CUTOFF_STATUS',x['reportingCutoffStatus'])
           PY
           curl -fsS "$URL/api/reports/2026-09-26.json" -o /tmp/report.json
           curl -fsS "$URL/reports/2026-09-26.pdf" -o /tmp/report.pdf
