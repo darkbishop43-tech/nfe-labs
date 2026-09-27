@@ -1,0 +1,126 @@
+name: Deploy Advisor Bridge and Cockpit Panel
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [market-edge-baseline-real]
+    paths:
+      - 'market-edge-lab/real/advisor-bridge/**'
+      - '.github/workflows/deploy-advisor-bridge-cockpit.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  bridge-and-cockpit:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: market-edge-baseline-real
+          fetch-depth: 2
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Zero-money bridge unit tests
+        working-directory: market-edge-lab/real/advisor-bridge
+        run: |
+          set -euo pipefail
+          node test.mjs | tee /tmp/advisor-bridge-test.log
+          grep -q 'ACTIVE_STATE=PASS' /tmp/advisor-bridge-test.log
+          grep -q 'STALE_STATE=PASS' /tmp/advisor-bridge-test.log
+          grep -q 'UNAVAILABLE_STATE=PASS' /tmp/advisor-bridge-test.log
+          grep -q 'PARTIAL_STATE=PASS' /tmp/advisor-bridge-test.log
+          grep -q 'MUTATION_METHODS_BLOCKED=PASS' /tmp/advisor-bridge-test.log
+          grep -q 'CREDENTIAL_EXPOSURE=0' /tmp/advisor-bridge-test.log
+          grep -q 'advisorWrites=0' /tmp/advisor-bridge-test.log
+          grep -q 'executionStateWrites=0' /tmp/advisor-bridge-test.log
+          grep -q 'providerTradingWrites=0' /tmp/advisor-bridge-test.log
+          grep -q 'capitalMovedUsd=0' /tmp/advisor-bridge-test.log
+          grep -q 'ordersSubmitted=0' /tmp/advisor-bridge-test.log
+
+      - name: Patch cockpit display only
+        run: |
+          set -euo pipefail
+          python market-edge-lab/real/advisor-bridge/patch-cockpit.py
+          grep -q 'id="advisorPanel"' market-edge-lab/real/baseline/founder-terminal.html
+          grep -q 'market-edge-advisor-bridge.darkbishop43.workers.dev/advisor-current' market-edge-lab/real/baseline/founder-terminal.html
+
+      - name: Assert production execution files untouched
+        run: |
+          set -euo pipefail
+          git diff --exit-code HEAD -- market-edge-lab/real/baseline/src/index.js
+          git diff --exit-code HEAD -- market-edge-lab/real/baseline/wrangler.toml
+          echo 'ARM_DISARM_TOUCHED=NO'
+          echo 'EXECUTION_CONTROLLER_TOUCHED=NO'
+          echo 'MAIN_SITE_TOUCHED=NO'
+
+      - name: Commit cockpit-only display update
+        run: |
+          set -euo pipefail
+          if git diff --quiet -- market-edge-lab/real/baseline/founder-terminal.html; then
+            echo 'COCKPIT_ALREADY_PATCHED=YES'
+          else
+            git config user.name 'github-actions[bot]'
+            git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+            git add market-edge-lab/real/baseline/founder-terminal.html
+            git commit -m 'Add read-only Advisor status panel to Founder cockpit'
+            git push origin HEAD:market-edge-baseline-real
+          fi
+
+      - name: Generate isolated bridge config ephemerally
+        working-directory: market-edge-lab/real/advisor-bridge
+        run: |
+          cat > wrangler.generated.toml <<'EOF'
+          name = "market-edge-advisor-bridge"
+          main = "src/index.js"
+          compatibility_date = "2026-09-27"
+          workers_dev = true
+
+          [[kv_namespaces]]
+          binding = "ADVISOR_STATE"
+          id = "d110292129c94b26942c25d0c462a17b"
+          EOF
+
+      - name: Deploy isolated read-only bridge
+        working-directory: market-edge-lab/real/advisor-bridge
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+          npx --yes wrangler@4 deploy --config wrangler.generated.toml | tee /tmp/advisor-bridge-deploy.log
+
+      - name: Verify live bridge and cockpit contract
+        run: |
+          set -euo pipefail
+          bridge='https://market-edge-advisor-bridge.darkbishop43.workers.dev'
+          curl --fail --silent --show-error "$bridge/health" -o /tmp/health.json
+          curl --fail --silent --show-error "$bridge/advisor-current" -o /tmp/current.json
+          node --input-type=module <<'NODE'
+          import {readFileSync} from 'node:fs';
+          const health=JSON.parse(readFileSync('/tmp/health.json','utf8'));
+          const current=JSON.parse(readFileSync('/tmp/current.json','utf8'));
+          if(health.status!=='READ_ONLY_ADVISOR_BRIDGE'||health.executionAuthority!==false) throw new Error('HEALTH_AUTHORITY_FAIL');
+          if(!['ACTIVE','STALE'].includes(current.status)) throw new Error('LIVE_ADVISOR_STATE_NOT_READABLE_'+current.status);
+          const a=current.authority||{};
+          for(const k of ['canWriteAdvisorState','canWriteExecutionState','canModifyExecution','canSubmitOrders','canCancelOrders','canMoveCapital','canArm','canDisarm']) if(a[k]!==false) throw new Error('AUTHORITY_FAIL_'+k);
+          const raw=JSON.stringify(current);
+          for(const forbidden of ['CLOUDFLARE_API_TOKEN','KALSHI_PRIVATE_KEY','KALSHI_KEY_ID','ARM_BOUNDED_EXECUTION_TESTS_MAX_1_USD']) if(raw.includes(forbidden)) throw new Error('CREDENTIAL_OR_AUTH_LEAK_'+forbidden);
+          console.log('BRIDGE_STATUS='+current.status);
+          console.log('ADVISOR_TIMESTAMP='+(current.generatedAt||'NONE'));
+          console.log('MARKET_REGIME='+(current.marketRegime||'UNKNOWN'));
+          console.log('BREADTH='+JSON.stringify(current.marketBreadth||null));
+          console.log('PROVIDER_TRADING_WRITES=0');
+          console.log('CAPITAL_MOVED_USD=0');
+          console.log('ORDERS_SUBMITTED=0');
+          console.log('ADVISOR_WRITES=0');
+          console.log('EXECUTION_STATE_WRITES=0');
+          console.log('CREDENTIALS_EXPOSED=0');
+          NODE
+          grep -q 'id="advisorPanel"' market-edge-lab/real/baseline/founder-terminal.html
+          echo 'COCKPIT_DISPLAY_CONTRACT=PASS'
