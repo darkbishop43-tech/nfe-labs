@@ -20,6 +20,14 @@ body{background-image:linear-gradient(#0a111a88 1px,transparent 1px),linear-grad
 .evidence-resizer{height:10px;cursor:ns-resize;background:#060b10;border-top:1px solid #26384a;border-bottom:1px solid var(--line);position:relative;touch-action:none}.evidence-resizer:after{content:'';position:absolute;left:calc(50% - 34px);top:4px;width:68px;height:2px;background:#496078;border-radius:2px}.lower{min-height:180px;height:340px;background:#070c12;display:flex;flex-direction:column;resize:none}.evidence-head{min-height:36px;display:flex;align-items:center;border-bottom:1px solid var(--line);background:#091018;position:sticky;top:0;z-index:8}.tabs{height:35px;display:flex;flex:1;overflow-x:auto}.tabs button{border:0;border-right:1px solid var(--line);background:transparent;color:#6f8498;padding:0 13px;font-size:9px;font-weight:900;letter-spacing:.08em;cursor:pointer;white-space:nowrap}.tabs button.on{color:#fff;background:#0e1721;border-top:2px solid var(--gold)}.layout-controls{display:flex;gap:4px;padding:0 7px;white-space:nowrap}.layout-controls button{background:#0b151f;border:1px solid var(--line2);color:#9fb3c7;padding:4px 7px;font-size:8px;font-weight:900;cursor:pointer}.tabpanel{overflow:auto;flex:1;padding:0;min-height:0}.tabpanel .tbl th{top:0;z-index:6}.empty{height:100%;display:flex;align-items:center;justify-content:center;color:#526579;font-size:10px}.statusbar{height:26px;display:flex;align-items:center;padding:0 10px;border-top:1px solid var(--line);background:#05090e;color:#52667a;font-size:9px;gap:14px}.statusbar .right{margin-left:auto}
 @media(max-width:900px){.top{height:auto;min-height:42px;flex-wrap:wrap;padding:6px 8px}.nav{order:3;width:100%;height:32px}.account{grid-template-columns:repeat(4,1fr)}.auto{grid-template-columns:repeat(3,1fr)}.workspace{display:flex;flex-direction:column;height:auto}.pane{border-right:0;border-bottom:1px solid var(--line)}.watch{order:1;max-height:310px}.center{order:3;height:340px}.rightpane{order:2}.inspector{max-height:320px}.evidence-resizer{display:none}.lower{height:auto;min-height:300px;max-height:none}.evidence-head{position:relative;flex-wrap:wrap}.layout-controls{width:100%;padding:5px 7px;border-top:1px solid var(--line)}.tabpanel{overflow:visible;min-height:260px}.account .metric:nth-child(n+5){display:none}}
 @media(max-width:520px){.brand{font-size:10px}.topright{font-size:9px}.account{grid-template-columns:repeat(3,1fr)}.auto{grid-template-columns:repeat(2,1fr)}.metric{padding:6px}.watch{max-height:260px}.center{height:300px}.tbl th:nth-child(n+6),.tbl td:nth-child(n+6){display:none}.tabs{overflow-x:auto}.tabs button{white-space:nowrap}.statusbar{display:none}}
+
+/* ADVISOR STATUS PANEL — read-only cockpit visibility */
+.advisorPanel{display:grid;grid-template-columns:1.05fr 1fr 1fr 1.2fr 1.2fr 1.6fr;border-bottom:1px solid var(--line);background:#071019}
+.advisorCell{padding:7px 10px;border-right:1px solid var(--line);min-width:0}
+.advisorCell:last-child{border-right:0}.advisorTitle{font-size:9px;letter-spacing:.12em;font-weight:900;color:var(--gold)}
+.advisorBig{font-size:11px;font-weight:900;color:#e9f2fb;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.advisorSub{font-size:8px;color:var(--muted);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.advisorGood{color:var(--green)}.advisorWarn{color:var(--amber)}.advisorBad{color:var(--red)}
+@media(max-width:900px){.advisorPanel{grid-template-columns:repeat(3,1fr)}}
+@media(max-width:520px){.advisorPanel{grid-template-columns:repeat(2,1fr)}.advisorCell{padding:6px}}
 </style>
 </head>
 <body><div id="app">
@@ -40,6 +48,16 @@ body{background-image:linear-gradient(#0a111a88 1px,transparent 1px),linear-grad
 </section>
 <section class="strip auto">
 <div class="metric"><div class="lab">AUTO</div><div class="val" id="autoStatus">—</div></div><div class="metric"><div class="lab">ARM</div><div class="val" id="arm">—</div></div><div class="metric"><div class="lab">ENTRY</div><div class="val gold" id="entry">.80</div></div><div class="metric"><div class="lab">EXIT</div><div class="val" id="exit">.20</div></div><div class="metric"><div class="lab">CURRENT RUN</div><div class="val" id="run">—</div></div><div class="metric"><div class="lab">STAGE</div><div class="val" id="stage">—</div></div><div class="metric"><div class="lab">ATTEMPTS</div><div class="val" id="attempts">—</div></div><div class="metric"><div class="lab">OPEN POSITIONS</div><div class="val" id="openPos">—</div></div><div class="metric"><div class="lab">NEXT SCAN</div><div class="val" id="nextScan">—</div></div>
+</section>
+
+
+<section class="advisorPanel" id="advisorPanel" aria-live="polite">
+  <div class="advisorCell"><div class="advisorTitle">15-MIN ADVISOR</div><div id="advisorStatus" class="advisorBig advisorWarn">CHECKING…</div><div id="advisorUpdated" class="advisorSub">UPDATED —</div></div>
+  <div class="advisorCell"><div class="lab">MARKET</div><div id="advisorMarket" class="advisorBig">—</div><div id="advisorBreadth" class="advisorSub">BREADTH —</div></div>
+  <div class="advisorCell"><div class="lab">TOP BULLISH</div><div id="advisorBull" class="advisorBig">—</div><div id="advisorBullSub" class="advisorSub">—</div></div>
+  <div class="advisorCell"><div class="lab">TOP BEARISH</div><div id="advisorBear" class="advisorBig">—</div><div id="advisorBearSub" class="advisorSub">—</div></div>
+  <div class="advisorCell"><div class="lab">WATCH</div><div id="advisorWatch" class="advisorBig">—</div><div id="advisorPartial" class="advisorSub">PARTIAL —</div></div>
+  <div class="advisorCell"><div class="lab">AUTHORITY</div><div class="advisorBig advisorGood">READ ONLY</div><div class="advisorSub">NO SCORE · NO EXECUTION · NO ARM/DISARM</div></div>
 </section>
 
 <main class="workspace">
@@ -176,4 +194,22 @@ evidenceResizer.addEventListener('pointerup',()=>evidenceDrag=null);evidenceResi
 window.addEventListener('resize',restoreEvidence);restoreEvidence();
 document.querySelectorAll('.tabs button').forEach(b=>b.onclick=()=>{document.querySelectorAll('.tabs button').forEach(x=>x.classList.remove('on'));b.classList.add('on');state.tab=b.dataset.tab;renderTab()});
 setInterval(()=>setText('clock',new Date().toISOString().slice(11,19)+' UTC'),1000);setInterval(()=>{renderTop();if(state.selected)renderInspector()},1000);refresh();setInterval(refresh,15000);
-</script></body></html>
+</script>
+<script>
+(()=>{
+  const ADVISOR_BRIDGE='https://market-edge-advisor-bridge.darkbishop43.workers.dev/advisor-current';
+  let advisorState=null;
+  const byId=id=>document.getElementById(id);
+  const ageText=s=>{if(!Number.isFinite(Number(s)))return 'age unavailable';const n=Math.max(0,Math.floor(Number(s)));if(n<60)return n+'s ago';if(n<3600)return Math.floor(n/60)+'m ago';return Math.floor(n/3600)+'h ago';};
+  const itemName=x=>typeof x==='string'?x:String(x?.asset||x?.symbol||x?.name||'').trim();
+  const findAssessment=(state,asset)=>Array.isArray(state?.assetAssessments)?state.assetAssessments.find(x=>String(x?.asset||'')===asset):null;
+  const describe=(state,list)=>{const names=(Array.isArray(list)?list:[]).slice(0,3).map(itemName).filter(Boolean);return {names:names.join(' · ')||'NONE',sub:names.map(a=>{const x=findAssessment(state,a);return x?`${a} ${x.advisoryConfidence||'LOW'} ${x.setupPhase||''}`.trim():a;}).join(' · ')||'—'};};
+  const breadthText=b=>{if(!b)return 'BREADTH —';const up=Number(b.numberAssetsBullish??b.up??0),down=Number(b.numberAssetsBearish??b.down??0),mixed=Number(b.numberAssetsMixed??b.mixed??0);if([up,down,mixed].some(Number.isFinite))return `${up||0} ↑ / ${down||0} ↓ / ${mixed||0} mixed`;const upPct=Number(b.marketBreadthUpPct),downPct=Number(b.marketBreadthDownPct);if(Number.isFinite(upPct)||Number.isFinite(downPct))return `${Number.isFinite(upPct)?upPct.toFixed(0):'—'}% ↑ / ${Number.isFinite(downPct)?downPct.toFixed(0):'—'}% ↓`;return 'BREADTH —';};
+  function paintUnavailable(){advisorState=null;const s=byId('advisorStatus');if(s){s.textContent='UNAVAILABLE';s.className='advisorBig advisorBad';}byId('advisorUpdated').textContent='UPDATED —';byId('advisorMarket').textContent='UNKNOWN';byId('advisorBreadth').textContent='BREADTH —';byId('advisorBull').textContent='—';byId('advisorBullSub').textContent='—';byId('advisorBear').textContent='—';byId('advisorBearSub').textContent='—';byId('advisorWatch').textContent='ADVISOR STATE UNAVAILABLE';byId('advisorPartial').textContent='PARTIAL —';}
+  function paint(state){advisorState=state;const status=String(state?.status||'UNAVAILABLE');const s=byId('advisorStatus');s.textContent=status;s.className='advisorBig '+(status==='ACTIVE'?'advisorGood':status==='STALE'?'advisorWarn':'advisorBad');byId('advisorUpdated').textContent=(state?.generatedAt?new Date(state.generatedAt).toLocaleString():'UPDATED —')+(Number.isFinite(Number(state?.ageSeconds))?' · '+ageText(state.ageSeconds):'');byId('advisorMarket').textContent=state?.marketRegime||'UNKNOWN';byId('advisorBreadth').textContent=breadthText(state?.marketBreadth);const bull=describe(state,state?.strongestBullishContext);byId('advisorBull').textContent=bull.names;byId('advisorBullSub').textContent=bull.sub;const bear=describe(state,state?.strongestBearishContext);byId('advisorBear').textContent=bear.names;byId('advisorBearSub').textContent=bear.sub;const risks=(Array.isArray(state?.marketRiskFlags)?state.marketRiskFlags:[]).map(String);const divs=(Array.isArray(state?.largestDivergences)?state.largestDivergences:[]).map(itemName).filter(Boolean);byId('advisorWatch').textContent=(risks[0]||divs[0]||'NO MAJOR WARNING');const partial=(Array.isArray(state?.assetAssessments)?state.assetAssessments:[]).filter(x=>x?.dataStatus==='PARTIAL').map(x=>x.asset);byId('advisorPartial').textContent=partial.length?'PARTIAL '+partial.join(' · '):'PARTIAL NONE';}
+  async function refreshAdvisor(){try{const r=await fetch(ADVISOR_BRIDGE,{method:'GET',cache:'no-store',credentials:'omit'});const j=await r.json();if(!r.ok||!j||j.status==='UNAVAILABLE')return paintUnavailable();paint(j);}catch{paintUnavailable();}}
+  function tickAge(){if(!advisorState?.generatedAt)return;const ms=Date.parse(advisorState.generatedAt);if(!Number.isFinite(ms))return;const age=Math.max(0,Math.floor((Date.now()-ms)/1000));advisorState.ageSeconds=age;byId('advisorUpdated').textContent=new Date(ms).toLocaleString()+' · '+ageText(age);if(age>720&&advisorState.status==='ACTIVE'){advisorState.status='STALE';const s=byId('advisorStatus');s.textContent='STALE';s.className='advisorBig advisorWarn';}}
+  refreshAdvisor();setInterval(refreshAdvisor,30000);setInterval(tickAge,1000);
+})();
+</script>
+</body></html>
