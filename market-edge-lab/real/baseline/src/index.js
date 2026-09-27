@@ -2086,6 +2086,13 @@ async function runExecutionTestSeries(env,freshShadow=null,preparedBalance=null)
   const founderManualLedger=await loadFounderManualLedger(env);
   const founderOwnedTickers=new Set(founderManualOpenRecords(founderManualLedger).map(r=>String(r?.ticker||r?.marketTicker||"")));
   const activeTestThreshold=Number.isFinite(Number(state?.threshold))?Number(state.threshold):EXECUTION_TEST_CONFIG.entryScore;
+  // Frozen Founder-selected stake cap for this armed series. Falls back to the
+  // static $1 EXECUTION_TEST_CONFIG default whenever state does not carry a
+  // valid Coach Card-armed value (e.g. legacy /execution-test-arm series).
+  const activeStakeCapUsd=(()=>{
+    const v=Number(state?.maxEntryDebitUsd);
+    return Number.isInteger(v)&&v>=1&&v<=10?v:EXECUTION_TEST_CONFIG.maxEntryDebitUsd;
+  })();
   const candidates=executionTestCandidatePool(shadow,now,activeTestThreshold).filter(o=>!activeTickers.has(String(o.marketTicker))&&autoTickerEntryAllowed(founderManualLedger,String(o.marketTicker)));
   let slots=Math.max(0,Math.max(1,Math.trunc(Number(state?.maxConcurrent||EXECUTION_TEST_CONFIG.maxConcurrent)))-executionTestOpenPositions(state).length);
   let warmedBalance=preparedBalance&&typeof preparedBalance==="object"?preparedBalance:null;
@@ -2104,8 +2111,8 @@ async function runExecutionTestSeries(env,freshShadow=null,preparedBalance=null)
       executionTestLedger(state,"TEST_LOCK_REQUALIFICATION_HOLD",{ticker:candidate.marketTicker,side:candidate.outcomeSide,observedScore:safeFinite(observed.score),liveScore:safeFinite(candidate.score),liveAsk:safeFinite(candidate.yes)});
       continue;
     }
-    let sizing=estimateKalshiFeeSafeSize(candidate.yes,EXECUTION_TEST_CONFIG.maxEntryDebitUsd);
-    if(!sizing?.ok||Number(sizing.totalDebitUsd)>EXECUTION_TEST_CONFIG.maxEntryDebitUsd||Number(sizing.count)<1)continue;
+    let sizing=estimateKalshiFeeSafeSize(candidate.yes,activeStakeCapUsd);
+    if(!sizing?.ok||Number(sizing.totalDebitUsd)>activeStakeCapUsd||Number(sizing.count)<1)continue;
 
     // Preflight exact execution shard immediately before FIRE.
     const balanceProof=warmedBalance||await kalshiExecutionBalanceSnapshot(env);
@@ -2153,7 +2160,8 @@ async function runExecutionTestSeries(env,freshShadow=null,preparedBalance=null)
 
     // MICROSCOPIC NO_FILL REPAIR: refresh the SAME exact ticker/side once after the
     // persisted FIRE latch + authority reload, then submit immediately. No chasing,
-    // no retry loop, no arbitrary crossing, and the existing $1 debit cap remains hard.
+    // no retry loop, no arbitrary crossing, and the frozen per-series debit cap
+    // (activeStakeCapUsd) remains hard.
     const preSubmitQuote=await freshKalshiExecutionQuote(env,candidate);
     if(!preSubmitQuote?.ok){
       attempt.status="PRE_SUBMIT_QUOTE_HOLD";
@@ -2174,9 +2182,9 @@ async function runExecutionTestSeries(env,freshShadow=null,preparedBalance=null)
       if(!await saveExecutionTestRuntimeState(env,state,runtimeControlToken))return await loadExecutionTestState(env);
       continue;
     }
-    const finalSizing=estimateKalshiFeeSafeSize(finalCandidate.yes,EXECUTION_TEST_CONFIG.maxEntryDebitUsd);
+    const finalSizing=estimateKalshiFeeSafeSize(finalCandidate.yes,activeStakeCapUsd);
     const finalPayload=finalSizing?.ok?kalshiV2EntryPayload(finalCandidate,finalSizing,clientId):null;
-    if(!finalPayload||Number(finalSizing.totalDebitUsd)>EXECUTION_TEST_CONFIG.maxEntryDebitUsd||Number(finalSizing.count)<1){
+    if(!finalPayload||Number(finalSizing.totalDebitUsd)>activeStakeCapUsd||Number(finalSizing.count)<1){
       attempt.status="PRE_SUBMIT_SIZING_HOLD";
       attempt.preSubmitQuoteAt=preSubmitQuote.readAt||new Date().toISOString();
       executionTestLedger(state,"TEST_PRE_SUBMIT_SIZING_HOLD",{attemptNo,ticker:finalCandidate.marketTicker,side:finalCandidate.outcomeSide,providerWrite:false});
@@ -4581,7 +4589,7 @@ document.getElementById('export')?.addEventListener('click',async()=>{const r=aw
       if(state.armed&&!executionTestQueueActive(state)) control+="<form method='post' action='/execution-test-disarm'><input type='hidden' name='authorization' value='DISARM_EXECUTION_TEST_SERIES_PRESERVE_HISTORY'><button type='submit'>STOP / DISARM SERIES</button></form>";
       if(!state.armed&&!executionTestQueueActive(state)&&executionTestOpenPositions(state).length===0&&ready) control+="<form method='post' action='/execution-test-queue-arm'><input type='hidden' name='authorization' value='ARM_GOVERNED_THRESHOLD_QUEUE_MAX_1_USD'><b>Threshold queue · minimum scores</b><p class='muted'>Each nonblank row becomes one sequential stage. Only one stage can be active. A higher score may qualify during any lower-threshold stage.</p>"+[1,2,3,4,5].map((n,i)=>"<div style='display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:8px 0'><select name='score"+n+"' style='font-size:17px;padding:10px;border-radius:9px'><option value=''>Unused</option>"+[.50,.55,.60,.65,.70,.75,.80,.85].map(v=>"<option value='"+v+"' "+(i===0&&v===.65?"selected":"")+">"+v.toFixed(2)+"</option>").join("")+"</select><input name='count"+n+"' type='number' min='1' max='100' step='1' value='"+(i===0?2:"")+"' placeholder='attempts' style='font-size:17px;padding:10px;border-radius:9px'></div>").join("")+"<button type='submit'>ARM GOVERNED THRESHOLD QUEUE</button></form><p class='muted'>The queue uses the existing RADAR → LOCK → FIRE → MANAGE → RECORD controller unchanged.</p>";
       const activeCoachFrozen=(state?.armed&&!executionTestQueueActive(state))?"<div class='box' style='border:1px solid #4b5563;padding:10px 12px;margin:8px 0'><b>ACTIVE FROZEN CONFIGURATION</b><div style='display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin-top:7px;font-size:14px'><span>Threshold <b>"+Number(state?.threshold??EXECUTION_TEST_CONFIG.entryScore).toFixed(2)+"</b></span><span>Attempts <b>"+executionTestSeriesLimit(state)+"</b></span><span>Stake <b>$"+Number(state?.maxEntryDebitUsd??EXECUTION_TEST_CONFIG.maxEntryDebitUsd).toFixed(0)+"</b></span><span>Positions <b>"+Number(state?.maxConcurrent??EXECUTION_TEST_CONFIG.maxConcurrent)+"</b></span></div></div>":"";
-      control+=activeCoachFrozen+"<div class='box' style='padding:12px;margin:8px 0'><div style='display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:8px'><b>FOUNDER COACH CARD</b><span class='muted' style='font-size:12px'>Zero-money config</span></div><form method='post' action='/execution-test-coach-preview'><input type='hidden' name='authorization' value='VALIDATE_FOUNDER_COACH_CARD'><div style='display:grid;grid-template-columns:1fr 1fr;gap:10px 14px'><div><label style='font-size:13px'><b>Signal threshold</b></label><select name='coachThreshold' style='font-size:15px;padding:7px 9px;width:100%;box-sizing:border-box;margin-top:4px;border-radius:8px'>"+[.50,.55,.60,.65,.70,.75,.80,.85].map(v=>"<option value='"+v+"' "+(v===.60?"selected":"")+">"+v.toFixed(2)+"</option>").join("")+"</select></div><div><label style='font-size:13px'><b>Attempt count</b></label><input name='coachAttempts' type='number' min='1' max='100' step='1' value='3' style='font-size:15px;padding:7px 9px;width:100%;box-sizing:border-box;margin-top:4px;border-radius:8px'></div><div><label style='font-size:13px'><b>Max entry debit</b></label><input type='hidden' id='coachStakeValue' name='coachStake' value='1'><div style='display:grid;grid-template-columns:1fr auto;gap:6px;margin-top:4px'><select id='coachStakeDisplay' disabled style='font-size:15px;padding:7px 9px;width:100%;box-sizing:border-box;border-radius:8px'>"+[1,2,3,4,5,6,7,8,9,10].map(v=>"<option value='"+v+"' "+(v===1?"selected":"")+">🔒 $"+v+"</option>").join("")+"</select><button id='coachStakeLockButton' type='button' onclick='coachToggleLock(&quot;stake&quot;)' style='padding:6px 9px;font-size:12px;white-space:nowrap'>UNLOCK</button></div></div><div><label style='font-size:13px'><b>Max simultaneous</b></label><input type='hidden' id='coachConcurrentValue' name='coachConcurrent' value='3'><div style='display:grid;grid-template-columns:1fr auto;gap:6px;margin-top:4px'><input id='coachConcurrentDisplay' type='number' min='1' max='10' step='1' value='3' disabled style='font-size:15px;padding:7px 9px;width:100%;box-sizing:border-box;border-radius:8px'><button id='coachConcurrentLockButton' type='button' onclick='coachToggleLock(&quot;concurrent&quot;)' style='padding:6px 9px;font-size:12px;white-space:nowrap'>UNLOCK</button></div></div></div><p class='muted' style='margin:8px 0 6px;font-size:12px'>Defaults: $1 / 3 positions. Unlock to edit. Active series values freeze at ARM.</p><div style='display:flex;gap:8px;flex-wrap:wrap'><button type='submit' style='padding:8px 12px'>VALIDATE COACH CARD CONFIGURATION</button><button type='button' disabled style='padding:8px 12px'>ARM COACH CARD RUN — NOT ENABLED</button></div></form><script>function coachSync(){const s=document.getElementById('coachStakeDisplay'),c=document.getElementById('coachConcurrentDisplay'),sv=document.getElementById('coachStakeValue'),cv=document.getElementById('coachConcurrentValue');if(s&&sv)sv.value=s.value;if(c&&cv)cv.value=c.value;}function coachToggleLock(which){const stake=which==='stake',field=document.getElementById(stake?'coachStakeDisplay':'coachConcurrentDisplay'),btn=document.getElementById(stake?'coachStakeLockButton':'coachConcurrentLockButton');if(!field||!btn)return;field.disabled=!field.disabled;const locked=field.disabled;btn.textContent=locked?'UNLOCK':'RE-LOCK';if(stake&&field.options){for(const o of field.options)o.textContent=(locked?'🔒 ':'🔓 ')+o.textContent.replace(/^🔒 |^🔓 /,'');}coachSync();}document.getElementById('coachStakeDisplay')?.addEventListener('change',coachSync);document.getElementById('coachConcurrentDisplay')?.addEventListener('input',coachSync);coachSync();</script></div>";
+      control+=activeCoachFrozen+"<div class='box' style='padding:12px;margin:8px 0'><div style='display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:8px'><b>FOUNDER COACH CARD</b><span class='muted' style='font-size:12px'>Zero-money config</span></div><form method='post' action='/execution-test-coach-preview'><input type='hidden' name='authorization' value='VALIDATE_FOUNDER_COACH_CARD'><input type='hidden' name='armAuthorization' value='ARM_FOUNDER_COACH_CARD_RUN'><div style='display:grid;grid-template-columns:1fr 1fr;gap:10px 14px'><div><label style='font-size:13px'><b>Signal threshold</b></label><select name='coachThreshold' style='font-size:15px;padding:7px 9px;width:100%;box-sizing:border-box;margin-top:4px;border-radius:8px'>"+[.50,.55,.60,.65,.70,.75,.80,.85].map(v=>"<option value='"+v+"' "+(v===.60?"selected":"")+">"+v.toFixed(2)+"</option>").join("")+"</select></div><div><label style='font-size:13px'><b>Attempt count</b></label><input name='coachAttempts' type='number' min='1' max='100' step='1' value='3' style='font-size:15px;padding:7px 9px;width:100%;box-sizing:border-box;margin-top:4px;border-radius:8px'></div><div><label style='font-size:13px'><b>Max entry debit</b></label><input type='hidden' id='coachStakeValue' name='coachStake' value='1'><div style='display:grid;grid-template-columns:1fr auto;gap:6px;margin-top:4px'><select id='coachStakeDisplay' disabled style='font-size:15px;padding:7px 9px;width:100%;box-sizing:border-box;border-radius:8px'>"+[1,2,3,4,5,6,7,8,9,10].map(v=>"<option value='"+v+"' "+(v===1?"selected":"")+">🔒 $"+v+"</option>").join("")+"</select><button id='coachStakeLockButton' type='button' onclick='coachToggleLock(&quot;stake&quot;)' style='padding:6px 9px;font-size:12px;white-space:nowrap'>UNLOCK</button></div></div><div><label style='font-size:13px'><b>Max simultaneous</b></label><input type='hidden' id='coachConcurrentValue' name='coachConcurrent' value='3'><div style='display:grid;grid-template-columns:1fr auto;gap:6px;margin-top:4px'><input id='coachConcurrentDisplay' type='number' min='1' max='10' step='1' value='3' disabled style='font-size:15px;padding:7px 9px;width:100%;box-sizing:border-box;border-radius:8px'><button id='coachConcurrentLockButton' type='button' onclick='coachToggleLock(&quot;concurrent&quot;)' style='padding:6px 9px;font-size:12px;white-space:nowrap'>UNLOCK</button></div></div></div><p class='muted' style='margin:8px 0 6px;font-size:12px'>Defaults: $1 / 3 positions. Unlock to edit. Active series values freeze at ARM.</p><div style='display:flex;gap:8px;flex-wrap:wrap'><button type='submit' style='padding:8px 12px'>VALIDATE COACH CARD CONFIGURATION</button><button type='submit' formaction='/execution-test-coach-arm' style='padding:8px 12px'>ARM COACH CARD RUN</button></div></form><script>function coachSync(){const s=document.getElementById('coachStakeDisplay'),c=document.getElementById('coachConcurrentDisplay'),sv=document.getElementById('coachStakeValue'),cv=document.getElementById('coachConcurrentValue');if(s&&sv)sv.value=s.value;if(c&&cv)cv.value=c.value;}function coachToggleLock(which){const stake=which==='stake',field=document.getElementById(stake?'coachStakeDisplay':'coachConcurrentDisplay'),btn=document.getElementById(stake?'coachStakeLockButton':'coachConcurrentLockButton');if(!field||!btn)return;field.disabled=!field.disabled;const locked=field.disabled;btn.textContent=locked?'UNLOCK':'RE-LOCK';if(stake&&field.options){for(const o of field.options)o.textContent=(locked?'🔒 ':'🔓 ')+o.textContent.replace(/^🔒 |^🔓 /,'');}coachSync();}document.getElementById('coachStakeDisplay')?.addEventListener('change',coachSync);document.getElementById('coachConcurrentDisplay')?.addEventListener('input',coachSync);coachSync();</script></div>";
       if(!state.armed&&!executionTestQueueActive(state)&&executionTestOpenPositions(state).length===0&&ready) control+="<div class='box' style='padding:10px 12px;margin:8px 0'><b>EXISTING SINGLE-SERIES ARM</b><form method='post' action='/execution-test-arm'><input type='hidden' name='authorization' value='ARM_BOUNDED_EXECUTION_TESTS_MAX_1_USD'><div style='display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:7px 0'><div><label for='testScore' style='font-size:13px'><b>Acceptance score</b></label><select id='testScore' name='testScore' style='font-size:15px;padding:7px 9px;width:100%;box-sizing:border-box;margin-top:4px;border-radius:8px'><option value='.50'>.50</option><option value='.55'>.55</option><option value='.60'>.60</option><option value='.65' selected>.65</option><option value='.70'>.70</option><option value='.75'>.75</option><option value='.80'>.80</option><option value='.85'>.85</option></select></div><div><label for='runCount' style='font-size:13px'><b>Automatic attempts</b></label><input id='runCount' name='runCount' type='number' inputmode='numeric' min='1' max='100' step='1' value='10' style='font-size:15px;padding:7px 9px;width:100%;box-sizing:border-box;margin-top:4px;border-radius:8px'></div></div><button type='submit' style='padding:8px 12px'>ARM SELECTED EXECUTION TEST SERIES</button></form></div>";
       control+="<p class='muted'>Arming authorizes only the bounded number of attempts selected above. It does not place a manual trade. The scheduler owns RADAR → LOCK → FIRE → MANAGE → RECORD.</p></div></body></html>";
       return new Response(control,{headers:{"content-type":"text/html;charset=utf-8","cache-control":"no-store"}});
@@ -4630,17 +4638,71 @@ document.getElementById('export')?.addEventListener('click',async()=>{const r=aw
       const form=await request.formData().catch(()=>null);
       if(String(form?.get("authorization")||"")!=="VALIDATE_FOUNDER_COACH_CARD") return json({ok:false,state:"EXPLICIT_COACH_VALIDATION_AUTHORIZATION_REQUIRED",armed:false,providerWrites:0,capitalMovedUsd:0,tradingOrders:0},400);
       const threshold=Number(form?.get("coachThreshold"));
-      const maxAttempts=Math.trunc(Number(form?.get("coachAttempts")));
-      const maxEntryDebitUsd=Math.trunc(Number(form?.get("coachStake")));
-      const maxConcurrent=Math.trunc(Number(form?.get("coachConcurrent")));
+      // Fail closed on non-integer input: validate the raw parsed number's
+      // integrality BEFORE any truncation, so e.g. "5.5" is rejected rather
+      // than silently coerced into a valid integer.
+      const maxAttempts=Number(form?.get("coachAttempts"));
+      const maxEntryDebitUsd=Number(form?.get("coachStake"));
+      const maxConcurrent=Number(form?.get("coachConcurrent"));
       const allowedScores=[.50,.55,.60,.65,.70,.75,.80,.85];
       if(!allowedScores.some(x=>Math.abs(x-threshold)<1e-9)) return json({ok:false,state:"COACH_THRESHOLD_INVALID",armed:false,providerWrites:0,capitalMovedUsd:0,tradingOrders:0},400);
       if(!Number.isInteger(maxAttempts)||maxAttempts<1||maxAttempts>100) return json({ok:false,state:"COACH_ATTEMPTS_INVALID",armed:false,providerWrites:0,capitalMovedUsd:0,tradingOrders:0},400);
       if(!Number.isInteger(maxEntryDebitUsd)||maxEntryDebitUsd<1||maxEntryDebitUsd>10) return json({ok:false,state:"COACH_STAKE_INVALID",armed:false,providerWrites:0,capitalMovedUsd:0,tradingOrders:0},400);
       if(!Number.isInteger(maxConcurrent)||maxConcurrent<1||maxConcurrent>10) return json({ok:false,state:"COACH_CONCURRENCY_INVALID",armed:false,providerWrites:0,capitalMovedUsd:0,tradingOrders:0},400);
       const frozenConfig=Object.freeze({threshold,maxAttempts,maxEntryDebitUsd,maxConcurrent});
-      const liveArmEligible=maxEntryDebitUsd===1&&maxConcurrent<=3;
-      return json({ok:true,state:liveArmEligible?"COACH_CONFIG_VALID_WITHIN_CURRENT_AUTHORITY":"COACH_CONFIG_VALID_NOT_YET_LIVE_AUTHORIZED",frozenConfig,immutable:true,liveArmEligible,liveArmImplemented:false,autoCanAlterConfig:false,armed:false,providerWrites:0,capitalMovedUsd:0,tradingOrders:0});
+      // Live Coach Card ARM (below) is capped at maxConcurrent<=3 to match the
+      // existing proven controller's concurrency capability. A config that
+      // validates here with maxConcurrent 4-10 is a valid zero-money config,
+      // but is not yet eligible for live ARM under this repair.
+      const liveArmEligible=maxEntryDebitUsd>=1&&maxEntryDebitUsd<=10&&maxConcurrent<=3;
+      return json({ok:true,state:liveArmEligible?"COACH_CONFIG_VALID_WITHIN_CURRENT_AUTHORITY":"COACH_CONFIG_VALID_NOT_YET_LIVE_AUTHORIZED",frozenConfig,immutable:true,liveArmEligible,liveArmImplemented:true,autoCanAlterConfig:false,armed:false,providerWrites:0,capitalMovedUsd:0,tradingOrders:0});
+    }
+
+    if (request.method === "POST" && url.pathname === "/execution-test-coach-arm") {
+      // Founder Coach Card live ARM. A separate explicit action from the
+      // zero-money /execution-test-coach-preview validator above. Re-validates
+      // the exact same bounds server-side (fail closed) and, on success, freezes
+      // the Founder-selected configuration into the SAME existing execution-test
+      // state/engine used by /execution-test-arm. This does not replace or alter
+      // the existing single-series $1 ARM path.
+      const form=await request.formData().catch(()=>null);
+      if(String(form?.get("armAuthorization")||"")!=="ARM_FOUNDER_COACH_CARD_RUN") return json({ok:false,state:"EXPLICIT_COACH_ARM_AUTHORIZATION_REQUIRED",armed:false,providerWrites:0,capitalMovedUsd:0,tradingOrders:0},400);
+      const threshold=Number(form?.get("coachThreshold"));
+      // Fail closed on non-integer input: validate the raw parsed number's
+      // integrality BEFORE any truncation, so e.g. "5.5" is rejected rather
+      // than silently coerced into a valid integer.
+      const maxAttempts=Number(form?.get("coachAttempts"));
+      const maxEntryDebitUsd=Number(form?.get("coachStake"));
+      const maxConcurrent=Number(form?.get("coachConcurrent"));
+      const allowedScores=[.50,.55,.60,.65,.70,.75,.80,.85];
+      if(!allowedScores.some(x=>Math.abs(x-threshold)<1e-9)) return json({ok:false,state:"COACH_THRESHOLD_INVALID",armed:false,providerWrites:0,capitalMovedUsd:0,tradingOrders:0},400);
+      if(!Number.isInteger(maxAttempts)||maxAttempts<1||maxAttempts>100) return json({ok:false,state:"COACH_ATTEMPTS_INVALID",armed:false,providerWrites:0,capitalMovedUsd:0,tradingOrders:0},400);
+      if(!Number.isInteger(maxEntryDebitUsd)||maxEntryDebitUsd<1||maxEntryDebitUsd>10) return json({ok:false,state:"COACH_STAKE_INVALID",armed:false,providerWrites:0,capitalMovedUsd:0,tradingOrders:0},400);
+      // Live Coach Card ARM is deliberately narrower than the zero-money preview:
+      // capped at maxConcurrent<=3 to match the existing proven controller's
+      // concurrency capability. This repair does not expand concurrency.
+      if(!Number.isInteger(maxConcurrent)||maxConcurrent<1||maxConcurrent>3) return json({ok:false,state:"COACH_CONCURRENCY_EXCEEDS_LIVE_CAPABILITY",armed:false,maxLiveConcurrent:3,providerWrites:0,capitalMovedUsd:0,tradingOrders:0},400);
+      if(!kalshiControllerSwitchEnabled(env)) return json({ok:false,state:"CONTROLLER_SWITCH_HARD_DISABLED",armed:false},423);
+      const real=await loadRealTradeState(env);
+      if(kalshiAuthorizationValid(real)||Number(real?.filledCount||0)>Number(real?.exitFilledTotal||0)) return json({ok:false,state:"ONE_TRADE_CONTROLLER_OR_POSITION_ACTIVE",armed:false},409);
+      const current=await loadExecutionTestState(env);
+      if(executionTestQueueActive(current)) return json({ok:false,state:"QUEUE_ALREADY_ACTIVE",armed:false},409);
+      if(current?.armed||executionTestOpenPositions(current).length>0) return json({ok:false,state:"EXECUTION_TEST_ALREADY_ACTIVE",armed:false},409);
+      const balanceProof=await kalshiExecutionBalanceSnapshot(env);
+      const rows=Array.isArray(balanceProof?.body?.balance_breakdown)?balanceProof.body.balance_breakdown:[];
+      const index2=Number(rows.find(x=>Number(x?.exchange_index)===EXECUTION_TEST_CONFIG.requiredExchangeIndex)?.balance);
+      if(!balanceProof?.ok||!Number.isFinite(index2)||index2<EXECUTION_TEST_CONFIG.minSeriesFundingUsd) return json({ok:false,state:"INDEX2_FUNDING_NOT_READY",index2Usd:Number.isFinite(index2)?index2:null,requiredUsd:EXECUTION_TEST_CONFIG.minSeriesFundingUsd,armed:false},409);
+      const state=defaultExecutionTestState();
+      state.queueHistory=JSON.parse(JSON.stringify(Array.isArray(current?.queueHistory)?current.queueHistory:[]));
+      state.threshold=threshold;
+      state.maxAttempts=maxAttempts;
+      state.maxEntryDebitUsd=maxEntryDebitUsd;
+      state.maxConcurrent=maxConcurrent;
+      state.armed=true;state.status="ARMED_FISHING";state.seriesId=crypto.randomUUID();state.armedAt=Date.now();
+      state.fundingAtArm={index2Usd:index2,requiredExchangeIndex:EXECUTION_TEST_CONFIG.requiredExchangeIndex};
+      executionTestLedger(state,"EXECUTION_TEST_COACH_CARD_SERIES_ARMED",{threshold,maxAttempts,maxEntryDebitUsd,maxConcurrent,index2Usd:index2,productionBaselineThreshold:REAL_TEST_CONFIG.entryScore});
+      await saveExecutionTestState(env,state);
+      return Response.redirect(new URL("/execution-test-control?armed=1",request.url).toString(),303);
     }
 
     if (request.method === "POST" && url.pathname === "/execution-test-arm") {
