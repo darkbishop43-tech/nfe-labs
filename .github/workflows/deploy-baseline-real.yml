@@ -1,6 +1,6 @@
 name: Deploy Baseline Real Worker
 
-# NFE-OS deployment trigger: Coach Card governance source commit 5718ff5
+# NFE-OS deployment trigger: compact control-page source commit 1d023fd
 on:
   push:
     branches:
