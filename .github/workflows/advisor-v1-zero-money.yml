@@ -1,0 +1,116 @@
+name: Advisor V1 Zero Money
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [market-edge-baseline-real]
+    paths:
+      - 'market-edge-lab/real/baseline/advisor-v1/**'
+      - '.github/workflows/advisor-v1-zero-money.yml'
+  schedule:
+    - cron: '*/5 * * * *'
+
+permissions:
+  contents: read
+
+env:
+  ADVISOR_KV_NAMESPACE_ID: d110292129c94b26942c25d0c462a17b
+
+jobs:
+  analyze:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: market-edge-baseline-real
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Refresh isolated completed 1-minute evidence
+        working-directory: market-edge-lab/real/baseline
+        run: |
+          set -euo pipefail
+          node advisor-history/collect.mjs
+
+      - name: Build Advisor V1 PRE_CYCLE_BRIEFING and current update
+        working-directory: market-edge-lab/real/baseline
+        run: |
+          set -euo pipefail
+          node advisor-v1/analyze.mjs | tee /tmp/advisor-v1.log
+          grep -q 'PRE_CYCLE_BRIEFING_CREATED=YES' /tmp/advisor-v1.log
+          grep -q 'NO_FUTURE_LEAK=PROVEN' /tmp/advisor-v1.log
+          grep -q 'BRIEFING_IMMUTABLE=PROVEN' /tmp/advisor-v1.log
+          grep -q 'CURRENT_UPDATE_SEPARATE=PROVEN' /tmp/advisor-v1.log
+          grep -q 'providerTradingWrites=0' /tmp/advisor-v1.log
+          grep -q 'capitalMovedUsd=0' /tmp/advisor-v1.log
+          grep -q 'ordersSubmittedByAdvisor=0' /tmp/advisor-v1.log
+
+      - name: Assert execution and ARM/DISARM quarantine
+        run: |
+          set -euo pipefail
+          git diff --exit-code HEAD -- market-edge-lab/real/baseline/src/index.js
+          git diff --exit-code HEAD -- market-edge-lab/real/baseline/wrangler.toml
+          echo 'ARM_DISARM_TOUCHED=NO'
+          echo 'EXECUTION_FILES_TOUCHED=NO'
+          echo 'EXECUTION_STATE_TOUCHED=NO'
+
+      - name: Validate Cloudflare persistence credentials
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+
+      - name: Persist Advisor V1 keys only
+        working-directory: market-edge-lab/real/baseline
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          api="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/storage/kv/namespaces/$ADVISOR_KV_NAMESPACE_ID/values"
+          encode(){ node -e 'process.stdout.write(encodeURIComponent(process.argv[1]))' "$1"; }
+          put(){
+            key="$1"; file="$2"
+            case "$key" in
+              advisor:briefing:v1:*|advisor:current:v1|advisor:update:v1:*) ;;
+              *) echo "REFUSING_NON_ADVISOR_KEY $key"; exit 1;;
+            esac
+            enc="$(encode "$key")"
+            response="$(curl --silent --show-error --fail-with-body -X PUT -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -H 'Content-Type: application/json' --data-binary "@$file" "$api/$enc")"
+            node -e 'const x=JSON.parse(process.argv[1]);if(x.success!==true)process.exit(1)' "$response"
+            echo "PERSISTED $key"
+          }
+          exists(){
+            key="$1"; enc="$(encode "$key")"
+            code="$(curl --silent --output /tmp/existing.json --write-out '%{http_code}' -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "$api/$enc" || true)"
+            test "$code" = "200"
+          }
+          cycle="$(node -e "const x=require('./advisor-v1/out/pre-cycle-briefing.json');process.stdout.write(x.cycleId)")"
+          stamp="$(node -e "const x=require('./advisor-v1/out/current.json');process.stdout.write(x.generatedAt.replace(/[:.]/g,'-'))")"
+          briefing_key="advisor:briefing:v1:$cycle"
+          if exists "$briefing_key"; then
+            echo "BRIEFING_IMMUTABLE_EXISTING $briefing_key"
+          else
+            put "$briefing_key" advisor-v1/out/pre-cycle-briefing.json
+          fi
+          put "advisor:current:v1" advisor-v1/out/current.json
+          put "advisor:update:v1:$cycle:$stamp" advisor-v1/out/current.json
+          echo 'executionStateKvWrites=0'
+          echo 'providerTradingWrites=0'
+          echo 'capitalMovedUsd=0'
+          echo 'ordersSubmittedByAdvisor=0'
+
+      - name: Upload Advisor evidence artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: advisor-v1-${{ github.run_id }}
+          path: |
+            market-edge-lab/real/baseline/advisor-history/out/*.json
+            market-edge-lab/real/baseline/advisor-v1/out/*.json
+          if-no-files-found: error
+          retention-days: 14
