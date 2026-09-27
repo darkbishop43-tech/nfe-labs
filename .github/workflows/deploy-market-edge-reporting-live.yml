@@ -72,7 +72,7 @@ jobs:
         run: |
           cat > wrangler.toml <<EOF
           name = "market-edge-reporting-live"
-          main = "src/index.js"
+          main = "src/live.js"
           compatibility_date = "2026-09-26"
 
           [triggers]
@@ -81,10 +81,13 @@ jobs:
           [[kv_namespaces]]
           binding = "REPORTING"
           id = "$KV_ID"
+
+          [[services]]
+          binding = "BASELINE"
+          service = "market-edge-baseline-real"
           EOF
           cat wrangler.toml
       - name: Deploy isolated reporting Worker
-        id: deploy
         working-directory: market-edge-reporting-live
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -105,7 +108,7 @@ jobs:
           print(secrets.token_urlsafe(32))
           PY
           )
-          printf '%s' "$TOKEN" | npx wrangler secret put REPORTING_ADMIN_TOKEN >/tmp/secret.log
+          printf '%s\n' "$TOKEN" | npx wrangler secret put REPORTING_ADMIN_TOKEN >/tmp/secret.log
           echo "$TOKEN" > /tmp/reporting-token
           chmod 600 /tmp/reporting-token
       - name: Live read-only ledger verification and first real Sep 26 snapshot
@@ -129,14 +132,23 @@ jobs:
           python - <<'PY'
           import json
           x=json.load(open('/tmp/live.json'))
+          print('SOURCE_STATUS',json.dumps(x.get('sourceStatus'),sort_keys=True))
           assert x['source']=='LIVE_READ_ONLY_MARKET_EDGE_DATA'
           assert x['tradingAuthority'] is False and x['providerWrites']==0
           assert x['reportingTimezone']=='America/New_York'
+          assert x['sourceStatus']['execution']=='OK' and x['sourceStatus']['capital']=='OK'
           print('LIVE_SERIES',json.dumps(x.get('currentSeries'),sort_keys=True))
           print('LIVE_EXECUTION',json.dumps(x.get('execution'),sort_keys=True))
           print('LIVE_CAPITAL',json.dumps(x.get('capital'),sort_keys=True))
           PY
-          curl -fsS -X POST -H "x-report-token: $TOKEN" "$URL/admin/finalize?date=2026-09-26" -o /tmp/snapshot.json
+          ok=0
+          for i in $(seq 1 12); do
+            code=$(curl -sS -o /tmp/snapshot.json -w '%{http_code}' -X POST -H "x-report-token: $TOKEN" "$URL/admin/finalize?date=2026-09-26")
+            if [ "$code" = 200 ]; then ok=1; break; fi
+            echo "FINALIZE_WAIT_HTTP=$code"
+            sleep 5
+          done
+          test "$ok" = 1
           python - <<'PY'
           import json
           x=json.load(open('/tmp/snapshot.json'))
