@@ -1,0 +1,67 @@
+name: Bounded New 20 Capital Reconciliation
+
+on:
+  push:
+    branches: [market-edge-baseline-real]
+    paths: ['.github/workflows/reconcile-new-20-capital-to-index2.yml']
+
+permissions:
+  contents: read
+
+jobs:
+  reconcile:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify, move exactly new $20, allocate sleeves, verify
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          B='https://market-edge-baseline-real.darkbishop43.workers.dev'
+          NS='d110292129c94b26942c25d0c462a17b'
+
+          curl -fsS "$B/execution-test-state" -o /tmp/before.json
+          curl -fsS "$B/founder-capital-ledger" -o /tmp/capital-before.json
+
+          python - <<'PY'
+          import json
+          x=json.load(open('/tmp/before.json')); c=json.load(open('/tmp/capital-before.json'))
+          s=x['state']; p=c['provider']; rows=p.get('balanceBreakdown') or []
+          by={int(r['exchangeIndex']):float(r['balanceUsd']) for r in rows}
+          total=float(p['cashUsd'])
+          assert s.get('armed') is False, s
+          assert int(s.get('openPositions') or 0)==0, s
+          assert abs(sum(by.values())-total)<0.0001, (by,total)
+          assert abs(by.get(0,0)-20.0)<0.0001, f'INDEX0_NOT_EXACT_NEW_20: {by}'
+          manual=float(((c.get('sleeves') or {}).get('FOUNDER_MANUAL') or {}).get('allocatedCapitalUsd') or 0)
+          assert abs(manual)<0.0001, f'FOUNDER_ALLOCATION_NOT_ZERO: {manual}'
+          print('PRE='+json.dumps({'providerCashUsd':total,'byIndex':by,'founderManualAllocatedUsd':manual,'openPositions':0}))
+          PY
+
+          curl -fsS -o /tmp/transfer-body -D /tmp/transfer-headers -X POST \
+            -H 'content-type: application/x-www-form-urlencoded' \
+            --data 'authorization=MOVE_INDEX0_TO_INDEX2_FOR_FIVE_EXECUTION_TESTS' \
+            "$B/execution-test-consolidate-index2"
+
+          # Persist logical Founder sleeve allocation only after provider transfer succeeds.
+          printf '%s' '{"schema":"FOUNDER_MANUAL_CAPITAL_V1","source":"FOUNDER_MANUAL","allocatedUsd":10,"status":"FUNDED_LOCKED","allocationReason":"NEW_20_SPLIT_10_AUTO_10_FOUNDER","allocatedAt":"2026-09-27T00:00:00Z"}' > /tmp/founder-capital.json
+          npx --yes wrangler@4 kv key put --namespace-id "$NS" founder-manual-capital-v1 --path /tmp/founder-capital.json --remote
+
+          curl -fsS "$B/execution-test-state" -o /tmp/after.json
+          curl -fsS "$B/founder-capital-ledger" -o /tmp/capital-after.json
+
+          python - <<'PY'
+          import json
+          x=json.load(open('/tmp/after.json')); c=json.load(open('/tmp/capital-after.json'))
+          s=x['state']; p=c['provider']; rows=p.get('balanceBreakdown') or []
+          by={int(r['exchangeIndex']):float(r['balanceUsd']) for r in rows}; total=float(p['cashUsd'])
+          sleeves=c.get('sleeves') or {}; founder=float((sleeves.get('FOUNDER_MANUAL') or {}).get('allocatedCapitalUsd') or 0); auto=float((sleeves.get('AUTO_BASELINE') or {}).get('allocatedCapitalUsd') or 0)
+          assert s.get('armed') is False and int(s.get('openPositions') or 0)==0, s
+          assert abs(sum(by.values())-total)<0.0001, (by,total)
+          assert abs(by.get(0,0))<0.0001, by
+          assert abs(founder-10.0)<0.0001, sleeves
+          assert abs((auto+founder)-total)<0.02, (auto,founder,total)
+          print('POST='+json.dumps({'providerCashUsd':total,'byIndex':by,'autoSleeveUsd':auto,'founderSleeveUsd':founder,'totalProviderUsd':total,'openPositions':0,'reconciled':True,'providerTransferWrites':1,'tradingOrdersSubmitted':0}))
+          PY
