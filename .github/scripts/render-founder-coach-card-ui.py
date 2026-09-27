@@ -11,10 +11,16 @@ assert 'ARM_BOUNDED_EXECUTION_TESTS_MAX_1_USD' in original_arm
 assert '/execution-test-coach-preview' in s
 assert '/execution-test-coach-arm' not in s
 
-card_start = '      control+="<div class=\'box\'><b>FOUNDER COACH CARD</b>'
+legacy_start = '      control+="<div class=\'box\'><b>FOUNDER COACH CARD</b>'
+active_start = '      const activeCoachFrozen='
 original_arm_ui = '      if(!state.armed&&!executionTestQueueActive(state)&&executionTestOpenPositions(state).length===0&&ready) control+="<div class=\'box\'><b>EXISTING SINGLE-SERIES ARM</b>'
-assert card_start in s and original_arm_ui in s
-start = s.index(card_start)
+assert original_arm_ui in s
+if active_start in s:
+    start = s.index(active_start)
+elif legacy_start in s:
+    start = s.index(legacy_start)
+else:
+    raise AssertionError('COACH_CARD_START_ANCHOR_MISSING')
 end = s.index(original_arm_ui, start)
 
 card = '''      const activeCoachFrozen=(state?.armed&&!executionTestQueueActive(state))?"<div class='box' style='border:1px solid #4b5563'><b>ACTIVE FROZEN CONFIGURATION</b><p>Threshold: <b>"+Number(state?.threshold??EXECUTION_TEST_CONFIG.entryScore).toFixed(2)+"</b><br>Attempts: <b>"+executionTestSeriesLimit(state)+"</b><br>Stake: <b>$"+Number(state?.maxEntryDebitUsd??EXECUTION_TEST_CONFIG.maxEntryDebitUsd).toFixed(0)+"</b><br>Max simultaneous positions: <b>"+Number(state?.maxConcurrent??EXECUTION_TEST_CONFIG.maxConcurrent)+"</b></p><p class='muted'>Read-only active series values. Editing controls below cannot mutate this armed series.</p></div>":"";
