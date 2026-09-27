@@ -1,5 +1,6 @@
 name: Founder Coach Card UI Integration
 
+# NFE-OS verifier trigger: lock-button quote repair 727b8a5
 on:
   push:
     branches:
