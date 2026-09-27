@@ -1,5 +1,6 @@
 name: Deploy Baseline Real Worker
 
+# NFE-OS deployment trigger: Coach Card UI-only source commit 960f35a6a1694d88ccc4b84515c55a82f9286dc1
 on:
   push:
     branches:
