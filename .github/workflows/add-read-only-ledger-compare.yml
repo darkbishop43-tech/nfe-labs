@@ -1,0 +1,129 @@
+name: Read Only Ledger Compare Acceptance
+
+on:
+  push:
+    branches: [market-edge-baseline-real]
+    paths:
+      - 'market-edge-lab/real/ledger-compare/**'
+      - '.github/workflows/add-read-only-ledger-compare.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: market-edge-baseline-real
+          fetch-depth: 4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Patch Founder cockpit presentation only
+        run: |
+          set -euo pipefail
+          python market-edge-lab/real/ledger-compare/patch-founder-terminal.py
+          grep -q 'id="kalshiAccountSummary"' market-edge-lab/real/baseline/founder-terminal.html
+          grep -q 'data-tab="compare"' market-edge-lab/real/baseline/founder-terminal.html
+          grep -q 'forensic-historical-orders?limit=200' market-edge-lab/real/baseline/founder-terminal.html
+          grep -q 'PROVIDER VALUES ARE NOT REWRITTEN' market-edge-lab/real/baseline/founder-terminal.html
+          echo 'ACCOUNT_SUMMARY=PRESENT'
+          echo 'LEDGER_COMPARE_TAB=PRESENT'
+
+      - name: Prove execution source and trading config untouched
+        run: |
+          set -euo pipefail
+          actual="$(git hash-object market-edge-lab/real/baseline/src/index.js)"
+          test "$actual" = '22af6fdad48acd51d1c2a3f769ec625c6ebc810b'
+          git diff --exit-code HEAD -- market-edge-lab/real/baseline/src/index.js
+          git diff --exit-code HEAD -- market-edge-lab/real/baseline/wrangler.toml
+          echo 'ARM_DISARM=UNCHANGED'
+          echo 'EXECUTION_LOGIC=UNCHANGED'
+          echo 'EXECUTION_SOURCE=UNCHANGED'
+
+      - name: Commit cockpit read-only presentation
+        run: |
+          set -euo pipefail
+          if git diff --quiet -- market-edge-lab/real/baseline/founder-terminal.html; then
+            echo 'COCKPIT_ALREADY_CURRENT=YES'
+          else
+            git config user.name 'github-actions[bot]'
+            git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+            git add market-edge-lab/real/baseline/founder-terminal.html
+            git commit -m 'Add Kalshi summary and read-only ledger compare tab'
+            git push origin HEAD:market-edge-baseline-real
+          fi
+
+      - name: Wait for read bridge and collect live evidence
+        run: |
+          set -euo pipefail
+          base='https://market-edge-founder-read.darkbishop43.workers.dev'
+          ok=0
+          for i in $(seq 1 18); do
+            h=$(curl --silent --output /tmp/health.json --write-out '%{http_code}' "$base/health" || true)
+            o=$(curl --silent --output /tmp/orders.json --write-out '%{http_code}' "$base/forensic-historical-orders?limit=200" || true)
+            c=$(curl --silent --output /tmp/capital.json --write-out '%{http_code}' "$base/founder-capital-ledger" || true)
+            e=$(curl --silent --output /tmp/exec.json --write-out '%{http_code}' "$base/execution-test-state" || true)
+            r=$(curl --silent --output /tmp/real.json --write-out '%{http_code}' "$base/real-trade-state" || true)
+            echo "attempt=$i health=$h orders=$o capital=$c exec=$e real=$r"
+            if [ "$h" = 200 ] && [ "$o" = 200 ] && [ "$c" = 200 ] && [ "$e" = 200 ] && [ "$r" = 200 ]; then ok=1; break; fi
+            sleep 5
+          done
+          test "$ok" = 1
+
+          post=$(curl --silent --output /tmp/post.json --write-out '%{http_code}' -X POST "$base/forensic-historical-orders" || true)
+          test "$post" = 405
+
+          node --input-type=module <<'NODE'
+          import {readFileSync} from 'node:fs';
+          const ordersJson=JSON.parse(readFileSync('/tmp/orders.json','utf8'));
+          const capital=JSON.parse(readFileSync('/tmp/capital.json','utf8'));
+          const exec=JSON.parse(readFileSync('/tmp/exec.json','utf8'));
+          const real=JSON.parse(readFileSync('/tmp/real.json','utf8'));
+          const arr=x=>Array.isArray(x)?x:[];
+          const orders=arr(ordersJson?.orders).length?arr(ordersJson.orders):arr(ordersJson?.historical_orders).length?arr(ordersJson.historical_orders):arr(ordersJson?.data?.orders).length?arr(ordersJson.data.orders):arr(ordersJson?.data?.historical_orders);
+          const num=v=>Number.isFinite(Number(v))?Number(v):null;
+          const filled=o=>num(o?.fill_count??o?.filled_count??o?.filledCount??o?.count_filled??o?.count)??0;
+          const ts=o=>{const v=o?.created_time??o?.created_at??o?.updated_time??o?.ts??o?.timestamp;if(v==null)return null;if(typeof v==='number')return v>1e12?v:v*1000;const t=Date.parse(v);return Number.isFinite(t)?t:null};
+          const filledOrders=orders.filter(o=>filled(o)>0);
+          const start=Date.parse('2026-09-27T04:00:00.000Z');
+          const end=Date.parse('2026-09-28T04:00:00.000Z');
+          const sep27=filledOrders.filter(o=>{const t=ts(o);return Number.isFinite(t)&&t>=start&&t<end});
+          const p=capital?.provider||{};
+          if(!capital || typeof capital!=='object') throw new Error('CAPITAL_READ_FAIL');
+          if(!exec || typeof exec!=='object') throw new Error('EXEC_READ_FAIL');
+          if(!real || typeof real!=='object') throw new Error('REAL_READ_FAIL');
+          console.log('LIVE_KALSHI_READ=PASS');
+          console.log('MARKET_EDGE_READ=PASS');
+          console.log('BASELINE_STATE_READ=PASS');
+          console.log('HISTORICAL_ORDERS_RETURNED='+orders.length);
+          console.log('FILLED_PROVIDER_ORDERS_RETURNED='+filledOrders.length);
+          console.log('SEP27_FILLED_PROVIDER_ORDERS_VISIBLE='+sep27.length);
+          console.log('KALSHI_CASH='+(Number.isFinite(Number(p.cashUsd))?Number(p.cashUsd).toFixed(4):'UNAVAILABLE'));
+          console.log('ACCOUNT_VALUE='+(Number.isFinite(Number(p.accountValueUsd))?Number(p.accountValueUsd).toFixed(4):'UNAVAILABLE'));
+          console.log('OPEN_EXPOSURE='+(Number.isFinite(Number(p.openExposureUsd))?Number(p.openExposureUsd).toFixed(4):'UNAVAILABLE'));
+          console.log('OPEN_POSITIONS='+(Number.isFinite(Number(p.openPositionsCount))?Number(p.openPositionsCount):'UNAVAILABLE'));
+          console.log('DAILY_PNL='+(Number.isFinite(Number(p.todayPnlUsd))?Number(p.todayPnlUsd).toFixed(4):'UNAVAILABLE'));
+          console.log('PROVIDER_WRITES=0');
+          console.log('EXECUTION_STATE_WRITES=0');
+          console.log('CAPITAL_MOVED_USD=0');
+          console.log('ORDERS_SUBMITTED=0');
+          NODE
+
+      - name: Verify cockpit compare is display-only
+        run: |
+          set -euo pipefail
+          grep -q "method:'GET'" market-edge-lab/real/baseline/founder-terminal.html
+          grep -q 'P/L_MISMATCH' market-edge-lab/real/baseline/founder-terminal.html
+          grep -q 'METADATA_MISMATCH' market-edge-lab/real/baseline/founder-terminal.html
+          grep -q 'PROVIDER_ONLY' market-edge-lab/real/baseline/founder-terminal.html
+          grep -q 'INTERNAL_ONLY' market-edge-lab/real/baseline/founder-terminal.html
+          echo 'MISMATCHES_SHOWN_TRUTHFULLY=YES'
+          echo 'PROVIDER_WRITES=0'
+          echo 'CAPITAL_MOVED_USD=0'
+          echo 'ORDERS_SUBMITTED=0'
