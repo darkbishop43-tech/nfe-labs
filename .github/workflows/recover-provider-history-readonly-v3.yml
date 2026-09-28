@@ -1,0 +1,125 @@
+name: Recover Provider History Read Only V3
+
+on:
+  push:
+    branches: [market-edge-baseline-real]
+    paths:
+      - '.github/workflows/recover-provider-history-readonly-v3.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  recover:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: market-edge-baseline-real
+          fetch-depth: 4
+
+      - name: Patch GET-only provider history route and existing cockpit source
+        run: |
+          set -euo pipefail
+          cp market-edge-lab/real/baseline/src/index.js /tmp/index.before.js
+          python market-edge-lab/real/provider-history/patch-provider-history.py
+          grep -q 'NFE_PROVIDER_HISTORY_READ_V1' market-edge-lab/real/baseline/src/index.js
+          grep -q '/forensic-provider-history?limit=200' market-edge-lab/real/baseline/founder-terminal.html
+
+      - name: Prove additive GET-only route and no unrelated executable changes
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          before=Path('/tmp/index.before.js').read_text()
+          after=Path('market-edge-lab/real/baseline/src/index.js').read_text()
+          marker='    // NFE_PROVIDER_HISTORY_READ_V1'
+          anchor='    if (request.method === "GET" && url.pathname === "/forensic-historical-orders") {'
+          start=after.index(marker)
+          end=after.index(anchor,start)
+          block=after[start:end]
+          stripped=after[:start]+after[end:]
+          # The patch may introduce/remove blank separators only; executable text must be identical.
+          norm=lambda s:'\n'.join(line.rstrip() for line in s.splitlines() if line.strip())
+          assert norm(stripped)==norm(before), 'UNRELATED_EXECUTABLE_SOURCE_CHANGE'
+          assert 'request.method === "GET"' in block
+          assert 'kalshiExecutionGet' in block
+          for forbidden in ['kalshiExecutionPost','kalshiExecutionDelete','saveExecutionTestState','saveRealTradeState','/execution-test-arm','/execution-test-disarm']:
+              assert forbidden not in block, forbidden
+          print('EXECUTION_LOGIC_UNCHANGED=YES')
+          print('PROVIDER_ROUTE_GET_ONLY=YES')
+          print('PROVIDER_WRITES=0')
+          print('EXECUTION_STATE_WRITES=0')
+          print('CAPITAL_MOVED_USD=0')
+          print('ORDERS_SUBMITTED=0')
+          PY
+
+      - name: Commit read-only recovery
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add market-edge-lab/real/baseline/src/index.js market-edge-lab/real/baseline/founder-terminal.html
+          if git diff --cached --quiet; then
+            echo 'RECOVERY_ALREADY_APPLIED=YES'
+          else
+            git commit -m 'Recover Kalshi fills and settlements read-only history'
+            git push origin HEAD:market-edge-baseline-real
+          fi
+
+      - name: Wait for deployed read routes and collect evidence
+        run: |
+          set -euo pipefail
+          direct='https://market-edge-baseline-real.darkbishop43.workers.dev/forensic-provider-history?limit=200'
+          bridge='https://market-edge-founder-read.darkbishop43.workers.dev/forensic-provider-history?limit=200'
+          ok=0
+          for i in $(seq 1 35); do
+            d=$(curl --silent --output /tmp/direct.json --write-out '%{http_code}' "$direct" || true)
+            b=$(curl --silent --output /tmp/bridge.json --write-out '%{http_code}' "$bridge" || true)
+            echo "attempt=$i direct=$d bridge=$b"
+            if [ "$d" = 200 ] && [ "$b" = 200 ]; then ok=1; break; fi
+            sleep 6
+          done
+          test "$ok" = 1
+          node --input-type=module <<'NODE'
+          import {readFileSync} from 'node:fs';
+          const x=JSON.parse(readFileSync('/tmp/bridge.json','utf8'));
+          const arr=v=>Array.isArray(v)?v:[];
+          const fills=[...arr(x.fills),...arr(x.historicalFills)];
+          const settlements=arr(x.settlements);
+          const positions=arr(x.positions);
+          const ts=v=>{if(!v)return null;const t=Date.parse(v);return Number.isFinite(t)?t:null};
+          const start=Date.parse('2026-09-27T04:00:00Z'), end=Date.parse('2026-09-28T04:00:00Z');
+          const sep27fills=fills.filter(r=>{const t=ts(r.createdAt);return t!==null&&t>=start&&t<end});
+          const sep27settlements=settlements.filter(r=>{const t=ts(r.settledTime);return t!==null&&t>=start&&t<end});
+          const endpoint=x.endpointFamilies||{};
+          console.log('FILLS_SOURCE='+(endpoint.fills?.ok||endpoint.historicalFills?.ok?'FOUND':'NOT_FOUND'));
+          console.log('TRADES_SOURCE='+(fills.some(r=>r.tradeId)?'FOUND':'NOT_FOUND'));
+          console.log('SETTLEMENT_SOURCE='+(endpoint.settlements?.ok?'FOUND':'NOT_FOUND'));
+          console.log('ENDPOINT_FILLS_HTTP='+(endpoint.fills?.httpStatus??'NA'));
+          console.log('ENDPOINT_HISTORICAL_FILLS_HTTP='+(endpoint.historicalFills?.httpStatus??'NA'));
+          console.log('ENDPOINT_SETTLEMENTS_HTTP='+(endpoint.settlements?.httpStatus??'NA'));
+          console.log('ENDPOINT_POSITIONS_HTTP='+(endpoint.positions?.httpStatus??'NA'));
+          console.log('FILLS_ROWS='+fills.length);
+          console.log('SETTLEMENT_ROWS='+settlements.length);
+          console.log('POSITIONS_ROWS='+positions.length);
+          console.log('ROWS_RETURNED='+(fills.length+settlements.length));
+          console.log('SEP27_FILL_ROWS='+sep27fills.length);
+          console.log('SEP27_SETTLEMENT_ROWS='+sep27settlements.length);
+          console.log('SEP27_ROWS_RETURNED='+(sep27fills.length+sep27settlements.length));
+          const keys=[...new Set([...fills.slice(0,20),...settlements.slice(0,20),...positions.slice(0,20)].flatMap(r=>Object.keys(r).filter(k=>r[k]!=null)))].sort();
+          console.log('AUTHORITATIVE_FIELDS='+keys.join(','));
+          console.log('PROVIDER_WRITES='+Number(x?.safety?.providerTradingWrites??0));
+          console.log('EXECUTION_STATE_WRITES='+Number(x?.safety?.executionStateWrites??0));
+          console.log('CAPITAL_MOVED_USD='+Number(x?.safety?.capitalMovedUsd??0));
+          console.log('ORDERS_SUBMITTED='+Number(x?.safety?.ordersSubmitted??0));
+          NODE
+
+      - name: Verify POST remains unavailable on bridge
+        run: |
+          set -euo pipefail
+          code=$(curl --silent --output /tmp/post.json --write-out '%{http_code}' -X POST 'https://market-edge-founder-read.darkbishop43.workers.dev/forensic-provider-history' || true)
+          test "$code" = 405
+          echo 'ARM_DISARM=UNCHANGED'
+          echo 'EXECUTION_LOGIC=UNCHANGED'
