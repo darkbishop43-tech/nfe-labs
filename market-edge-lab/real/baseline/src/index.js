@@ -4255,6 +4255,67 @@ export default {
       });
     }
 
+
+    // NFE_PROVIDER_HISTORY_READ_V1 — authenticated provider history, GET only.
+    if (request.method === "GET" && url.pathname === "/forensic-provider-history") {
+      const requestedLimit=Number(url.searchParams.get("limit"));
+      const limit=Number.isFinite(requestedLimit)?Math.min(200,Math.max(1,Math.trunc(requestedLimit))):200;
+      const minTs=url.searchParams.get("min_ts");
+      const maxTs=url.searchParams.get("max_ts");
+      const q=(extra={})=>{
+        const p=new URLSearchParams({limit:String(limit),...extra});
+        if(minTs)p.set("min_ts",minTs);
+        if(maxTs)p.set("max_ts",maxTs);
+        return p.toString();
+      };
+      const specs=[
+        ["fills","/trade-api/v2/portfolio/fills?"+q({subaccount:"0"})],
+        ["settlements","/trade-api/v2/portfolio/settlements?"+q({subaccount:"0"})],
+        ["positions","/trade-api/v2/portfolio/positions?"+q({subaccount:"0",count_filter:"position,total_traded"})],
+        ["historicalFills","/trade-api/v2/historical/fills?"+q({subaccount:"0"})]
+      ];
+      const readOne=async ([name,path])=>{
+        try{
+          const r=await kalshiExecutionGet(env,path);
+          let body=null; try{body=await r.json();}catch{}
+          return {name,path,httpStatus:r.status,ok:r.ok,body};
+        }catch{return {name,path,httpStatus:null,ok:false,body:null};}
+      };
+      const results=await Promise.all(specs.map(readOne));
+      const byName=Object.fromEntries(results.map(x=>[x.name,x]));
+      const safeFill=f=>({
+        recordType:"FILL",fillId:f?.fill_id??f?.fillId??null,orderId:f?.order_id??f?.orderId??null,tradeId:f?.trade_id??f?.tradeId??null,
+        ticker:f?.ticker??null,marketTicker:f?.market_ticker??f?.ticker??null,side:f?.side??null,action:f?.action??null,count:f?.count??null,
+        yesPrice:f?.yes_price??f?.yes_price_dollars??null,noPrice:f?.no_price??f?.no_price_dollars??null,feeCost:f?.fee_cost??f?.fee??null,
+        createdAt:f?.created_time??f?.created_at??f?.ts??null
+      });
+      const safeSettlement=x=>({
+        recordType:"SETTLEMENT",ticker:x?.ticker??null,eventTicker:x?.event_ticker??null,marketResult:x?.market_result??null,
+        yesCount:x?.yes_count??null,noCount:x?.no_count??null,yesTotalCost:x?.yes_total_cost??null,noTotalCost:x?.no_total_cost??null,
+        revenue:x?.revenue??null,feeCost:x?.fee_cost??null,value:x?.value??null,settledTime:x?.settled_time??null
+      });
+      const safePosition=x=>({
+        recordType:"POSITION",ticker:x?.ticker??x?.market_ticker??null,position:x?.position??null,totalTraded:x?.total_traded??null,
+        marketExposure:x?.market_exposure??null,realizedPnl:x?.realized_pnl??null,feesPaid:x?.fees_paid??null
+      });
+      const fills=Array.isArray(byName.fills?.body?.fills)?byName.fills.body.fills.map(safeFill):[];
+      const historicalFills=Array.isArray(byName.historicalFills?.body?.fills)?byName.historicalFills.body.fills.map(safeFill):[];
+      const settlements=Array.isArray(byName.settlements?.body?.settlements)?byName.settlements.body.settlements.map(safeSettlement):[];
+      const positions=Array.isArray(byName.positions?.body?.market_positions)?byName.positions.body.market_positions.map(safePosition):Array.isArray(byName.positions?.body?.positions)?byName.positions.body.positions.map(safePosition):[];
+      const providerRows=[...fills,...historicalFills,...settlements];
+      return json({
+        ok:true,readOnly:true,provider:"KALSHI",generatedAt:new Date().toISOString(),
+        endpointFamilies:{
+          fills:{path:"GET /trade-api/v2/portfolio/fills",ok:byName.fills?.ok===true,httpStatus:byName.fills?.httpStatus??null,rowCount:fills.length},
+          historicalFills:{path:"GET /trade-api/v2/historical/fills",ok:byName.historicalFills?.ok===true,httpStatus:byName.historicalFills?.httpStatus??null,rowCount:historicalFills.length},
+          settlements:{path:"GET /trade-api/v2/portfolio/settlements",ok:byName.settlements?.ok===true,httpStatus:byName.settlements?.httpStatus??null,rowCount:settlements.length},
+          positions:{path:"GET /trade-api/v2/portfolio/positions",ok:byName.positions?.ok===true,httpStatus:byName.positions?.httpStatus??null,rowCount:positions.length}
+        },
+        fills,historicalFills,settlements,positions,providerRows,
+        safety:{providerTradingWrites:0,executionStateWrites:0,capitalMovedUsd:0,ordersSubmitted:0,credentialsExposed:false}
+      });
+    }
+
     if (request.method === "GET" && url.pathname === "/forensic-historical-orders") {
       const providerPath=new URL("https://external-api.kalshi.com/trade-api/v2/historical/orders");
       for(const key of ["min_ts","max_ts","cursor","limit"]){

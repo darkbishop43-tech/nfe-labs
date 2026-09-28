@@ -244,18 +244,18 @@ setInterval(()=>setText('clock',new Date().toISOString().slice(11,19)+' UTC'),10
  const n=v=>Number.isFinite(Number(v))?Number(v):null;
  const getRO=async path=>{const r=await fetch(READ_BASE+path,{cache:'no-store',method:'GET',headers:{accept:'application/json'}});if(!r.ok)throw new Error(path+' HTTP '+r.status);return r.json()};
  const arr=x=>Array.isArray(x)?x:[];
- const ordersFrom=x=>arr(x?.orders).length?arr(x.orders):arr(x?.historical_orders).length?arr(x.historical_orders):arr(x?.data?.orders).length?arr(x.data.orders):arr(x?.data?.historical_orders).length?arr(x.data.historical_orders):[];
- const orderId=o=>String(o?.order_id??o?.orderId??o?.id??'').trim();
+ const ordersFrom=x=>arr(x?.providerRows).length?arr(x.providerRows):arr(x?.fills).length?arr(x.fills):arr(x?.orders).length?arr(x.orders):arr(x?.historical_orders).length?arr(x.historical_orders):arr(x?.data?.orders).length?arr(x.data.orders):arr(x?.data?.historical_orders).length?arr(x.data.historical_orders):[];
+ const orderId=o=>String(o?.order_id??o?.orderId??o?.fillId??o?.tradeId??o?.id??'').trim();
  const ticker=o=>String(o?.ticker??o?.market_ticker??o?.marketTicker??'').trim();
  const side=o=>String(o?.side??o?.outcome??o?.yes_no??'').toUpperCase();
- const timeOf=o=>o?.created_time??o?.created_at??o?.updated_time??o?.ts??o?.timestamp??null;
+ const timeOf=o=>o?.created_time??o?.created_at??o?.createdAt??o?.settledTime??o?.updated_time??o?.ts??o?.timestamp??null;
  const toMs=v=>{if(v==null)return null;if(typeof v==='number')return v>1e12?v:v*1000;const t=Date.parse(v);return Number.isFinite(t)?t:null};
  const timeMs=o=>toMs(timeOf(o));
  const providerCost=o=>n(o?.cost??o?.total_cost??o?.cost_dollars??o?.filled_cost??o?.filledCost);
- const providerFees=o=>n(o?.fees??o?.fee??o?.taker_fees??o?.maker_fees??o?.fees_dollars);
+ const providerFees=o=>n(o?.fees??o?.fee??o?.feeCost??o?.taker_fees??o?.maker_fees??o?.fees_dollars);
  const providerPayout=o=>n(o?.payout??o?.return??o?.settlement_value??o?.settlementValue);
  const providerPnl=o=>n(o?.realized_pnl??o?.realizedPnl??o?.profit_loss??o?.pnl);
- const filledCount=o=>n(o?.fill_count??o?.filled_count??o?.filledCount??o?.count_filled??o?.count)??0;
+ const filledCount=o=>o?.recordType==='SETTLEMENT'?1:(n(o?.fill_count??o?.filled_count??o?.filledCount??o?.count_filled??o?.count)??0);
  const esc2=x=>String(x??'—').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
  function paintAccount(){
   const p=ledger.capital?.provider||{};
@@ -306,7 +306,7 @@ setInterval(()=>setText('clock',new Date().toISOString().slice(11,19)+' UTC'),10
  };
  async function refreshLedger(){
   try{
-   const [capital,exec,history]=await Promise.all([getRO('/founder-capital-ledger'),getRO('/execution-test-state'),getRO('/forensic-historical-orders?limit=200')]);
+   const [capital,exec,history]=await Promise.all([getRO('/founder-capital-ledger'),getRO('/execution-test-state'),getRO('/forensic-provider-history?limit=200')]);
    ledger.capital=capital;ledger.exec=exec;ledger.history=history;ledger.error=null;ledger.lastReadAt=new Date().toISOString();paintAccount();
    if(document.querySelector('.tabs button[data-tab="compare"]')?.classList.contains('on'))window.renderLedgerCompare();
   }catch(e){ledger.error=String(e?.message||e);ledger.lastReadAt=new Date().toISOString();paintAccount();if(document.querySelector('.tabs button[data-tab="compare"]')?.classList.contains('on'))window.renderLedgerCompare()}
