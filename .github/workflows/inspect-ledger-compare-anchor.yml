@@ -1,0 +1,21 @@
+name: Inspect Ledger Compare Anchor
+on:
+  push:
+    branches: [market-edge-baseline-real]
+    paths: ['.github/workflows/inspect-ledger-compare-anchor.yml']
+permissions:
+  contents: read
+jobs:
+  inspect:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Print relevant read-only anchors
+        run: |
+          set -euo pipefail
+          echo '---BASELINE ROUTE ANCHOR---'
+          grep -n -B4 -A70 'forensic-provider-history' market-edge-lab/real/baseline/src/index.js || true
+          echo '---COCKPIT ANCHORS---'
+          grep -n -B8 -A120 -E 'loadLedgerCompare|forensic-provider-history|renderLedgerCompare|LEDGER COMPARE' market-edge-lab/real/baseline/founder-terminal.html || true
+          echo '---BRIDGE---'
+          cat market-edge-lab/real/founder-read-bridge/src/index.js
