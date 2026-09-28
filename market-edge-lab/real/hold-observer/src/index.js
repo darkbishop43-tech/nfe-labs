@@ -21,7 +21,7 @@ function providerFills(h){return [...arr(h?.fills),...arr(h?.historicalFills)]}
 function providerSettlements(h){return arr(h?.settlements)}
 function openLocalPositions(state){return arr(state?.positions).filter(p=>String(p?.status||'').toUpperCase()!=='CLOSED'&&Number(p?.filledCount||0)>0)}
 function providerOwns(history,p){const t=tickerOf(p);return providerPositions(history).some(r=>tickerOf(r)===t)}
-function entryFill(history,p){const oid=String(p?.entryOrderId||'');const fs=providerFills(history).filter(f=>tickerOf(f)===tickerOf(p));return fs.find(f=>oid&&String(f?.orderId||f?.order_id||'')===oid)||fs.sort((a,b)=>(ms(a?.createdAt||a?.created_time)||0)-(ms(b?.createdAt||b?.created_time)||0))[0]||null}
+function entryFill(history,p){const oid=String(p?.entryOrderId||'');if(!oid)return null;return providerFills(history).find(f=>tickerOf(f)===tickerOf(p)&&String(f?.orderId||f?.order_id||'')===oid)||null}
 function quoteFor(shadow,p){const t=tickerOf(p),s=sideOf(p);const o=arr(shadow?.opportunities).find(x=>tickerOf(x)===t&&(!s||sideOf(x)===s))||null;return o?{score:safe(o.score),yesBid:safe(o.yesBid??o.bid),yesAsk:safe(o.yesAsk??o.yes),noBid:safe(o.noBid),noAsk:safe(o.noAsk),closeTime:o.closeTime||null}:null}
 function publicPosition(state,history,shadow,p,now=Date.now()){
   const owned=providerOwns(history,p);if(!owned)return null;
