@@ -1,0 +1,116 @@
+name: Apply Sep 27 Ledger Correlation Read Only
+on:
+  push:
+    branches: [market-edge-baseline-real]
+    paths:
+      - 'market-edge-lab/real/provider-history/patch-sep27-ledger-correlation.py'
+      - '.github/workflows/apply-sep27-ledger-correlation-readonly.yml'
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  apply:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: market-edge-baseline-real
+          fetch-depth: 4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Apply bounded read-only patch
+        run: |
+          set -euo pipefail
+          cp market-edge-lab/real/baseline/src/index.js /tmp/index.before.js
+          python market-edge-lab/real/provider-history/patch-sep27-ledger-correlation.py
+      - name: Verify GET-only isolation
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          before=Path('/tmp/index.before.js').read_text()
+          after=Path('market-edge-lab/real/baseline/src/index.js').read_text()
+          marker='    // NFE_SEP27_EXACT_CORRELATION_READ_V1\n'
+          start=after.index(marker)
+          end=after.index('    // NFE_PROVIDER_HISTORY_READ_V1\n',start)
+          block=after[start:end]
+          stripped=after[:start]+after[end:]
+          norm=lambda x:'\n'.join(line.rstrip() for line in x.splitlines() if line.strip())
+          assert norm(stripped)==norm(before)
+          assert 'request.method === "GET"' in block
+          for bad in ['kalshiExecutionPost','kalshiExecutionDelete','saveExecutionTestState','saveRealTradeState','.put(','.delete(','/execution-test-arm','/execution-test-disarm']:
+              assert bad not in block, bad
+          h=Path('market-edge-lab/real/baseline/founder-terminal.html').read_text()
+          b=Path('market-edge-lab/real/founder-read-bridge/src/index.js').read_text()
+          assert '/forensic-sep27-correlation?limit=200' in h
+          assert 'SEP 27 EXACT PROVIDER ↔ MARKET EDGE' in h
+          assert '"/forensic-sep27-correlation"' in b
+          assert 'request.method!=="GET"' in b
+          print('EXECUTION_LOGIC_UNCHANGED=YES')
+          print('ARM_DISARM_UNCHANGED=YES')
+          print('PROVIDER_WRITES=0')
+          print('EXECUTION_STATE_WRITES=0')
+          print('CAPITAL_MOVED_USD=0')
+          print('ORDERS_SUBMITTED=0')
+          PY
+      - name: Commit UI and GET-only route
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add market-edge-lab/real/baseline/src/index.js market-edge-lab/real/baseline/founder-terminal.html market-edge-lab/real/founder-read-bridge/src/index.js
+          if git diff --cached --quiet; then
+            echo 'ALREADY_APPLIED=YES'
+          else
+            git commit -m 'Expose Sep 27 exact correlation in Ledger Compare'
+            git push origin HEAD:market-edge-baseline-real
+          fi
+      - name: Deploy Baseline
+        working-directory: market-edge-lab/real/baseline
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          npm install --no-audit --no-fund
+          npx --yes wrangler@4 deploy
+      - name: Deploy read bridge
+        working-directory: market-edge-lab/real/founder-read-bridge
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          npx --yes wrangler@4 deploy
+      - name: Verify live route
+        run: |
+          set -euo pipefail
+          url='https://market-edge-founder-read.darkbishop43.workers.dev/forensic-sep27-correlation?limit=200'
+          code=000
+          for i in $(seq 1 20); do
+            code=$(curl -sS -o /tmp/c.json -w '%{http_code}' "$url" || true)
+            [ "$code" = 200 ] && break
+            sleep 4
+          done
+          test "$code" = 200
+          post=$(curl -sS -o /tmp/post.json -w '%{http_code}' -X POST 'https://market-edge-founder-read.darkbishop43.workers.dev/forensic-sep27-correlation' || true)
+          test "$post" = 405
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          const x=JSON.parse(fs.readFileSync('/tmp/c.json','utf8'));
+          console.log('STATUS='+(x.ok?'GREEN':'RED'));
+          console.log('SEP27_PROVIDER_LIFECYCLES_RECONSTRUCTED='+x.providerLifecycles);
+          console.log('MARKET_EDGE_MATCHED='+x.matched);
+          console.log('PROVIDER_ONLY='+x.providerOnly);
+          console.log('INTERNAL_ONLY='+(x.internalOnly??'UNDETERMINED'));
+          console.log('MISMATCHES='+x.mismatches);
+          console.log('NEAR_HOLD_CANDIDATES_FOUND='+(x.rows||[]).filter(r=>String(r.ticker).startsWith('KXNEAR15M-')).length);
+          console.log('PROVIDER_CLOSE_NEAR_6M='+(x.rows||[]).filter(r=>r.holdEvidence?.checkpoint6m==='PROVIDER_CLOSE_NEAR_CHECKPOINT').length);
+          console.log('PROVIDER_WRITES='+x.safety.providerTradingWrites);
+          console.log('EXECUTION_STATE_WRITES='+x.safety.executionStateWrites);
+          console.log('CAPITAL_MOVED_USD='+x.safety.capitalMovedUsd);
+          console.log('ORDERS_SUBMITTED='+x.safety.ordersSubmitted);
+          console.log('ARM_DISARM='+x.safety.armDisarm);
+          console.log('EXECUTION_LOGIC='+x.safety.executionLogic);
+          NODE
