@@ -21,7 +21,7 @@ jobs:
           node market-edge-lab/real/hold-observer/test.mjs | tee /tmp/hold-proof.json
           node --input-type=module <<'NODE'
           import fs from 'node:fs';const x=JSON.parse(fs.readFileSync('/tmp/hold-proof.json','utf8').trim().split('\n').at(-1));
-          for(const k of ['livePositionPanelModel','defaultFiveMinutes','entryCheckpoint','checkpoint5m','checkpoint5m30','checkpoint6m','actualExitRetention','settlementRetention'])if(x[k]!=='PASS')throw new Error(k+'_FAIL');
+          for(const k of ['livePositionPanelModel','defaultFiveMinutes','entryCheckpoint','checkpoint5m','checkpoint5m30','checkpoint6m','actualExitRetention','settlementRetention','postExitObservationModel'])if(x[k]!=='PASS')throw new Error(k+'_FAIL');
           if(x.realDeadlineMutation!==0||x.providerTradingWrites!==0||x.executionStateWrites!==0||x.capitalMovedUsd!==0||x.ordersSubmitted!==0)throw new Error('ZERO_AUTHORITY_FAIL');
           console.log('STATUS=GREEN');
           console.log('LIVE_POSITION_PANEL_MODEL=PASS');
@@ -31,6 +31,7 @@ jobs:
           console.log('5_00_CHECKPOINT=PASS');
           console.log('5_30_CHECKPOINT=PASS');
           console.log('6_00_CHECKPOINT=PASS');
+          console.log('POST_EXIT_OBSERVATION=PASS');
           console.log('ACTUAL_EXIT_RETENTION=PASS');
           console.log('SETTLEMENT_RETENTION=PASS');
           console.log('REAL_DEADLINE_MUTATION=0');
