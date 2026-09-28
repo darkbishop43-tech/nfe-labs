@@ -1,0 +1,53 @@
+name: Probe Forensic Historical Orders Shape
+
+on:
+  push:
+    branches: [market-edge-baseline-real]
+    paths:
+      - '.github/workflows/probe-forensic-historical-orders-shape.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: market-edge-baseline-real
+
+      - name: Read historical orders through Founder bridge
+        run: |
+          set -euo pipefail
+          base='https://market-edge-founder-read.darkbishop43.workers.dev'
+          code=$(curl --silent --show-error --output /tmp/orders.json --write-out '%{http_code}' "$base/forensic-historical-orders?limit=200")
+          test "$code" = 200
+          node --input-type=module <<'NODE'
+          import {readFileSync} from 'node:fs';
+          const x=JSON.parse(readFileSync('/tmp/orders.json','utf8'));
+          console.log('TOP_KEYS='+Object.keys(x).sort().join(','));
+          function walk(v,path='root',depth=0){
+            if(depth>6||v==null)return;
+            if(Array.isArray(v)){
+              const objectRows=v.filter(q=>q&&typeof q==='object'&&!Array.isArray(q));
+              const orderLike=objectRows.filter(q=>['order_id','orderId','ticker','market_ticker','fill_count','filled_count','status','side'].some(k=>k in q));
+              if(orderLike.length){
+                const keys=[...new Set(orderLike.slice(0,5).flatMap(q=>Object.keys(q)))].sort();
+                console.log(`ORDER_ARRAY path=${path} count=${v.length} orderLike=${orderLike.length} keys=${keys.join(',')}`);
+              }
+              for(let i=0;i<Math.min(v.length,2);i++) walk(v[i],`${path}[${i}]`,depth+1);
+              return;
+            }
+            if(typeof v==='object')for(const [k,val] of Object.entries(v))walk(val,`${path}.${k}`,depth+1);
+          }
+          walk(x);
+          const forbidden=['private_key','api_key','authorization','secret','CLOUDFLARE_API_TOKEN','KALSHI_PRIVATE_KEY'];
+          const raw=JSON.stringify(x).toLowerCase();
+          for(const f of forbidden)if(raw.includes(f.toLowerCase()))throw new Error('SENSITIVE_FIELD_EXPOSED_'+f);
+          console.log('CREDENTIAL_EXPOSURE=0');
+          console.log('PROVIDER_WRITES=0');
+          console.log('CAPITAL_MOVED_USD=0');
+          console.log('ORDERS_SUBMITTED=0');
+          NODE
