@@ -1,0 +1,208 @@
+name: Deploy Sep 27 Ledger Correlation Read Only
+
+on:
+  push:
+    branches: [market-edge-baseline-real]
+    paths:
+      - '.github/workflows/deploy-sep27-ledger-correlation-readonly.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  patch-deploy-verify:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: market-edge-baseline-real
+          fetch-depth: 4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Patch additive GET-only correlation route and existing compare tab
+        run: |
+          set -euo pipefail
+          cp market-edge-lab/real/baseline/src/index.js /tmp/index.before.js
+          cp market-edge-lab/real/baseline/founder-terminal.html /tmp/cockpit.before.html
+          cp market-edge-lab/real/founder-read-bridge/src/index.js /tmp/bridge.before.js
+          python - <<'PY'
+          from pathlib import Path
+          src=Path('market-edge-lab/real/baseline/src/index.js')
+          s=src.read_text()
+          marker='    // NFE_SEP27_EXACT_CORRELATION_READ_V1\n'
+          if marker not in s:
+              anchor='    // NFE_PROVIDER_HISTORY_READ_V1\n'
+              assert anchor in s, 'PROVIDER_HISTORY_ANCHOR_MISSING'
+              block=r'''    // NFE_SEP27_EXACT_CORRELATION_READ_V1
+    if (request.method === "GET" && url.pathname === "/forensic-sep27-correlation") {
+      try {
+        const limit=Math.max(1,Math.min(200,Math.trunc(Number(url.searchParams.get("limit")||200))));
+        const readJson=async path=>{const r=await kalshiExecutionGet(env,path);let body=null;try{body=await r.json();}catch{}return{ok:r.ok,httpStatus:r.status,body};};
+        const [fillsNow,fillsHistorical,settlements]=await Promise.all([
+          readJson("/trade-api/v2/portfolio/fills?limit="+limit),
+          readJson("/trade-api/v2/historical/fills?limit="+limit),
+          readJson("/trade-api/v2/portfolio/settlements?limit="+limit)
+        ]);
+        const normalizeFill=x=>({recordType:"FILL",fillId:x?.fill_id??x?.fillId??null,orderId:x?.order_id??x?.orderId??null,tradeId:x?.trade_id??x?.tradeId??null,ticker:x?.ticker??x?.market_ticker??null,marketTicker:x?.market_ticker??x?.ticker??null,eventTicker:x?.event_ticker??null,side:x?.side??null,action:x?.action??null,yesPrice:x?.yes_price_dollars??x?.yes_price??null,noPrice:x?.no_price_dollars??x?.no_price??null,feeCost:x?.fee_cost??x?.fee_cost_dollars??null,createdAt:x?.created_time??x?.created_at??x?.createdAt??null});
+        const normalizeSettlement=x=>({recordType:"SETTLEMENT",ticker:x?.ticker??x?.market_ticker??null,eventTicker:x?.event_ticker??null,marketResult:x?.market_result??x?.marketResult??null,revenue:x?.revenue_dollars??x?.revenue??null,feeCost:x?.fee_cost??x?.fee_cost_dollars??null,value:x?.value??null,settledTime:x?.settled_time??x?.settledTime??null});
+        const fa=[...(Array.isArray(fillsNow?.body?.fills)?fillsNow.body.fills:[]),...(Array.isArray(fillsHistorical?.body?.fills)?fillsHistorical.body.fills:[])].map(normalizeFill);
+        const sa=(Array.isArray(settlements?.body?.settlements)?settlements.body.settlements:[]).map(normalizeSettlement);
+        const parseMs=v=>{const n=Date.parse(String(v||""));return Number.isFinite(n)?n:null;};
+        const start=Date.parse("2026-09-27T04:00:00Z"),end=Date.parse("2026-09-28T04:00:00Z");
+        const sepFills=fa.filter(x=>{const n=parseMs(x.createdAt);return n!==null&&n>=start&&n<end;});
+        const sepSettlements=sa.filter(x=>{const n=parseMs(x.settledTime);return n!==null&&n>=start&&n<end;});
+        const keyList=env?.BASELINE_REAL_SHADOW_STATE?await env.BASELINE_REAL_SHADOW_STATE.list({prefix:"notification:delivery:v1:"}):{keys:[]};
+        const orderMap=new Map();
+        for(const row of (Array.isArray(keyList?.keys)?keyList.keys:[])){
+          const name=String(row?.name||"");
+          const m=name.match(/^notification:delivery:v1:(fill|close):([^:]+):([^:]+)-(\d+)$/);
+          if(!m)continue;
+          const [,kind,orderId,seriesId,attemptRaw]=m;
+          if(!orderMap.has(orderId))orderMap.set(orderId,[]);
+          orderMap.get(orderId).push({kind,seriesId,attempt:Number(attemptRaw),evidenceKey:name});
+        }
+        const groups=new Map();
+        for(const f of sepFills){const k=String(f.ticker||f.marketTicker||"UNKNOWN");if(!groups.has(k))groups.set(k,{ticker:k,fills:[],settlements:[]});groups.get(k).fills.push(f);}
+        for(const x of sepSettlements){const k=String(x.ticker||"UNKNOWN");if(!groups.has(k))groups.set(k,{ticker:k,fills:[],settlements:[]});groups.get(k).settlements.push(x);}
+        const rows=[];
+        for(const g of groups.values()){
+          const hits=[];
+          for(const f of g.fills)for(const h of (orderMap.get(String(f.orderId||""))||[]))hits.push({...h,orderId:f.orderId,createdAt:f.createdAt,providerSide:f.side,providerAction:f.action,yesPrice:f.yesPrice,noPrice:f.noPrice});
+          const mappings=[...new Map(hits.map(h=>[h.seriesId+":"+h.attempt,h])).values()];
+          let status="PROVIDER_ONLY",reason="NO_RETAINED_ORDER_MAPPING";
+          if(mappings.length===1){status="MATCH";reason="EXACT_PROVIDER_ORDER_ID_TO_SERIES_ATTEMPT";}else if(mappings.length>1){status="METADATA_MISMATCH";reason="MULTIPLE_SERIES_ATTEMPT_MAPPINGS";}
+          const entryFills=hits.filter(x=>x.kind==="fill"),closeFills=hits.filter(x=>x.kind==="close");
+          const firstEntry=entryFills.map(x=>parseMs(x.createdAt)).filter(Number.isFinite).sort((a,b)=>a-b)[0]??null;
+          const firstClose=closeFills.map(x=>parseMs(x.createdAt)).filter(Number.isFinite).sort((a,b)=>a-b)[0]??null;
+          const holdSeconds=firstEntry!==null&&firstClose!==null?(firstClose-firstEntry)/1000:null;
+          rows.push({ticker:g.ticker,status,reason,seriesId:mappings.length===1?mappings[0].seriesId:null,attempt:mappings.length===1?mappings[0].attempt:null,provider:{fills:g.fills,settlements:g.settlements},holdEvidence:{entryAt:firstEntry!==null?new Date(firstEntry).toISOString():null,fiveMinuteDeadline:firstEntry!==null?new Date(firstEntry+300000).toISOString():null,providerCloseAt:firstClose!==null?new Date(firstClose).toISOString():null,entryToProviderCloseSeconds:holdSeconds,checkpoint5m:"QUOTE_UNAVAILABLE",checkpoint5m30:"QUOTE_UNAVAILABLE",checkpoint6m:firstClose!==null&&Math.abs(holdSeconds-360)<=75?"PROVIDER_CLOSE_NEAR_CHECKPOINT":"QUOTE_UNAVAILABLE",settlementAvailable:g.settlements.length>0},historicalInternal:{score:null,threshold:null,exitReason:null,phase1A:null,phase1B:null,note:"Sep 27 series bodies rolled out of bounded queueHistory; retained notification keys preserve exact orderId -> series/attempt mapping only."}});
+        }
+        const matched=rows.filter(x=>x.status==="MATCH").length,providerOnly=rows.filter(x=>x.status==="PROVIDER_ONLY").length,mismatches=rows.filter(x=>x.status==="METADATA_MISMATCH").length;
+        return json({ok:true,readOnly:true,state:"SEP27_EXACT_CORRELATION",date:"2026-09-27 America/New_York",providerLifecycles:rows.length,matched,providerOnly,mismatches,internalOnly:null,internalOnlyReason:"UNDETERMINED_BECAUSE_SEP27_ARCHIVED_POSITION_BODIES_ROLLED_OUT",rows,safety:{providerTradingWrites:0,executionStateWrites:0,capitalMovedUsd:0,ordersSubmitted:0,armDisarm:"UNCHANGED",executionLogic:"UNCHANGED_EXCEPT_ADDITIVE_GET_READ_ROUTE"}});
+      } catch(error) {
+        return json({ok:false,readOnly:true,state:"SEP27_EXACT_CORRELATION_READ_FAILED",errorCode:String(error?.message||"FAILED"),safety:{providerTradingWrites:0,executionStateWrites:0,capitalMovedUsd:0,ordersSubmitted:0}},500);
+      }
+    }
+
+'''
+              s=s.replace(anchor,block+anchor,1)
+              src.write_text(s)
+
+          bridge=Path('market-edge-lab/real/founder-read-bridge/src/index.js')
+          b=bridge.read_text()
+          if '"/forensic-sep27-correlation"' not in b:
+              old='"/forensic-historical-orders","/forensic-provider-history"'
+              if old in b:
+                  b=b.replace(old,'"/forensic-historical-orders","/forensic-provider-history","/forensic-sep27-correlation"',1)
+              else:
+                  old='"/forensic-historical-orders"'
+                  assert old in b, 'BRIDGE_ALLOWLIST_ANCHOR_MISSING'
+                  b=b.replace(old,'"/forensic-historical-orders","/forensic-sep27-correlation"',1)
+              bridge.write_text(b)
+
+          cockpit=Path('market-edge-lab/real/baseline/founder-terminal.html')
+          h=cockpit.read_text()
+          if "ledger.correlation=correlation" not in h:
+              old="const [capital,exec,history]=await Promise.all([getRO('/founder-capital-ledger'),getRO('/execution-test-state'),getRO('/forensic-provider-history?limit=200')]);\n   ledger.capital=capital;ledger.exec=exec;ledger.history=history;ledger.error=null;ledger.lastReadAt=new Date().toISOString();paintAccount();"
+              new="const [capital,exec,history,correlation]=await Promise.all([getRO('/founder-capital-ledger'),getRO('/execution-test-state'),getRO('/forensic-provider-history?limit=200'),getRO('/forensic-sep27-correlation?limit=200')]);\n   ledger.capital=capital;ledger.exec=exec;ledger.history=history;ledger.correlation=correlation;ledger.error=null;ledger.lastReadAt=new Date().toISOString();paintAccount();"
+              assert old in h, 'COCKPIT_REFRESH_ANCHOR_MISSING'
+              h=h.replace(old,new,1)
+          if 'SEP 27 EXACT PROVIDER ↔ MARKET EDGE' not in h:
+              old="const rows=compareRows();\n  const heads="
+              new="const rows=compareRows(),corrRows=Array.isArray(ledger.correlation?.rows)?ledger.correlation.rows:[];\n  const corrBody=corrRows.map(r=>'<tr><td>'+esc2(r.ticker||'—')+'</td><td>'+esc2(r.seriesId||'—')+'</td><td>'+esc2(r.attempt??'—')+'</td><td>'+esc2(r.holdEvidence?.entryAt||'—')+'</td><td>'+esc2(r.holdEvidence?.providerCloseAt||'—')+'</td><td>'+esc2(r.holdEvidence?.entryToProviderCloseSeconds==null?'—':Number(r.holdEvidence.entryToProviderCloseSeconds).toFixed(1)+'s')+'</td><td>'+esc2(r.provider?.settlements?.[0]?.marketResult||'—')+'</td><td><span class=\"compareBadge '+esc2(r.status||'UNKNOWN')+'\">'+esc2(r.status||'UNKNOWN')+'</span></td></tr>').join('');\n  const corrHtml='<div class=\"compareWrap\"><div class=\"compareHead\"><div><div class=\"compareTitle\">SEP 27 EXACT PROVIDER ↔ MARKET EDGE</div><div class=\"compareSub\">ORDER-ID FORENSIC MAP · '+corrRows.length+' PROVIDER LIFECYCLES · '+Number(ledger.correlation?.matched||0)+' EXACT SERIES/ATTEMPT MATCHES · HISTORICAL SCORE/PHASE FIELDS SHOWN ONLY WHEN RETAINED</div></div><span class=\"badge live\">READ ONLY</span></div>'+(corrRows.length?'<table class=\"compareTbl\"><thead><tr><th>TICKER</th><th>SERIES</th><th>ATTEMPT</th><th>ENTRY</th><th>PROVIDER CLOSE</th><th>ENTRY→CLOSE</th><th>SETTLEMENT</th><th>STATUS</th></tr></thead><tbody>'+corrBody+'</tbody></table>':'<div class=\"empty\">No Sep 27 exact-correlation evidence available.</div>')+'</div>';\n  const heads="
+              assert old in h, 'COMPARE_RENDER_ANCHOR_MISSING'
+              h=h.replace(old,new,1)
+              old2="el.innerHTML='<div class=\"compareWrap\"><div class=\"compareHead\"><div><div class=\"compareTitle\">LEDGER COMPARE</div>"
+              new2="el.innerHTML=corrHtml+'<div class=\"compareWrap\"><div class=\"compareHead\"><div><div class=\"compareTitle\">LEDGER COMPARE</div>"
+              assert old2 in h, 'COMPARE_HTML_ANCHOR_MISSING'
+              h=h.replace(old2,new2,1)
+          cockpit.write_text(h)
+          print('PATCHED_READ_ONLY_CORRELATION=YES')
+          PY
+
+      - name: Prove no execution behavior changed
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          before=Path('/tmp/index.before.js').read_text(); after=Path('market-edge-lab/real/baseline/src/index.js').read_text()
+          marker='    // NFE_SEP27_EXACT_CORRELATION_READ_V1\n'
+          assert marker in after
+          start=after.index(marker)
+          end=after.index('    // NFE_PROVIDER_HISTORY_READ_V1\n',start)
+          block=after[start:end]
+          stripped=after[:start]+after[end:]
+          norm=lambda x:'\n'.join(line.rstrip() for line in x.splitlines() if line.strip())
+          assert norm(stripped)==norm(before), 'UNRELATED_EXECUTION_SOURCE_CHANGE'
+          assert 'request.method === "GET"' in block
+          assert 'BASELINE_REAL_SHADOW_STATE.list' in block
+          assert 'kalshiExecutionGet' in block
+          for forbidden in ['kalshiExecutionPost','kalshiExecutionDelete','saveExecutionTestState','saveRealTradeState','/execution-test-arm','/execution-test-disarm','.put(','.delete(']:
+              assert forbidden not in block, forbidden
+          h=Path('market-edge-lab/real/baseline/founder-terminal.html').read_text()
+          assert '/forensic-sep27-correlation?limit=200' in h and 'SEP 27 EXACT PROVIDER ↔ MARKET EDGE' in h
+          b=Path('market-edge-lab/real/founder-read-bridge/src/index.js').read_text()
+          assert '"/forensic-sep27-correlation"' in b and 'request.method!=="GET"' in b
+          print('EXECUTION_LOGIC_UNCHANGED=YES')
+          print('ARM_DISARM_UNCHANGED=YES')
+          print('PROVIDER_WRITES=0')
+          print('EXECUTION_STATE_WRITES=0')
+          print('CAPITAL_MOVED_USD=0')
+          print('ORDERS_SUBMITTED=0')
+          PY
+
+      - name: Commit bounded read-only UI evidence update
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add market-edge-lab/real/baseline/src/index.js market-edge-lab/real/baseline/founder-terminal.html market-edge-lab/real/founder-read-bridge/src/index.js
+          if git diff --cached --quiet; then echo 'ALREADY_APPLIED=YES'; else git commit -m 'Expose Sep 27 exact correlation in Ledger Compare'; git push origin HEAD:market-edge-baseline-real; fi
+
+      - name: Deploy Baseline additive GET-only route
+        working-directory: market-edge-lab/real/baseline
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          npm install --no-audit --no-fund
+          npx --yes wrangler@4 deploy
+
+      - name: Deploy GET-only Founder bridge
+        working-directory: market-edge-lab/real/founder-read-bridge
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          npx --yes wrangler@4 deploy
+
+      - name: Verify live exact-correlation evidence and zero writes
+        run: |
+          set -euo pipefail
+          url='https://market-edge-founder-read.darkbishop43.workers.dev/forensic-sep27-correlation?limit=200'
+          for i in $(seq 1 20); do code=$(curl -sS -o /tmp/c.json -w '%{http_code}' "$url" || true); [ "$code" = 200 ] && break; sleep 4; done
+          test "$code" = 200
+          post=$(curl -sS -o /tmp/post.json -w '%{http_code}' -X POST 'https://market-edge-founder-read.darkbishop43.workers.dev/forensic-sep27-correlation' || true)
+          test "$post" = 405
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';const x=JSON.parse(fs.readFileSync('/tmp/c.json','utf8'));
+          console.log('STATUS='+(x.ok?'GREEN':'RED'));
+          console.log('SEP27_PROVIDER_LIFECYCLES_RECONSTRUCTED='+x.providerLifecycles);
+          console.log('MARKET_EDGE_MATCHED='+x.matched);
+          console.log('PROVIDER_ONLY='+x.providerOnly);
+          console.log('INTERNAL_ONLY='+(x.internalOnly??'UNDETERMINED'));
+          console.log('MISMATCHES='+x.mismatches);
+          console.log('NEAR_HOLD_CANDIDATES_FOUND='+(x.rows||[]).filter(r=>String(r.ticker).startsWith('KXNEAR15M-')).length);
+          console.log('PROVIDER_CLOSE_NEAR_6M='+(x.rows||[]).filter(r=>r.holdEvidence?.checkpoint6m==='PROVIDER_CLOSE_NEAR_CHECKPOINT').length);
+          console.log('PROVIDER_WRITES='+x.safety.providerTradingWrites);
+          console.log('EXECUTION_STATE_WRITES='+x.safety.executionStateWrites);
+          console.log('CAPITAL_MOVED_USD='+x.safety.capitalMovedUsd);
+          console.log('ORDERS_SUBMITTED='+x.safety.ordersSubmitted);
+          console.log('ARM_DISARM='+x.safety.armDisarm);
+          console.log('EXECUTION_LOGIC='+x.safety.executionLogic);
+          NODE
