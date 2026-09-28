@@ -1,0 +1,44 @@
+name: Sep 27 Order Map Read Only Fast
+on:
+  push:
+    branches: [market-edge-baseline-real]
+    paths:
+      - '.github/workflows/sep27-order-map-readonly-fast.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  map:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: {node-version: '22'}
+      - name: Build order-id map from provider and retained KV key names
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          ns='d110292129c94b26942c25d0c462a17b'
+          curl -fsS 'https://market-edge-founder-read.darkbishop43.workers.dev/forensic-provider-history?limit=200' >/tmp/p.json
+          npx --yes wrangler@4 kv key list --namespace-id "$ns" --remote >/tmp/k.json
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          const p=JSON.parse(fs.readFileSync('/tmp/p.json','utf8')), kk=JSON.parse(fs.readFileSync('/tmp/k.json','utf8'));
+          const keys=(Array.isArray(kk)?kk:(kk.keys||[])).map(x=>String(x.name||x.key||x));
+          const arr=v=>Array.isArray(v)?v:[]; const dt=v=>{const n=Date.parse(v||'');return Number.isFinite(n)?n:null};
+          const A=Date.parse('2026-09-27T04:00:00Z'),Z=Date.parse('2026-09-28T04:00:00Z');
+          const fills=[...arr(p.fills),...arr(p.historicalFills)].filter(x=>{const q=dt(x.createdAt);return q!==null&&q>=A&&q<Z});
+          const settlements=arr(p.settlements).filter(x=>{const q=dt(x.settledTime);return q!==null&&q>=A&&q<Z});
+          const om=new Map();
+          for(const key of keys){const m=key.match(/^notification:delivery:v1:(fill|close):([^:]+):([^:]+)-(\d+)$/);if(!m)continue; const [,kind,oid,sid,a]=m;if(!om.has(oid))om.set(oid,[]);om.get(oid).push({kind,seriesId:sid,attemptNo:+a,key});}
+          const gs=new Map(); for(const f of fills){const k=f.ticker;if(!gs.has(k))gs.set(k,{ticker:k,fills:[],settlements:[]});gs.get(k).fills.push(f)} for(const s of settlements){const k=s.ticker;if(!gs.has(k))gs.set(k,{ticker:k,fills:[],settlements:[]});gs.get(k).settlements.push(s)}
+          let match=0,po=0,mm=0;const rows=[];
+          for(const g of gs.values()){const hits=g.fills.flatMap(f=>(om.get(f.orderId)||[]).map(h=>({...h,orderId:f.orderId,providerCreatedAt:f.createdAt,providerSide:f.side,providerAction:f.action,providerYesPrice:f.yesPrice,providerNoPrice:f.noPrice})));const u=[...new Map(hits.map(h=>[h.seriesId+':'+h.attemptNo,h])).values()];let status,reason;if(u.length===1){status='MATCH';reason='EXACT_ORDER_ID';match++}else if(u.length===0){status='PROVIDER_ONLY';reason='NO_NOTIFICATION_MAPPING';po++}else{status='METADATA_MISMATCH';reason='MULTIPLE_SERIES_ATTEMPT_MAPPINGS';mm++}rows.push({ticker:g.ticker,status,reason,mappings:u,hits,settlements:g.settlements});}
+          console.log('SEP27_PROVIDER_LIFECYCLES_RECONSTRUCTED='+gs.size);console.log('MARKET_EDGE_MATCHED='+match);console.log('PROVIDER_ONLY='+po);console.log('MISMATCHES='+mm);
+          console.log('NEAR_HOLD_CANDIDATES_FOUND='+rows.filter(r=>r.ticker.startsWith('KXNEAR15M-')).length);
+          console.log('---MATCH_SUMMARY---');for(const r of rows)console.log([r.status,r.ticker,r.mappings.map(m=>m.seriesId+'#'+m.attemptNo).join('|'),r.reason].join('\t'));
+          console.log('---NEAR_MAP_JSON---');console.log(JSON.stringify(rows.filter(r=>r.ticker.startsWith('KXNEAR15M-'))));
+          console.log('PROVIDER_WRITES=0');console.log('EXECUTION_STATE_WRITES=0');console.log('CAPITAL_MOVED_USD=0');console.log('ORDERS_SUBMITTED=0');
+          NODE
