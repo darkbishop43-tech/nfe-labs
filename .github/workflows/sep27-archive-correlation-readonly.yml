@@ -1,0 +1,106 @@
+name: Sep 27 Archive Correlation Read Only
+
+on:
+  push:
+    branches: [market-edge-baseline-real]
+    paths:
+      - '.github/workflows/sep27-archive-correlation-readonly.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  correlate:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Read archived execution state and provider history only
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          ns='d110292129c94b26942c25d0c462a17b'
+          npx --yes wrangler@4 kv key get 'baseline-real-execution-test-v1' --namespace-id "$ns" --remote > /tmp/execution.json
+          curl -fsS 'https://market-edge-founder-read.darkbishop43.workers.dev/forensic-provider-history?limit=200' > /tmp/provider.json
+          echo 'READ_ONLY_INPUTS_FETCHED=YES'
+
+      - name: Exact provider to archived Market Edge correlation
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          const ex=JSON.parse(fs.readFileSync('/tmp/execution.json','utf8'));
+          const pv=JSON.parse(fs.readFileSync('/tmp/provider.json','utf8'));
+          const arr=v=>Array.isArray(v)?v:[];
+          const fills=[...arr(pv.fills),...arr(pv.historicalFills)];
+          const settlements=arr(pv.settlements);
+          const t=v=>{const n=Date.parse(v||'');return Number.isFinite(n)?n:null};
+          const A=Date.parse('2026-09-27T04:00:00Z'), Z=Date.parse('2026-09-28T04:00:00Z');
+          const sf=fills.filter(r=>{const q=t(r.createdAt);return q!==null&&q>=A&&q<Z});
+          const ss=settlements.filter(r=>{const q=t(r.settledTime);return q!==null&&q>=A&&q<Z});
+          const histories=arr(ex.queueHistory);
+          console.log('QUEUE_HISTORY_COUNT='+histories.length);
+          const sepHist=histories.filter(h=>{
+            const vals=[h.stoppedAt,...arr(h.ledger).map(x=>x.createdAt),...arr(h.positions).map(x=>x.filledAt?new Date(Number(x.filledAt)).toISOString():null)].filter(Boolean);
+            return vals.some(v=>{const q=t(v);return q!==null&&q>=A&&q<Z});
+          });
+          console.log('SEP27_ARCHIVED_SERIES='+sepHist.length);
+          const internal=[];
+          for(const h of sepHist){
+            const pos=arr(h.positions), led=arr(h.ledger), at=arr(h.attempts);
+            for(const p of pos){
+              internal.push({seriesId:String(h.queueId||'').replace(/^SINGLE:/,''),queueId:h.queueId||null,attemptNo:p.attemptNo??null,ticker:p.ticker||p.marketTicker||null,side:p.side||p.outcomeSide||null,entryScore:p.entryScore??null,entryOrderId:p.entryOrderId||null,filledAt:p.filledAt??null,entryAverageFillPrice:p.entryAverageFillPrice??null,entryAverageFeePaid:p.entryAverageFeePaid??null,exitOrderId:p.exitOrderId||null,closedAt:p.closedAt??null,exitReason:p.exitReason||null,exitAverageFillPrice:p.exitAverageFillPrice??null,exitAverageFeePaid:p.exitAverageFeePaid??null,status:p.status||null,phase1A:p.phase1A??p.phase1a??p.shadowCheckpoint??null,phase1B:p.phase1B??p.phase1b??p.phase1BContinuation??null,ledger:led.find(x=>Number(x.attemptNo)===Number(p.attemptNo))||null,attempt:at.find(x=>Number(x.attemptNo)===Number(p.attemptNo))||null});
+            }
+          }
+          console.log('SEP27_INTERNAL_POSITION_RECORDS='+internal.length);
+          const byEntry=new Map(internal.filter(x=>x.entryOrderId).map(x=>[x.entryOrderId,x]));
+          const byExit=new Map(internal.filter(x=>x.exitOrderId).map(x=>[x.exitOrderId,x]));
+          const byTicker=new Map();
+          for(const x of internal){if(x.ticker){if(!byTicker.has(x.ticker))byTicker.set(x.ticker,[]);byTicker.get(x.ticker).push(x)}}
+          const groups=new Map();
+          for(const f of sf){const k=f.ticker||f.marketTicker||'UNKNOWN'; if(!groups.has(k))groups.set(k,{ticker:k,fills:[],settlements:[]});groups.get(k).fills.push(f)}
+          for(const s of ss){const k=s.ticker||s.marketTicker||'UNKNOWN'; if(!groups.has(k))groups.set(k,{ticker:k,fills:[],settlements:[]});groups.get(k).settlements.push(s)}
+          let matched=0,providerOnly=0,mismatch=0;
+          const matchedInternal=new Set();
+          const rows=[];
+          for(const g of groups.values()){
+            const exact=[];
+            for(const f of g.fills){if(byEntry.has(f.orderId))exact.push({kind:'ENTRY',f,internal:byEntry.get(f.orderId)});if(byExit.has(f.orderId))exact.push({kind:'EXIT',f,internal:byExit.get(f.orderId)})}
+            const uniq=[...new Map(exact.map(x=>[(x.internal.seriesId||'')+':'+x.internal.attemptNo,x.internal])).values()];
+            let status='PROVIDER_ONLY', reason='NO_INTERNAL_IDENTIFIER_MATCH';
+            if(uniq.length===1){status='MATCH';reason='ORDER_ID';matched++;matchedInternal.add((uniq[0].seriesId||'')+':'+uniq[0].attemptNo)}
+            else if(uniq.length>1){status='METADATA_MISMATCH';reason='MULTIPLE_INTERNAL_ORDER_MATCHES';mismatch++}
+            else {
+              const c=byTicker.get(g.ticker)||[];
+              if(c.length===1){status='MATCH';reason='UNIQUE_TICKER_FALLBACK';matched++;matchedInternal.add((c[0].seriesId||'')+':'+c[0].attemptNo);uniq.push(c[0])}
+              else providerOnly++;
+            }
+            rows.push({ticker:g.ticker,status,reason,internal:uniq[0]||null,fills:g.fills,settlements:g.settlements});
+          }
+          const internalOnly=internal.filter(x=>!matchedInternal.has((x.seriesId||'')+':'+x.attemptNo));
+          console.log('SEP27_PROVIDER_LIFECYCLES_RECONSTRUCTED='+groups.size);
+          console.log('MARKET_EDGE_MATCHED='+matched);
+          console.log('PROVIDER_ONLY='+providerOnly);
+          console.log('INTERNAL_ONLY='+internalOnly.length);
+          console.log('MISMATCHES='+mismatch);
+          console.log('---CORRELATED_ROWS_JSON---');
+          console.log(JSON.stringify(rows));
+          console.log('---INTERNAL_ONLY_JSON---');
+          console.log(JSON.stringify(internalOnly));
+          const near=rows.filter(r=>String(r.ticker).startsWith('KXNEAR15M-'));
+          console.log('NEAR_HOLD_CANDIDATES_FOUND='+near.length);
+          console.log('---NEAR_CORRELATED_JSON---');
+          console.log(JSON.stringify(near));
+          const phaseA=internal.filter(x=>x.phase1A!=null).length, phaseB=internal.filter(x=>x.phase1B!=null).length;
+          console.log('SEP27_PHASE1A_POSITION_RECORDS='+phaseA);
+          console.log('SEP27_PHASE1B_POSITION_RECORDS='+phaseB);
+          console.log('PROVIDER_WRITES='+Number(pv?.safety?.providerTradingWrites??0));
+          console.log('EXECUTION_STATE_WRITES='+Number(pv?.safety?.executionStateWrites??0));
+          console.log('CAPITAL_MOVED_USD='+Number(pv?.safety?.capitalMovedUsd??0));
+          console.log('ORDERS_SUBMITTED='+Number(pv?.safety?.ordersSubmitted??0));
+          NODE
