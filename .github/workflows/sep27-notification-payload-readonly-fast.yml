@@ -1,0 +1,48 @@
+name: Sep 27 Notification Payload Read Only Fast
+on:
+  push:
+    branches: [market-edge-baseline-real]
+    paths:
+      - '.github/workflows/sep27-notification-payload-readonly-fast.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  inspect:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: {node-version: '22'}
+      - name: Read matching notification payloads through Cloudflare KV REST
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          curl -fsS 'https://market-edge-founder-read.darkbishop43.workers.dev/forensic-provider-history?limit=200' >/tmp/p.json
+          npx --yes wrangler@4 kv key list --namespace-id d110292129c94b26942c25d0c462a17b --remote >/tmp/k.json
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          const p=JSON.parse(fs.readFileSync('/tmp/p.json','utf8')), kk=JSON.parse(fs.readFileSync('/tmp/k.json','utf8'));
+          const keys=(Array.isArray(kk)?kk:(kk.keys||[])).map(x=>String(x.name||x.key||x));
+          const arr=v=>Array.isArray(v)?v:[];const dt=v=>{const n=Date.parse(v||'');return Number.isFinite(n)?n:null};
+          const A=Date.parse('2026-09-27T04:00:00Z'),Z=Date.parse('2026-09-28T04:00:00Z');
+          const fills=[...arr(p.fills),...arr(p.historicalFills)].filter(x=>{const q=dt(x.createdAt);return q!==null&&q>=A&&q<Z});
+          const orderIds=new Set(fills.map(x=>x.orderId).filter(Boolean));
+          const rel=keys.filter(k=>/^notification:delivery:v1:(fill|close):/.test(k)&&[...orderIds].some(id=>k.includes(':'+id+':')));
+          const base=`https://api.cloudflare.com/client/v4/accounts/${process.env.CLOUDFLARE_ACCOUNT_ID}/storage/kv/namespaces/d110292129c94b26942c25d0c462a17b/values/`;
+          const headers={Authorization:`Bearer ${process.env.CLOUDFLARE_API_TOKEN}`};
+          async function get(key){const r=await fetch(base+encodeURIComponent(key),{headers});const text=await r.text();let value;try{value=JSON.parse(text)}catch{value=text};return{key,http:r.status,value}}
+          const vals=[];for(let i=0;i<rel.length;i+=20){vals.push(...await Promise.all(rel.slice(i,i+20).map(get)))}
+          console.log('RETAINED_NOTIFICATION_PAYLOADS='+vals.length);
+          console.log('HTTP_NON_200='+vals.filter(x=>x.http!==200).length);
+          const fields=[...new Set(vals.flatMap(x=>x.value&&typeof x.value==='object'?Object.keys(x.value):[]))].sort();
+          console.log('PAYLOAD_FIELDS='+fields.join(','));
+          const nearIds=new Set(fills.filter(x=>String(x.ticker).startsWith('KXNEAR15M-')).map(x=>x.orderId));
+          const near=vals.filter(x=>[...nearIds].some(id=>x.key.includes(':'+id+':')));
+          console.log('---NEAR_NOTIFICATION_PAYLOADS_JSON---');console.log(JSON.stringify(near));
+          console.log('---ALL_NOTIFICATION_PAYLOAD_SUMMARIES---');
+          for(const x of vals){const v=x.value;console.log(JSON.stringify({key:x.key,http:x.http,value:v&&typeof v==='object'?v:null,raw:typeof v==='string'?v:null}))}
+          console.log('PROVIDER_WRITES=0');console.log('EXECUTION_STATE_WRITES=0');console.log('CAPITAL_MOVED_USD=0');console.log('ORDERS_SUBMITTED=0');
+          NODE
