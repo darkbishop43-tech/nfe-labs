@@ -59,7 +59,8 @@ js=r'''
  const ticker=o=>String(o?.ticker??o?.market_ticker??o?.marketTicker??'').trim();
  const side=o=>String(o?.side??o?.outcome??o?.yes_no??'').toUpperCase();
  const timeOf=o=>o?.created_time??o?.created_at??o?.updated_time??o?.ts??o?.timestamp??null;
- const timeMs=o=>{const v=timeOf(o);if(v==null)return null;if(typeof v==='number')return v>1e12?v:v*1000;const t=Date.parse(v);return Number.isFinite(t)?t:null};
+ const toMs=v=>{if(v==null)return null;if(typeof v==='number')return v>1e12?v:v*1000;const t=Date.parse(v);return Number.isFinite(t)?t:null};
+ const timeMs=o=>toMs(timeOf(o));
  const providerCost=o=>n(o?.cost??o?.total_cost??o?.cost_dollars??o?.filled_cost??o?.filledCost);
  const providerFees=o=>n(o?.fees??o?.fee??o?.taker_fees??o?.maker_fees??o?.fees_dollars);
  const providerPayout=o=>n(o?.payout??o?.return??o?.settlement_value??o?.settlementValue);
@@ -79,17 +80,16 @@ js=r'''
  }
  function internalRows(){
   const st=ledger.exec?.state||{},series=st.seriesId||'—',threshold=st.threshold??'—';
-  const pos=arr(st.positions).map(p=>({kind:'POSITION',series,threshold,attempt:p.attemptNo,asset:p.asset,ticker:p.ticker,side:String(p.side||p.direction||'').toUpperCase(),entryOrderId:String(p.entryOrderId||''),exitOrderId:String(p.exitOrderId||''),score:p.entryScore,entry:p.entryAverageFillPrice,exit:p.exitAverageFillPrice,hold:Number.isFinite(Date.parse(p.closedAt))&&Number.isFinite(Date.parse(p.filledAt))?Date.parse(p.closedAt)-Date.parse(p.filledAt):null,exitReason:p.exitReason,status:p.status,internalPnl:n(p.realizedPnlUsd??p.pnlUsd)}));
-  const attempts=arr(st.attempts).map(a=>({kind:'ATTEMPT',series,threshold,attempt:a.attemptNo,asset:a.asset,ticker:a.ticker,side:String(a.side||'').toUpperCase(),entryOrderId:String(a.orderId||''),exitOrderId:'',score:a.liveScore??a.observedScore,entry:a.liveAsk,exit:null,hold:null,exitReason:null,status:a.status,internalPnl:null}));
+  const pos=arr(st.positions).map(p=>({kind:'POSITION',series,threshold,attempt:p.attemptNo,asset:p.asset,ticker:p.ticker,side:String(p.side||p.direction||'').toUpperCase(),entryOrderId:String(p.entryOrderId||''),exitOrderId:String(p.exitOrderId||''),score:p.entryScore,entry:p.entryAverageFillPrice,exit:p.exitAverageFillPrice,time:p.filledAt??p.closedAt??null,hold:Number.isFinite(Date.parse(p.closedAt))&&Number.isFinite(Date.parse(p.filledAt))?Date.parse(p.closedAt)-Date.parse(p.filledAt):null,exitReason:p.exitReason,status:p.status,internalPnl:n(p.realizedPnlUsd??p.pnlUsd)}));
+  const attempts=arr(st.attempts).map(a=>({kind:'ATTEMPT',series,threshold,attempt:a.attemptNo,asset:a.asset,ticker:a.ticker,side:String(a.side||'').toUpperCase(),entryOrderId:String(a.orderId||''),exitOrderId:'',score:a.liveScore??a.observedScore,entry:a.liveAsk,exit:null,time:a.startedAt??a.createdAt??a.submittedAt??null,hold:null,exitReason:null,status:a.status,internalPnl:null}));
   const byAttempt=new Map(pos.map(x=>[String(x.attempt),x]));
   for(const a of attempts)if(!byAttempt.has(String(a.attempt)))pos.push(a);
   return pos;
  }
  function strictFallback(provider,internals,used){
   const pt=ticker(provider),ps=side(provider),tm=timeMs(provider);if(!pt||!ps||!Number.isFinite(tm))return null;
-  const candidates=internals.map((x,i)=>({x,i})).filter(q=>!used.has(q.i)&&q.x.ticker===pt&&q.x.side===ps);
-  if(candidates.length!==1)return null;
-  return candidates[0];
+  const candidates=internals.map((x,i)=>({x,i})).filter(q=>{const im=toMs(q.x.time);return !used.has(q.i)&&q.x.ticker===pt&&q.x.side===ps&&Number.isFinite(im)&&Math.abs(im-tm)<=300000});
+  return candidates.length===1?candidates[0]:null;
  }
  function compareRows(){
   const providers=ordersFrom(ledger.history).filter(o=>filledCount(o)>0), internals=internalRows(), used=new Set(), rows=[];
@@ -118,7 +118,7 @@ js=r'''
   try{
    const [capital,exec,history]=await Promise.all([getRO('/founder-capital-ledger'),getRO('/execution-test-state'),getRO('/forensic-historical-orders?limit=200')]);
    ledger.capital=capital;ledger.exec=exec;ledger.history=history;ledger.error=null;ledger.lastReadAt=new Date().toISOString();paintAccount();
-   if(window.state?.tab==='compare'||document.querySelector('.tabs button[data-tab="compare"]')?.classList.contains('on'))window.renderLedgerCompare();
+   if(document.querySelector('.tabs button[data-tab="compare"]')?.classList.contains('on'))window.renderLedgerCompare();
   }catch(e){ledger.error=String(e?.message||e);ledger.lastReadAt=new Date().toISOString();paintAccount();if(document.querySelector('.tabs button[data-tab="compare"]')?.classList.contains('on'))window.renderLedgerCompare()}
  }
  refreshLedger();setInterval(refreshLedger,15000);
