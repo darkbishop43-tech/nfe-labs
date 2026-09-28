@@ -1,0 +1,46 @@
+name: Sep 27 KV History Discovery Read Only
+
+on:
+  push:
+    branches: [market-edge-baseline-real]
+    paths:
+      - '.github/workflows/sep27-kv-history-discovery-readonly.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  discover:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Inspect source persistence vocabulary without mutation
+        run: |
+          set -euo pipefail
+          src='market-edge-lab/real/baseline/src/index.js'
+          echo '---PERSISTENCE_REFERENCES---'
+          grep -nE 'BASELINE_REAL_SHADOW_STATE\.(get|put)|ledgerRecords|queueHistory|closedAt|phase1A|phase1B|shadowCheckpoint|histor' "$src" | tail -n 240 || true
+      - name: List KV keys read only
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+          npx --yes wrangler@4 kv key list --namespace-id d110292129c94b26942c25d0c462a17b --remote > /tmp/keys.json
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          const x=JSON.parse(fs.readFileSync('/tmp/keys.json','utf8'));
+          const a=Array.isArray(x)?x:(x?.keys||[]);
+          console.log('KV_KEY_COUNT='+a.length);
+          for(const k of a) console.log('KV_KEY='+String(k.name||k.key||k));
+          NODE
+          echo 'PROVIDER_WRITES=0'
+          echo 'EXECUTION_STATE_WRITES=0'
+          echo 'CAPITAL_MOVED_USD=0'
+          echo 'ORDERS_SUBMITTED=0'
