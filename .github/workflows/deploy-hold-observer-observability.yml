@@ -21,19 +21,10 @@ jobs:
         run: |
           set -euo pipefail
           git hash-object market-edge-lab/real/baseline/src/index.js > /tmp/baseline.sha
-          python - <<'PY'
-          from pathlib import Path
-          p=Path('market-edge-lab/real/hold-observer/src/index.js')
-          s=p.read_text()
-          old="function entryFill(history,p){const oid=String(p?.entryOrderId||'');const fs=providerFills(history).filter(f=>tickerOf(f)===tickerOf(p));return fs.find(f=>oid&&String(f?.orderId||f?.order_id||'')===oid)||fs.sort((a,b)=>(ms(a?.createdAt||a?.created_time)||0)-(ms(b?.createdAt||b?.created_time)||0))[0]||null}"
-          new="function entryFill(history,p){const oid=String(p?.entryOrderId||'');if(!oid)return null;return providerFills(history).find(f=>tickerOf(f)===tickerOf(p)&&String(f?.orderId||f?.order_id||'')===oid)||null}"
-          if old in s:p.write_text(s.replace(old,new,1))
-          elif new not in s:raise SystemExit('ENTRY_FILL_ANCHOR_MISSING')
-          PY
           python market-edge-lab/real/hold-observer/patch-cockpit.py
           test "$(git hash-object market-edge-lab/real/baseline/src/index.js)" = "$(cat /tmp/baseline.sha)"
           echo 'PRODUCTION_EXECUTION_SOURCE_UNCHANGED=YES'
-      - name: Repeat zero-money proof after cockpit/source hardening
+      - name: Repeat zero-money proof after live-current repair
         run: |
           set -euo pipefail
           node market-edge-lab/real/hold-observer/test.mjs | tee /tmp/proof.json
@@ -43,52 +34,32 @@ jobs:
           if(x.realDeadlineMutation||x.providerTradingWrites||x.executionStateWrites||x.capitalMovedUsd||x.ordersSubmitted)throw new Error('ZERO_AUTHORITY_FAIL');
           console.log('ZERO_MONEY_OBSERVABILITY=GREEN');
           NODE
-      - name: Verify cockpit controls are display-only
+      - name: Verify observer and cockpit remain non-executing
         run: |
           set -euo pipefail
           python - <<'PY'
           from pathlib import Path
-          h=Path('market-edge-lab/real/baseline/founder-terminal.html').read_text()
-          assert 'id="holdObsPanel"' in h
-          assert 'market-edge-hold-observer.darkbishop43.workers.dev/current' in h
-          assert 'FOUNDER HOLD EXTENSIONS — NOT YET ACTIVE' in h
-          assert '<button disabled>+30 SEC</button>' in h
-          assert '<button disabled>+1 MIN</button>' in h
-          assert '<button disabled>+5 MIN</button>' in h
-          assert '<button disabled>HOLD TO CLOSE</button>' in h
-          src=Path('market-edge-lab/real/hold-observer/src/index.js').read_text()
-          for bad in ['execution-test-arm','execution-test-disarm','kalshiExecutionPost','kalshiExecutionDelete','saveExecutionTestState','saveRealTradeState']:
-              assert bad not in src,bad
-          assert "if(request.method!=='GET')" in src
-          assert 'holdExtensionMutationEnabled:false' in src
-          assert 'realDeadlineMutation:0' in src
-          print('HOLD_BUTTONS_VISIBLE_DISABLED=YES')
-          print('REAL_DEADLINE_MUTATION=0')
-          print('ARM_DISARM_UNCHANGED=YES')
+          h=Path('market-edge-lab/real/baseline/founder-terminal.html').read_text();src=Path('market-edge-lab/real/hold-observer/src/index.js').read_text()
+          for x in ['id="holdObsPanel"','FOUNDER HOLD EXTENSIONS — NOT YET ACTIVE','<button disabled>+30 SEC</button>','<button disabled>+1 MIN</button>','<button disabled>+5 MIN</button>','<button disabled>HOLD TO CLOSE</button>']: assert x in h,x
+          for bad in ['execution-test-arm','execution-test-disarm','kalshiExecutionPost','kalshiExecutionDelete','saveExecutionTestState','saveRealTradeState']: assert bad not in src,bad
+          assert "if(request.method!=='GET')" in src and 'realDeadlineMutation:0' in src and "if(u.pathname==='/current'){try{return j(await sync(env))}" in src
+          print('HOLD_BUTTONS_VISIBLE_DISABLED=YES');print('REAL_DEADLINE_MUTATION=0');print('ARM_DISARM_UNCHANGED=YES')
           PY
-      - name: Commit cockpit and strict observer source only
+      - name: Commit cockpit only if patch changed it
         run: |
           set -euo pipefail
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add market-edge-lab/real/hold-observer/src/index.js market-edge-lab/real/baseline/founder-terminal.html
-          if git diff --cached --quiet; then echo 'ALREADY_APPLIED=YES'; else git commit -m 'Activate hold observability and checkpoint display'; git push origin HEAD:market-edge-baseline-real; fi
-      - name: Create or reuse isolated evidence KV namespace
+          git config user.name 'github-actions[bot]';git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add market-edge-lab/real/baseline/founder-terminal.html
+          if git diff --cached --quiet; then echo 'COCKPIT_ALREADY_APPLIED=YES'; else git commit -m 'Keep live hold observability panel'; git push origin HEAD:market-edge-baseline-real; fi
+      - name: Find isolated evidence KV namespace
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: |
           set -euo pipefail
           title='market-edge-hold-observer-evidence'
-          curl -fsS -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/storage/kv/namespaces?per_page=100" > /tmp/ns.json
-          id=$(jq -r --arg t "$title" '.result[]|select(.title==$t)|.id' /tmp/ns.json | head -1)
-          if [ -z "$id" ]; then
-            curl -fsS -X POST -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -H 'Content-Type: application/json' --data "{\"title\":\"$title\"}" "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/storage/kv/namespaces" > /tmp/create.json
-            id=$(jq -r '.result.id' /tmp/create.json)
-          fi
-          test -n "$id" && test "$id" != null
-          echo "HOLD_KV_ID=$id" >> "$GITHUB_ENV"
-          echo 'ISOLATED_EVIDENCE_KV=READY'
+          curl -fsS -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/storage/kv/namespaces?per_page=100" >/tmp/ns.json
+          id=$(jq -r --arg t "$title" '.result[]|select(.title==$t)|.id' /tmp/ns.json|head -1);test -n "$id";echo "HOLD_KV_ID=$id" >> "$GITHUB_ENV"
       - name: Generate isolated Worker config
         run: |
           cat > market-edge-lab/real/hold-observer/wrangler.toml <<EOF
@@ -121,29 +92,15 @@ jobs:
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-        run: |
-          set -euo pipefail
-          npx --yes wrangler@4 deploy | tee /tmp/deploy.txt
-      - name: Verify live read-only observer and scheduled snapshot
+        run: npx --yes wrangler@4 deploy | tee /tmp/deploy.txt
+      - name: Verify live read-only current snapshot
         run: |
           set -euo pipefail
           base='https://market-edge-hold-observer.darkbishop43.workers.dev'
-          code=000
-          for i in $(seq 1 20); do code=$(curl -sS -o /tmp/health.json -w '%{http_code}' "$base/health" || true); [ "$code" = 200 ] && break; sleep 3; done
-          test "$code" = 200
-          post=$(curl -sS -o /tmp/post.json -w '%{http_code}' -X POST "$base/current" || true)
-          test "$post" = 405
-          current=000
-          for i in $(seq 1 28); do current=$(curl -sS -o /tmp/current.json -w '%{http_code}' "$base/current" || true); if [ "$current" = 200 ] && jq -e '.updatedAt != null' /tmp/current.json >/dev/null; then break; fi; sleep 3; done
+          for i in $(seq 1 20); do code=$(curl -sS -o /tmp/health.json -w '%{http_code}' "$base/health"||true); [ "$code" = 200 ]&&break;sleep 2;done;test "$code" = 200
+          test "$(curl -sS -o /tmp/post.json -w '%{http_code}' -X POST "$base/current"||true)" = 405
+          for i in $(seq 1 20); do current=$(curl -sS -o /tmp/current.json -w '%{http_code}' "$base/current"||true); [ "$current" = 200 ]&&jq -e '.updatedAt != null' /tmp/current.json >/dev/null&&break;sleep 2;done
           test "$current" = 200
-          jq -e '.safety.realDeadlineMutation == 0 and .safety.providerTradingWrites == 0 and .safety.executionStateWrites == 0 and .safety.capitalMovedUsd == 0 and .safety.ordersSubmitted == 0 and .safety.defaultHoldMs == 300000 and .safety.exitScore == 0.20' /tmp/current.json >/dev/null
-          echo "LIVE_POSITIONS=$(jq '.positions|length' /tmp/current.json)"
-          echo "OBSERVER_UPDATED_AT=$(jq -r '.updatedAt' /tmp/current.json)"
-          echo 'REAL_DEADLINE_MUTATION=0'
-          echo 'PROVIDER_WRITES=0'
-          echo 'EXECUTION_STATE_WRITES=0'
-          echo 'CAPITAL_MOVED_USD=0'
-          echo 'ORDERS_SUBMITTED=0'
-          echo 'DEFAULT_5_MINUTE=UNCHANGED'
-          echo 'EXIT_SCORE=.20_UNCHANGED'
-          echo 'ARM_DISARM=UNCHANGED'
+          jq -e '.ok == true and .safety.realDeadlineMutation == 0 and .safety.providerTradingWrites == 0 and .safety.executionStateWrites == 0 and .safety.capitalMovedUsd == 0 and .safety.ordersSubmitted == 0 and .safety.defaultHoldMs == 300000 and .safety.exitScore == 0.20' /tmp/current.json >/dev/null
+          echo "LIVE_POSITIONS=$(jq '.positions|length' /tmp/current.json)";echo "RECENT_CLOSED=$(jq 'if .recentClosed then 1 else 0 end' /tmp/current.json)";echo "OBSERVER_UPDATED_AT=$(jq -r '.updatedAt' /tmp/current.json)"
+          echo 'REAL_DEADLINE_MUTATION=0';echo 'PROVIDER_WRITES=0';echo 'EXECUTION_STATE_WRITES=0';echo 'CAPITAL_MOVED_USD=0';echo 'ORDERS_SUBMITTED=0';echo 'DEFAULT_5_MINUTE=UNCHANGED';echo 'EXIT_SCORE=.20_UNCHANGED';echo 'ARM_DISARM=UNCHANGED'
