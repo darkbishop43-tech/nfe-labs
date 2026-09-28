@@ -1,0 +1,105 @@
+name: Sep 27 Notification Correlation Read Only
+
+on:
+  push:
+    branches: [market-edge-baseline-real]
+    paths:
+      - '.github/workflows/sep27-notification-correlation-readonly.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  correlate:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Fetch provider history and retained notification key index read only
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          ns='d110292129c94b26942c25d0c462a17b'
+          curl -fsS 'https://market-edge-founder-read.darkbishop43.workers.dev/forensic-provider-history?limit=200' > /tmp/provider.json
+          npx --yes wrangler@4 kv key list --namespace-id "$ns" --remote > /tmp/keys.json
+          node --input-type=module <<'NODE' > /tmp/relevant-keys.txt
+          import fs from 'node:fs';
+          const p=JSON.parse(fs.readFileSync('/tmp/provider.json','utf8'));
+          const k=JSON.parse(fs.readFileSync('/tmp/keys.json','utf8'));
+          const keys=(Array.isArray(k)?k:(k.keys||[])).map(x=>String(x.name||x.key||x));
+          const arr=v=>Array.isArray(v)?v:[];
+          const t=v=>{const n=Date.parse(v||'');return Number.isFinite(n)?n:null};
+          const A=Date.parse('2026-09-27T04:00:00Z'),Z=Date.parse('2026-09-28T04:00:00Z');
+          const fills=[...arr(p.fills),...arr(p.historicalFills)].filter(r=>{const q=t(r.createdAt);return q!==null&&q>=A&&q<Z});
+          const ids=new Set(fills.map(r=>r.orderId).filter(Boolean));
+          for(const key of keys){
+            if(!key.startsWith('notification:delivery:v1:')) continue;
+            if([...ids].some(id=>key.includes(':'+id+':'))) console.log(key);
+          }
+          NODE
+          : > /tmp/notification-values.ndjson
+          while IFS= read -r key; do
+            [ -z "$key" ] && continue
+            val=$(npx --yes wrangler@4 kv key get "$key" --namespace-id "$ns" --remote 2>/dev/null || true)
+            printf '%s\t%s\n' "$key" "$val" >> /tmp/notification-values.ndjson
+          done < /tmp/relevant-keys.txt
+          echo "RELEVANT_NOTIFICATION_KEYS=$(wc -l < /tmp/relevant-keys.txt)"
+
+      - name: Build exact order-id correlation and inspect retained payloads
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          const p=JSON.parse(fs.readFileSync('/tmp/provider.json','utf8'));
+          const k=JSON.parse(fs.readFileSync('/tmp/keys.json','utf8'));
+          const keyNames=(Array.isArray(k)?k:(k.keys||[])).map(x=>String(x.name||x.key||x));
+          const arr=v=>Array.isArray(v)?v:[];
+          const t=v=>{const n=Date.parse(v||'');return Number.isFinite(n)?n:null};
+          const A=Date.parse('2026-09-27T04:00:00Z'),Z=Date.parse('2026-09-28T04:00:00Z');
+          const fills=[...arr(p.fills),...arr(p.historicalFills)].filter(r=>{const q=t(r.createdAt);return q!==null&&q>=A&&q<Z});
+          const settlements=arr(p.settlements).filter(r=>{const q=t(r.settledTime);return q!==null&&q>=A&&q<Z});
+          const map=new Map();
+          for(const key of keyNames){
+            const m=key.match(/^notification:delivery:v1:(fill|close):([^:]+):([^:]+)-(\d+)$/);
+            if(!m)continue;
+            const [,kind,orderId,seriesId,attempt]=m;
+            if(!map.has(orderId))map.set(orderId,[]);
+            map.get(orderId).push({kind,seriesId,attemptNo:Number(attempt),key});
+          }
+          const groups=new Map();
+          for(const f of fills){const q=f.ticker||f.marketTicker||'UNKNOWN';if(!groups.has(q))groups.set(q,{ticker:q,fills:[],settlements:[]});groups.get(q).fills.push(f)}
+          for(const s of settlements){const q=s.ticker||s.marketTicker||'UNKNOWN';if(!groups.has(q))groups.set(q,{ticker:q,fills:[],settlements:[]});groups.get(q).settlements.push(s)}
+          let matched=0,ambiguous=0,providerOnly=0;
+          const out=[];
+          for(const g of groups.values()){
+            const hits=[];
+            for(const f of g.fills) for(const h of (map.get(f.orderId)||[])) hits.push({...h,orderId:f.orderId,providerSide:f.side,providerAction:f.action,providerPrice:f.yesPrice,createdAt:f.createdAt});
+            const uniq=[...new Map(hits.map(h=>[h.seriesId+':'+h.attemptNo,h])).values()];
+            let status='PROVIDER_ONLY',reason='NO_RETAINED_NOTIFICATION_ORDER_MATCH';
+            if(uniq.length===1){status='MATCH';reason='EXACT_PROVIDER_ORDER_ID_TO_SERIES_ATTEMPT';matched++}
+            else if(uniq.length>1){status='METADATA_MISMATCH';reason='MULTIPLE_SERIES_ATTEMPT_MAPPINGS';ambiguous++}
+            else providerOnly++;
+            out.push({ticker:g.ticker,status,reason,mapping:uniq,hits,fills:g.fills,settlements:g.settlements});
+          }
+          console.log('SEP27_PROVIDER_LIFECYCLES_RECONSTRUCTED='+groups.size);
+          console.log('EXACT_NOTIFICATION_MATCHED='+matched);
+          console.log('PROVIDER_ONLY='+providerOnly);
+          console.log('MAPPING_MISMATCHES='+ambiguous);
+          console.log('---EXACT_CORRELATION_JSON---');
+          console.log(JSON.stringify(out));
+          const vals=fs.readFileSync('/tmp/notification-values.ndjson','utf8').split(/\n/).filter(Boolean).map(line=>{const i=line.indexOf('\t');const key=line.slice(0,i),raw=line.slice(i+1);let value=null;try{value=JSON.parse(raw)}catch{value=raw};return{key,value}});
+          console.log('---NEAR_NOTIFICATION_PAYLOADS_JSON---');
+          const nearOrderIds=new Set(out.filter(x=>x.ticker.startsWith('KXNEAR15M-')).flatMap(x=>x.fills.map(f=>f.orderId)));
+          console.log(JSON.stringify(vals.filter(v=>[...nearOrderIds].some(id=>v.key.includes(':'+id+':')))));
+          const fieldNames=[...new Set(vals.flatMap(v=>v.value&&typeof v.value==='object'?Object.keys(v.value):[]))].sort();
+          console.log('NOTIFICATION_PAYLOAD_FIELDS='+fieldNames.join(','));
+          console.log('PROVIDER_WRITES='+Number(p?.safety?.providerTradingWrites??0));
+          console.log('EXECUTION_STATE_WRITES='+Number(p?.safety?.executionStateWrites??0));
+          console.log('CAPITAL_MOVED_USD='+Number(p?.safety?.capitalMovedUsd??0));
+          console.log('ORDERS_SUBMITTED='+Number(p?.safety?.ordersSubmitted??0));
+          NODE
