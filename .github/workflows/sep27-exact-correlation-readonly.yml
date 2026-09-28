@@ -1,0 +1,76 @@
+name: Sep 27 Exact Correlation Read Only
+
+on:
+  push:
+    branches: [market-edge-baseline-real]
+    paths:
+      - '.github/workflows/sep27-exact-correlation-readonly.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  correlate:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Collect read-only evidence
+        run: |
+          set -euo pipefail
+          base='https://market-edge-baseline-real.darkbishop43.workers.dev'
+          bridge='https://market-edge-founder-read.darkbishop43.workers.dev'
+          curl -fsS "$bridge/forensic-provider-history?limit=200" > /tmp/provider.json
+          for p in execution-test-state real-trade-state founder-capital-ledger shadow-state; do
+            code=$(curl -sS -o "/tmp/$p.json" -w '%{http_code}' "$bridge/$p" || true)
+            echo "$p HTTP=$code"
+          done
+          for p in phase1a-shadow-proof phase1b-shadow-proof; do
+            code=$(curl -sS -o "/tmp/$p.json" -w '%{http_code}' "$base/$p" || true)
+            echo "$p HTTP=$code"
+          done
+          post=$(curl -sS -o /tmp/post.txt -w '%{http_code}' -X POST "$bridge/forensic-provider-history" || true)
+          test "$post" = 405
+          echo 'READ_ONLY_POST_REJECTED=YES'
+
+      - name: Reconstruct Sep 27 provider lifecycles and expose internal evidence shapes
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          const read=p=>{try{return JSON.parse(fs.readFileSync(p,'utf8'))}catch{return null}};
+          const provider=read('/tmp/provider.json')||{};
+          const arr=v=>Array.isArray(v)?v:[];
+          const fills=[...arr(provider.fills),...arr(provider.historicalFills)];
+          const settlements=arr(provider.settlements);
+          const t=v=>{const n=Date.parse(v||'');return Number.isFinite(n)?n:null};
+          const start=Date.parse('2026-09-27T04:00:00Z'), end=Date.parse('2026-09-28T04:00:00Z');
+          const sf=fills.filter(r=>{const q=t(r.createdAt);return q!==null&&q>=start&&q<end});
+          const ss=settlements.filter(r=>{const q=t(r.settledTime);return q!==null&&q>=start&&q<end});
+          const byTicker=new Map();
+          for(const r of sf){const k=r.ticker||r.marketTicker||'UNKNOWN'; if(!byTicker.has(k))byTicker.set(k,{ticker:k,fills:[],settlements:[]}); byTicker.get(k).fills.push(r)}
+          for(const r of ss){const k=r.ticker||r.marketTicker||'UNKNOWN'; if(!byTicker.has(k))byTicker.set(k,{ticker:k,fills:[],settlements:[]}); byTicker.get(k).settlements.push(r)}
+          for(const x of byTicker.values()){
+            x.fills.sort((a,b)=>(t(a.createdAt)||0)-(t(b.createdAt)||0));
+            x.settlements.sort((a,b)=>(t(a.settledTime)||0)-(t(b.settledTime)||0));
+          }
+          console.log('SEP27_PROVIDER_TICKER_GROUPS='+byTicker.size);
+          console.log('SEP27_PROVIDER_FILL_ROWS='+sf.length);
+          console.log('SEP27_PROVIDER_SETTLEMENT_ROWS='+ss.length);
+          console.log('---SEP27_PROVIDER_GROUPS_JSON---');
+          console.log(JSON.stringify([...byTicker.values()]));
+          for(const name of ['execution-test-state','real-trade-state','founder-capital-ledger','shadow-state','phase1a-shadow-proof','phase1b-shadow-proof']){
+            const x=read('/tmp/'+name+'.json');
+            console.log('---'+name.toUpperCase()+'_JSON---');
+            console.log(JSON.stringify(x));
+          }
+          console.log('---SEP27_NEAR_PROVIDER_JSON---');
+          console.log(JSON.stringify([...byTicker.values()].filter(x=>String(x.ticker).includes('NEAR'))));
+          console.log('PROVIDER_WRITES='+Number(provider?.safety?.providerTradingWrites??0));
+          console.log('EXECUTION_STATE_WRITES='+Number(provider?.safety?.executionStateWrites??0));
+          console.log('CAPITAL_MOVED_USD='+Number(provider?.safety?.capitalMovedUsd??0));
+          console.log('ORDERS_SUBMITTED='+Number(provider?.safety?.ordersSubmitted??0));
+          NODE
