@@ -1,0 +1,43 @@
+name: Founder Hold Extension Zero Money Proof
+on:
+  push:
+    branches: [market-edge-baseline-real]
+    paths:
+      - 'market-edge-lab/real/provider-history/founder-hold-extension-zero-money.js'
+      - '.github/workflows/founder-hold-extension-zero-money.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  prove:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Run zero-money deadline fixtures
+        run: |
+          set -euo pipefail
+          node market-edge-lab/real/provider-history/founder-hold-extension-zero-money.js > /tmp/proof.json
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          const x=JSON.parse(fs.readFileSync('/tmp/proof.json','utf8'));
+          console.log('STATUS='+(x.ok?'GREEN':'RED'));
+          console.log('DEFAULT_5_00='+(x.defaultHold.pass?'PASS':'FAIL'));
+          console.log('PLUS_30_TO_5_30='+(x.plus30.pass?'PASS':'FAIL'));
+          console.log('PLUS_1_TO_6_00='+(x.plus1.pass?'PASS':'FAIL'));
+          console.log('PLUS_5_TO_10_00='+(x.plus5.pass?'PASS':'FAIL'));
+          console.log('HOLD_TO_CLOSE='+(x.holdToClose.pass?'PASS':'FAIL'));
+          console.log('SCORE_EXIT_UNCHANGED='+(x.scoreExitUnchanged.pass?'PASS':'FAIL'));
+          console.log('NEW_POSITION_RESET='+(x.nextPositionReset.pass?'PASS':'FAIL'));
+          console.log('DISARM_MANAGEMENT='+(x.disarmSemantics.pass?'PASS':'FAIL'));
+          console.log('RECONCILIATION_UNCHANGED='+(x.reconciliation.pass?'PASS':'FAIL'));
+          console.log('CHECKPOINTS='+x.checkpointRetention.map(c=>c.label).join(','));
+          console.log('PROVIDER_WRITES='+x.providerWrites);
+          console.log('EXECUTION_STATE_WRITES='+x.executionStateWrites);
+          console.log('CAPITAL_MOVED_USD='+x.capitalMovedUsd);
+          console.log('ORDERS_SUBMITTED='+x.ordersSubmitted);
+          if(!x.defaultHold.pass||!x.plus30.pass||!x.plus1.pass||!x.plus5.pass||!x.holdToClose.pass||!x.scoreExitUnchanged.pass||!x.nextPositionReset.pass||!x.disarmSemantics.pass||!x.reconciliation.pass)process.exit(1);
+          if(x.providerWrites!==0||x.executionStateWrites!==0||x.capitalMovedUsd!==0||x.ordersSubmitted!==0)process.exit(1);
+          NODE
