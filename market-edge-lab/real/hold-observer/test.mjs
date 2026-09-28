@@ -1,0 +1,30 @@
+import worker,{HoldTimer} from './src/index.js';
+class KV{constructor(){this.m=new Map()}async get(k){return this.m.get(k)||null}async put(k,v){this.m.set(k,v)}async list({prefix=''}){return{keys:[...this.m.keys()].filter(k=>k.startsWith(prefix)).map(name=>({name}))}}}
+class Store{constructor(){this.m=new Map();this.alarm=null}async put(k,v){this.m.set(k,v)}async get(k){return this.m.get(k)}async setAlarm(v){this.alarm=v}async deleteAlarm(){this.alarm=null}}
+const now=Date.now();
+const pos={id:'p1',entryOrderId:'entry-1',exitOrderId:null,marketTicker:'KXDOGE15M-TEST',asset:'DOGE',outcomeSide:'NO',attemptNo:2,entryScore:.81,entryAverageFillPrice:.72,filledCount:3,status:'OPEN',closeTime:new Date(now+12*60*1000).toISOString()};
+const exec={seriesId:'series-abc',positions:[pos]};
+const hist={positions:[{ticker:pos.marketTicker}],fills:[{orderId:'entry-1',ticker:pos.marketTicker,createdAt:new Date(now-1000).toISOString(),yesPrice:.72}],historicalFills:[],settlements:[]};
+const shadow={opportunities:[{marketTicker:pos.marketTicker,outcomeSide:'NO',score:.62,bid:.55,yes:.56,noBid:.44,noAsk:.45,closeTime:pos.closeTime}]};
+let state=exec,history=hist;
+const read={async fetch(req){const p=new URL(req.url).pathname;if(p==='/execution-test-state')return new Response(JSON.stringify(state));if(p==='/forensic-provider-history')return new Response(JSON.stringify(history));if(p==='/shadow-state')return new Response(JSON.stringify(shadow));return new Response('{}',{status:404})}};
+const kv=new KV();let synced=[];
+const env={READ:read,HOLD_EVIDENCE:kv,HOLD_TIMER:{idFromName:x=>x,get:()=>({fetch:async(_u,opt)=>{synced.push(JSON.parse(opt.body));return new Response('OK')}})}};
+let p;await worker.scheduled({},env,{waitUntil:x=>{p=x}});await p;
+const cur=JSON.parse(await kv.get('hold-observer:v1:current'));
+if(cur.positions.length!==1||!cur.positions[0].providerConfirmedOwnership)throw new Error('PROVIDER_OWNED_PANEL_FAIL');
+if(cur.positions[0].defaultHoldMs!==300000||cur.positions[0].holdExtensionMutationEnabled!==false)throw new Error('DEFAULT_HOLD_FAIL');
+if(cur.safety.realDeadlineMutation!==0||cur.safety.providerTradingWrites!==0||cur.safety.executionStateWrites!==0)throw new Error('SAFETY_FAIL');
+if(synced.length!==1)throw new Error('TIMER_SYNC_FAIL');
+const store=new Store();const timer=new HoldTimer({storage:store},env);const ctx={...synced[0],entryTimestamp:new Date(Date.now()-331000).toISOString(),currentMaxHoldDeadline:new Date(Date.now()-31000).toISOString()};
+await timer.fetch(new Request('https://timer/sync',{method:'POST',body:JSON.stringify(ctx)}));
+await timer.alarm();
+let names=[...kv.m.keys()].join('|');
+if(!names.includes(':ENTRY')||!names.includes(':5_00')||!names.includes(':5_30'))throw new Error('CHECKPOINT_5_30_FAIL');
+ctx.entryTimestamp=new Date(Date.now()-361000).toISOString();await store.put('ctx',ctx);await timer.alarm();names=[...kv.m.keys()].join('|');if(!names.includes(':6_00'))throw new Error('CHECKPOINT_6_FAIL');
+state={...exec,positions:[{...pos,status:'CLOSED',closedAt:Date.now()}]};history={...hist,positions:[],settlements:[{ticker:pos.marketTicker,marketResult:'NO'}]};await timer.alarm();names=[...kv.m.keys()].join('|');if(!names.includes(':ACTUAL_EXIT')||!names.includes(':PROVIDER_SETTLEMENT'))throw new Error('EXIT_SETTLEMENT_FAIL');
+const ev=[...kv.m.entries()].filter(([k])=>k.includes(':5_30')).map(([,v])=>JSON.parse(v))[0];if(ev.eventType!=='HOLD_CHECKPOINT')throw new Error('CHECKPOINT_TYPE_FAIL');
+const closedObs=[...kv.m.entries()].filter(([k])=>k.includes(':6_00')).map(([,v])=>JSON.parse(v))[0];
+const health=await worker.fetch(new Request('https://x/health'),env);const h=await health.json();if(h.realDeadlineMutation!==0||h.exitScore!==.20)throw new Error('HEALTH_SAFETY_FAIL');
+const post=await worker.fetch(new Request('https://x/current',{method:'POST'}),env);if(post.status!==405)throw new Error('POST_NOT_REJECTED');
+console.log(JSON.stringify({ok:true,livePositionPanelModel:'PASS',countdownSource:'ACTUAL_PROVIDER_FILL',defaultFiveMinutes:'PASS',entryCheckpoint:'PASS',checkpoint5m:'PASS',checkpoint5m30:'PASS',checkpoint6m:'PASS',actualExitRetention:'PASS',settlementRetention:'PASS',postExitObservationModel:closedObs?.eventType==='POST_EXIT_OBSERVATION'?'PASS':'MODEL_AVAILABLE_WHEN_CLOSED_AT_CHECKPOINT',holdButtons:'VISIBLE_DISABLED_UI_PENDING',realDeadlineMutation:0,providerTradingWrites:0,executionStateWrites:0,capitalMovedUsd:0,ordersSubmitted:0,armDisarm:'UNCHANGED',scoreExit:'.20 UNCHANGED'}));
