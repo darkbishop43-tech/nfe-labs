@@ -4316,6 +4316,57 @@ export default {
       });
     }
 
+    // NFE_SEP27_EXACT_CORRELATION_READ_V1
+    if (request.method === "GET" && url.pathname === "/forensic-sep27-correlation") {
+      try {
+        const limit=Math.max(1,Math.min(200,Math.trunc(Number(url.searchParams.get("limit")||200))));
+        const readJson=async path=>{const r=await kalshiExecutionGet(env,path);let body=null;try{body=await r.json();}catch{}return{ok:r.ok,httpStatus:r.status,body};};
+        const [fillsNow,fillsHistorical,settlements]=await Promise.all([
+          readJson("/trade-api/v2/portfolio/fills?limit="+limit),
+          readJson("/trade-api/v2/historical/fills?limit="+limit),
+          readJson("/trade-api/v2/portfolio/settlements?limit="+limit)
+        ]);
+        const normalizeFill=x=>({recordType:"FILL",fillId:x?.fill_id??x?.fillId??null,orderId:x?.order_id??x?.orderId??null,tradeId:x?.trade_id??x?.tradeId??null,ticker:x?.ticker??x?.market_ticker??null,marketTicker:x?.market_ticker??x?.ticker??null,eventTicker:x?.event_ticker??null,side:x?.side??null,action:x?.action??null,yesPrice:x?.yes_price_dollars??x?.yes_price??null,noPrice:x?.no_price_dollars??x?.no_price??null,feeCost:x?.fee_cost??x?.fee_cost_dollars??null,createdAt:x?.created_time??x?.created_at??x?.createdAt??null});
+        const normalizeSettlement=x=>({recordType:"SETTLEMENT",ticker:x?.ticker??x?.market_ticker??null,eventTicker:x?.event_ticker??null,marketResult:x?.market_result??x?.marketResult??null,revenue:x?.revenue_dollars??x?.revenue??null,feeCost:x?.fee_cost??x?.fee_cost_dollars??null,value:x?.value??null,settledTime:x?.settled_time??x?.settledTime??null});
+        const fa=[...(Array.isArray(fillsNow?.body?.fills)?fillsNow.body.fills:[]),...(Array.isArray(fillsHistorical?.body?.fills)?fillsHistorical.body.fills:[])].map(normalizeFill);
+        const sa=(Array.isArray(settlements?.body?.settlements)?settlements.body.settlements:[]).map(normalizeSettlement);
+        const parseMs=v=>{const n=Date.parse(String(v||""));return Number.isFinite(n)?n:null;};
+        const start=Date.parse("2026-09-27T04:00:00Z"),end=Date.parse("2026-09-28T04:00:00Z");
+        const sepFills=fa.filter(x=>{const n=parseMs(x.createdAt);return n!==null&&n>=start&&n<end;});
+        const sepSettlements=sa.filter(x=>{const n=parseMs(x.settledTime);return n!==null&&n>=start&&n<end;});
+        const keyList=env?.BASELINE_REAL_SHADOW_STATE?await env.BASELINE_REAL_SHADOW_STATE.list({prefix:"notification:delivery:v1:"}):{keys:[]};
+        const orderMap=new Map();
+        for(const row of (Array.isArray(keyList?.keys)?keyList.keys:[])){
+          const name=String(row?.name||"");
+          const m=name.match(/^notification:delivery:v1:(fill|close):([^:]+):([^:]+)-(\d+)$/);
+          if(!m)continue;
+          const [,kind,orderId,seriesId,attemptRaw]=m;
+          if(!orderMap.has(orderId))orderMap.set(orderId,[]);
+          orderMap.get(orderId).push({kind,seriesId,attempt:Number(attemptRaw),evidenceKey:name});
+        }
+        const groups=new Map();
+        for(const f of sepFills){const k=String(f.ticker||f.marketTicker||"UNKNOWN");if(!groups.has(k))groups.set(k,{ticker:k,fills:[],settlements:[]});groups.get(k).fills.push(f);}
+        for(const x of sepSettlements){const k=String(x.ticker||"UNKNOWN");if(!groups.has(k))groups.set(k,{ticker:k,fills:[],settlements:[]});groups.get(k).settlements.push(x);}
+        const rows=[];
+        for(const g of groups.values()){
+          const hits=[];
+          for(const f of g.fills)for(const h of (orderMap.get(String(f.orderId||""))||[]))hits.push({...h,orderId:f.orderId,createdAt:f.createdAt,providerSide:f.side,providerAction:f.action,yesPrice:f.yesPrice,noPrice:f.noPrice});
+          const mappings=[...new Map(hits.map(h=>[h.seriesId+":"+h.attempt,h])).values()];
+          let status="PROVIDER_ONLY",reason="NO_RETAINED_ORDER_MAPPING";
+          if(mappings.length===1){status="MATCH";reason="EXACT_PROVIDER_ORDER_ID_TO_SERIES_ATTEMPT";}else if(mappings.length>1){status="METADATA_MISMATCH";reason="MULTIPLE_SERIES_ATTEMPT_MAPPINGS";}
+          const entryFills=hits.filter(x=>x.kind==="fill"),closeFills=hits.filter(x=>x.kind==="close");
+          const firstEntry=entryFills.map(x=>parseMs(x.createdAt)).filter(Number.isFinite).sort((a,b)=>a-b)[0]??null;
+          const firstClose=closeFills.map(x=>parseMs(x.createdAt)).filter(Number.isFinite).sort((a,b)=>a-b)[0]??null;
+          const holdSeconds=firstEntry!==null&&firstClose!==null?(firstClose-firstEntry)/1000:null;
+          rows.push({ticker:g.ticker,status,reason,seriesId:mappings.length===1?mappings[0].seriesId:null,attempt:mappings.length===1?mappings[0].attempt:null,provider:{fills:g.fills,settlements:g.settlements},holdEvidence:{entryAt:firstEntry!==null?new Date(firstEntry).toISOString():null,fiveMinuteDeadline:firstEntry!==null?new Date(firstEntry+300000).toISOString():null,providerCloseAt:firstClose!==null?new Date(firstClose).toISOString():null,entryToProviderCloseSeconds:holdSeconds,checkpoint5m:"QUOTE_UNAVAILABLE",checkpoint5m30:"QUOTE_UNAVAILABLE",checkpoint6m:firstClose!==null&&Math.abs(holdSeconds-360)<=75?"PROVIDER_CLOSE_NEAR_CHECKPOINT":"QUOTE_UNAVAILABLE",settlementAvailable:g.settlements.length>0},historicalInternal:{score:null,threshold:null,exitReason:null,phase1A:null,phase1B:null,note:"Sep 27 series bodies rolled out of bounded queueHistory; retained notification keys preserve exact orderId -> series/attempt mapping only."}});
+        }
+        const matched=rows.filter(x=>x.status==="MATCH").length,providerOnly=rows.filter(x=>x.status==="PROVIDER_ONLY").length,mismatches=rows.filter(x=>x.status==="METADATA_MISMATCH").length;
+        return json({ok:true,readOnly:true,state:"SEP27_EXACT_CORRELATION",date:"2026-09-27 America/New_York",providerLifecycles:rows.length,matched,providerOnly,mismatches,internalOnly:null,internalOnlyReason:"UNDETERMINED_BECAUSE_SEP27_ARCHIVED_POSITION_BODIES_ROLLED_OUT",rows,safety:{providerTradingWrites:0,executionStateWrites:0,capitalMovedUsd:0,ordersSubmitted:0,armDisarm:"UNCHANGED",executionLogic:"UNCHANGED_EXCEPT_ADDITIVE_GET_READ_ROUTE"}});
+      } catch(error) {
+        return json({ok:false,readOnly:true,state:"SEP27_EXACT_CORRELATION_READ_FAILED",errorCode:String(error?.message||"FAILED"),safety:{providerTradingWrites:0,executionStateWrites:0,capitalMovedUsd:0,ordersSubmitted:0}},500);
+      }
+    }
+
     if (request.method === "GET" && url.pathname === "/forensic-historical-orders") {
       const providerPath=new URL("https://external-api.kalshi.com/trade-api/v2/historical/orders");
       for(const key of ["min_ts","max_ts","cursor","limit"]){
