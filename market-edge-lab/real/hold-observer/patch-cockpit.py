@@ -1,0 +1,45 @@
+from pathlib import Path
+p=Path('market-edge-lab/real/baseline/founder-terminal.html')
+s=p.read_text()
+css='''
+/* HOLD_OBSERVER_UI_V1 — observational only; no deadline mutation */
+.holdObs{border-bottom:1px solid var(--line);background:#070d14;padding:7px 9px}.holdObsHead{display:flex;align-items:center;gap:8px;margin-bottom:6px}.holdObsTitle{font-size:9px;letter-spacing:.12em;font-weight:900;color:var(--gold)}.holdObsStatus{font-size:9px;font-weight:900}.holdObsStatus.good{color:var(--green)}.holdObsStatus.warn{color:var(--amber)}.holdObsStatus.bad{color:var(--red)}.holdObsNote{margin-left:auto;font-size:8px;color:var(--muted);white-space:nowrap}.holdCards{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:6px}.holdCard{border:1px solid #26384a;background:#08111a;padding:8px;min-width:0}.holdTop{display:flex;align-items:center;gap:7px}.holdCoin{width:25px;height:25px;border:1px solid #355069;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:900;color:#fff;background:#0d1925}.holdAsset{font-size:12px;font-weight:900}.holdTicker{font-size:8px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.holdOwned{margin-left:auto;font-size:9px;font-weight:900;color:var(--green)}.holdOwned.closed{color:var(--muted)}.holdGrid{display:grid;grid-template-columns:repeat(6,minmax(75px,1fr));gap:1px;background:var(--line);border:1px solid var(--line);margin-top:7px}.holdGrid>div{background:#080f16;padding:5px}.holdK{font-size:7px;color:#65798e;letter-spacing:.06em}.holdV{font-size:9px;font-weight:800;margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.holdCountdown{color:var(--green);font-size:13px}.holdCountdown.expired{color:var(--amber)}.holdControls{display:flex;gap:4px;flex-wrap:wrap;margin-top:6px}.holdControls button{border:1px solid #394653;background:#10161c;color:#66717c;padding:5px 8px;font-size:8px;font-weight:900;cursor:not-allowed}.holdControlsLabel{font-size:8px;color:var(--amber);font-weight:900;display:flex;align-items:center;margin-right:3px}.holdExitActive{margin-left:auto;color:var(--green);font-size:8px;font-weight:900;display:flex;align-items:center}.holdEmpty{padding:8px;border:1px dashed #28394a;color:#65798e;font-size:9px}.holdEvidence{font-size:8px;color:#71879d;margin-top:5px}
+@media(max-width:900px){.holdGrid{grid-template-columns:repeat(3,1fr)}}
+@media(max-width:520px){.holdObs{padding:6px}.holdCards{grid-template-columns:1fr}.holdGrid{grid-template-columns:repeat(2,1fr)}.holdObsNote{display:none}}
+'''
+if 'HOLD_OBSERVER_UI_V1' not in s:
+    s=s.replace('</style>',css+'\n</style>',1)
+panel='''
+<section class="holdObs" id="holdObsPanel" aria-live="polite">
+  <div class="holdObsHead"><div class="holdObsTitle">LIVE OWNED POSITION</div><div id="holdObsStatus" class="holdObsStatus warn">CHECKING…</div><div id="holdObsUpdated" class="holdObsNote">OBSERVATION ONLY · UPDATED —</div></div>
+  <div id="holdCards" class="holdCards"><div class="holdEmpty">Checking authenticated provider ownership…</div></div>
+</section>
+'''
+if 'id="holdObsPanel"' not in s:
+    start=s.index('<section class="advisorPanel"')
+    end=s.index('</section>',start)+len('</section>')
+    s=s[:end]+"\n\n"+panel+s[end:]
+js=r'''
+<script>
+/* HOLD_OBSERVER_UI_V1_SCRIPT — GET only */
+(()=>{
+ const URL='https://market-edge-hold-observer.darkbishop43.workers.dev/current';
+ let state=null,error=null;
+ const $=id=>document.getElementById(id);
+ const esc=v=>String(v??'—').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+ const icon=a=>({BTC:'₿',ETH:'Ξ',SOL:'◎',XRP:'✕',HYPE:'H',ZEC:'Z',DOGE:'Ð',BNB:'◆',NEAR:'N'}[String(a||'').toUpperCase()]||String(a||'?').slice(0,1));
+ const num=(v,d=2)=>Number.isFinite(Number(v))?Number(v).toFixed(d):'—';
+ const tm=v=>{const n=Date.parse(v||'');return Number.isFinite(n)?new Date(n).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit',second:'2-digit'}):'—'};
+ const dur=ms=>{if(!Number.isFinite(ms))return '—';const neg=ms<0;ms=Math.abs(ms);const m=Math.floor(ms/60000),sec=Math.floor((ms%60000)/1000);return (neg?'-':'')+String(m).padStart(2,'0')+':'+String(sec).padStart(2,'0')};
+ function openCard(p){const entry=Date.parse(p.entryTimestamp||''),deadline=Date.parse(p.currentMaxHoldDeadline||'');const now=Date.now();const left=Number.isFinite(deadline)?deadline-now:NaN;const owned=Number.isFinite(entry)?now-entry:NaN;return '<div class="holdCard"><div class="holdTop"><div class="holdCoin">'+esc(icon(p.asset))+'</div><div><div class="holdAsset">'+esc(p.asset)+' · '+esc(p.side)+'</div><div class="holdTicker">'+esc(p.ticker)+'</div></div><div class="holdOwned">OWNED · '+esc(p.quantity??'—')+'</div></div><div class="holdGrid"><div><div class="holdK">SERIES / ATTEMPT</div><div class="holdV">'+esc(p.seriesId||'—')+' / '+esc(p.attempt??'—')+'</div></div><div><div class="holdK">ENTRY SCORE</div><div class="holdV">'+num(p.entryScore,3)+'</div></div><div><div class="holdK">ENTRY PRICE</div><div class="holdV">'+num(p.entryPrice,4)+'</div></div><div><div class="holdK">ENTRY TIME</div><div class="holdV">'+tm(p.entryTimestamp)+'</div></div><div><div class="holdK">TIME OWNED</div><div class="holdV">'+dur(owned)+'</div></div><div><div class="holdK">CURRENT SCORE</div><div class="holdV">'+num(p.currentScore,3)+'</div></div><div><div class="holdK">DEFAULT HOLD</div><div class="holdV">05:00</div></div><div><div class="holdK">TIME REMAINING</div><div class="holdV holdCountdown '+(left<0?'expired':'')+'">'+dur(left)+'</div></div><div><div class="holdK">REAL DEADLINE</div><div class="holdV">'+tm(p.currentMaxHoldDeadline)+'</div></div><div><div class="holdK">PROVIDER CLOSE</div><div class="holdV">'+tm(p.providerCloseTime)+'</div></div><div><div class="holdK">MANAGEMENT</div><div class="holdV">'+esc(p.positionStatus||'OPEN')+'</div></div><div><div class="holdK">EXIT RULE</div><div class="holdV">≤ .20 ACTIVE</div></div></div><div class="holdControls"><span class="holdControlsLabel">FOUNDER HOLD EXTENSIONS — NOT YET ACTIVE</span><button disabled>+30 SEC</button><button disabled>+1 MIN</button><button disabled>+5 MIN</button><button disabled>HOLD TO CLOSE</button><span class="holdExitActive">.20 EXIT ACTIVE</span></div><div class="holdEvidence">CHECKPOINT RETENTION: ENTRY · 5:00 · 5:30 · 6:00 · ACTUAL EXIT · PROVIDER SETTLEMENT</div></div>'}
+ function closedCard(x){const p=x?.position||{},o=x?.observation||{};return '<div class="holdCard"><div class="holdTop"><div class="holdCoin">'+esc(icon(p.asset))+'</div><div><div class="holdAsset">'+esc(p.asset)+' · '+esc(p.side)+'</div><div class="holdTicker">'+esc(p.ticker)+'</div></div><div class="holdOwned closed">CLOSED</div></div><div class="holdGrid"><div><div class="holdK">SERIES / ATTEMPT</div><div class="holdV">'+esc(p.seriesId||'—')+' / '+esc(p.attempt??'—')+'</div></div><div><div class="holdK">ENTRY SCORE</div><div class="holdV">'+num(p.entryScore,3)+'</div></div><div><div class="holdK">ENTRY PRICE</div><div class="holdV">'+num(p.entryPrice,4)+'</div></div><div><div class="holdK">ENTRY TIME</div><div class="holdV">'+tm(p.entryTimestamp)+'</div></div><div><div class="holdK">FINAL 5:00 DEADLINE</div><div class="holdV">'+tm(p.realMaxHoldDeadline)+'</div></div><div><div class="holdK">ACTUAL EXIT</div><div class="holdV">'+tm(o.actualExitTimestamp||o.timestamp)+'</div></div></div><div class="holdControls"><span class="holdControlsLabel">FOUNDER HOLD EXTENSIONS — NOT YET ACTIVE</span><button disabled>+30 SEC</button><button disabled>+1 MIN</button><button disabled>+5 MIN</button><button disabled>HOLD TO CLOSE</button><span class="holdExitActive">.20 EXIT RULE PRESERVED</span></div></div>'}
+ function paint(){const st=$('holdObsStatus'),up=$('holdObsUpdated'),cards=$('holdCards');if(!st||!cards)return;if(error){st.textContent='UNAVAILABLE';st.className='holdObsStatus bad';cards.innerHTML='<div class="holdEmpty">HOLD OBSERVER UNAVAILABLE · '+esc(error)+'</div>';return}const age=state?.updatedAt?Date.now()-Date.parse(state.updatedAt):Infinity;if(age<120000){st.textContent='ACTIVE';st.className='holdObsStatus good'}else if(Number.isFinite(age)){st.textContent='STALE';st.className='holdObsStatus warn'}else{st.textContent='UNAVAILABLE';st.className='holdObsStatus bad'}if(up)up.textContent='OBSERVATION ONLY · UPDATED '+(state?.updatedAt?tm(state.updatedAt):'—');const ps=Array.isArray(state?.positions)?state.positions:[];if(ps.length)cards.innerHTML=ps.map(openCard).join('');else if(state?.recentClosed)cards.innerHTML=closedCard(state.recentClosed);else cards.innerHTML='<div class="holdEmpty">NO AUTHENTICATED PROVIDER-CONFIRMED OPEN POSITION · DEFAULT HOLD REMAINS 5:00 · .20 EXIT ACTIVE</div>'}
+ async function refresh(){try{const r=await fetch(URL,{cache:'no-store'});if(!r.ok)throw new Error('HTTP '+r.status);state=await r.json();error=null}catch(e){error=String(e?.message||e)}paint()}
+ refresh();setInterval(refresh,10000);setInterval(paint,1000);
+})();
+</script>
+'''
+if 'HOLD_OBSERVER_UI_V1_SCRIPT' not in s:
+    s=s.replace('</body>',js+'\n</body>',1)
+p.write_text(s)
+print('COCKPIT_HOLD_OBSERVER_PATCHED=YES')
