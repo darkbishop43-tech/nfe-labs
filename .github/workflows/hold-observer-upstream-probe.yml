@@ -1,0 +1,27 @@
+name: Hold Observer Upstream Probe
+on:
+  push:
+    branches: [market-edge-baseline-real]
+    paths: ['.github/workflows/hold-observer-upstream-probe.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Probe read-only inputs
+        run: |
+          set -euo pipefail
+          base='https://market-edge-founder-read.darkbishop43.workers.dev'
+          for p in execution-test-state 'forensic-provider-history?limit=200' shadow-state; do
+            safe=$(echo "$p"|tr '?=&/' '____')
+            code=$(curl -sS -o "/tmp/$safe.json" -w '%{http_code}' "$base/$p" || true)
+            echo "$p HTTP=$code"
+            if [ "$code" = 200 ]; then jq -r '"keys="+((keys|join(",")) // "")' "/tmp/$safe.json" || true; fi
+          done
+          hcode=$(curl -sS -o /tmp/h.json -w '%{http_code}' 'https://market-edge-hold-observer.darkbishop43.workers.dev/health' || true)
+          ccode=$(curl -sS -o /tmp/c.json -w '%{http_code}' 'https://market-edge-hold-observer.darkbishop43.workers.dev/current' || true)
+          echo "observer health HTTP=$hcode"
+          echo "observer current HTTP=$ccode"
+          [ "$ccode" = 200 ] && cat /tmp/c.json || true
