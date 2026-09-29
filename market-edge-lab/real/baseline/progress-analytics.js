@@ -1,0 +1,72 @@
+(()=>{
+'use strict';
+const READ='https://market-edge-founder-read.darkbishop43.workers.dev';
+const S={exec:null,history:null,error:null,metric:'accuracy'};
+const A=x=>Array.isArray(x)?x:[];
+const N=v=>(v===null||v===undefined||v==='')?null:(Number.isFinite(Number(v))?Number(v):null);
+const U=v=>String(v||'').toUpperCase();
+const E=v=>String(v??'UNKNOWN').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const ms=v=>{if(v===null||v===undefined)return null;if(typeof v==='number')return v>1e12?v:v*1000;const n=Number(v);if(typeof v==='string'&&/^\d+(?:\.\d+)?$/.test(v)&&Number.isFinite(n))return n>1e12?n:n*1000;const t=Date.parse(v);return Number.isFinite(t)?t:null};
+const tick=x=>String(x?.ticker??x?.marketTicker??x?.market_ticker??'');
+const side=x=>U(x?.side??x?.outcomeSide??x?.outcome??x?.yes_no);
+const get=async path=>{const r=await fetch(READ+path,{method:'GET',cache:'no-store',credentials:'omit',headers:{accept:'application/json'}});if(!r.ok)throw new Error(path+' HTTP '+r.status);return r.json()};
+const rows=h=>[...A(h?.providerRows),...A(h?.fills),...A(h?.historicalFills),...A(h?.orders),...A(h?.historical_orders),...A(h?.data?.orders),...A(h?.data?.historical_orders)];
+const settlements=h=>[...A(h?.settlements),...A(h?.data?.settlements)];
+const pnl=x=>N(x?.realized_pnl??x?.realizedPnl??x?.profit_loss??x?.pnl??x?.pnlUsd??x?.realizedPnlUsd);
+const fee=x=>N(x?.fees??x?.fee??x?.feeCost??x?.taker_fees??x?.maker_fees??x?.fees_dollars);
+const qty=x=>N(x?.fill_count??x?.filled_count??x?.filledCount??x?.count_filled??x?.count??x?.quantity);
+const when=x=>ms(x?.settled_time??x?.settledTime??x?.closed_at??x?.closedAt??x?.created_time??x?.created_at??x?.createdAt??x?.updated_time??x?.ts??x?.timestamp);
+const fPct=x=>x===null?'UNKNOWN':(x*100).toFixed(1)+'%';
+const fMoney=x=>x===null?'UNKNOWN':(x>=0?'+':'-')+'$'+Math.abs(x).toFixed(2);
+function injectUi(){
+ if(document.getElementById('progressTabBtn'))return;
+ const triage=document.querySelector('.tabs button[data-tab="triage"]');
+ if(!triage)return;
+ const b=document.createElement('button');b.id='progressTabBtn';b.dataset.tab='progress';b.textContent='PROGRESS';triage.insertAdjacentElement('afterend',b);
+ const style=document.createElement('style');style.textContent=`.progressWrap{padding:9px;display:flex;flex-direction:column;gap:9px}.progressBlocks{display:grid;grid-template-columns:repeat(3,minmax(220px,1fr));gap:8px}.progressCard{border:1px solid var(--line2);background:#08111a;padding:9px}.progressTitle{font-size:10px;font-weight:900;letter-spacing:.08em;color:#fff;margin-bottom:7px}.progressSub{font-size:8px;color:var(--muted);margin-top:-4px;margin-bottom:7px}.progressGrid{display:grid;grid-template-columns:repeat(2,1fr);gap:1px;background:var(--line)}.progressGrid>div{background:#071019;padding:6px}.progressK{font-size:8px;color:#65798e;letter-spacing:.07em}.progressV{font-size:12px;font-weight:900;color:#e9f2fb;margin-top:2px}.progressSection{border:1px solid var(--line);background:#070c12}.progressHead{display:flex;align-items:center;gap:8px;padding:7px 9px;border-bottom:1px solid var(--line);background:#091018;flex-wrap:wrap}.progressHead strong{letter-spacing:.07em}.progressHead span{font-size:8px;color:var(--muted)}.progressMetricBtns{margin-left:auto;display:flex;gap:4px}.progressMetricBtns button{background:#09121b;border:1px solid var(--line2);color:#8498ad;padding:4px 7px;font-size:8px;font-weight:900;cursor:pointer}.progressMetricBtns button.on{color:#fff;border-color:#587b9b}.progressChart{height:180px;padding:8px}.progressChart svg{width:100%;height:100%;display:block}.progressTbl{width:100%;border-collapse:collapse;white-space:nowrap}.progressTbl th{position:sticky;top:0;background:#0a1119;color:#60768d;text-align:right;font-size:8px;letter-spacing:.06em;padding:6px;border-bottom:1px solid var(--line);z-index:2}.progressTbl th:first-child,.progressTbl td:first-child{text-align:left}.progressTbl td{text-align:right;padding:6px;border-bottom:1px solid #101b26;font-size:9px}.progressUnknown{color:var(--amber)}@media(max-width:900px){.progressBlocks{grid-template-columns:1fr}.progressMetricBtns{width:100%;margin-left:0}.progressChart{height:150px}}`;
+ document.head.appendChild(style);
+ b.addEventListener('click',()=>{document.querySelectorAll('.tabs button').forEach(x=>x.classList.remove('on'));b.classList.add('on');if(window.state)window.state.tab='progress';render()});
+}
+function exactSettlement(t){const a=settlements(S.history).filter(x=>tick(x)===t);return a.length?a[a.length-1]:null}
+function finalDir(t){const s=exactSettlement(t),v=U(s?.market_result??s?.marketResult??s?.result??s?.outcome);return v==='YES'||v==='NO'?v:v==='FLAT'||v==='TIE'?'FLAT':'UNKNOWN'}
+function realizedForPosition(p){const ids=new Set([String(p?.entryOrderId||''),String(p?.exitOrderId||'')].filter(Boolean));if(!ids.size)return null;const vals=rows(S.history).filter(x=>ids.has(String(x?.order_id??x?.orderId??x?.id??''))).map(pnl).filter(x=>x!==null);return vals.length?vals[vals.length-1]:null}
+function runSnapshots(){
+ const st=S.exec?.state||{},out=[],seen=new Set();
+ const add=(x,source)=>{if(!x?.seriesId||seen.has(String(x.seriesId)))return;seen.add(String(x.seriesId));out.push({seriesId:String(x.seriesId),threshold:N(x.threshold),attemptsStarted:N(x.attemptsStarted),attempts:A(x.attempts),positions:A(x.positions),at:x.completedAt??x.armedAt??x.startedAt??x.updatedAt??null,source})};
+ add(st,'CURRENT');
+ A(st?.queue?.completedStages).forEach(x=>add(x,'QUEUE_COMPLETED_STAGE'));
+ A(st?.queueHistory).forEach(q=>{A(q?.completedStages).forEach(x=>add(x,'QUEUE_HISTORY_STAGE'));if(q?.seriesId)add(q,'QUEUE_HISTORY')});
+ return out;
+}
+function classifyRun(r){
+ const ps=A(r.positions),attempts=A(r.attempts);let fills=0,nofill=0,correct=0,wrong=0,flat=0,unknown=0,nfw=0,nfl=0,nfu=0,mgw=0,mgl=0,pwrong=0;
+ for(const a of attempts){
+  const p=ps.find(x=>String(x?.attemptNo)===String(a?.attemptNo)&&(!tick(a)||tick(x)===tick(a)))||null;
+  const filled=Number(a?.fillCount||p?.filledCount||0)>0,st=U(a?.status);if(filled)fills++;else if(st.includes('NO_FILL'))nofill++;
+  const fin=finalDir(tick(a)||tick(p)),pred=side(a)||side(p),pc=(fin==='YES'||fin==='NO')?(pred===fin?'CORRECT':'WRONG'):fin==='FLAT'?'FLAT':'UNKNOWN';
+  if(filled){if(pc==='CORRECT')correct++;else if(pc==='WRONG'){wrong++;pwrong++}else if(pc==='FLAT')flat++;else unknown++;if(pc==='CORRECT'){const z=p?realizedForPosition(p):null;if(z!==null){if(z>0)mgw++;else if(z<0)mgl++;}}}
+  else if(st.includes('NO_FILL')){if(pc==='CORRECT')nfw++;else if(pc==='WRONG')nfl++;else nfu++;}
+ }
+ const total=N(r.attemptsStarted)??attempts.length,den=correct+wrong;
+ return {...r,total,fills,nofill,fillRate:total>0?fills/total:null,correct,wrong,flat,unknown,accuracy:den?correct/den:null,nfw,nfl,nfu,mgw,mgl,pwrong};
+}
+function lifecycleRows(){
+ const preferred=settlements(S.history).filter(x=>pnl(x)!==null&&when(x)!==null);
+ const source=preferred.length?preferred:rows(S.history).filter(x=>pnl(x)!==null&&when(x)!==null);
+ const m=new Map();for(const x of source){const key=String(x?.settlement_id??x?.settlementId??x?.position_id??x?.positionId??x?.trade_id??x?.tradeId??x?.order_id??x?.orderId??tick(x)+'|'+when(x));m.set(key,x)}return [...m.values()];
+}
+function dailyProvider(){const d=new Map();for(const x of lifecycleRows()){const day=new Date(when(x)).toISOString().slice(0,10);if(!d.has(day))d.set(day,[]);d.get(day).push(x)}return [...d.entries()].sort((a,b)=>a[0].localeCompare(b[0])).map(([date,x])=>{const z=x.map(pnl).filter(v=>v!==null),wins=z.filter(v=>v>0),losses=z.filter(v=>v<0),fees=x.map(fee).filter(v=>v!==null),qs=x.map(qty).filter(v=>v!==null);return{date,count:x.length,wins:wins.length,losses:losses.length,winRate:(wins.length+losses.length)?wins.length/(wins.length+losses.length):null,avgWin:wins.length?wins.reduce((a,b)=>a+b,0)/wins.length:null,avgLoss:losses.length?losses.reduce((a,b)=>a+b,0)/losses.length:null,net:z.length?z.reduce((a,b)=>a+b,0):null,fees:fees.length?fees.reduce((a,b)=>a+b,0):null,avgQty:qs.length?qs.reduce((a,b)=>a+b,0)/qs.length:null}})}
+function chart(rs,days){const pts=S.metric==='pnl'?days.filter(x=>x.net!==null).map(x=>({label:x.date.slice(5),v:x.net})):rs.filter(x=>x.at).map(x=>({label:new Date(ms(x.at)||0).toLocaleDateString([], {month:'numeric',day:'numeric'}),v:S.metric==='fill'?x.fillRate:x.accuracy})).filter(x=>x.v!==null);if(!pts.length)return '<div class="empty">NO AUTHORITATIVE HISTORICAL POINTS FOR THIS METRIC</div>';const W=900,H=160,p=24,vs=pts.map(x=>x.v),lo=Math.min(...vs),hi=Math.max(...vs),rng=hi-lo||1,X=i=>p+i*(W-p*2)/Math.max(1,pts.length-1),Y=v=>H-p-(v-lo)/rng*(H-p*2),d=pts.map((q,i)=>(i?'L':'M')+X(i).toFixed(1)+' '+Y(q.v).toFixed(1)).join(' ');return '<svg viewBox="0 0 '+W+' '+H+'" preserveAspectRatio="none"><path d="'+d+'" fill="none" stroke="#64a8ff" stroke-width="2" vector-effect="non-scaling-stroke"/>'+pts.map((q,i)=>'<circle cx="'+X(i)+'" cy="'+Y(q.v)+'" r="3" fill="#dce7f2"><title>'+E(q.label)+' · '+(S.metric==='pnl'?fMoney(q.v):fPct(q.v))+'</title></circle>').join('')+'</svg>'}
+function block(title,sub,vals){return '<div class="progressCard"><div class="progressTitle">'+title+'</div><div class="progressSub">'+sub+'</div><div class="progressGrid">'+vals.map(v=>'<div><div class="progressK">'+E(v[0])+'</div><div class="progressV '+(v[1]==='UNKNOWN'?'progressUnknown':'')+'">'+E(v[1])+'</div></div>').join('')+'</div></div>'}
+function render(){
+ const el=document.getElementById('tabPanel');if(!el)return;if(S.error){el.innerHTML='<div class="empty">PROGRESS READ UNAVAILABLE · '+E(S.error)+'</div>';return}
+ const rs=runSnapshots().map(classifyRun),days=dailyProvider(),allAtt=rs.reduce((a,r)=>a+r.total,0),fills=rs.reduce((a,r)=>a+r.fills,0),nf=rs.reduce((a,r)=>a+r.nofill,0),correct=rs.reduce((a,r)=>a+r.correct,0),wrong=rs.reduce((a,r)=>a+r.wrong,0),flatUnknown=rs.reduce((a,r)=>a+r.flat+r.unknown,0),den=correct+wrong,nfw=rs.reduce((a,r)=>a+r.nfw,0),nfl=rs.reduce((a,r)=>a+r.nfl,0),nfu=rs.reduce((a,r)=>a+r.nfu,0),mgw=rs.reduce((a,r)=>a+r.mgw,0),mgl=rs.reduce((a,r)=>a+r.mgl,0),pwrong=rs.reduce((a,r)=>a+r.pwrong,0),life=lifecycleRows(),pv=life.map(pnl).filter(x=>x!==null),wins=pv.filter(x=>x>0),losses=pv.filter(x=>x<0),net=pv.length?pv.reduce((a,b)=>a+b,0):null;
+ const runRows=rs.slice().sort((a,b)=>(ms(b.at)||0)-(ms(a.at)||0)).map(r=>[r.at?new Date(ms(r.at)).toLocaleString():'UNKNOWN',r.seriesId,r.threshold===null?'UNKNOWN':r.threshold.toFixed(2),r.total,r.fills,r.nofill,fPct(r.fillRate),r.correct,r.wrong,fPct(r.accuracy),r.nfw,r.nfl,r.mgl]);
+ const dailyRows=days.slice().reverse().map(d=>[d.date,d.count,fPct(d.winRate),fMoney(d.avgWin),fMoney(d.avgLoss),fMoney(d.net),d.fees===null?'UNKNOWN':'$'+d.fees.toFixed(2),d.avgQty===null?'UNKNOWN':d.avgQty.toFixed(2)]);
+ el.innerHTML='<div class="progressWrap"><div class="progressBlocks">'+block('1 · SIGNAL QUALITY','EXACT RETAINED MARKET EDGE RUN EVIDENCE',[['DIRECTIONAL ACCURACY',den?fPct(correct/den):'UNKNOWN'],['CORRECT',correct],['WRONG',wrong],['FLAT / UNKNOWN',flatUnknown],['RUN SAMPLE',rs.length],['FILLED SAMPLE',fills]])+block('2 · CAPTURE QUALITY','QUALIFIED ATTEMPT CAPTURE',[['ATTEMPTS',allAtt],['FILLS',fills],['NO_FILL',nf],['FILL RATE',allAtt?fPct(fills/allAtt):'UNKNOWN'],['NO_FILL WOULD WIN',nfw],['NO_FILL WOULD LOSE',nfl],['NO_FILL UNKNOWN',nfu]])+block('3 · MANAGEMENT QUALITY','PREDICTION VS REALIZED MANAGEMENT',[['CORRECT / MGMT WIN',mgw],['CORRECT / MGMT LOSS',mgl],['PREDICTION WRONG',pwrong],['AVG REALIZED WIN',wins.length?fMoney(wins.reduce((a,b)=>a+b,0)/wins.length):'UNKNOWN'],['AVG REALIZED LOSS',losses.length?fMoney(losses.reduce((a,b)=>a+b,0)/losses.length):'UNKNOWN'],['NET REALIZED',fMoney(net)]])+'</div><div class="progressSection"><div class="progressHead"><strong>PROGRESS CHART</strong><span>READ ONLY · MISSING POINTS OMITTED</span><div class="progressMetricBtns"><button data-pm="accuracy" class="'+(S.metric==='accuracy'?'on':'')+'">DIRECTIONAL ACCURACY</button><button data-pm="fill" class="'+(S.metric==='fill'?'on':'')+'">FILL RATE</button><button data-pm="pnl" class="'+(S.metric==='pnl'?'on':'')+'">NET P/L</button></div></div><div class="progressChart">'+chart(rs,days)+'</div></div><div class="progressSection"><div class="progressHead"><strong>PROVIDER FINANCIAL HISTORY</strong><span>THRESHOLD NEVER INFERRED FROM PROVIDER DATA</span></div><div style="overflow:auto">'+(dailyRows.length?'<table class="progressTbl"><thead><tr>'+['DATE','FILLED LIFECYCLES','WIN RATE','AVG WIN','AVG LOSS','NET P/L','FEES','AVG QTY'].map(h=>'<th>'+h+'</th>').join('')+'</tr></thead><tbody>'+dailyRows.map(r=>'<tr>'+r.map(v=>'<td>'+E(v)+'</td>').join('')+'</tr>').join('')+'</tbody></table>':'<div class="empty">NO AUTHORITATIVE PROVIDER DAILY FINANCIAL HISTORY AVAILABLE</div>')+'</div></div><div class="progressSection"><div class="progressHead"><strong>MARKET EDGE RUN-BY-RUN</strong><span>EXACT SERIES SNAPSHOTS ONLY · DISTINCT SERIES IDs NEVER MERGED</span></div><div style="overflow:auto">'+(runRows.length?'<table class="progressTbl"><thead><tr>'+['DATE / TIME','SERIES ID','THRESHOLD','ATTEMPTS','FILLS','NO_FILL','FILL RATE','CORRECT','WRONG','DIRECTIONAL ACCURACY','NO_FILL WOULD WIN','NO_FILL WOULD LOSE','CORRECT / MGMT LOSS'].map(h=>'<th>'+h+'</th>').join('')+'</tr></thead><tbody>'+runRows.map(r=>'<tr>'+r.map(v=>'<td>'+E(v)+'</td>').join('')+'</tr>').join('')+'</tbody></table>':'<div class="empty">NO EXACT RETAINED MARKET EDGE RUN SNAPSHOTS AVAILABLE</div>')+'</div></div></div>';
+ el.querySelectorAll('[data-pm]').forEach(b=>b.onclick=()=>{S.metric=b.dataset.pm;render()});
+}
+window.renderProgress=render;
+async function refresh(){try{const [exec,history]=await Promise.all([get('/execution-test-state'),get('/forensic-provider-history?limit=200')]);S.exec=exec;S.history=history;S.error=null;if(document.querySelector('#progressTabBtn.on'))render()}catch(e){S.error=String(e?.message||e);if(document.querySelector('#progressTabBtn.on'))render()}}
+injectUi();refresh();setInterval(refresh,15000);
+})();
