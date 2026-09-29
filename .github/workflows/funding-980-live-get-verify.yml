@@ -1,0 +1,35 @@
+name: Funding 9.80 Live GET Verify
+
+on:
+  push:
+    branches: [market-edge-funding-980-live-get-verify]
+    paths: ['.github/workflows/funding-980-live-get-verify.yml']
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: GET-only live funding page verification
+        run: |
+          set -euo pipefail
+          B='https://market-edge-baseline-real.darkbishop43.workers.dev'
+          curl -fsS "$B/founder-funding" -o /tmp/funding.html
+          python - <<'PY'
+          from pathlib import Path
+          import re
+          h=Path('/tmp/funding.html').read_text()
+          def grab(label):
+              m=re.search(re.escape(label)+r':\s*<b[^>]*>\$?([^<]+)</b>',h)
+              return m.group(1).strip() if m else 'MISSING'
+          print('FOUNDER_FUNDING_PAGE_PRESENT='+str('FOUNDER FUNDING' in h))
+          print('INDEX0='+grab('INDEX 0 BALANCE'))
+          print('INDEX2='+grab('INDEX 2 BALANCE'))
+          print('TOTAL='+grab('TOTAL PREDICTIONS CASH'))
+          print('TRANSFERABLE='+grab('TRANSFERABLE INDEX 0 CASH'))
+          print('REVIEW_CONTROL_PRESENT='+str('REVIEW TRANSFER' in h))
+          print('CONFIRM_CONTROL_PRESENT_ON_GET='+str('CONFIRM INDEX 0' in h))
+          print('GET_ONLY_PROVIDER_WRITES=0')
+          print('GET_ONLY_CAPITAL_MOVED_USD=0')
+          assert 'FOUNDER FUNDING' in h
+          assert 'CONFIRM INDEX 0' not in h
+          PY
