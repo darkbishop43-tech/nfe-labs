@@ -1,0 +1,54 @@
+name: Final Top Cleanup Proof
+on:
+  push:
+    branches: [market-edge-final-top-cleanup]
+    paths:
+      - '.github/workflows/final-top-cleanup-proof.yml'
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  proof:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: market-edge-final-top-cleanup
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Freeze execution source
+        run: sha256sum market-edge-lab/real/baseline/src/index.js > /tmp/execution-before.sha
+      - name: Apply presentation patch
+        run: python3 market-edge-lab/real/baseline/apply-final-top-cleanup.py
+      - name: Verify top consolidation and boundaries
+        run: |
+          sha256sum market-edge-lab/real/baseline/src/index.js > /tmp/execution-after.sha
+          diff -u /tmp/execution-before.sha /tmp/execution-after.sha
+          python3 - <<'PY'
+          import pathlib
+          s=pathlib.Path('market-edge-lab/real/baseline/founder-terminal.html').read_text()
+          required=['FINAL_TOP_CLEANUP_V1','id="accountSummaryBand"','id="runSummaryBand"','id="systemSummaryBand"','ACCOUNT VALUE','OPEN EXPOSURE','LIFETIME REAL P/L','AUTO / ARM STATUS','CURRENT RUN','OPEN POSITIONS / NEXT SCAN','ENTRY / EXIT THRESHOLD','RECONCILIATION','PROVIDER SYNC','ADVISOR STATUS','AUTHORITY','FINAL_TOP_CLEANUP_MIRROR_V1']
+          for x in required:
+            if x not in s: raise SystemExit('MISSING '+x)
+          if s.count('topLegacySource') < 5: raise SystemExit('LEGACY_TOP_SOURCES_NOT_HIDDEN')
+          for x in ['TOTAL PROVIDER','AUTO ALLOCATED','AUTO AVAILABLE','FOUNDER ALLOCATED','FOUNDER AVAILABLE','KALSHI CASH']:
+            if x not in s: raise SystemExit('SOURCE_DOM_REMOVED '+x)
+          PY
+      - name: Syntax check inline JavaScript
+        run: |
+          python3 - <<'PY'
+          import re,pathlib,subprocess,tempfile
+          s=pathlib.Path('market-edge-lab/real/baseline/founder-terminal.html').read_text()
+          for src in re.findall(r'<script>(.*?)</script>',s,re.S):
+            f=tempfile.NamedTemporaryFile('w',suffix='.js',delete=False);f.write(src);f.close();subprocess.run(['node','--check',f.name],check=True)
+          print('INLINE_JS_OK')
+          PY
+      - name: Commit cockpit-only file
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add market-edge-lab/real/baseline/founder-terminal.html
+          test "$(git diff --cached --name-only)" = 'market-edge-lab/real/baseline/founder-terminal.html'
+          git commit -m 'Consolidate Founder Cockpit top summary bands'
+          git push origin HEAD:market-edge-final-top-cleanup
