@@ -16,25 +16,14 @@ jobs:
         run: |
           set -euo pipefail
           base='https://market-edge-founder-read.darkbishop43.workers.dev'
-          for route in execution-test-state real-trade-state founder-capital-ledger 'forensic-provider-history?limit=200'; do
-            echo "=== $route ==="
-            curl -fsS "$base/$route" -o /tmp/x.json
-            python3 - <<'PY'
+          curl -fsS "$base/execution-test-state" -o /tmp/ex.json
+          python3 - <<'PY'
           import json
-          x=json.load(open('/tmp/x.json'))
-          def desc(v):
-            if isinstance(v,dict): return {'type':'object','keys':sorted(v.keys())}
-            if isinstance(v,list): return {'type':'array','len':len(v),'first_keys':sorted(v[0].keys()) if v and isinstance(v[0],dict) else []}
-            return {'type':type(v).__name__}
-          print('TOP',desc(x))
-          if isinstance(x,dict):
-            for k,v in x.items():
-              if isinstance(v,(dict,list)): print(k,desc(v))
-          for path in [('state',),('state','ledger'),('state','attempts'),('state','positions'),('history',),('providerRows',),('settlements',),('data',)]:
-            v=x; ok=True
-            for k in path:
-              if isinstance(v,dict) and k in v:v=v[k]
-              else:ok=False;break
-            if ok: print('.'.join(path),desc(v))
+          x=json.load(open('/tmp/ex.json'))
+          s=x.get('state',{});q=x.get('queue',{});h=x.get('history',[])
+          print('CURRENT',json.dumps({k:s.get(k) for k in ['status','armed','seriesId','attemptsStarted','maxAttempts','attemptsRemaining','openPositions']},sort_keys=True))
+          print('CURRENT_ATTEMPTS',json.dumps(s.get('attempts',[]),sort_keys=True))
+          print('QUEUE',json.dumps({k:q.get(k) for k in ['active','status','queueId','currentIndex','totalAttempts','completedAttempts']},sort_keys=True))
+          print('QUEUE_COMPLETED_STAGES',json.dumps(q.get('completedStages',[]),sort_keys=True))
+          print('HISTORY',json.dumps(h,sort_keys=True))
           PY
-          done
