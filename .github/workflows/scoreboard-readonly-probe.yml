@@ -1,5 +1,9 @@
 name: Scoreboard Readonly Probe
 on:
+  push:
+    branches: [market-edge-scoreboard]
+    paths:
+      - '.github/workflows/scoreboard-readonly-probe.yml'
   workflow_dispatch:
 permissions:
   contents: read
