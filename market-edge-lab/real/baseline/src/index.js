@@ -4777,7 +4777,10 @@ document.getElementById('export')?.addEventListener('click',async()=>{const r=aw
 
     if (request.method === "POST" && url.pathname === "/founder-funding-review") {
       const form=await request.formData().catch(()=>null);
-      const amount=Number(form?.get("amountUsd"));
+      const amountRaw=String(form?.get("amountUsd")??"").trim();
+      const amountMatch=/^(?:0|[1-9]\d*)(?:\.(\d{1,2}))?$/.exec(amountRaw);
+      const amountCents=amountMatch?(Number(amountRaw.split(".")[0])*100+Number((amountMatch[1]||"").padEnd(2,"0"))):NaN;
+      const amount=Number.isInteger(amountCents)?amountCents/100:NaN;
       const state=await loadExecutionTestState(env);
       if(state?.armed||executionTestQueueActive(state)) return json({ok:false,state:"FOUNDER_ACTION_REQUIRED_DISARM_FIRST",providerWrites:0,capitalMovedUsd:0},409);
       const open=executionTestOpenPositions(state);
@@ -4790,7 +4793,7 @@ document.getElementById('export')?.addEventListener('click',async()=>{const r=aw
       const index0=Number(rows.find(x=>Number(x?.exchange_index)===0)?.balance||0);
       const index2=Number(rows.find(x=>Number(x?.exchange_index)===2)?.balance||0);
       const total=rows.reduce((sum,x)=>sum+(Number(x?.balance)||0),0);
-      if(!Number.isFinite(amount)||amount<=0||Math.round(amount*100)!==amount*100) return json({ok:false,state:"TRANSFER_AMOUNT_INVALID",providerWrites:0,capitalMovedUsd:0},400);
+      if(!Number.isInteger(amountCents)||amountCents<=0) return json({ok:false,state:"TRANSFER_AMOUNT_INVALID",providerWrites:0,capitalMovedUsd:0},400);
       if(amount>index0+1e-9) return json({ok:false,state:"TRANSFER_EXCEEDS_FRESH_INDEX0",requestedUsd:amount,index0Usd:index0,providerWrites:0,capitalMovedUsd:0},409);
       if(!env?.BASELINE_REAL_SHADOW_STATE) return json({ok:false,state:"REVIEW_STORE_UNAVAILABLE",providerWrites:0,capitalMovedUsd:0},503);
       const reviewId=crypto.randomUUID();
