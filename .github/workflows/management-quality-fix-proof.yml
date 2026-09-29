@@ -1,0 +1,54 @@
+name: Management Quality Fix Proof
+on:
+  push:
+    branches: [market-edge-management-quality-fix]
+    paths:
+      - '.github/workflows/management-quality-fix-proof.yml'
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  proof:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: market-edge-management-quality-fix
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Freeze execution source
+        run: sha256sum market-edge-lab/real/baseline/src/index.js > /tmp/execution-before.sha
+      - name: Apply read-only analytics fix
+        run: python3 market-edge-lab/real/baseline/apply-management-quality-fix.py
+      - name: Verify management mapping and boundaries
+        run: |
+          sha256sum market-edge-lab/real/baseline/src/index.js > /tmp/execution-after.sha
+          diff -u /tmp/execution-before.sha /tmp/execution-after.sha
+          grep -q "const direct=N(p?.realizedPnlUsd??p?.pnlUsd)" market-edge-lab/real/baseline/progress-analytics.js
+          grep -q "mgUnknown" market-edge-lab/real/baseline/progress-analytics.js
+          grep -q "MANAGEMENT SAMPLE" market-edge-lab/real/baseline/progress-analytics.js
+          grep -q "PRED CORRECT + MGMT WIN" market-edge-lab/real/baseline/founder-terminal.html
+          grep -q "PREDICTION WRONG" market-edge-lab/real/baseline/founder-terminal.html
+          grep -q "MANAGEMENT UNKNOWN" market-edge-lab/real/baseline/founder-terminal.html
+          grep -q "AVG REALIZED WIN" market-edge-lab/real/baseline/founder-terminal.html
+          grep -q "AVG REALIZED LOSS" market-edge-lab/real/baseline/founder-terminal.html
+          ! grep -Eq "fetch\([^\n]*method:'POST'|fetch\([^\n]*method:\"POST\"" market-edge-lab/real/baseline/progress-analytics.js
+      - name: Syntax checks
+        run: |
+          node --check market-edge-lab/real/baseline/progress-analytics.js
+          python3 - <<'PY'
+          import re,pathlib,subprocess,tempfile
+          s=pathlib.Path('market-edge-lab/real/baseline/founder-terminal.html').read_text()
+          for src in re.findall(r'<script>(.*?)</script>',s,re.S):
+            f=tempfile.NamedTemporaryFile('w',suffix='.js',delete=False);f.write(src);f.close();subprocess.run(['node','--check',f.name],check=True)
+          print('INLINE_JS_OK')
+          PY
+      - name: Commit read-only cockpit files
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add market-edge-lab/real/baseline/founder-terminal.html market-edge-lab/real/baseline/progress-analytics.js
+          test "$(git diff --cached --name-only | sort)" = $'market-edge-lab/real/baseline/founder-terminal.html\nmarket-edge-lab/real/baseline/progress-analytics.js'
+          git commit -m 'Fix management quality read-only evidence mapping'
+          git push origin HEAD:market-edge-management-quality-fix
