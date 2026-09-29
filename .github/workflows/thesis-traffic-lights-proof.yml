@@ -1,0 +1,72 @@
+name: Thesis Traffic Lights Proof
+on:
+  push:
+    branches: [market-edge-thesis-traffic-lights]
+    paths:
+      - '.github/workflows/thesis-traffic-lights-proof.yml'
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  proof:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: market-edge-thesis-traffic-lights
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Freeze execution source
+        run: sha256sum market-edge-lab/real/baseline/src/index.js | tee /tmp/before.sha
+      - name: Capture thesis logic fingerprint
+        run: |
+          python3 - <<'PY'
+          import pathlib,re,hashlib
+          s=pathlib.Path('market-edge-lab/real/baseline/founder-terminal.html').read_text()
+          m=re.search(r"function thesis\(p\)\{.*?return \{light,reason,entry,same,opp,sameDelta:entry!==null&&same!==null\?same-entry:null\}\}",s,re.S)
+          if not m: raise SystemExit('thesis function not found')
+          pathlib.Path('/tmp/thesis-before.txt').write_text(m.group(0))
+          print(hashlib.sha256(m.group(0).encode()).hexdigest())
+          PY
+      - name: Apply presentation patch
+        run: python3 market-edge-lab/real/baseline/apply-thesis-traffic-lights.py
+      - name: Verify boundaries and thesis logic unchanged
+        run: |
+          sha256sum market-edge-lab/real/baseline/src/index.js > /tmp/after.sha
+          diff -u /tmp/before.sha /tmp/after.sha
+          test "$(git diff --name-only)" = "market-edge-lab/real/baseline/founder-terminal.html"
+          python3 - <<'PY'
+          import pathlib,re
+          s=pathlib.Path('market-edge-lab/real/baseline/founder-terminal.html').read_text()
+          m=re.search(r"function thesis\(p\)\{.*?return \{light,reason,entry,same,opp,sameDelta:entry!==null&&same!==null\?same-entry:null\}\}",s,re.S)
+          if not m: raise SystemExit('thesis function not found after patch')
+          before=pathlib.Path('/tmp/thesis-before.txt').read_text()
+          if m.group(0)!=before: raise SystemExit('THESIS_LOGIC_CHANGED')
+          PY
+          grep -q 'THESIS INTACT' market-edge-lab/real/baseline/founder-terminal.html
+          grep -q 'THESIS WEAKENING' market-edge-lab/real/baseline/founder-terminal.html
+          grep -q 'OPPOSITE SIDE STRONGER' market-edge-lab/real/baseline/founder-terminal.html
+          grep -q 'NO LIVE THESIS TO EVALUATE' market-edge-lab/real/baseline/founder-terminal.html
+          grep -q 'CURRENT OWNED-SIDE SCORE' market-edge-lab/real/baseline/founder-terminal.html
+          grep -q 'CURRENT OPPOSITE-SIDE SCORE' market-edge-lab/real/baseline/founder-terminal.html
+          grep -q 'CHANGE SINCE ENTRY' market-edge-lab/real/baseline/founder-terminal.html
+          grep -q 'FOUNDER HEADS-UP ONLY · NO AUTO ACTION' market-edge-lab/real/baseline/founder-terminal.html
+      - name: Syntax check inline JavaScript
+        run: |
+          python3 - <<'PY'
+          import re,pathlib,subprocess,tempfile
+          s=pathlib.Path('market-edge-lab/real/baseline/founder-terminal.html').read_text()
+          scripts=re.findall(r'<script>(.*?)</script>',s,re.S)
+          for src in scripts:
+            f=tempfile.NamedTemporaryFile('w',suffix='.js',delete=False);f.write(src);f.close();subprocess.run(['node','--check',f.name],check=True)
+          print('INLINE_SCRIPTS_OK',len(scripts))
+          PY
+      - name: Commit cockpit-only change
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add market-edge-lab/real/baseline/founder-terminal.html
+          test "$(git diff --cached --name-only)" = "market-edge-lab/real/baseline/founder-terminal.html"
+          git commit -m 'Show always-visible thesis traffic lights'
+          git push origin HEAD:market-edge-thesis-traffic-lights
