@@ -437,4 +437,5 @@ setInterval(()=>setText('clock',new Date().toISOString().slice(11,19)+' UTC'),10
 (()=>{function jump(tab){const b=document.querySelector('.tabs button[data-tab="'+tab+'"]');if(b)b.click();document.getElementById('evidenceWorkspace')?.scrollIntoView({behavior:'smooth',block:'start'})}document.getElementById('holdJumpPositions')?.addEventListener('click',()=>jump('positions'));document.getElementById('holdJumpOrders')?.addEventListener('click',()=>jump('orders'));})();
 </script>
 
+<script src="./progress-analytics.js"></script>
 </body></html>
