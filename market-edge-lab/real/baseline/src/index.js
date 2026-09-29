@@ -4740,7 +4740,7 @@ document.getElementById('export')?.addEventListener('click',async()=>{const r=aw
       control+="<h2>NFE-OS · MULTI-TRADE EXECUTION TEST</h2>";
       control+="<div class='box'><b>TEST ONLY · NOT PRODUCTION BASELINE</b><p>Threshold <b>"+Number(state?.threshold??EXECUTION_TEST_CONFIG.entryScore).toFixed(2)+"</b> · Founder selects <b>score + 1–100 provider entry attempts</b> · max <b>3 simultaneous filled positions</b> · max <b>$1 total debit per entry</b> · each filled position keeps its own ≤ .20 / 5-minute exit.</p><p class='muted'>Production Baseline remains .80 and is not changed by this series.</p></div>";
       control+="<div class='box'><b>INDEX 2 TEST FUNDING</b><p>Index 0: <b>"+(Number.isFinite(index0)?"$"+index0.toFixed(2):"—")+"</b><br>Index 2: <b class='"+(ready?"ok":"warn")+"'>"+(Number.isFinite(index2)?"$"+index2.toFixed(2):"—")+"</b></p><p>"+(ready?"READY — execution-test funding gate passed.":"NOT READY — test arm requires at least $5.00 on index 2.")+"</p>";
-      if(Number.isFinite(index0)&&index0>0) control+="<form method='post' action='/execution-test-consolidate-index2'><input type='hidden' name='authorization' value='MOVE_INDEX0_TO_INDEX2_FOR_FIVE_EXECUTION_TESTS'><button type='submit'>MOVE INDEX 0 BALANCE TO INDEX 2</button></form>";
+      if(Number.isFinite(index0)&&index0>0) control+="<form method='get' action='/founder-funding'><button type='submit'>OPEN FOUNDER FUNDING</button></form>";
       control+="</div><div class='box'><b>SERIES STATUS</b><p>"+String(state.status||"DISARMED")+" · attempts "+Number(state.attemptsStarted||0)+"/"+executionTestSeriesLimit(state)+" · open positions "+executionTestOpenPositions(state).length+"/3</p>";
       const q=state?.queue||{};
       if(executionTestQueueActive(state)){const idx=Number(q.currentIndex||0),active=q.stages?.[idx]||{};control+="<div class='box'><b>QUEUE ACTIVE</b><p>ACTIVE: <b>"+Number(active.threshold||state.threshold).toFixed(2)+" — "+Number(state.attemptsStarted||0)+"/"+executionTestSeriesLimit(state)+"</b></p><p>NEXT: <b>"+(q.stages?.[idx+1]?Number(q.stages[idx+1].threshold).toFixed(2)+" — 0/"+Number(q.stages[idx+1].count):"NONE")+"</b></p><p>TOTAL: <b>"+Number(q.completedAttempts||0)+"/"+Number(q.totalAttempts||0)+" attempts completed</b></p><form method='post' action='/execution-test-queue-disarm'><input type='hidden' name='authorization' value='DISARM_EXECUTION_TEST_QUEUE'><button type='submit'>STOP / DISARM QUEUE</button></form></div>";}
@@ -4753,25 +4753,91 @@ document.getElementById('export')?.addEventListener('click',async()=>{const r=aw
       return new Response(control,{headers:{"content-type":"text/html;charset=utf-8","cache-control":"no-store"}});
     }
 
-    if (request.method === "POST" && url.pathname === "/execution-test-consolidate-index2") {
-      const form=await request.formData().catch(()=>null);
-      if(String(form?.get("authorization")||"")!=="MOVE_INDEX0_TO_INDEX2_FOR_FIVE_EXECUTION_TESTS") return json({ok:false,state:"EXPLICIT_TRANSFER_AUTHORIZATION_REQUIRED"},400);
+    if (url.pathname === "/execution-test-consolidate-index2") {
+      return json({ok:false,state:"FOUNDER_FUNDING_REVIEW_REQUIRED",next:"/founder-funding",providerWrites:0,capitalMovedUsd:0},409);
+    }
+
+    if (request.method === "GET" && url.pathname === "/founder-funding") {
       const state=await loadExecutionTestState(env);
-      if(state?.armed||executionTestOpenPositions(state).length>0) return json({ok:false,state:"TEST_ACTIVE_TRANSFER_BLOCKED"},409);
       const balanceProof=await kalshiExecutionBalanceSnapshot(env);
-      if(!balanceProof?.ok) return json({ok:false,state:"BALANCE_READ_FAILED"},502);
       const rows=Array.isArray(balanceProof?.body?.balance_breakdown)?balanceProof.body.balance_breakdown:[];
-      const source=Number(rows.find(x=>Number(x?.exchange_index)===0)?.balance);
-      if(!Number.isFinite(source)||source<=0) return Response.redirect(new URL("/execution-test-control?funding=NO_INDEX0_BALANCE",request.url).toString(),303);
-      const amountCenticents=Math.floor(source*10000+1e-9);
-      if(!(amountCenticents>0)) return json({ok:false,state:"TRANSFER_AMOUNT_INVALID"},400);
+      const index0=Number(rows.find(x=>Number(x?.exchange_index)===0)?.balance||0);
+      const index2=Number(rows.find(x=>Number(x?.exchange_index)===2)?.balance||0);
+      const total=rows.reduce((sum,x)=>sum+(Number(x?.balance)||0),0);
+      const open=executionTestOpenPositions(state);
+      const expired=open.filter(p=>{const started=Number(p?.filledAt||p?.submittedAt);return Number.isFinite(started)&&Date.now()-started>=EXECUTION_TEST_CONFIG.maxHoldMs;});
+      const disarmed=!state?.armed&&!executionTestQueueActive(state);
+      const safe=Boolean(balanceProof?.ok&&disarmed&&open.length===0&&expired.length===0);
+      const money=n=>Number.isFinite(Number(n))?'$'+Number(n).toFixed(2):'—';
+      const status=safe?'READY FOR REVIEW':(!disarmed?'FOUNDER ACTION REQUIRED — DISARM FIRST':expired.length?'BLOCKED — EXPIRED POSITION SAFETY HOLD':open.length?'BLOCKED — OPEN POSITION EXISTS':'BLOCKED — BALANCE READ FAILED');
+      const form=safe&&index0>0?`<form method="post" action="/founder-funding-review"><label><b>TRANSFER AMOUNT</b></label><input name="amountUsd" type="number" inputmode="decimal" min="0.01" step="0.01" max="${index0.toFixed(2)}" required style="font-size:18px;padding:12px;width:100%;box-sizing:border-box;margin:8px 0;border-radius:10px"><button type="submit" style="font-size:17px;font-weight:800;padding:13px 16px;border-radius:10px;border:1px solid #d3a53a;background:#101b29;color:#ffd86a;width:100%">REVIEW TRANSFER</button></form>`:'<p>No transfer action is available.</p>';
+      const page=`<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1"><title>Founder Funding</title><body style="font-family:system-ui;background:#050a11;color:#eef7ff;padding:20px;max-width:720px;margin:auto"><h2>FOUNDER FUNDING</h2><div style="border:1px solid #294764;background:#0d1724;border-radius:14px;padding:18px"><p>TOTAL PREDICTIONS CASH: <b>${money(total)}</b></p><p>INDEX 0 BALANCE: <b>${money(index0)}</b></p><p>INDEX 2 BALANCE: <b>${money(index2)}</b></p><p>TRANSFERABLE INDEX 0 CASH: <b>${money(index0)}</b></p><p>SOURCE: <b>INDEX 0</b><br>DESTINATION: <b>INDEX 2</b></p><p>STATUS: <b>${status}</b></p>${form}<p style="color:#91a6be">Opening or refreshing this page performs authenticated reads only. It does not transfer funds, arm, disarm, or place an order.</p></div></body>`;
+      return new Response(page,{headers:{"content-type":"text/html;charset=utf-8","cache-control":"no-store"}});
+    }
+
+    if (request.method === "POST" && url.pathname === "/founder-funding-review") {
+      const form=await request.formData().catch(()=>null);
+      const amount=Number(form?.get("amountUsd"));
+      const state=await loadExecutionTestState(env);
+      if(state?.armed||executionTestQueueActive(state)) return json({ok:false,state:"FOUNDER_ACTION_REQUIRED_DISARM_FIRST",providerWrites:0,capitalMovedUsd:0},409);
+      const open=executionTestOpenPositions(state);
+      const expired=open.filter(p=>{const started=Number(p?.filledAt||p?.submittedAt);return Number.isFinite(started)&&Date.now()-started>=EXECUTION_TEST_CONFIG.maxHoldMs;});
+      if(expired.length) return json({ok:false,state:"EXPIRED_POSITION_SAFETY_HOLD",providerWrites:0,capitalMovedUsd:0},409);
+      if(open.length) return json({ok:false,state:"OPEN_POSITION_TRANSFER_BLOCKED",providerWrites:0,capitalMovedUsd:0},409);
+      const balanceProof=await kalshiExecutionBalanceSnapshot(env);
+      if(!balanceProof?.ok) return json({ok:false,state:"BALANCE_READ_FAILED",providerWrites:0,capitalMovedUsd:0},502);
+      const rows=Array.isArray(balanceProof?.body?.balance_breakdown)?balanceProof.body.balance_breakdown:[];
+      const index0=Number(rows.find(x=>Number(x?.exchange_index)===0)?.balance||0);
+      const index2=Number(rows.find(x=>Number(x?.exchange_index)===2)?.balance||0);
+      const total=rows.reduce((sum,x)=>sum+(Number(x?.balance)||0),0);
+      if(!Number.isFinite(amount)||amount<=0||Math.round(amount*100)!==amount*100) return json({ok:false,state:"TRANSFER_AMOUNT_INVALID",providerWrites:0,capitalMovedUsd:0},400);
+      if(amount>index0+1e-9) return json({ok:false,state:"TRANSFER_EXCEEDS_FRESH_INDEX0",requestedUsd:amount,index0Usd:index0,providerWrites:0,capitalMovedUsd:0},409);
+      if(!env?.BASELINE_REAL_SHADOW_STATE) return json({ok:false,state:"REVIEW_STORE_UNAVAILABLE",providerWrites:0,capitalMovedUsd:0},503);
+      const reviewId=crypto.randomUUID();
+      await env.BASELINE_REAL_SHADOW_STATE.put("founder-funding-review-v1:"+reviewId,JSON.stringify({schema:"FOUNDER_FUNDING_REVIEW_V1",amountUsd:amount,reviewedAt:Date.now(),index0Usd:index0,index2Usd:index2,totalUsd:total}),{expirationTtl:600});
+      const expected0=index0-amount,expected2=index2+amount;
+      const page=`<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1"><title>Review Founder Funding</title><body style="font-family:system-ui;background:#050a11;color:#eef7ff;padding:20px;max-width:720px;margin:auto"><h2>REVIEW INDEX 0 → INDEX 2</h2><div style="border:1px solid #d3a53a;background:#0d1724;border-radius:14px;padding:18px"><p>SOURCE INDEX 0: <b>$${index0.toFixed(2)}</b></p><p>DESTINATION INDEX 2: <b>$${index2.toFixed(2)}</b></p><p>TRANSFER: <b>$${amount.toFixed(2)}</b></p><p>EXPECTED POST-TRANSFER INDEX 0: <b>$${expected0.toFixed(2)}</b></p><p>EXPECTED POST-TRANSFER INDEX 2: <b>$${expected2.toFixed(2)}</b></p><p>TOTAL PREDICTIONS CASH: <b>$${total.toFixed(2)}</b></p><form method="post" action="/founder-funding-confirm"><input type="hidden" name="reviewId" value="${reviewId}"><input type="hidden" name="authorization" value="CONFIRM_FOUNDER_INDEX0_TO_INDEX2_TRANSFER"><button type="submit" style="font-size:17px;font-weight:800;padding:13px 16px;border-radius:10px;border:1px solid #d3a53a;background:#101b29;color:#ffd86a;width:100%">CONFIRM INDEX 0 → INDEX 2</button></form><p style="color:#91a6be">No provider write has occurred. Confirmation performs a new safety and balance read before any transfer.</p></div></body>`;
+      return new Response(page,{headers:{"content-type":"text/html;charset=utf-8","cache-control":"no-store"}});
+    }
+
+    if (request.method === "POST" && url.pathname === "/founder-funding-confirm") {
+      const form=await request.formData().catch(()=>null);
+      if(String(form?.get("authorization")||"")!=="CONFIRM_FOUNDER_INDEX0_TO_INDEX2_TRANSFER") return json({ok:false,state:"EXPLICIT_FOUNDER_CONFIRM_REQUIRED",providerWrites:0,capitalMovedUsd:0},400);
+      const reviewId=String(form?.get("reviewId")||"");
+      if(!reviewId||!env?.BASELINE_REAL_SHADOW_STATE) return json({ok:false,state:"VALID_REVIEW_REQUIRED",providerWrites:0,capitalMovedUsd:0},400);
+      const key="founder-funding-review-v1:"+reviewId;
+      const raw=await env.BASELINE_REAL_SHADOW_STATE.get(key);
+      if(!raw) return json({ok:false,state:"REVIEW_MISSING_OR_EXPIRED",providerWrites:0,capitalMovedUsd:0},409);
+      let review=null; try{review=JSON.parse(raw);}catch{}
+      await env.BASELINE_REAL_SHADOW_STATE.delete(key);
+      const amount=Number(review?.amountUsd);
+      if(!Number.isFinite(amount)||amount<=0) return json({ok:false,state:"REVIEW_INVALID",providerWrites:0,capitalMovedUsd:0},409);
+      const state=await loadExecutionTestState(env);
+      if(state?.armed||executionTestQueueActive(state)) return json({ok:false,state:"FOUNDER_ACTION_REQUIRED_DISARM_FIRST",providerWrites:0,capitalMovedUsd:0},409);
+      const open=executionTestOpenPositions(state);
+      const expired=open.filter(p=>{const started=Number(p?.filledAt||p?.submittedAt);return Number.isFinite(started)&&Date.now()-started>=EXECUTION_TEST_CONFIG.maxHoldMs;});
+      if(expired.length) return json({ok:false,state:"EXPIRED_POSITION_SAFETY_HOLD",providerWrites:0,capitalMovedUsd:0},409);
+      if(open.length) return json({ok:false,state:"OPEN_POSITION_TRANSFER_BLOCKED",providerWrites:0,capitalMovedUsd:0},409);
+      const balanceProof=await kalshiExecutionBalanceSnapshot(env);
+      if(!balanceProof?.ok) return json({ok:false,state:"BALANCE_READ_FAILED",providerWrites:0,capitalMovedUsd:0},502);
+      const rows=Array.isArray(balanceProof?.body?.balance_breakdown)?balanceProof.body.balance_breakdown:[];
+      const index0=Number(rows.find(x=>Number(x?.exchange_index)===0)?.balance||0);
+      const index2=Number(rows.find(x=>Number(x?.exchange_index)===2)?.balance||0);
+      const total=rows.reduce((sum,x)=>sum+(Number(x?.balance)||0),0);
+      if(amount>index0+1e-9) return json({ok:false,state:"TRANSFER_EXCEEDS_FRESH_INDEX0",requestedUsd:amount,index0Usd:index0,providerWrites:0,capitalMovedUsd:0},409);
+      const amountCenticents=Math.round(amount*10000);
+      if(!(amountCenticents>0)) return json({ok:false,state:"TRANSFER_AMOUNT_INVALID",providerWrites:0,capitalMovedUsd:0},400);
       const payload={source:"event_contract",destination:"event_contract",amount:amountCenticents,source_exchange_shard:0,destination_exchange_shard:2,source_subaccount:0,destination_subaccount:0};
       const r=await kalshiApprovedShardTransfer(env,payload);
-      const body=await r.json().catch(()=>({}));
-      if(!r.ok) return json({ok:false,state:"INDEX2_TRANSFER_PROVIDER_REJECTED",httpStatus:r.status,providerResponse:body},502);
-      executionTestLedger(state,"TEST_FUNDING_MOVED_INDEX0_TO_INDEX2",{sourceUsd:source,amountCenticents,httpStatus:r.status});
-      await saveExecutionTestState(env,state);
-      return Response.redirect(new URL("/execution-test-control?funding=MOVED_TO_INDEX2",request.url).toString(),303);
+      const providerResponse=await r.json().catch(()=>({}));
+      if(!r.ok) return json({ok:false,state:"INDEX2_TRANSFER_PROVIDER_REJECTED",httpStatus:r.status,providerResponse,providerWrites:1,capitalMoveAttemptedUsd:amount},502);
+      const after=await kalshiExecutionBalanceSnapshot(env);
+      const afterRows=Array.isArray(after?.body?.balance_breakdown)?after.body.balance_breakdown:[];
+      const post0=Number(afterRows.find(x=>Number(x?.exchange_index)===0)?.balance||0);
+      const post2=Number(afterRows.find(x=>Number(x?.exchange_index)===2)?.balance||0);
+      const postTotal=afterRows.reduce((sum,x)=>sum+(Number(x?.balance)||0),0);
+      const reconciled=Boolean(after?.ok&&Math.abs(post0-(index0-amount))<0.011&&Math.abs(post2-(index2+amount))<0.011&&Math.abs(postTotal-total)<0.011);
+      return json({ok:true,state:reconciled?"INDEX2_TRANSFER_RECONCILED":"INDEX2_TRANSFER_ACCEPTED_AWAITING_BALANCE_RECONCILIATION",transfer:{amountUsd:amount,sourceExchangeIndex:0,destinationExchangeIndex:2,pre:{index0Usd:index0,index2Usd:index2,totalUsd:total},post:{index0Usd:post0,index2Usd:post2,totalUsd:postTotal},reconciled},providerWrites:1,ordersSubmitted:0,armChanged:false,disarmChanged:false});
     }
 
     if (request.method === "POST" && url.pathname === "/execution-test-disarm") {
