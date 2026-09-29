@@ -79,6 +79,17 @@ html,body{font-size:14px;line-height:1.45}
 @media(max-width:900px){html,body{font-size:13px}.top{padding:8px}.brand::after{display:block;margin-top:2px}.account,.auto,.sleeves,.advisorPanel{grid-template-columns:repeat(2,minmax(0,1fr))}.account .metric:nth-child(n+5){display:block}.workspace{min-height:0}.center{height:420px}.lower{min-height:360px}.upperProgressBlocks{grid-template-columns:1fr}.thesisMetrics4{grid-template-columns:repeat(2,1fr)}}
 @media(max-width:520px){.brand{font-size:13px}.brand::after{font-size:8px}.account,.auto,.sleeves,.advisorPanel{grid-template-columns:1fr 1fr}.metric{min-height:58px;padding:9px}.val{font-size:14px}.advisorCell{min-height:64px}.upperProgressGrid{grid-template-columns:1fr 1fr}.upperProgressV{font-size:14px}.thesisLights{display:grid!important;grid-template-columns:1fr}.thesisLamp{width:100%;font-size:11px}.tbl th:nth-child(n+6),.tbl td:nth-child(n+6){display:table-cell}.tablewrap,.tabpanel{overflow-x:auto}.tabs button{font-size:10px;padding:0 12px}.center{height:380px}}
 
+
+/* FINAL_TOP_CLEANUP_V1 — presentation only */
+.topLegacySource{display:none!important}
+.topSummaryBand{border-bottom:1px solid var(--line);background:#071019;padding:10px 12px}
+.topBandHead{font-size:10px;font-weight:900;letter-spacing:.14em;color:var(--gold);margin-bottom:7px}
+.topBandGrid{display:grid;gap:8px}.topBandGrid.accountBandGrid{grid-template-columns:repeat(4,minmax(180px,1fr))}.topBandGrid.runBandGrid{grid-template-columns:repeat(4,minmax(190px,1fr))}.topBandGrid.systemBandGrid{grid-template-columns:repeat(5,minmax(140px,1fr))}
+.topBandCard{border:1px solid var(--line2);background:#09121b;padding:10px 12px;min-width:0;border-radius:4px}.topBandCard.compact{padding:8px 10px}.topBandLabel{font-size:9px;font-weight:900;letter-spacing:.09em;color:#73889d}.topBandValue{font-size:17px;line-height:1.2;font-weight:900;color:#edf5fd;margin-top:4px;overflow-wrap:anywhere}.topBandValue.green{color:var(--green)}.topBandValue.red{color:var(--red)}.topBandValue.gold{color:var(--gold)}.topBandValue.amber{color:var(--amber)}.topBandSub{font-size:10px;color:var(--muted);margin-top:5px;line-height:1.35}.topBandPair{display:flex;gap:12px;flex-wrap:wrap}.topBandPair span{white-space:nowrap}.topBandPair b{color:#cfe0ef}
+@media(max-width:1050px){.topBandGrid.accountBandGrid,.topBandGrid.runBandGrid{grid-template-columns:repeat(2,minmax(0,1fr))}.topBandGrid.systemBandGrid{grid-template-columns:repeat(3,minmax(0,1fr))}}
+@media(max-width:620px){.topSummaryBand{padding:9px 8px}.topBandGrid.accountBandGrid,.topBandGrid.runBandGrid,.topBandGrid.systemBandGrid{grid-template-columns:1fr 1fr}.topBandCard{padding:9px}.topBandValue{font-size:15px}.topBandSub{font-size:9px}}
+@media(max-width:390px){.topBandGrid.accountBandGrid,.topBandGrid.runBandGrid,.topBandGrid.systemBandGrid{grid-template-columns:1fr}}
+
 </style>
 </head>
 <body><div id="app">
@@ -86,10 +97,40 @@ html,body{font-size:14px;line-height:1.45}
 <nav class="nav"><a class="on" href="https://market-edge-baseline-real.darkbishop43.workers.dev/" target="_blank">REAL</a><a href="https://raw.githack.com/darkbishop43-tech/nfe-labs/adaptive-market-lab/market-edge-lab/siblings/founder-trader-terminal.html" target="_blank">PAPER</a><a href="https://raw.githack.com/darkbishop43-tech/nfe-labs/market-edge-sibling-build/market-edge-lab/siblings/payne-method/index.html" target="_blank">PAYNE</a><a href="https://raw.githack.com/darkbishop43-tech/nfe-labs/adaptive-market-lab/market-edge-lab/siblings/adaptive-market-lab/index.html" target="_blank">ADAPTIVE</a><a href="https://market-edge-universal-observer.darkbishop43.workers.dev/" target="_blank">OBSERVER</a><span class="off">AUDIT</span><span class="off">SYSTEM</span></nav>
 <div class="topright"><span><i id="connDot" class="dot"></i> <span id="conn">CONNECTING</span></span><span class="mini" id="clock">--:--:-- UTC</span></div></header>
 
-<section class="strip account">
+
+<section class="topSummaryBand" id="accountSummaryBand">
+  <div class="topBandHead">ACCOUNT</div>
+  <div class="topBandGrid accountBandGrid">
+    <div class="topBandCard"><div class="topBandLabel">ACCOUNT VALUE</div><div id="topAccountValue" class="topBandValue">—</div><div class="topBandSub">BUYING POWER <b id="topBuyingPower">—</b></div></div>
+    <div class="topBandCard"><div class="topBandLabel">CASH</div><div id="topCash" class="topBandValue">—</div><div class="topBandSub">TODAY P/L <b id="topTodayPnl">—</b></div></div>
+    <div class="topBandCard"><div class="topBandLabel">OPEN EXPOSURE</div><div id="topExposure" class="topBandValue">—</div><div class="topBandSub">CURRENT PROVIDER RISK</div></div>
+    <div class="topBandCard"><div class="topBandLabel">LIFETIME REAL P/L</div><div id="topLifePnl" class="topBandValue">—</div><div class="topBandSub">REALIZED ACCOUNT HISTORY</div></div>
+  </div>
+</section>
+<section class="topSummaryBand" id="runSummaryBand">
+  <div class="topBandHead">ACTIVE RUN</div>
+  <div class="topBandGrid runBandGrid">
+    <div class="topBandCard"><div class="topBandLabel">AUTO / ARM STATUS</div><div class="topBandPair"><span>AUTO <b id="topAutoStatus">—</b></span><span>ARM <b id="topArmStatus">—</b></span></div><div class="topBandSub">RUN STATE</div></div>
+    <div class="topBandCard"><div class="topBandLabel">CURRENT RUN</div><div id="topCurrentRun" class="topBandValue">—</div><div class="topBandSub">STAGE <b id="topStage">—</b> · ATTEMPTS <b id="topAttempts">—</b></div></div>
+    <div class="topBandCard"><div class="topBandLabel">OPEN POSITIONS / NEXT SCAN</div><div class="topBandPair"><span>OPEN <b id="topOpenPositions">—</b></span><span>SCAN <b id="topNextScan">—</b></span></div><div class="topBandSub">LIVE RUN PROGRESS</div></div>
+    <div class="topBandCard"><div class="topBandLabel">ENTRY / EXIT THRESHOLD</div><div class="topBandPair"><span>ENTRY <b id="topEntryThreshold">—</b></span><span>EXIT <b id="topExitThreshold">—</b></span></div><div class="topBandSub">DISPLAY OF CURRENT CONTROLLER STATE</div></div>
+  </div>
+</section>
+<section class="topSummaryBand" id="systemSummaryBand">
+  <div class="topBandHead">SYSTEM / PROVIDER</div>
+  <div class="topBandGrid systemBandGrid">
+    <div class="topBandCard compact"><div class="topBandLabel">SOURCE</div><div class="topBandValue gold">KALSHI</div></div>
+    <div class="topBandCard compact"><div class="topBandLabel">RECONCILIATION</div><div id="topRecon" class="topBandValue">—</div></div>
+    <div class="topBandCard compact"><div class="topBandLabel">PROVIDER SYNC</div><div id="topProviderSync" class="topBandValue">—</div></div>
+    <div class="topBandCard compact"><div class="topBandLabel">ADVISOR STATUS</div><div id="topAdvisorStatus" class="topBandValue">—</div></div>
+    <div class="topBandCard compact"><div class="topBandLabel">AUTHORITY</div><div class="topBandValue green">READ ONLY</div></div>
+  </div>
+</section>
+
+<section class="strip account topLegacySource" aria-hidden="true">
 <div class="metric"><div class="lab">ACCOUNT VALUE</div><div class="val" id="accountValue">—</div></div><div class="metric"><div class="lab">CASH</div><div class="val" id="cash">AWAITING PROVIDER</div></div><div class="metric"><div class="lab">OPEN EXPOSURE</div><div class="val" id="exposure">—</div></div><div class="metric"><div class="lab">TODAY P/L</div><div class="val" id="todayPnl">UNAVAILABLE</div></div><div class="metric"><div class="lab">TODAY P/L %</div><div class="val" id="todayPct">UNAVAILABLE</div></div><div class="metric"><div class="lab">LIFETIME REAL P/L</div><div class="val" id="lifePnl">—</div></div><div class="metric"><div class="lab">BUYING POWER</div><div class="val" id="buyPower">—</div></div>
 </section>
-<section class="strip sleeves">
+<section class="strip sleeves topLegacySource" aria-hidden="true">
 <div class="metric"><div class="lab">TOTAL PROVIDER</div><div class="val" id="sTotal">—</div></div>
 <div class="metric"><div class="lab">AUTO ALLOCATED</div><div class="val" id="sAutoAlloc">—</div><div class="mini" id="sAutoDetail">—</div></div>
 <div class="metric"><div class="lab">AUTO AVAILABLE</div><div class="val" id="sAutoAvail">—</div></div>
@@ -97,13 +138,13 @@ html,body{font-size:14px;line-height:1.45}
 <div class="metric"><div class="lab">FOUNDER AVAILABLE</div><div class="val" id="sFounderAvail">$0.00</div></div>
 <div class="metric"><div class="lab">RECONCILIATION</div><div class="val" id="sRecon">VERIFYING</div><div class="mini" id="sMechanism">—</div></div>
 </section>
-<section class="strip auto">
+<section class="strip auto topLegacySource" aria-hidden="true">
 <div class="metric"><div class="lab">AUTO</div><div class="val" id="autoStatus">—</div></div><div class="metric"><div class="lab">ARM</div><div class="val" id="arm">—</div></div><div class="metric"><div class="lab">ENTRY</div><div class="val gold" id="entry">.80</div></div><div class="metric"><div class="lab">EXIT</div><div class="val" id="exit">.20</div></div><div class="metric"><div class="lab">CURRENT RUN</div><div class="val" id="run">—</div></div><div class="metric"><div class="lab">STAGE</div><div class="val" id="stage">—</div></div><div class="metric"><div class="lab">ATTEMPTS</div><div class="val" id="attempts">—</div></div><div class="metric"><div class="lab">OPEN POSITIONS</div><div class="val" id="openPos">—</div></div><div class="metric"><div class="lab">NEXT SCAN</div><div class="val" id="nextScan">—</div></div>
 </section>
 
 
 
-<section class="kalshiSummary" id="kalshiAccountSummary" aria-live="polite">
+<section class="kalshiSummary topLegacySource" id="kalshiAccountSummary" aria-hidden="true" aria-live="polite">
   <div class="metric"><div class="summarySource">KALSHI ACCOUNT SUMMARY</div><div class="val gold">SOURCE: KALSHI · READ ONLY</div><div class="mini" id="kalshiSummaryTruth">PROVIDER VALUES ARE NOT REWRITTEN</div></div>
   <div class="metric"><div class="lab">KALSHI CASH</div><div class="val" id="ksCash">UNAVAILABLE</div></div>
   <div class="metric"><div class="lab">ACCOUNT VALUE</div><div class="val" id="ksAccountValue">UNAVAILABLE</div></div>
@@ -475,4 +516,15 @@ setInterval(()=>setText('clock',new Date().toISOString().slice(11,19)+' UTC'),10
 </script>
 
 <script src="./progress-analytics.js"></script>
+
+<script>
+/* FINAL_TOP_CLEANUP_MIRROR_V1 — presentation mirror only */
+(()=>{
+  const pairs={accountValue:'topAccountValue',buyPower:'topBuyingPower',cash:'topCash',todayPnl:'topTodayPnl',exposure:'topExposure',lifePnl:'topLifePnl',autoStatus:'topAutoStatus',arm:'topArmStatus',run:'topCurrentRun',stage:'topStage',attempts:'topAttempts',openPos:'topOpenPositions',nextScan:'topNextScan',entry:'topEntryThreshold',exit:'topExitThreshold',sRecon:'topRecon',ksSync:'topProviderSync',advisorStatus:'topAdvisorStatus'};
+  const tone=(src,dst)=>{if(!src||!dst)return;dst.classList.remove('green','red','gold','amber');if(src.classList.contains('green')||src.classList.contains('syncGood')||src.classList.contains('advisorGood'))dst.classList.add('green');else if(src.classList.contains('red')||src.classList.contains('syncBad')||src.classList.contains('advisorBad'))dst.classList.add('red');else if(src.classList.contains('gold'))dst.classList.add('gold');else if(src.classList.contains('syncWarn')||src.classList.contains('advisorWarn'))dst.classList.add('amber')};
+  const copy=(srcId,dstId)=>{const src=document.getElementById(srcId),dst=document.getElementById(dstId);if(!src||!dst)return;const paint=()=>{dst.textContent=src.textContent||'—';tone(src,dst)};paint();new MutationObserver(paint).observe(src,{subtree:true,childList:true,characterData:true,attributes:true,attributeFilter:['class']})};
+  for(const [src,dst] of Object.entries(pairs))copy(src,dst);
+})();
+</script>
+
 </body></html>
