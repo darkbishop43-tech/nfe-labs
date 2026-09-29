@@ -1887,6 +1887,21 @@ async function runExecutionTestSeries(env,freshShadow=null,preparedBalance=null)
     const age=now-Number(position?.filledAt||position?.submittedAt||now);
     const exitByScore=Boolean(shadowCurrent&&Number(shadowCurrent.score)<=EXECUTION_TEST_CONFIG.exitScore);
     const exitByTime=age>=EXECUTION_TEST_CONFIG.maxHoldMs;
+    const managementForensic=exitByTime?{
+      ts:new Date(now).toISOString(),type:"TEST_POST_DEADLINE_MANAGE_FORENSIC",controllerCycleAt:now,
+      positionId:position.id||"UNKNOWN",attemptNo:position.attemptNo??"UNKNOWN",ticker:position.marketTicker||"UNKNOWN",
+      positionFp:Number.isFinite(Number(position?.normalizedQuantity))?Number(position.normalizedQuantity):"UNKNOWN",
+      ownershipEvidence:position?.reconciliationClassification||"UNKNOWN",ageMs:Number.isFinite(age)?age:"UNKNOWN",
+      maxHoldMs:EXECUTION_TEST_CONFIG.maxHoldMs,maxHold:true,positionStatus:position.status||"UNKNOWN",
+      liveBidReadAttempted:true,liveBid:Number.isFinite(liveBid)?liveBid:"UNKNOWN",
+      bidValidity:Number.isFinite(liveBid)?Boolean(liveBid>0.01&&liveBid<0.99):"UNKNOWN",
+      score:shadowCurrent&&Number.isFinite(Number(shadowCurrent.score))?Number(shadowCurrent.score):"UNKNOWN",
+      scoreExit:Boolean(exitByScore),timeExit:true,payloadBuild:"UNKNOWN",preExitReconciliation:"UNKNOWN",
+      paginationComplete:"UNKNOWN",safeExitQuantity:"UNKNOWN",providerExitPostAttempted:false,
+      providerOrderId:"UNKNOWN",providerStatus:"UNKNOWN",providerResponse:"UNKNOWN",
+      exitHoldReason:"UNKNOWN",exception:"UNKNOWN",newEntryBlockedBecauseExpiredPosition:"UNKNOWN"
+    }:null;
+    if(managementForensic){state.ledger=Array.isArray(state.ledger)?state.ledger:[];state.ledger.unshift(managementForensic);state.ledger=state.ledger.slice(0,120);}
     if(exitByTime&&position?.phase1aShadow&&!position.phase1aShadow.checkpointDecision){
       const exactProviderBid=Number(exactQuote?.bid);
       const decision=freezePhase1ACheckpointDecision({
@@ -1918,6 +1933,7 @@ async function runExecutionTestSeries(env,freshShadow=null,preparedBalance=null)
     if(!(liveBid>0.01&&liveBid<0.99)){
       position.status="EXIT_RETRY";
       position.exitHoldReason="LIVE_BID_UNAVAILABLE";
+      if(managementForensic)managementForensic.exitHoldReason="LIVE_BID_UNAVAILABLE";
       continue;
     }
     const alreadyExited=Number(position.exitFilledTotal||0);
@@ -1927,7 +1943,8 @@ async function runExecutionTestSeries(env,freshShadow=null,preparedBalance=null)
     const exitState={...position,remainingExitCount:remaining};
     const clientId=executionTestClientOrderId(state,position.attemptNo,"x"+position.exitAttempt);
     const payload=kalshiV2ExitPayload(exitState,liveBid,clientId);
-    if(!payload){position.status="EXIT_RETRY";position.exitHoldReason="PAYLOAD_BUILD_FAILED";continue;}
+    if(managementForensic)managementForensic.payloadBuild=payload?"PASS":"FAIL";
+    if(!payload){position.status="EXIT_RETRY";position.exitHoldReason="PAYLOAD_BUILD_FAILED";if(managementForensic)managementForensic.exitHoldReason="PAYLOAD_BUILD_FAILED";continue;}
     position.exitReason=exitByScore?"SCORE_EXIT":"MAX_HOLD_EXIT";
 
     // FINAL PRE-EXIT OWNERSHIP GATE: exactly one fresh provider-position reconciliation
@@ -1954,6 +1971,7 @@ async function runExecutionTestSeries(env,freshShadow=null,preparedBalance=null)
       }
     }catch(error){preExitReadError=String(error?.message||error);}
     const preExitRec=classifyExecutionProviderPosition(Boolean(preExitResponse?.ok&&preExitParseOk),preExitBody,position.marketTicker,{providerReadAt:preExitReadAt,providerHttpStatus:preExitResponse?.status??null,paginationComplete:preExitPaginationComplete});
+    if(managementForensic){managementForensic.preExitReconciliation=preExitRec?.classification||"UNKNOWN";managementForensic.paginationComplete=preExitPaginationComplete===true;managementForensic.positionFp=Number.isFinite(Number(preExitRec?.normalizedQuantity))?Number(preExitRec.normalizedQuantity):managementForensic.positionFp;}
     position.reconciliationClassification=preExitRec.classification;
     position.reconciliationReason=preExitRec.reason;
     position.providerReadAt=preExitRec.providerReadAt;
@@ -1984,18 +2002,22 @@ async function runExecutionTestSeries(env,freshShadow=null,preparedBalance=null)
     }
     const freshProviderQuantity=Math.abs(Number(preExitRec.normalizedQuantity));
     const safeExitQuantity=Math.min(remaining,freshProviderQuantity);
+    if(managementForensic)managementForensic.safeExitQuantity=Number.isFinite(safeExitQuantity)?safeExitQuantity:"UNKNOWN";
     if(!(safeExitQuantity>1e-9)){
       position.status="EXIT_RETRY";
       position.exitHoldReason="PRE_EXIT_SAFE_QUANTITY_ZERO";
+      if(managementForensic)managementForensic.exitHoldReason="PRE_EXIT_SAFE_QUANTITY_ZERO";
       continue;
     }
     payload.count=Number(safeExitQuantity).toFixed(2);
     position.exitSubmitStartedAt=Date.now();
     let r;
+    if(managementForensic)managementForensic.providerExitPostAttempted=true;
     try{r=await executionTestExitWrite(env,state,position,payload);}
-    catch(error){position.status="EXIT_RETRY";position.exitWriteError=String(error?.message||error);continue;}
+    catch(error){position.status="EXIT_RETRY";position.exitWriteError=String(error?.message||error);if(managementForensic){managementForensic.exitHoldReason="EXIT_WRITE_EXCEPTION";managementForensic.exception=position.exitWriteError;}continue;}
     const body=await r.json().catch(()=>({}));
     position.exitSubmitStartedAt=null;
+    if(managementForensic){managementForensic.providerStatus=Number.isFinite(Number(r?.status))?Number(r.status):"UNKNOWN";managementForensic.providerResponse=r?.ok===true?"OK":"REJECTED";}
     if(!r.ok){
       position.status="EXIT_RETRY";position.exitProviderStatus=r.status;position.exitProviderResponse=body;
       executionTestLedger(state,"TEST_EXIT_PROVIDER_REJECTED",{positionId:position.id,ticker:position.marketTicker,httpStatus:r.status});
@@ -2003,6 +2025,7 @@ async function runExecutionTestSeries(env,freshShadow=null,preparedBalance=null)
     }
     const x=summarizeKalshiV2CreateResponse(body);
     position.exitOrderId=x.orderId||position.exitOrderId||null;
+    if(managementForensic)managementForensic.providerOrderId=position.exitOrderId||"UNKNOWN";
     position.exitFilledTotal=Number((alreadyExited+Number(x.fillCount||0)).toFixed(4));
     position.exitRemainingCount=Math.max(0,Number(position.filledCount||0)-position.exitFilledTotal);
     position.exitAverageFillPrice=x.averageFillPrice??position.exitAverageFillPrice??null;
@@ -2080,6 +2103,29 @@ async function runExecutionTestSeries(env,freshShadow=null,preparedBalance=null)
     state.status="WAITING_FOR_LIVE_SHADOW";
     if(!await saveExecutionTestRuntimeState(env,state,runtimeControlToken))return await loadExecutionTestState(env);return state;
   }
+
+  // MANAGEMENT SAFETY PHASE 1: unresolved expired AUTO ownership blocks NEW AUTO FIRE only.
+  // Existing reconciliation and MANAGE already ran above; no attempt is consumed by this hold.
+  const expiredPriorityPositions=executionTestOpenPositions(state).filter(p=>{
+    const started=Number(p?.filledAt||p?.submittedAt);
+    return Number.isFinite(started)&&now-started>=EXECUTION_TEST_CONFIG.maxHoldMs;
+  });
+  for(const row of (Array.isArray(state.ledger)?state.ledger:[])){
+    if(row?.type==="TEST_POST_DEADLINE_MANAGE_FORENSIC"&&Number(row?.controllerCycleAt)===now){
+      row.newEntryBlockedBecauseExpiredPosition=expiredPriorityPositions.length>0;
+    }
+  }
+  if(expiredPriorityPositions.length>0){
+    state.newEntryHoldReason="EXPIRED_POSITION_PRIORITY";
+    executionTestLedger(state,"TEST_NEW_ENTRY_BLOCKED_EXPIRED_POSITION_PRIORITY",{
+      reason:"EXPIRED_POSITION_PRIORITY",expiredPositionCount:expiredPriorityPositions.length,
+      positions:expiredPriorityPositions.map(p=>({positionId:p.id||"UNKNOWN",attemptNo:p.attemptNo??"UNKNOWN",ticker:p.marketTicker||"UNKNOWN",status:p.status||"UNKNOWN",ageMs:Number.isFinite(Number(p?.filledAt||p?.submittedAt))?now-Number(p?.filledAt||p?.submittedAt):"UNKNOWN",ownership:p?.reconciliationClassification||"UNKNOWN"})),
+      attemptsStarted:Number(state.attemptsStarted||0),providerWrites:0,attemptConsumed:false
+    });
+    if(!await saveExecutionTestRuntimeState(env,state,runtimeControlToken))return await loadExecutionTestState(env);
+    return state;
+  }
+  state.newEntryHoldReason=null;
 
   // RADAR: only exact index-2 candidates enter this bounded Founder-selected test series.
   const activeTickers=new Set(executionTestOpenPositions(state).map(p=>String(p.marketTicker)));
