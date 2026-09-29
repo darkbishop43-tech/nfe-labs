@@ -397,7 +397,7 @@ setInterval(()=>setText('clock',new Date().toISOString().slice(11,19)+' UTC'),10
  const READ='https://market-edge-founder-read.darkbishop43.workers.dev';
  const HOLD='https://market-edge-hold-observer.darkbishop43.workers.dev/current';
  const obs={exec:null,history:null,shadow:null,hold:null,error:null,updatedAt:null};
- const q=id=>document.getElementById(id), A=x=>Array.isArray(x)?x:[], N=v=>Number.isFinite(Number(v))?Number(v):null;
+ const q=id=>document.getElementById(id), A=x=>Array.isArray(x)?x:[], N=v=>(v===null||v===undefined||v==='')?null:(Number.isFinite(Number(v))?Number(v):null);
  const E=v=>String(v??'—').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
  const U=v=>String(v||'').toUpperCase();
  const tick=x=>String(x?.ticker??x?.marketTicker??x?.market_ticker??'');
