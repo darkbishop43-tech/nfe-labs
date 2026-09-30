@@ -1,0 +1,8 @@
+NFE-OS Market Edge provider-ledger continuity observability marker.
+
+Purpose: trigger deployment of the validated GET-only /forensic-provider-history evidence projection enrichment.
+Execution authority: NONE.
+Trading behavior change: NONE.
+Provider writes: 0.
+Execution-state writes: 0.
+Second IOC: HOLD / UNCHANGED.
