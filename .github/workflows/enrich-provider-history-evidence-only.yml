@@ -1,0 +1,70 @@
+name: Enrich Provider History Evidence Only
+
+on:
+  push:
+    branches: [market-edge-baseline-real]
+    paths:
+      - '.github/workflows/enrich-provider-history-evidence-only.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  enrich:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: market-edge-baseline-real
+          fetch-depth: 3
+
+      - name: Patch GET-only provider-history projection
+        shell: python
+        run: |
+          from pathlib import Path
+          p=Path('market-edge-lab/real/baseline/src/index.js')
+          s=p.read_text()
+          old='''      const safeFill=f=>({\n        recordType:"FILL",fillId:f?.fill_id??f?.fillId??null,orderId:f?.order_id??f?.orderId??null,tradeId:f?.trade_id??f?.tradeId??null,\n        ticker:f?.ticker??null,marketTicker:f?.market_ticker??f?.ticker??null,side:f?.side??null,action:f?.action??null,count:f?.count??null,\n        yesPrice:f?.yes_price??f?.yes_price_dollars??null,noPrice:f?.no_price??f?.no_price_dollars??null,feeCost:f?.fee_cost??f?.fee??null,\n        createdAt:f?.created_time??f?.created_at??f?.ts??null\n      });'''
+          new='''      const safeFill=f=>({\n        recordType:"FILL",fillId:f?.fill_id??f?.fillId??null,orderId:f?.order_id??f?.orderId??null,tradeId:f?.trade_id??f?.tradeId??null,\n        ticker:f?.ticker??null,marketTicker:f?.market_ticker??f?.ticker??null,side:f?.side??null,action:f?.action??null,count:f?.count??null,\n        yesPrice:f?.yes_price??f?.yes_price_dollars??null,noPrice:f?.no_price??f?.no_price_dollars??null,feeCost:f?.fee_cost??f?.fee??null,\n        createdAt:f?.created_time??f?.created_at??f?.ts??null,providerRaw:f\n      });'''
+          old2='''      const safeSettlement=x=>({\n        recordType:"SETTLEMENT",ticker:x?.ticker??null,eventTicker:x?.event_ticker??null,marketResult:x?.market_result??null,\n        yesCount:x?.yes_count??null,noCount:x?.no_count??null,yesTotalCost:x?.yes_total_cost??null,noTotalCost:x?.no_total_cost??null,\n        revenue:x?.revenue??null,feeCost:x?.fee_cost??null,value:x?.value??null,settledTime:x?.settled_time??null\n      });'''
+          new2='''      const safeSettlement=x=>({\n        recordType:"SETTLEMENT",ticker:x?.ticker??null,eventTicker:x?.event_ticker??null,marketResult:x?.market_result??null,\n        yesCount:x?.yes_count??null,noCount:x?.no_count??null,yesTotalCost:x?.yes_total_cost??null,noTotalCost:x?.no_total_cost??null,\n        revenue:x?.revenue??null,feeCost:x?.fee_cost??null,value:x?.value??null,settledTime:x?.settled_time??null,providerRaw:x\n      });'''
+          old3='''      const safePosition=x=>({\n        recordType:"POSITION",ticker:x?.ticker??x?.market_ticker??null,position:x?.position??null,totalTraded:x?.total_traded??null,\n        marketExposure:x?.market_exposure??null,realizedPnl:x?.realized_pnl??null,feesPaid:x?.fees_paid??null\n      });'''
+          new3='''      const safePosition=x=>({\n        recordType:"POSITION",ticker:x?.ticker??x?.market_ticker??null,position:x?.position??null,totalTraded:x?.total_traded??null,\n        marketExposure:x?.market_exposure??null,realizedPnl:x?.realized_pnl??null,feesPaid:x?.fees_paid??null,providerRaw:x\n      });'''
+          for a,b,name in [(old,new,'safeFill'),(old2,new2,'safeSettlement'),(old3,new3,'safePosition')]:
+              if a not in s:
+                  if b in s: continue
+                  raise SystemExit('EXPECTED_'+name+'_BLOCK_NOT_FOUND')
+              s=s.replace(a,b,1)
+          p.write_text(s)
+
+      - name: Prove diff is provider-history projection only
+        shell: bash
+        run: |
+          set -euo pipefail
+          changed="$(git diff --name-only)"
+          test "$changed" = 'market-edge-lab/real/baseline/src/index.js'
+          patch="$(git diff --unified=0 -- market-edge-lab/real/baseline/src/index.js)"
+          printf '%s\n' "$patch"
+          additions="$(printf '%s\n' "$patch" | grep '^+' | grep -v '^+++' || true)"
+          removals="$(printf '%s\n' "$patch" | grep '^-' | grep -v '^---' || true)"
+          test -z "$removals"
+          test "$(printf '%s\n' "$additions" | grep -c 'providerRaw:' || true)" -eq 3
+          test "$(printf '%s\n' "$additions" | grep -vc 'providerRaw:' || true)" -eq 0
+          git diff --exit-code -- market-edge-lab/real/baseline/wrangler.toml
+          echo 'TRADING_LOGIC_DIFF=0'
+          echo 'PROVIDER_HISTORY_PROJECTION_ONLY=YES'
+
+      - name: Commit evidence-only projection enrichment
+        shell: bash
+        run: |
+          set -euo pipefail
+          if git diff --quiet; then
+            echo 'ALREADY_CURRENT=YES'
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add market-edge-lab/real/baseline/src/index.js
+          git commit -m 'Preserve raw provider fields in read-only history'
+          git push origin HEAD:market-edge-baseline-real
