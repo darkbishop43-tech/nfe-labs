@@ -4333,16 +4333,16 @@ export default {
         recordType:"FILL",fillId:f?.fill_id??f?.fillId??null,orderId:f?.order_id??f?.orderId??null,tradeId:f?.trade_id??f?.tradeId??null,
         ticker:f?.ticker??null,marketTicker:f?.market_ticker??f?.ticker??null,side:f?.side??null,action:f?.action??null,count:f?.count??null,
         yesPrice:f?.yes_price??f?.yes_price_dollars??null,noPrice:f?.no_price??f?.no_price_dollars??null,feeCost:f?.fee_cost??f?.fee??null,
-        createdAt:f?.created_time??f?.created_at??f?.ts??null
+        createdAt:f?.created_time??f?.created_at??f?.ts??null,providerRaw:f
       });
       const safeSettlement=x=>({
         recordType:"SETTLEMENT",ticker:x?.ticker??null,eventTicker:x?.event_ticker??null,marketResult:x?.market_result??null,
         yesCount:x?.yes_count??null,noCount:x?.no_count??null,yesTotalCost:x?.yes_total_cost??null,noTotalCost:x?.no_total_cost??null,
-        revenue:x?.revenue??null,feeCost:x?.fee_cost??null,value:x?.value??null,settledTime:x?.settled_time??null
+        revenue:x?.revenue??null,feeCost:x?.fee_cost??null,value:x?.value??null,settledTime:x?.settled_time??null,providerRaw:x
       });
       const safePosition=x=>({
         recordType:"POSITION",ticker:x?.ticker??x?.market_ticker??null,position:x?.position??null,totalTraded:x?.total_traded??null,
-        marketExposure:x?.market_exposure??null,realizedPnl:x?.realized_pnl??null,feesPaid:x?.fees_paid??null
+        marketExposure:x?.market_exposure??null,realizedPnl:x?.realized_pnl??null,feesPaid:x?.fees_paid??null,providerRaw:x
       });
       const fills=Array.isArray(byName.fills?.body?.fills)?byName.fills.body.fills.map(safeFill):[];
       const historicalFills=Array.isArray(byName.historicalFills?.body?.fills)?byName.historicalFills.body.fills.map(safeFill):[];
