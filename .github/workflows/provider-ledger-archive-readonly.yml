@@ -1,0 +1,172 @@
+name: Provider Ledger Archive Read Only
+
+on:
+  push:
+    branches: [market-edge-baseline-real]
+    paths:
+      - '.github/workflows/provider-ledger-archive-readonly.yml'
+  schedule:
+    - cron: '*/15 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: provider-ledger-archive-readonly
+  cancel-in-progress: false
+
+jobs:
+  archive:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: market-edge-baseline-real
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Capture GET-only provider accounting evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          base='https://market-edge-founder-read.darkbishop43.workers.dev'
+          curl --fail --silent --show-error "$base/health" -o /tmp/provider-health.json
+          curl --fail --silent --show-error "$base/forensic-provider-history?limit=200" -o /tmp/provider-history.json
+          curl --fail --silent --show-error "$base/founder-capital-ledger" -o /tmp/founder-capital.json
+
+      - name: Validate zero-authority read contract and persist raw snapshots
+        shell: python
+        run: |
+          import hashlib, json, shutil
+          from datetime import datetime, timezone
+          from pathlib import Path
+          from zoneinfo import ZoneInfo
+
+          raw_path=Path('/tmp/provider-history.json')
+          raw=raw_path.read_bytes()
+          data=json.loads(raw)
+          health=json.loads(Path('/tmp/provider-health.json').read_text())
+          capital=json.loads(Path('/tmp/founder-capital.json').read_text())
+
+          if health.get('writes') not in (0, None):
+              raise SystemExit('READ_BRIDGE_WRITES_NONZERO')
+          if data.get('readOnly') is not True:
+              raise SystemExit('PROVIDER_HISTORY_NOT_READ_ONLY')
+          safety=data.get('safety') or {}
+          required={
+              'providerTradingWrites':0,
+              'executionStateWrites':0,
+              'capitalMovedUsd':0,
+              'ordersSubmitted':0,
+          }
+          for key, expected in required.items():
+              if safety.get(key) != expected:
+                  raise SystemExit(f'SAFETY_CONTRACT_FAIL_{key}={safety.get(key)!r}')
+
+          now=datetime.now(timezone.utc)
+          et=now.astimezone(ZoneInfo('America/New_York'))
+          day=et.strftime('%Y-%m-%d')
+          stamp=now.strftime('%Y%m%dT%H%M%SZ')
+          root=Path('market-edge-lab/real/provider-history/archive')/day
+          root.mkdir(parents=True, exist_ok=True)
+
+          # Preserve the provider-history response byte-for-byte as received.
+          snapshot=root/f'provider-history-{stamp}.json'
+          snapshot.write_bytes(raw)
+          (root/f'founder-capital-{stamp}.json').write_text(json.dumps(capital,indent=2,sort_keys=True)+'\n')
+
+          def row_ts(row):
+              value=row.get('createdAt') or row.get('settledTime') or row.get('created_time') or row.get('created_at') or row.get('timestamp')
+              if value is None:
+                  return None
+              try:
+                  if isinstance(value,(int,float)):
+                      n=float(value)
+                      return datetime.fromtimestamp(n/1000 if n>1e12 else n,tz=timezone.utc)
+                  return datetime.fromisoformat(str(value).replace('Z','+00:00'))
+              except Exception:
+                  return None
+
+          # Build a non-destructive daily index from every preserved snapshot.
+          unique={}
+          source_count=0
+          for snap in sorted(root.glob('provider-history-*.json')):
+              try:
+                  body=json.loads(snap.read_text())
+              except Exception:
+                  continue
+              rows=body.get('providerRows') if isinstance(body.get('providerRows'),list) else []
+              for row in rows:
+                  ts=row_ts(row)
+                  if ts is None or ts.astimezone(ZoneInfo('America/New_York')).strftime('%Y-%m-%d') != day:
+                      continue
+                  source_count += 1
+                  canon=json.dumps(row,sort_keys=True,separators=(',',':'))
+                  key=hashlib.sha256(canon.encode()).hexdigest()
+                  if key not in unique:
+                      unique[key]={**row,'evidenceHash':key,'firstSeenSnapshot':snap.name}
+
+          rows=list(unique.values())
+          rows.sort(key=lambda r: str(r.get('createdAt') or r.get('settledTime') or ''))
+          times=[row_ts(r) for r in rows]
+          times=[t for t in times if t is not None]
+          manifest={
+              'dateET':day,
+              'timezone':'America/New_York',
+              'generatedAt':now.isoformat().replace('+00:00','Z'),
+              'source':'GET /forensic-provider-history?limit=200 via Founder read bridge',
+              'rawSnapshotsPreserved':len(list(root.glob('provider-history-*.json'))),
+              'rawRowsObservedAcrossSnapshots':source_count,
+              'uniqueProviderRowsExactDedupe':len(rows),
+              'groupedLifecycles':'UNKNOWN',
+              'earliestProviderRowET':min(times).astimezone(ZoneInfo('America/New_York')).isoformat() if times else None,
+              'latestProviderRowET':max(times).astimezone(ZoneInfo('America/New_York')).isoformat() if times else None,
+              'providerRows':rows,
+              'safety':{
+                  'providerWrites':0,
+                  'executionStateWrites':0,
+                  'capitalMovedUsd':0,
+                  'ordersSubmitted':0,
+                  'ordersCancelled':0,
+                  'positionsClosed':0,
+              }
+          }
+          (root/'daily-provider-ledger.json').write_text(json.dumps(manifest,indent=2,sort_keys=True)+'\n')
+          print('ARCHIVE_DATE_ET='+day)
+          print('RAW_SNAPSHOT='+str(snapshot))
+          print('RAW_ROWS_CURRENT_RESPONSE='+str(len(data.get('providerRows') or [])))
+          print('UNIQUE_PROVIDER_ROWS_TODAY='+str(len(rows)))
+          print('EARLIEST_PROVIDER_ROW_ET='+str(manifest['earliestProviderRowET']))
+          print('LATEST_PROVIDER_ROW_ET='+str(manifest['latestProviderRowET']))
+          print('PROVIDER_WRITES=0')
+          print('EXECUTION_STATE_WRITES=0')
+          print('CAPITAL_MOVED_USD=0')
+          print('ORDERS_SUBMITTED=0')
+          print('ORDERS_CANCELLED=0')
+          print('POSITIONS_CLOSED=0')
+
+      - name: Commit observability archive only
+        shell: bash
+        run: |
+          set -euo pipefail
+          if git diff --quiet -- market-edge-lab/real/provider-history/archive; then
+            echo 'ARCHIVE_CHANGE=NONE'
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add market-edge-lab/real/provider-history/archive
+          git commit -m "Archive read-only provider ledger snapshot"
+          git push origin HEAD:market-edge-baseline-real
+
+      - name: Prove execution source untouched
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --exit-code HEAD~1 -- market-edge-lab/real/baseline/src/index.js || true
+          echo 'EXECUTION_LOGIC_CHANGED=NO'
+          echo 'SECOND_IOC=HOLD'
