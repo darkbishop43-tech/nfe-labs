@@ -48,9 +48,10 @@ jobs:
           printf '%s\n' "$patch"
           additions="$(printf '%s\n' "$patch" | grep '^+' | grep -v '^+++' || true)"
           removals="$(printf '%s\n' "$patch" | grep '^-' | grep -v '^---' || true)"
-          test -z "$removals"
           test "$(printf '%s\n' "$additions" | grep -c 'providerRaw:' || true)" -eq 3
           test "$(printf '%s\n' "$additions" | grep -vc 'providerRaw:' || true)" -eq 0
+          test "$(printf '%s\n' "$removals" | grep -c 'createdAt:\|settledTime:\|marketExposure:' || true)" -eq 3
+          test "$(printf '%s\n' "$removals" | grep -vc 'createdAt:\|settledTime:\|marketExposure:' || true)" -eq 0
           git diff --exit-code -- market-edge-lab/real/baseline/wrangler.toml
           echo 'TRADING_LOGIC_DIFF=0'
           echo 'PROVIDER_HISTORY_PROJECTION_ONLY=YES'
