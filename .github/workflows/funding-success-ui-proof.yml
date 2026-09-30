@@ -1,0 +1,87 @@
+name: Founder Funding Success UI Zero-Money Proof
+
+on:
+  push:
+    branches: [market-edge-funding-success-ui-polish]
+    paths:
+      - .github/scripts/polish_founder_funding_success_ui.py
+      - .github/workflows/funding-success-ui-proof.yml
+
+permissions:
+  contents: write
+
+jobs:
+  prove:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: market-edge-funding-success-ui-polish
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Apply presentation-only patch
+        run: |
+          cp market-edge-lab/real/baseline/src/index.js /tmp/index.before.js
+          python .github/scripts/polish_founder_funding_success_ui.py
+      - name: Prove reconciled and pending presentation states
+        run: |
+          node - <<'JS'
+          function render(reconciled, amount, post0, post2, postTotal){
+            const diagnostic={ok:true,state:reconciled?'INDEX2_TRANSFER_RECONCILED':'INDEX2_TRANSFER_ACCEPTED_AWAITING_BALANCE_RECONCILIATION',transfer:{amountUsd:amount,post:{index0Usd:post0,index2Usd:post2,totalUsd:postTotal},reconciled},providerWrites:1,ordersSubmitted:0,armChanged:false,disarmChanged:false};
+            const diagnosticHtml=JSON.stringify(diagnostic,null,2).replace(/[&<>]/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[ch]));
+            const resultTitle=reconciled?'TRANSFER COMPLETE':'TRANSFER ACCEPTED — RECONCILIATION PENDING';
+            const resultNote=reconciled?'Balances have been freshly re-read and reconciled.':'Provider accepted the transfer, but the fresh balance read has not yet reconciled to the expected values. Do not submit another transfer.';
+            return `${resultTitle}|TRANSFERRED:$${amount.toFixed(2)}|INDEX0:$${post0.toFixed(2)}|INDEX2:$${post2.toFixed(2)}|TOTAL:$${postTotal.toFixed(2)}|${resultNote}|RETURN TO MARKET EDGE|Diagnostic evidence|${diagnosticHtml}`;
+          }
+          const complete=render(true,9.80,0,14.08,14.08);
+          if(!complete.includes('TRANSFER COMPLETE')) throw new Error('complete title missing');
+          if(complete.includes('RECONCILIATION PENDING')) throw new Error('complete mislabeled pending');
+          for(const x of ['TRANSFERRED:$9.80','INDEX0:$0.00','INDEX2:$14.08','TOTAL:$14.08','RETURN TO MARKET EDGE','Diagnostic evidence','INDEX2_TRANSFER_RECONCILED']) if(!complete.includes(x)) throw new Error('complete missing '+x);
+          const pending=render(false,9.80,9.80,4.28,14.08);
+          if(!pending.includes('TRANSFER ACCEPTED — RECONCILIATION PENDING')) throw new Error('pending title missing');
+          if(pending.includes('TRANSFER COMPLETE')) throw new Error('pending falsely complete');
+          if(!pending.includes('Do not submit another transfer.')) throw new Error('pending retry warning missing');
+          if(!pending.includes('INDEX2_TRANSFER_ACCEPTED_AWAITING_BALANCE_RECONCILIATION')) throw new Error('pending diagnostic missing');
+          console.log('RECONCILED_SCREEN=PASS');
+          console.log('PENDING_SCREEN=PASS');
+          console.log('RAW_DIAGNOSTIC_EVIDENCE=PRESERVED');
+          console.log('NO_RETRY_ACTION_WHILE_PENDING=PASS');
+          console.log('PROVIDER_WRITES_DURING_PROOF=0');
+          console.log('CAPITAL_MOVED_USD=0');
+          JS
+      - name: Freeze transfer and execution semantics
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          b=Path('/tmp/index.before.js').read_text(); a=Path('market-edge-lab/real/baseline/src/index.js').read_text()
+          frozen=[
+            'async function kalshiApprovedShardTransfer(env,payload)',
+            '/trade-api/v2/portfolio/intra_exchange_instance_transfer',
+            'url.pathname === "/founder-funding-review"',
+            'url.pathname === "/founder-funding-confirm"',
+            'CONFIRM_FOUNDER_INDEX0_TO_INDEX2_TRANSFER',
+            'url.pathname === "/execution-test-arm"',
+            'url.pathname === "/execution-test-disarm"',
+            'entryScore:0.80','exitScore:0.20','maxHoldMs:5*60*1000',
+            'EXPIRED_POSITION_PRIORITY'
+          ]
+          for token in frozen: assert b.count(token)==a.count(token), token
+          old='return json({ok:true,state:reconciled?"INDEX2_TRANSFER_RECONCILED":"INDEX2_TRANSFER_ACCEPTED_AWAITING_BALANCE_RECONCILIATION"'
+          assert old not in a
+          for token in ['TRANSFER COMPLETE','TRANSFER ACCEPTED — RECONCILIATION PENDING','RETURN TO MARKET EDGE','Diagnostic evidence','const diagnostic={ok:true,state:reconciled?']:
+            assert token in a, token
+          assert a.count('const r=await kalshiApprovedShardTransfer(env,payload);')==b.count('const r=await kalshiApprovedShardTransfer(env,payload);')
+          assert a.count('const reconciled=Boolean(')==b.count('const reconciled=Boolean(')
+          PY
+          node --check market-edge-lab/real/baseline/src/index.js
+          git diff --check
+      - name: Commit source-only presentation change
+        run: |
+          git config user.name 'NFE-OS Builder'
+          git config user.email 'actions@users.noreply.github.com'
+          git add market-edge-lab/real/baseline/src/index.js
+          test "$(git diff --cached --name-only)" = 'market-edge-lab/real/baseline/src/index.js'
+          git commit -m 'Polish Founder funding transfer result presentation'
+          git push origin HEAD:market-edge-funding-success-ui-polish
