@@ -47,6 +47,7 @@ jobs:
           from pathlib import Path
           from zoneinfo import ZoneInfo
 
+          ET=ZoneInfo('America/New_York')
           raw_path=Path('/tmp/provider-history.json')
           raw=raw_path.read_bytes()
           data=json.loads(raw)
@@ -58,19 +59,13 @@ jobs:
           if data.get('readOnly') is not True:
               raise SystemExit('PROVIDER_HISTORY_NOT_READ_ONLY')
           safety=data.get('safety') or {}
-          required={
-              'providerTradingWrites':0,
-              'executionStateWrites':0,
-              'capitalMovedUsd':0,
-              'ordersSubmitted':0,
-          }
+          required={'providerTradingWrites':0,'executionStateWrites':0,'capitalMovedUsd':0,'ordersSubmitted':0}
           for key, expected in required.items():
               if safety.get(key) != expected:
                   raise SystemExit(f'SAFETY_CONTRACT_FAIL_{key}={safety.get(key)!r}')
 
           now=datetime.now(timezone.utc)
-          et=now.astimezone(ZoneInfo('America/New_York'))
-          day=et.strftime('%Y-%m-%d')
+          day=now.astimezone(ET).strftime('%Y-%m-%d')
           stamp=now.strftime('%Y%m%dT%H%M%SZ')
           root=Path('market-edge-lab/real/provider-history/archive')/day
           root.mkdir(parents=True, exist_ok=True)
@@ -80,103 +75,144 @@ jobs:
           snapshot.write_bytes(raw)
           (root/f'founder-capital-{stamp}.json').write_text(json.dumps(capital,indent=2,sort_keys=True)+'\n')
 
+          def dec(v):
+              try: return Decimal(str(v))
+              except (InvalidOperation,ValueError,TypeError): return Decimal('0')
+
           def row_ts(row):
               value=row.get('createdAt') or row.get('settledTime') or row.get('created_time') or row.get('created_at') or row.get('timestamp')
-              if value is None:
-                  return None
+              if value is None: return None
               try:
                   if isinstance(value,(int,float)):
-                      n=float(value)
-                      return datetime.fromtimestamp(n/1000 if n>1e12 else n,tz=timezone.utc)
+                      n=float(value); return datetime.fromtimestamp(n/1000 if n>1e12 else n,tz=timezone.utc)
                   return datetime.fromisoformat(str(value).replace('Z','+00:00'))
-              except Exception:
-                  return None
+              except Exception: return None
 
           def stable_identity(row):
               typ=str(row.get('recordType') or '').upper()
-              raw=row.get('providerRaw') if isinstance(row.get('providerRaw'),dict) else {}
+              pr=row.get('providerRaw') if isinstance(row.get('providerRaw'),dict) else {}
               if typ == 'FILL':
-                  fid=row.get('fillId') or raw.get('fill_id') or row.get('tradeId') or raw.get('trade_id')
-                  if fid:
-                      return 'FILL|'+str(fid)
+                  fid=row.get('fillId') or pr.get('fill_id') or row.get('tradeId') or pr.get('trade_id')
+                  if fid: return 'FILL|'+str(fid)
               if typ == 'SETTLEMENT':
-                  ticker=row.get('ticker') or raw.get('ticker')
-                  settled=row.get('settledTime') or raw.get('settled_time')
-                  result=row.get('marketResult') or raw.get('market_result')
-                  if ticker and settled:
-                      return f'SETTLEMENT|{ticker}|{settled}|{result or ""}'
-              # Last-resort identity is stable across projection enrichment because providerRaw is excluded.
+                  ticker=row.get('ticker') or pr.get('ticker')
+                  settled=row.get('settledTime') or pr.get('settled_time')
+                  result=row.get('marketResult') or pr.get('market_result')
+                  if ticker and settled: return f'SETTLEMENT|{ticker}|{settled}|{result or ""}'
               base={k:v for k,v in row.items() if k not in ('providerRaw','evidenceHash','providerIdentity','firstSeenSnapshot')}
               return 'FALLBACK|'+hashlib.sha256(json.dumps(base,sort_keys=True,separators=(',',':')).encode()).hexdigest()
 
           def richness(row):
-              raw=row.get('providerRaw') if isinstance(row.get('providerRaw'),dict) else {}
-              return (1 if raw else 0, len(raw), len(json.dumps(row,sort_keys=True)))
+              pr=row.get('providerRaw') if isinstance(row.get('providerRaw'),dict) else {}
+              return (1 if pr else 0,len(pr),len(json.dumps(row,sort_keys=True)))
 
-          # Build a non-destructive daily index from all preserved snapshots.
-          # Raw snapshots are NEVER deduplicated. The index collapses only records with
-          # the same stable provider identity and keeps the richest observed projection.
-          unique={}
+          # Build a stable provider-record universe from every preserved snapshot.
+          # Raw snapshots are never deduplicated; only this query index is.
+          all_unique={}
           source_count=0
           for snap in sorted(root.glob('provider-history-*.json')):
-              try:
-                  body=json.loads(snap.read_text())
-              except Exception:
-                  continue
-              rows=body.get('providerRows') if isinstance(body.get('providerRows'),list) else []
-              for row in rows:
-                  ts=row_ts(row)
-                  if ts is None or ts.astimezone(ZoneInfo('America/New_York')).strftime('%Y-%m-%d') != day:
-                      continue
-                  source_count += 1
+              try: body=json.loads(snap.read_text())
+              except Exception: continue
+              provider_rows=body.get('providerRows') if isinstance(body.get('providerRows'),list) else []
+              source_count += len(provider_rows)
+              for row in provider_rows:
                   key=stable_identity(row)
                   candidate={**row,'providerIdentity':key,'firstSeenSnapshot':snap.name}
-                  prior=unique.get(key)
+                  prior=all_unique.get(key)
                   if prior is None or richness(candidate) > richness(prior):
-                      if prior is not None:
-                          candidate['firstSeenSnapshot']=prior.get('firstSeenSnapshot',snap.name)
-                      unique[key]=candidate
+                      if prior is not None: candidate['firstSeenSnapshot']=prior.get('firstSeenSnapshot',snap.name)
+                      all_unique[key]=candidate
 
-          rows=list(unique.values())
+          all_rows=list(all_unique.values())
+          rows=[r for r in all_rows if (row_ts(r) and row_ts(r).astimezone(ET).strftime('%Y-%m-%d')==day)]
           rows.sort(key=lambda r: str(r.get('createdAt') or r.get('settledTime') or ''))
-          times=[row_ts(r) for r in rows]
-          times=[t for t in times if t is not None]
+          times=[row_ts(r) for r in rows if row_ts(r)]
 
-          # Fees are surfaced descriptively, with fill and settlement fee fields kept
-          # separate to avoid silently double-counting two provider accounting concepts.
-          def dec(v):
-              try: return Decimal(str(v))
-              except (InvalidOperation,ValueError,TypeError): return Decimal('0')
-          fill_fee=sum((dec((r.get('providerRaw') or {}).get('fee_cost',r.get('feeCost'))) for r in rows if r.get('recordType')=='FILL'),Decimal('0'))
-          settlement_fee=sum((dec((r.get('providerRaw') or {}).get('fee_cost',r.get('feeCost'))) for r in rows if r.get('recordType')=='SETTLEMENT'),Decimal('0'))
+          # Deterministic accounting grouping is by exact Kalshi market ticker only.
+          # It is called a provider-market lifecycle, NOT an independent NFE trade.
+          fills_by_ticker={}
+          settlements=[]
+          for r in all_rows:
+              pr=r.get('providerRaw') if isinstance(r.get('providerRaw'),dict) else {}
+              ticker=r.get('ticker') or r.get('marketTicker') or pr.get('ticker') or pr.get('market_ticker')
+              if not ticker: continue
+              if r.get('recordType')=='FILL': fills_by_ticker.setdefault(ticker,[]).append(r)
+              elif r.get('recordType')=='SETTLEMENT':
+                  st=row_ts(r)
+                  if st and st.astimezone(ET).strftime('%Y-%m-%d')==day: settlements.append(r)
+
+          lifecycle_rows=[]
+          accounting_complete=True
+          for s in sorted(settlements,key=lambda r: str(r.get('settledTime') or '')):
+              spr=s.get('providerRaw') if isinstance(s.get('providerRaw'),dict) else {}
+              ticker=s.get('ticker') or spr.get('ticker')
+              result=(s.get('marketResult') or spr.get('market_result') or '').lower()
+              fs=sorted(fills_by_ticker.get(ticker,[]),key=lambda r: str(r.get('createdAt') or ''))
+              buy_cost=Decimal('0'); sell_proceeds=Decimal('0'); fees=Decimal('0')
+              net={'yes':Decimal('0'),'no':Decimal('0')}
+              valid=True
+              for f in fs:
+                  pr=f.get('providerRaw') if isinstance(f.get('providerRaw'),dict) else {}
+                  qty=dec(pr.get('count_fp',f.get('count')))
+                  side=str(pr.get('outcome_side') or pr.get('side') or f.get('side') or '').lower()
+                  action=str(pr.get('action') or f.get('action') or '').lower()
+                  if side not in ('yes','no') or action not in ('buy','sell') or qty<=0:
+                      valid=False; continue
+                  price=dec(pr.get(f'{side}_price_dollars',f.get('yesPrice') if side=='yes' else f.get('noPrice')))
+                  if action=='buy':
+                      buy_cost += qty*price; net[side]+=qty
+                  else:
+                      sell_proceeds += qty*price; net[side]-=qty
+                  fees += dec(pr.get('fee_cost',f.get('feeCost')))
+              if result not in ('yes','no') or not fs or net['yes']<0 or net['no']<0:
+                  valid=False
+              settlement_payout=(net[result] if valid else Decimal('0'))
+              gross=(sell_proceeds+settlement_payout-buy_cost) if valid else None
+              net_pnl=(gross-fees) if valid else None
+              if not valid: accounting_complete=False
+              lifecycle_rows.append({
+                  'ticker':ticker,
+                  'settledTime':s.get('settledTime') or spr.get('settled_time'),
+                  'marketResult':result or None,
+                  'providerFillRows':len(fs),
+                  'buyCostUsd':str(buy_cost),
+                  'sellProceedsUsd':str(sell_proceeds),
+                  'settlementPayoutUsd':str(settlement_payout) if valid else None,
+                  'fillFeesUsd':str(fees),
+                  'grossPnlUsd':str(gross) if gross is not None else None,
+                  'netRealizedPnlUsd':str(net_pnl) if net_pnl is not None else None,
+                  'endingYesContracts':str(net['yes']),
+                  'endingNoContracts':str(net['no']),
+                  'status':'PROVIDER_FILL_SETTLEMENT_RECONSTRUCTED' if valid else 'UNKNOWN_INCOMPLETE_PROVIDER_FILL_HISTORY'
+              })
+
+          reconstructed=[x for x in lifecycle_rows if x['netRealizedPnlUsd'] is not None]
+          total_fees=sum((dec(x['fillFeesUsd']) for x in reconstructed),Decimal('0'))
+          total_gross=sum((dec(x['grossPnlUsd']) for x in reconstructed),Decimal('0'))
+          total_net=sum((dec(x['netRealizedPnlUsd']) for x in reconstructed),Decimal('0'))
 
           manifest={
-              'dateET':day,
-              'timezone':'America/New_York',
-              'generatedAt':now.isoformat().replace('+00:00','Z'),
+              'dateET':day,'timezone':'America/New_York','generatedAt':now.isoformat().replace('+00:00','Z'),
               'source':'GET /forensic-provider-history?limit=200 via Founder read bridge',
               'rawSnapshotsPreserved':len(list(root.glob('provider-history-*.json'))),
               'rawRowsObservedAcrossSnapshots':source_count,
               'uniqueProviderRowsByStableIdentity':len(rows),
-              'groupedLifecycles':'UNKNOWN',
-              'earliestProviderRowET':min(times).astimezone(ZoneInfo('America/New_York')).isoformat() if times else None,
-              'latestProviderRowET':max(times).astimezone(ZoneInfo('America/New_York')).isoformat() if times else None,
-              'descriptiveFees':{
-                  'fillFeeCostUsd':str(fill_fee),
-                  'settlementFeeCostUsd':str(settlement_fee),
-                  'combinedNotReportedBecausePotentialOverlap':True
+              'groupingRule':'EXACT_KALSHI_MARKET_TICKER_PROVIDER_MARKET_LIFECYCLE_NOT_INDEPENDENT_TRADE',
+              'provenGroupedProviderMarketLifecycles':len(reconstructed),
+              'earliestProviderRowET':min(times).astimezone(ET).isoformat() if times else None,
+              'latestProviderRowET':max(times).astimezone(ET).isoformat() if times else None,
+              'accountingSummary':{
+                  'status':'COMPLETE_FOR_RECONSTRUCTED_SETTLED_MARKETS' if accounting_complete else 'PARTIAL_SOME_SETTLED_MARKETS_INCOMPLETE',
+                  'settlementsObservedToday':len(lifecycle_rows),
+                  'reconstructedSettledMarkets':len(reconstructed),
+                  'totalFeesUsd':str(total_fees),
+                  'grossRealizedPnlUsd':str(total_gross),
+                  'netRealizedPnlUsd':str(total_net),
+                  'method':'Exact-ticker provider fills cashflow + provider settlement result; fill fees counted once; raw rows retained.'
               },
-              'netRealizedPnlUsd':None,
-              'netRealizedPnlStatus':'UNKNOWN_UNTIL_DETERMINISTIC_FILL_SETTLEMENT_LIFECYCLE_ACCOUNTING',
+              'providerMarketLifecycles':lifecycle_rows,
               'providerRows':rows,
-              'safety':{
-                  'providerWrites':0,
-                  'executionStateWrites':0,
-                  'capitalMovedUsd':0,
-                  'ordersSubmitted':0,
-                  'ordersCancelled':0,
-                  'positionsClosed':0,
-              }
+              'safety':{'providerWrites':0,'executionStateWrites':0,'capitalMovedUsd':0,'ordersSubmitted':0,'ordersCancelled':0,'positionsClosed':0}
           }
           (root/'daily-provider-ledger.json').write_text(json.dumps(manifest,indent=2,sort_keys=True)+'\n')
           print('ARCHIVE_DATE_ET='+day)
@@ -185,25 +221,21 @@ jobs:
           print('UNIQUE_PROVIDER_ROWS_TODAY='+str(len(rows)))
           print('EARLIEST_PROVIDER_ROW_ET='+str(manifest['earliestProviderRowET']))
           print('LATEST_PROVIDER_ROW_ET='+str(manifest['latestProviderRowET']))
-          print('FILL_FEE_COST_USD='+str(fill_fee))
-          print('SETTLEMENT_FEE_COST_USD='+str(settlement_fee))
-          print('NET_REALIZED_PNL=UNKNOWN_UNTIL_DETERMINISTIC_LIFECYCLE_ACCOUNTING')
-          print('PROVIDER_WRITES=0')
-          print('EXECUTION_STATE_WRITES=0')
-          print('CAPITAL_MOVED_USD=0')
-          print('ORDERS_SUBMITTED=0')
-          print('ORDERS_CANCELLED=0')
-          print('POSITIONS_CLOSED=0')
+          print('SETTLEMENTS_OBSERVED_TODAY='+str(len(lifecycle_rows)))
+          print('PROVEN_GROUPED_PROVIDER_MARKET_LIFECYCLES='+str(len(reconstructed)))
+          print('TOTAL_FEES_USD='+str(total_fees))
+          print('GROSS_REALIZED_PNL_USD='+str(total_gross))
+          print('NET_REALIZED_PNL_USD='+str(total_net))
+          print('ACCOUNTING_STATUS='+manifest['accountingSummary']['status'])
+          print('PROVIDER_WRITES=0'); print('EXECUTION_STATE_WRITES=0'); print('CAPITAL_MOVED_USD=0')
+          print('ORDERS_SUBMITTED=0'); print('ORDERS_CANCELLED=0'); print('POSITIONS_CLOSED=0')
 
       - name: Commit observability archive only
         shell: bash
         run: |
           set -euo pipefail
           git add market-edge-lab/real/provider-history/archive
-          if git diff --cached --quiet; then
-            echo 'ARCHIVE_CHANGE=NONE'
-            exit 0
-          fi
+          if git diff --cached --quiet; then echo 'ARCHIVE_CHANGE=NONE'; exit 0; fi
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git commit -m "Archive read-only provider ledger snapshot"
