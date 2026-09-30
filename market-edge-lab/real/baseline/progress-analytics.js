@@ -18,6 +18,17 @@ const qty=x=>N(x?.fill_count??x?.filled_count??x?.filledCount??x?.count_filled??
 const when=x=>ms(x?.settled_time??x?.settledTime??x?.closed_at??x?.closedAt??x?.created_time??x?.created_at??x?.createdAt??x?.updated_time??x?.ts??x?.timestamp);
 const fPct=x=>x===null?'UNKNOWN':(x*100).toFixed(1)+'%';
 const fMoney=x=>x===null?'UNKNOWN':(x>=0?'+':'-')+'$'+Math.abs(x).toFixed(2);
+function polishAccountTop(){
+ const band=document.getElementById('accountSummaryBand');
+ if(!band||document.getElementById('topTodayPct'))return;
+ band.innerHTML='<div class="topBandHead">ACCOUNT</div><div class="accountFounderCard"><div class="accountFounderMetric"><div class="topBandLabel">ACCOUNT VALUE</div><div id="topAccountValue" class="topBandValue">—</div></div><div class="accountFounderMetric"><div class="topBandLabel">BUYING POWER / CASH</div><div class="topBandPair"><span>BUYING POWER <b id="topBuyingPower">—</b></span><span>CASH <b id="topCash">—</b></span></div></div><div class="accountFounderMetric"><div class="topBandLabel">TODAY +/- $</div><div id="topTodayPnl" class="topBandValue">—</div></div><div class="accountFounderMetric"><div class="topBandLabel">TODAY +/- %</div><div id="topTodayPct" class="topBandValue">—</div></div><div class="accountFounderMetric"><div class="topBandLabel">LIFETIME ACCOUNT P/L</div><div id="topLifePnl" class="topBandValue">—</div></div></div>';
+ const style=document.createElement('style');
+ style.id='founderAccountPolishStyle';
+ style.textContent='.accountFounderCard{display:grid;grid-template-columns:1.15fr 1.4fr 1fr 1fr 1.2fr;border:1px solid var(--line2);background:#09121b;border-radius:4px;overflow:hidden}.accountFounderMetric{padding:10px 12px;min-width:0;border-right:1px solid var(--line)}.accountFounderMetric:last-child{border-right:0}.accountFounderMetric .topBandPair{margin-top:6px}.accountFounderMetric .topBandPair b{font-size:15px}@media(max-width:1050px){.accountFounderCard{grid-template-columns:repeat(2,minmax(0,1fr))}.accountFounderMetric{border-bottom:1px solid var(--line)}}@media(max-width:620px){.accountFounderCard{grid-template-columns:1fr 1fr}.accountFounderMetric{padding:9px}}@media(max-width:390px){.accountFounderCard{grid-template-columns:1fr}.accountFounderMetric{border-right:0}}';
+ document.head.appendChild(style);
+ const src=document.getElementById('todayPct'),dst=document.getElementById('topTodayPct');
+ if(src&&dst){const paint=()=>{dst.textContent=src.textContent||'—';dst.classList.remove('green','red');const raw=String(src.textContent||'');if(/^\s*\+|^[^\d-]*[1-9]/.test(raw)&&!raw.includes('-'))dst.classList.add('green');else if(raw.includes('-'))dst.classList.add('red')};paint();new MutationObserver(paint).observe(src,{subtree:true,childList:true,characterData:true,attributes:true,attributeFilter:['class']});}
+}
 function injectUi(){
  if(document.getElementById('progressTabBtn'))return;
  const triage=document.querySelector('.tabs button[data-tab="triage"]');
@@ -78,5 +89,5 @@ function render(){
 }
 window.renderProgress=render;
 async function refresh(){try{const [exec,history]=await Promise.all([get('/execution-test-state'),get('/forensic-provider-history?limit=200')]);S.exec=exec;S.history=history;S.error=null;updateUpperSummary()}catch(e){S.error=String(e?.message||e);upperWaiting('UNKNOWN')}}
-injectUi();upperWaiting();refresh();setInterval(refresh,15000);
+polishAccountTop();injectUi();upperWaiting();refresh();setInterval(refresh,15000);
 })();
