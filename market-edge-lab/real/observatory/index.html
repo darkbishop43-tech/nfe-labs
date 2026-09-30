@@ -1,0 +1,25 @@
+<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Market Edge Performance Observatory</title><link rel="stylesheet" href="styles.css"></head><body>
+<div class="wrap">
+<section class="hero"><div><div class="kicker">NFE-OS · MARKET EDGE · READ-ONLY RESEARCH</div><h1>Performance Observatory</h1><p>Official Kalshi realized-P&amp;L provider ledger · evidence display only · no trading authority</p></div><div class="badge">342 PROVIDER ROWS PRESERVED</div></section>
+<div id="stats" class="grid stats"></div>
+<section class="filters"><div><label>ASSET<select id="asset"></select></label></div><div><label>SIDE<select id="side"><option>ALL</option><option>yes</option><option>no</option></select></label></div><div><label>SOURCE<select id="source"><option>ALL</option><option>AUTO_BASELINE</option><option>FOUNDER_MANUAL</option></select></label></div><div><label>RESULT<select id="result"><option>ALL</option><option>WIN</option><option>LOSS</option><option>FLAT</option></select></label></div><div><label>FROM<input id="from" type="date"></label></div><div><label>TO<input id="to" type="date"></label></div><div><label>TICKER SEARCH<input id="q" placeholder="NEAR / XRP ..."></label><button id="reset">RESET FILTERS</button></div></section>
+<section class="grid two"><div class="panel"><h2>1 · CUMULATIVE NET P/L CURVE</h2><div class="sub">Chronological provider-row realized net P/L</div><canvas id="cum" class="canvas tall"></canvas></div><div class="panel"><h2>2 · CHRONOLOGICAL WIN / LOSS STRIP</h2><div class="sub" id="sample"></div><div id="strip" class="strip"></div><div class="legend"><span><i class="sw" style="background:#55e39f"></i>WIN</span><span><i class="sw" style="background:#ff6b78"></i>LOSS</span><span><i class="sw" style="background:#6f8299"></i>FLAT</span><span><i class="sw" style="border:2px solid #ffc766"></i>FOUNDER_MANUAL</span></div></div></section>
+<section class="grid equal" style="margin-top:12px"><div class="panel"><h2>3 · P/L DISTRIBUTION</h2><div class="sub">Net-result bins across visible provider rows</div><canvas id="dist" class="canvas"></canvas></div><div class="panel"><h2>4 · ASSET PERFORMANCE</h2><div class="sub">Net P/L grouped by ticker-derived underlying asset</div><canvas id="assets" class="canvas"></canvas></div></section>
+<section class="grid equal" style="margin-top:12px"><div class="panel"><h2>5 · YES VS NO PERFORMANCE</h2><canvas id="sideChart" class="canvas"></canvas></div><div class="panel"><h2>6 · ENTRY PRICE / ECONOMICS MAP</h2><div class="sub">Entry price on X · provider-row net P/L on Y · point size reflects quantity</div><canvas id="scatter" class="canvas"></canvas></div></section>
+<section class="grid equal" style="margin-top:12px"><div class="panel"><h2>7 · TIME-OF-DAY PERFORMANCE</h2><div class="sub">Hour buckets use provider timestamps as supplied</div><canvas id="hours" class="canvas"></canvas></div><div class="panel"><h2>8 · GROSS P/L vs FEES vs NET P/L</h2><canvas id="econ" class="canvas"></canvas></div></section>
+<section class="grid equal" style="margin-top:12px"><div class="panel"><h2>9 · DRAWDOWN / RECOVERY</h2><div class="sub">Running distance below prior cumulative-P/L peak</div><canvas id="dd" class="canvas"></canvas></div><div class="panel"><h2>10 · SPECIMEN INSPECTOR</h2><div id="inspector" class="inspector"></div></div></section>
+<section class="panel" style="margin-top:12px"><h2>11 · RAW PROVIDER ROWS · READ-ONLY FILTERED VIEW</h2><div class="sub">No casual deduplication. Click any row to inspect.</div><div class="tablewrap"><table><thead><tr><th>#</th><th>CLOSED</th><th>ASSET</th><th>SIDE</th><th>QTY</th><th>ENTRY</th><th>EXIT</th><th>NET P/L</th><th>SOURCE TAG</th></tr></thead><tbody id="tbody"></tbody></table></div></section>
+<section class="warn" style="margin-top:12px"><b>UNKNOWN INVENTORY:</b> NFE score, series ID, attempt ID, NO_FILL history, management classification, exit reason, and logical position/decision aggregation are not manufactured from this provider CSV. They remain UNKNOWN until authoritative NFE evidence can be joined. The one known Founder training specimen is tagged FOUNDER_MANUAL; no additional Founder trades are inferred.</section>
+<div class="foot">Data source: official Kalshi realized-P&amp;L CSV · 342 rows · 13 original provider columns · bundled unchanged alongside this page. Observatory authority: READ ONLY · provider writes 0 · capital moved $0 · execution config unchanged.</div>
+</div>
+<script src="data-01.js"></script>
+<script src="data-02.js"></script>
+<script src="data-03.js"></script>
+<script src="data-04.js"></script>
+<script src="data-05.js"></script>
+<script src="data-06.js"></script>
+<script src="data-07.js"></script>
+<script src="data-08.js"></script>
+<script src="app-core.js"></script>
+<script src="app-render.js"></script>
+</body></html>
