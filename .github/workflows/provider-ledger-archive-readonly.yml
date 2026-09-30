@@ -41,7 +41,7 @@ jobs:
       - name: Validate zero-authority read contract and persist raw snapshots
         shell: python
         run: |
-          import hashlib, json, shutil
+          import hashlib, json
           from datetime import datetime, timezone
           from pathlib import Path
           from zoneinfo import ZoneInfo
@@ -92,6 +92,8 @@ jobs:
                   return None
 
           # Build a non-destructive daily index from every preserved snapshot.
+          # Exact duplicate normalized provider rows are collapsed only in this index;
+          # every raw response remains preserved above.
           unique={}
           source_count=0
           for snap in sorted(root.glob('provider-history-*.json')):
@@ -153,13 +155,13 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          if git diff --quiet -- market-edge-lab/real/provider-history/archive; then
+          git add market-edge-lab/real/provider-history/archive
+          if git diff --cached --quiet; then
             echo 'ARCHIVE_CHANGE=NONE'
             exit 0
           fi
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add market-edge-lab/real/provider-history/archive
           git commit -m "Archive read-only provider ledger snapshot"
           git push origin HEAD:market-edge-baseline-real
 
@@ -167,6 +169,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          git diff --exit-code HEAD~1 -- market-edge-lab/real/baseline/src/index.js || true
+          git diff --exit-code HEAD~1 -- market-edge-lab/real/baseline/src/index.js
+          git diff --exit-code HEAD~1 -- market-edge-lab/real/baseline/wrangler.toml
           echo 'EXECUTION_LOGIC_CHANGED=NO'
           echo 'SECOND_IOC=HOLD'
