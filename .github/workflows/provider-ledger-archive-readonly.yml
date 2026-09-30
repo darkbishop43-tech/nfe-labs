@@ -42,6 +42,7 @@ jobs:
         shell: python
         run: |
           import hashlib, json
+          from decimal import Decimal, InvalidOperation
           from datetime import datetime, timezone
           from pathlib import Path
           from zoneinfo import ZoneInfo
@@ -74,7 +75,7 @@ jobs:
           root=Path('market-edge-lab/real/provider-history/archive')/day
           root.mkdir(parents=True, exist_ok=True)
 
-          # Preserve the provider-history response byte-for-byte as received.
+          # Preserve every live provider-history response byte-for-byte.
           snapshot=root/f'provider-history-{stamp}.json'
           snapshot.write_bytes(raw)
           (root/f'founder-capital-{stamp}.json').write_text(json.dumps(capital,indent=2,sort_keys=True)+'\n')
@@ -91,9 +92,30 @@ jobs:
               except Exception:
                   return None
 
-          # Build a non-destructive daily index from every preserved snapshot.
-          # Exact duplicate normalized provider rows are collapsed only in this index;
-          # every raw response remains preserved above.
+          def stable_identity(row):
+              typ=str(row.get('recordType') or '').upper()
+              raw=row.get('providerRaw') if isinstance(row.get('providerRaw'),dict) else {}
+              if typ == 'FILL':
+                  fid=row.get('fillId') or raw.get('fill_id') or row.get('tradeId') or raw.get('trade_id')
+                  if fid:
+                      return 'FILL|'+str(fid)
+              if typ == 'SETTLEMENT':
+                  ticker=row.get('ticker') or raw.get('ticker')
+                  settled=row.get('settledTime') or raw.get('settled_time')
+                  result=row.get('marketResult') or raw.get('market_result')
+                  if ticker and settled:
+                      return f'SETTLEMENT|{ticker}|{settled}|{result or ""}'
+              # Last-resort identity is stable across projection enrichment because providerRaw is excluded.
+              base={k:v for k,v in row.items() if k not in ('providerRaw','evidenceHash','providerIdentity','firstSeenSnapshot')}
+              return 'FALLBACK|'+hashlib.sha256(json.dumps(base,sort_keys=True,separators=(',',':')).encode()).hexdigest()
+
+          def richness(row):
+              raw=row.get('providerRaw') if isinstance(row.get('providerRaw'),dict) else {}
+              return (1 if raw else 0, len(raw), len(json.dumps(row,sort_keys=True)))
+
+          # Build a non-destructive daily index from all preserved snapshots.
+          # Raw snapshots are NEVER deduplicated. The index collapses only records with
+          # the same stable provider identity and keeps the richest observed projection.
           unique={}
           source_count=0
           for snap in sorted(root.glob('provider-history-*.json')):
@@ -107,15 +129,27 @@ jobs:
                   if ts is None or ts.astimezone(ZoneInfo('America/New_York')).strftime('%Y-%m-%d') != day:
                       continue
                   source_count += 1
-                  canon=json.dumps(row,sort_keys=True,separators=(',',':'))
-                  key=hashlib.sha256(canon.encode()).hexdigest()
-                  if key not in unique:
-                      unique[key]={**row,'evidenceHash':key,'firstSeenSnapshot':snap.name}
+                  key=stable_identity(row)
+                  candidate={**row,'providerIdentity':key,'firstSeenSnapshot':snap.name}
+                  prior=unique.get(key)
+                  if prior is None or richness(candidate) > richness(prior):
+                      if prior is not None:
+                          candidate['firstSeenSnapshot']=prior.get('firstSeenSnapshot',snap.name)
+                      unique[key]=candidate
 
           rows=list(unique.values())
           rows.sort(key=lambda r: str(r.get('createdAt') or r.get('settledTime') or ''))
           times=[row_ts(r) for r in rows]
           times=[t for t in times if t is not None]
+
+          # Fees are surfaced descriptively, with fill and settlement fee fields kept
+          # separate to avoid silently double-counting two provider accounting concepts.
+          def dec(v):
+              try: return Decimal(str(v))
+              except (InvalidOperation,ValueError,TypeError): return Decimal('0')
+          fill_fee=sum((dec((r.get('providerRaw') or {}).get('fee_cost',r.get('feeCost'))) for r in rows if r.get('recordType')=='FILL'),Decimal('0'))
+          settlement_fee=sum((dec((r.get('providerRaw') or {}).get('fee_cost',r.get('feeCost'))) for r in rows if r.get('recordType')=='SETTLEMENT'),Decimal('0'))
+
           manifest={
               'dateET':day,
               'timezone':'America/New_York',
@@ -123,10 +157,17 @@ jobs:
               'source':'GET /forensic-provider-history?limit=200 via Founder read bridge',
               'rawSnapshotsPreserved':len(list(root.glob('provider-history-*.json'))),
               'rawRowsObservedAcrossSnapshots':source_count,
-              'uniqueProviderRowsExactDedupe':len(rows),
+              'uniqueProviderRowsByStableIdentity':len(rows),
               'groupedLifecycles':'UNKNOWN',
               'earliestProviderRowET':min(times).astimezone(ZoneInfo('America/New_York')).isoformat() if times else None,
               'latestProviderRowET':max(times).astimezone(ZoneInfo('America/New_York')).isoformat() if times else None,
+              'descriptiveFees':{
+                  'fillFeeCostUsd':str(fill_fee),
+                  'settlementFeeCostUsd':str(settlement_fee),
+                  'combinedNotReportedBecausePotentialOverlap':True
+              },
+              'netRealizedPnlUsd':None,
+              'netRealizedPnlStatus':'UNKNOWN_UNTIL_DETERMINISTIC_FILL_SETTLEMENT_LIFECYCLE_ACCOUNTING',
               'providerRows':rows,
               'safety':{
                   'providerWrites':0,
@@ -144,6 +185,9 @@ jobs:
           print('UNIQUE_PROVIDER_ROWS_TODAY='+str(len(rows)))
           print('EARLIEST_PROVIDER_ROW_ET='+str(manifest['earliestProviderRowET']))
           print('LATEST_PROVIDER_ROW_ET='+str(manifest['latestProviderRowET']))
+          print('FILL_FEE_COST_USD='+str(fill_fee))
+          print('SETTLEMENT_FEE_COST_USD='+str(settlement_fee))
+          print('NET_REALIZED_PNL=UNKNOWN_UNTIL_DETERMINISTIC_LIFECYCLE_ACCOUNTING')
           print('PROVIDER_WRITES=0')
           print('EXECUTION_STATE_WRITES=0')
           print('CAPITAL_MOVED_USD=0')
