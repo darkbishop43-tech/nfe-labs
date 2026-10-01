@@ -28,6 +28,13 @@ function pkcs1ToPkcs8(pkcs1) {
   return derWrap(0x30, inner);
 }
 
+function privateKeyEnvelope(pem) {
+  const text = String(pem || '').trim();
+  if (/-----BEGIN RSA PRIVATE KEY-----/.test(text)) return 'PKCS1';
+  if (/-----BEGIN PRIVATE KEY-----/.test(text)) return 'PKCS8';
+  return 'UNKNOWN';
+}
+
 function decodePem(pem) {
   const text = String(pem || '').trim();
   const isPkcs1 = /-----BEGIN RSA PRIVATE KEY-----/.test(text);
@@ -42,22 +49,61 @@ function decodePem(pem) {
   return isPkcs1 ? pkcs1ToPkcs8(bytes).buffer : bytes.buffer;
 }
 
-export async function kalshiGetOnlyHeaders(env, method, path) {
+function setDiagnostic(diagnostic, values) {
+  if (diagnostic && typeof diagnostic === 'object') Object.assign(diagnostic, values);
+}
+
+export async function kalshiGetOnlyHeaders(env, method, path, diagnostic = null) {
   if (String(method || '').toUpperCase() !== ALLOWED_METHOD) throw new Error('PAYNE_KALSHI_GET_ONLY_METHOD_REQUIRED');
-  if (!env?.KALSHI_EXECUTION_KEY_ID || !env?.KALSHI_EXECUTION_PRIVATE_KEY) throw new Error('KALSHI_EXECUTION_CREDENTIALS_NOT_INSTALLED');
-  const key = await crypto.subtle.importKey(
-    'pkcs8',
-    decodePem(env.KALSHI_EXECUTION_PRIVATE_KEY),
-    { name: 'RSA-PSS', hash: 'SHA-256' },
-    false,
-    ['sign']
-  );
+
+  const credentialsPresent = Boolean(env?.KALSHI_EXECUTION_KEY_ID && env?.KALSHI_EXECUTION_PRIVATE_KEY);
+  setDiagnostic(diagnostic, {
+    credentialsPresent,
+    privateKeyEnvelope: privateKeyEnvelope(env?.KALSHI_EXECUTION_PRIVATE_KEY),
+    failureStage: 'CREDENTIAL_CHECK',
+    errorClass: null,
+  });
+  if (!credentialsPresent) throw new Error('KALSHI_EXECUTION_CREDENTIALS_NOT_INSTALLED');
+
+  let keyData;
+  try {
+    setDiagnostic(diagnostic, { failureStage:'PEM_DECODE' });
+    keyData = decodePem(env.KALSHI_EXECUTION_PRIVATE_KEY);
+  } catch (error) {
+    setDiagnostic(diagnostic, { errorClass:error?.name || 'Error' });
+    throw error;
+  }
+
+  let key;
+  try {
+    setDiagnostic(diagnostic, { failureStage:'KEY_IMPORT' });
+    key = await crypto.subtle.importKey(
+      'pkcs8',
+      keyData,
+      { name: 'RSA-PSS', hash: 'SHA-256' },
+      false,
+      ['sign']
+    );
+  } catch (error) {
+    setDiagnostic(diagnostic, { errorClass:error?.name || 'Error' });
+    throw error;
+  }
+
   const ts = String(Date.now());
   const signPath = String(path).split('?')[0];
   const payload = new TextEncoder().encode(ts + ALLOWED_METHOD + signPath);
-  const signature = await crypto.subtle.sign({ name: 'RSA-PSS', saltLength: 32 }, key, payload);
+  let signature;
+  try {
+    setDiagnostic(diagnostic, { failureStage:'SIGN' });
+    signature = await crypto.subtle.sign({ name: 'RSA-PSS', saltLength: 32 }, key, payload);
+  } catch (error) {
+    setDiagnostic(diagnostic, { errorClass:error?.name || 'Error' });
+    throw error;
+  }
+
   let binary = '';
   for (const b of new Uint8Array(signature)) binary += String.fromCharCode(b);
+  setDiagnostic(diagnostic, { failureStage:'NONE', errorClass:null });
   return {
     accept: 'application/json',
     'KALSHI-ACCESS-KEY': String(env.KALSHI_EXECUTION_KEY_ID).trim(),
@@ -66,10 +112,23 @@ export async function kalshiGetOnlyHeaders(env, method, path) {
   };
 }
 
-export async function kalshiGetOnly(env, path, fetchImpl = fetch) {
+export async function kalshiGetOnly(env, path, fetchImpl = fetch, diagnostic = null) {
   if (!String(path || '').startsWith('/trade-api/')) throw new Error('PAYNE_KALSHI_GET_ONLY_PATH_REJECTED');
-  const headers = await kalshiGetOnlyHeaders(env, ALLOWED_METHOD, path);
-  return fetchImpl(KALSHI_ORIGIN + path, { method: ALLOWED_METHOD, headers });
+  const headers = await kalshiGetOnlyHeaders(env, ALLOWED_METHOD, path, diagnostic);
+  let response;
+  try {
+    setDiagnostic(diagnostic, { failureStage:'FETCH' });
+    response = await fetchImpl(KALSHI_ORIGIN + path, { method: ALLOWED_METHOD, headers });
+  } catch (error) {
+    setDiagnostic(diagnostic, { errorClass:error?.name || 'Error' });
+    throw error;
+  }
+  if (!response || typeof response.ok !== 'boolean') {
+    setDiagnostic(diagnostic, { failureStage:'RESPONSE', errorClass:'Error' });
+    throw new Error('PAYNE_KALSHI_INVALID_RESPONSE');
+  }
+  setDiagnostic(diagnostic, { failureStage:response.ok ? 'NONE' : 'RESPONSE', errorClass:null });
+  return response;
 }
 
 export function classifyIndex3(balanceBody) {
@@ -85,16 +144,41 @@ async function safeJson(response) {
 }
 
 export async function kalshiReadOnlyProof(env, fetchImpl = fetch) {
+  let providerGets = 0;
+  const diagnostic = {
+    credentialsPresent: Boolean(env?.KALSHI_EXECUTION_KEY_ID && env?.KALSHI_EXECUTION_PRIVATE_KEY),
+    privateKeyEnvelope: privateKeyEnvelope(env?.KALSHI_EXECUTION_PRIVATE_KEY),
+    failureStage: 'CREDENTIAL_CHECK',
+    errorClass: null,
+  };
+
   try {
-    let providerGets = 0;
     const get = async path => {
       providerGets += 1;
-      const response = await kalshiGetOnly(env, path, fetchImpl);
+      const response = await kalshiGetOnly(env, path, fetchImpl, diagnostic);
       return { response, body: await safeJson(response) };
     };
 
     const balance = await get('/trade-api/v2/portfolio/balance');
     const rows = Array.isArray(balance.body?.balance_breakdown) ? balance.body.balance_breakdown : null;
+
+    if (!balance.response.ok) {
+      return {
+        ok:false,
+        mode:'GET_ONLY',
+        authentication:'NOT_PROVEN',
+        authenticatedGet:'NOT_PROVEN',
+        providerGets,
+        accountBalanceGet:'NOT_PROVEN',
+        liveMarketGet:'NOT_TESTED_AUTH_FAILED',
+        freshLockGet:'NOT_TESTED_AUTH_FAILED',
+        preSubmitGet:'NOT_TESTED_AUTH_FAILED',
+        index3:classifyIndex3(balance.body),
+        providerWrites:0,
+        secretsExposed:false,
+        ...diagnostic,
+      };
+    }
 
     const markets = await get('/trade-api/v2/markets?limit=1');
     const firstMarket = Array.isArray(markets.body?.markets) ? markets.body.markets[0] : null;
@@ -124,6 +208,7 @@ export async function kalshiReadOnlyProof(env, fetchImpl = fetch) {
       index3: classifyIndex3(balance.body),
       providerWrites: 0,
       secretsExposed: false,
+      ...diagnostic,
     };
   } catch (error) {
     return {
@@ -131,7 +216,7 @@ export async function kalshiReadOnlyProof(env, fetchImpl = fetch) {
       mode: 'GET_ONLY',
       authentication: 'NOT_PROVEN',
       authenticatedGet: 'NOT_PROVEN',
-      providerGets: 0,
+      providerGets,
       accountBalanceGet: 'NOT_PROVEN',
       liveMarketGet: 'NOT_PROVEN',
       freshLockGet: 'NOT_PROVEN',
@@ -140,6 +225,10 @@ export async function kalshiReadOnlyProof(env, fetchImpl = fetch) {
       index3: 'UNKNOWN / PROVIDER EVIDENCE INSUFFICIENT',
       providerWrites: 0,
       secretsExposed: false,
+      credentialsPresent: diagnostic.credentialsPresent,
+      privateKeyEnvelope: diagnostic.privateKeyEnvelope,
+      failureStage: diagnostic.failureStage,
+      errorClass: diagnostic.errorClass || error?.name || 'Error',
     };
   }
 }
