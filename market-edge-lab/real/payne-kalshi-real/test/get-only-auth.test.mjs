@@ -68,8 +68,38 @@ test('GET-only proof performs balance, market, fresh lock, and pre-submit reads'
   assert.equal(out.preSubmitGet,'PROVEN');
   assert.equal(out.index3,'READ-PROVEN UNAVAILABLE');
   assert.equal(out.providerWrites,0);
+  assert.equal(out.credentialsPresent,true);
+  assert.equal(out.privateKeyEnvelope,'PKCS8');
+  assert.equal(out.failureStage,'NONE');
+  assert.equal(out.errorClass,null);
   assert.equal(out.secretsExposed,false);
   assert.equal(calls.every(c=>c.method==='GET'),true);
+});
+
+test('credential-check failure identifies stage and preserves attempted GET count without secret exposure', async () => {
+  const out = await kalshiReadOnlyProof({}, async () => { throw new Error('fetch must not run'); });
+  assert.equal(out.ok,false);
+  assert.equal(out.credentialsPresent,false);
+  assert.equal(out.privateKeyEnvelope,'UNKNOWN');
+  assert.equal(out.failureStage,'CREDENTIAL_CHECK');
+  assert.equal(out.providerGets,1);
+  assert.equal(out.errorClass,'Error');
+  assert.equal(out.secretsExposed,false);
+});
+
+test('fetch failure identifies stage, preserves GET count, and suppresses secret material', async () => {
+  const env = await testEnv();
+  const out = await kalshiReadOnlyProof(env, async () => { throw new TypeError('provider failure'); });
+  const text = JSON.stringify(out);
+  assert.equal(out.ok,false);
+  assert.equal(out.credentialsPresent,true);
+  assert.equal(out.privateKeyEnvelope,'PKCS8');
+  assert.equal(out.failureStage,'FETCH');
+  assert.equal(out.providerGets,1);
+  assert.equal(out.errorClass,'TypeError');
+  assert.equal(out.secretsExposed,false);
+  assert.equal(text.includes(env.KALSHI_EXECUTION_KEY_ID),false);
+  assert.equal(text.includes(env.KALSHI_EXECUTION_PRIVATE_KEY),false);
 });
 
 test('proof failure suppresses secret material', async () => {
