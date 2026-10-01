@@ -1,0 +1,20 @@
+name = "market-edge-payne-kalshi-real"
+main = "src/index.js"
+compatibility_date = "2026-09-17"
+workers_dev = true
+
+[vars]
+EXPERIMENT_NAME = "MARKET EDGE — PAYNE-KALSHI REAL"
+EXECUTION_MODE = "STEP1_ZERO_MONEY"
+LIVE_ORDER_SUBMISSION = "DISABLED"
+FUNDING_AUTHORITY = "DISABLED"
+PAYNE_THRESHOLD = "0.70"
+MARKET_SCOPE = "BTC_ETH_SOL_XRP_HYPE_ZEC_DOGE_BNB_NEAR_AUTO_SELECT"
+
+# Step 1 intentionally has no production KV namespace id or credentials configured here.
+# The code requires an isolated binding named PAYNE_KALSHI_STATE. Provision/bind only under a later authorized deployment step.
+# It MUST NOT bind BASELINE_REAL_SHADOW_STATE or Payne Paper state.
+# Kalshi POST authority, funding authority, and real execution are hard-disabled in source.
+
+# No cron is configured in Step 1 deployment config.
+# The scheduled() handler remains inert/provider-write-free if invoked by a test harness.
