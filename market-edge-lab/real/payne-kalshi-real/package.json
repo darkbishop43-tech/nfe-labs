@@ -2,5 +2,5 @@
   "name": "market-edge-payne-kalshi-real-step1",
   "private": true,
   "type": "module",
-  "scripts": { "test": "node --test test/step1.test.mjs" }
+  "scripts": { "test": "node --test test/*.test.mjs" }
 }
