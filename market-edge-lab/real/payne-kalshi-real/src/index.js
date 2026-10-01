@@ -140,6 +140,12 @@ export function realEligibility(candidate, nowMs = Date.now()) {
   };
 }
 
+export function fundingGate(control) {
+  const authorityDisabled = PAYNE_CONFIG.fundingAuthorityEnabled !== true || control?.fundingAuthority !== 'ENABLED';
+  const indexUnproven = control?.requiredExchangeIndex == null;
+  return { ok: !authorityDisabled && !indexUnproven, authorityDisabled, indexUnproven, failClosed: authorityDisabled || indexUnproven };
+}
+
 export async function freshKalshiExecutionQuote(env, candidate, providerGet) {
   if (typeof providerGet !== 'function') throw new Error('PROVIDER_GET_ADAPTER_REQUIRED');
   const quote = await providerGet(candidate.marketTicker);
@@ -179,9 +185,11 @@ export async function evaluateZeroMoneyCandidate(env, candidate, { providerGet, 
   const preSubmit = await freshKalshiExecutionQuote(env, candidate, providerGet);
   await appendEvent(env, 'PRE_SUBMIT_READ', { ticker:candidate.marketTicker, ok:preSubmit.ok, quote:preSubmit.ok ? preSubmit.market : null, reason:preSubmit.reason ?? null });
   if (!preSubmit.ok) return { ok:true, fired:false, gate, eligibility, lock, preSubmit, stopReason:'PRE_SUBMIT_FAILED' };
-  const stop = hardStopBeforeProviderPost({ ticker:candidate.marketTicker, stage:gate.stage });
-  await appendEvent(env, 'PROVIDER_POST_BLOCKED', { ticker:candidate.marketTicker, reason:stop.reason });
-  return { ok:true, fired:false, gate, eligibility, lock, preSubmit, stopReason:stop.reason };
+  const funding = fundingGate(control);
+  await appendEvent(env, 'FUNDING_GATE', { ticker:candidate.marketTicker, ...funding });
+  const stop = hardStopBeforeProviderPost({ ticker:candidate.marketTicker, stage:gate.stage, funding });
+  await appendEvent(env, 'PROVIDER_POST_BLOCKED', { ticker:candidate.marketTicker, reason:stop.reason, funding });
+  return { ok:true, fired:false, gate, eligibility, lock, preSubmit, funding, stopReason:stop.reason };
 }
 
 export function reconcileFixture({ providerContextComplete, ownedPosition, settlementEvidence }) {
