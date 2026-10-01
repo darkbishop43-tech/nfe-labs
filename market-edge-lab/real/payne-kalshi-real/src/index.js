@@ -222,7 +222,8 @@ export function step1Status() {
     mode:'ZERO-MONEY / GET-ONLY',
     stateBinding:STATE_BINDING,
     defaultState:defaultControlState(),
-    providerWrites:'DISABLED',
+    providerWrites:0,
+    providerWriteAuthority:'DISABLED',
     realExecution:'DISABLED',
     fundingAuthority:'DISABLED',
     index3:'UNKNOWN / PROVIDER EVIDENCE INSUFFICIENT',
@@ -244,7 +245,7 @@ export default {
         kalshi:provider,
       });
     }
-    return Response.json({ ok:true, service:SERVICE_ID, mode:'ZERO-MONEY / GET-ONLY', armed:false, attempts:0, openPositions:0, threshold:PAYNE_CONFIG.defaultThreshold, providerWrites:'DISABLED', realExecution:'DISABLED', fundingAuthority:'DISABLED' });
+    return Response.json({ ok:true, service:SERVICE_ID, mode:'ZERO-MONEY / GET-ONLY', armed:false, attempts:0, openPositions:0, threshold:PAYNE_CONFIG.defaultThreshold, providerWrites:0, providerWriteAuthority:'DISABLED', realExecution:'DISABLED', fundingAuthority:'DISABLED' });
   },
   async scheduled(controller, env) {
     await initializeDisarmed(env);
