@@ -1,3 +1,5 @@
+import { kalshiReadOnlyProof } from './kalshi-get-only.js';
+
 const SERVICE_ID = 'market-edge-payne-kalshi-real';
 const STATE_BINDING = 'PAYNE_KALSHI_STATE';
 const CONTROL_KEY = 'payne-kalshi:control:v1';
@@ -217,12 +219,13 @@ export async function recordReconciliationEvidence(env, evidence) {
 export function step1Status() {
   return {
     service:SERVICE_ID,
+    mode:'ZERO-MONEY / GET-ONLY',
     stateBinding:STATE_BINDING,
     defaultState:defaultControlState(),
-    providerWrites:0,
+    providerWrites:'DISABLED',
     realExecution:'DISABLED',
     fundingAuthority:'DISABLED',
-    index3:'UNKNOWN',
+    index3:'UNKNOWN / PROVIDER EVIDENCE INSUFFICIENT',
     secondIoc:'HOLD_UNCHANGED',
   };
 }
@@ -230,11 +233,18 @@ export function step1Status() {
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
+    if (request.method !== 'GET') return Response.json({ ok:false, reason:'GET_ONLY' }, { status:405 });
     if (url.pathname === '/status') return Response.json(step1Status());
-    if (url.pathname === '/initialize' && request.method === 'POST') {
-      return Response.json({ ok:false, reason:'STEP1_MUTATING_CONTROL_ENDPOINT_NOT_EXPOSED' }, { status:405 });
+    if (url.pathname === '/proof') {
+      const provider = await kalshiReadOnlyProof(env);
+      return Response.json({
+        ...step1Status(),
+        serviceLive:true,
+        kv:{ binding:STATE_BINDING, connected:Boolean(env?.[STATE_BINDING]) },
+        kalshi:provider,
+      });
     }
-    return Response.json({ ok:true, service:SERVICE_ID, mode:'STEP1_ZERO_MONEY', realExecution:'DISABLED' });
+    return Response.json({ ok:true, service:SERVICE_ID, mode:'ZERO-MONEY / GET-ONLY', armed:false, attempts:0, openPositions:0, threshold:PAYNE_CONFIG.defaultThreshold, providerWrites:'DISABLED', realExecution:'DISABLED', fundingAuthority:'DISABLED' });
   },
   async scheduled(controller, env) {
     await initializeDisarmed(env);
