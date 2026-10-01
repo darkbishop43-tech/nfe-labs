@@ -226,7 +226,7 @@ export function step1Status() {
     providerWriteAuthority:'DISABLED',
     realExecution:'DISABLED',
     fundingAuthority:'DISABLED',
-    index3:'UNKNOWN / PROVIDER EVIDENCE INSUFFICIENT',
+    index3:'UNKNOWN',
     secondIoc:'HOLD_UNCHANGED',
   };
 }
