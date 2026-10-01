@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   PAYNE_CONFIG, defaultControlState, payneStage, initializeDisarmed, loadControl,
-  evaluateZeroMoneyCandidate, reconcileFixture, managementDecision,
+  evaluateZeroMoneyCandidate, reconcileFixture, managementDecision, fundingGate,
   persistRun, persistAttempt, persistPosition, listEvents, recordManagementObservation,
   recordReconciliationEvidence, step1Status
 } from '../src/index.js';
@@ -36,6 +36,7 @@ test('qualifying candidate reaches fresh lock twice then stops before POST', asy
   const providerGet=async ticker=>{ gets++; return {ok:true,marketTicker:ticker,yesAsk:.60,yesBid:.59,noAsk:.41,noBid:.40}; };
   const out=await evaluateZeroMoneyCandidate(e,qualifying(),{providerGet});
   assert.equal(out.gate.stage,'PULL_TRIGGER'); assert.equal(gets,2); assert.equal(out.stopReason,'STEP1_PROVIDER_POST_HARD_DISABLED'); assert.equal(out.fired,false);
+  assert.equal(out.funding.failClosed,true); assert.equal(out.funding.authorityDisabled,true); assert.equal(out.funding.indexUnproven,true);
 });
 
 test('non-pull candidate cannot reach provider GET or fire', async ()=>{
@@ -50,6 +51,11 @@ test('real eligibility/time gate blocks unsafe candidate before provider read', 
   const c={...qualifying(),closeTime:futureClose(5)};
   const out=await evaluateZeroMoneyCandidate(e,c,{providerGet:async()=>{gets++; return {ok:true};}});
   assert.equal(gets,0); assert.equal(out.stopReason,'REAL_ELIGIBILITY_GATE'); assert.equal(out.eligibility.timeSafe,false);
+});
+
+test('funding gate remains fail-closed in Step 1', ()=>{
+  const f=fundingGate(defaultControlState());
+  assert.equal(f.ok,false); assert.equal(f.failClosed,true); assert.equal(f.authorityDisabled,true); assert.equal(f.indexUnproven,true);
 });
 
 test('OPEN / FLAT / UNKNOWN reconciliation fixtures', ()=>{
