@@ -2686,3 +2686,31 @@ The forensic response reports:
 - Baseline writes = 0
 - Baseline deployments = 0
 
+
+
+## Baseline fill-price comparison semantics
+
+Kalshi V2 order responses expose one YES-leg price scale.
+
+For Baseline:
+
+- YES long economic entry price = stored YES-leg average fill price
+- NO long economic entry price = `1 - stored YES-leg average fill price`
+
+The PAYNE forensic layer therefore preserves both:
+
+- raw Baseline YES-leg fill price
+- normalized economic outcome-side entry price
+
+Only the normalized outcome-side price is compared with PAYNE's hypothetical outcome-side entry price.
+
+Example proven live:
+
+- PAYNE NO hypothetical entry = 0.76
+- Baseline stored raw YES-leg average fill = 0.24
+- normalized Baseline NO economic entry = 0.76
+- comparable entry-price delta = 0.00
+
+This normalization is forensic interpretation only.
+
+Baseline source/state is not changed.
