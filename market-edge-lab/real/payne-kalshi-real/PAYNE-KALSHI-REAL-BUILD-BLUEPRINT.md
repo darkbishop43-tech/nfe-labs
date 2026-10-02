@@ -1524,3 +1524,313 @@ Before live acceptance:
 - Second IOC: HOLD / UNCHANGED
 - Baseline execution changes: 0
 - Payne Paper changes: 0
+
+
+---
+
+# NFE-OS UNIVERSAL MARKET CLOCK STANDARD
+
+## Purpose
+
+One authoritative market window must mean the same market window across NFE-OS projects observing the same market domain.
+
+Projects may use different models, scores, strategies, or decision rules.
+
+They must not create independent 15-minute market clocks that drift apart.
+
+Universal temporal order:
+
+```text
+PROVIDER TIME
+→ AUTHORITATIVE WINDOW
+→ BASELINE OBSERVATION TIME
+→ PROJECT OBSERVATION TIME
+→ DECISION TIME
+→ FRESH-LOCK TIME
+→ PRE-SUBMIT TIME
+→ RECORD
+```
+
+## Authoritative Kalshi clock
+
+Source of truth:
+
+- provider contract ticker
+- provider contract open timestamp
+- provider contract close timestamp
+- current observation timestamp
+
+Derived values:
+
+- elapsed time in current provider window
+- remaining time
+- lifecycle fraction / position in the window
+- next reset = current contract close where that close is the authoritative boundary
+
+No project-local 15-minute epoch is permitted to replace these provider timestamps.
+
+## Authoritative Baseline clock
+
+Where exposed by Baseline shadow evidence, retain:
+
+- Baseline observation timestamp
+- Baseline observation age
+- matched opportunity open timestamp
+- matched opportunity close timestamp
+- matched opportunity remaining time
+- matched-window next reset = matched opportunity close
+
+If Baseline does not expose a future scheduled observation time, represent it exactly as:
+
+`NOT_EXPOSED_BY_AUTHORITATIVE_SOURCE`
+
+Do not infer or synthesize one from PAYNE cron cadence.
+
+## PAYNE observation clock
+
+Each PAYNE observation retains:
+
+- PAYNE observation timestamp
+- associated Kalshi ticker
+- associated Kalshi window open
+- associated Kalshi window close
+- elapsed milliseconds within Kalshi window
+- remaining milliseconds
+- fraction through current Kalshi window
+- Fresh LOCK timestamp where performed
+- pre-submit timestamp where performed
+- Baseline → PAYNE observation timestamp delta where comparable
+
+PAYNE's one-minute cron is an observer cadence only.
+
+It does not define the market window.
+
+## Window consistency evidence
+
+PAYNE compares:
+
+- Kalshi ticker/window identity
+- Kalshi provider open/close
+- Baseline matched opportunity open/close
+- PAYNE associated provider window
+
+Evidence object:
+
+`NFE_OS_UNIVERSAL_MARKET_CLOCK_V1`
+
+Required consistency state:
+
+- `TRUE`
+- `FALSE`
+- `UNKNOWN`
+
+Diagnostics:
+
+- `WINDOW_CONSISTENT`
+- `WINDOW_MISMATCH`
+- `WINDOW_CONSISTENCY_UNKNOWN`
+
+If an authoritative Baseline window disagrees with the provider window:
+
+- do not silently normalize it
+- preserve the discrepancy
+- expose `WINDOW_MISMATCH`
+- do not advance the zero-money FIRE preview as though the evidence were temporally aligned
+
+## Cockpit presentation
+
+The cockpit displays three timing groups.
+
+### KALSHI WINDOW
+
+- OPEN
+- CLOSE
+- REMAINING
+- NEXT RESET
+
+### BASELINE WINDOW
+
+- OBSERVED AT
+- OBSERVATION AGE
+- OPEN
+- CLOSE
+- REMAINING
+- NEXT RESET
+- NEXT OBSERVATION, or `NOT_EXPOSED_BY_AUTHORITATIVE_SOURCE`
+
+### PAYNE OBSERVATION
+
+- OBSERVED AT
+- AGE
+- associated Kalshi ticker
+- elapsed time in current provider window
+- percentage position in current provider window
+- Fresh LOCK timestamp
+- pre-submit timestamp
+- window consistency diagnostic
+- Baseline → PAYNE observation delta
+
+Browser countdowns are PRESENTATION ONLY.
+
+They recompute from the authoritative timestamps.
+
+They are not persisted as a decrementing authoritative counter.
+
+On refresh or reload they reconstruct from provider/Baseline/PAYNE timestamps.
+
+## Research questions enabled by the standard
+
+Persisted clock evidence is intended to support later descriptive research such as:
+
+- whether PAYNE and Baseline saw a signal in the same authoritative window
+- which system observed it first
+- seconds between Baseline and PAYNE observations
+- remaining-time point where RADAR appeared
+- remaining-time point where LOCK appeared
+- remaining-time point where PULL / zero-money FIRE would occur
+- whether a signal disappeared before Fresh LOCK
+- whether systems disagreed early and converged later
+- whether useful signals cluster early, middle, or late in a 15-minute lifecycle
+- whether rejection rates change near expiration
+
+No conclusion is implied by collecting these fields.
+
+## PAYNE implementation status
+
+Implemented in PAYNE-KALSHI REAL source:
+
+- provider-clock association
+- Baseline-clock association
+- PAYNE observation clock
+- lifecycle elapsed/remaining/fraction evidence
+- Fresh LOCK timestamp
+- pre-submit timestamp
+- Baseline → PAYNE observation delta
+- TRUE / FALSE / UNKNOWN window consistency
+- WINDOW_MISMATCH diagnostic
+- zero-money FIRE fail-closed on proven window mismatch
+- export fields for timing comparison
+- browser presentation countdown reconstructed from timestamps
+
+Live deployment proof remains a separate acceptance requirement.
+
+## Cross-project timer rollout inventory
+
+This mission does NOT mutate the projects below.
+
+Repository evidence identifies the following later rollout candidates.
+
+### 1. Baseline REAL
+
+Evidence:
+
+- `market-edge-lab/real/baseline/src/index.js`
+- exposes Kalshi 15-minute opportunity `closeTime`
+- exposes `/shadow-state`
+- is the authoritative Baseline source consumed by PAYNE
+
+Future adoption target:
+
+- formalize the same universal-clock evidence shape at the source
+- preserve provider open/close where available
+- keep observation timestamp explicit
+- expose window identity consistently to downstream read-only consumers
+
+No Baseline change is authorized by the current PAYNE mission.
+
+### 2. Hold Observer
+
+Evidence:
+
+- `market-edge-lab/real/hold-observer/src/index.js`
+- reads `/shadow-state`
+- tracks provider close time
+- records entry/checkpoint/exit timestamps
+- uses a Durable Object timer for observational checkpoints
+
+Future adoption target:
+
+- distinguish hold/checkpoint timer from authoritative market window clock
+- associate every checkpoint with the provider/Baseline window identity
+- expose window-consistency diagnostics
+
+No Hold Observer mutation is authorized here.
+
+### 3. Founder Read Bridge
+
+Evidence:
+
+- `market-edge-lab/real/founder-read-bridge/src/index.js`
+- read-only bridge exposes Baseline `/shadow-state` and related evidence
+
+Future adoption target:
+
+- preserve/pass universal-clock evidence without reinterpretation
+- do not create independent timing semantics in the bridge
+
+No bridge mutation is authorized here.
+
+### 4. BTC 15-Minute Robinhood Observer
+
+Evidence:
+
+- `market-edge-lab/real/robinhood-15m/src/index.js`
+- explicitly identifies itself as a BTC 15-minute real observer
+
+Future adoption target:
+
+- if comparing its instrument lifecycle against NFE-OS 15-minute research, use its own provider-authoritative contract timestamps
+- do not pretend Robinhood and Kalshi windows are identical merely because both are 15-minute instruments
+- only mark cross-venue window equivalence when authoritative timestamps support it
+
+No Robinhood mutation is authorized here.
+
+### 5. Legacy Market Edge Cloud Worker / Paper collection surfaces
+
+Evidence:
+
+- `market-edge-lab/cloudflare/worker.js`
+- `.github/workflows/market-edge-paper-collector.yml`
+- `.github/workflows/market-edge-sibling-paper-cloud.yml`
+
+Future adoption target:
+
+- review any persisted observation or paper-trade timestamps before cross-system research
+- align paper observations to provider-defined market windows where applicable
+
+These surfaces require separate reconciliation before any modification.
+
+### 6. Universal Market Observer repository
+
+Repository:
+
+`darkbishop43-tech/market-edge-universal-observer`
+
+Evidence:
+
+- `src/observer/kalshi.js`
+- `src/observer/run.js`
+- `src/stream/kalshi-stream-do.js`
+
+Future adoption target:
+
+- use provider timestamps as canonical market/window identity
+- use the same consistency vocabulary when later correlating Universal Observer evidence with Baseline/PAYNE evidence
+- domain-specific observers such as Weather/Economics may use different lifecycle semantics, but must still distinguish authoritative event/market time from scheduler time
+
+No Universal Observer mutation is authorized in this PAYNE mission.
+
+## Cross-project rollout governance
+
+Rollout order is not authorized by this blueprint.
+
+Every project requires a separate Mission Control / Founder-authorized change.
+
+The universal rule is architectural:
+
+`scheduler cadence ≠ market clock`
+
+and:
+
+`presentation countdown ≠ authoritative time state`
+
