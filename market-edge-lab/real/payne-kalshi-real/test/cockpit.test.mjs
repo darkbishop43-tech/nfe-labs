@@ -61,6 +61,8 @@ function baselineService(body=baselineShadow(),status=200){
         },
         safety:{maxEntryDebitUsd:1,maxConcurrent:3}
       });
+      if(url.pathname==='/execution-test-nofill-forensic') return jsonResponse({ok:true,readOnly:true,state:'EXECUTION_TEST_NO_FILL_FORENSIC_V1',audited:[],safety:{providerWrites:0,stateMutation:false,ordersCreated:0,cancels:0,capitalMovedUsd:0}});
+      if(url.pathname==='/forensic-provider-history') return jsonResponse({ok:true,readOnly:true,provider:'KALSHI',fills:[{orderId:'ORDER-1',ticker:'KXBTC15M-TEST',side:'yes',action:'buy',yesPrice:.50,createdAt:'2026-10-02T06:05:15Z'}],historicalFills:[],settlements:[],positions:[],safety:{providerTradingWrites:0,executionStateWrites:0,capitalMovedUsd:0,ordersSubmitted:0}});
       return jsonResponse({ok:false,error:'NOT_FOUND'},404);
     },
   };
@@ -111,7 +113,7 @@ function installKalshiFetch(){
     if(u.includes('series_ticker=KXBTC15M')) return jsonResponse({markets:[providerMarket('BTC','KXBTC15M-TEST','KXBTC15M')]});
     if(u.includes('series_ticker=KXETH15M')) return jsonResponse({markets:[providerMarket('ETH','KXETH15M-TEST','KXETH15M','0.45','0.47')]});
     if(u.includes('/trade-api/v2/markets?series_ticker=')) return jsonResponse({markets:[]});
-    if(u.includes('/markets/KXBTC15M-TEST')) return jsonResponse({market:providerMarket('BTC','KXBTC15M-TEST','KXBTC15M','0.48','0.50')});
+    if(u.includes('/markets/KXBTC15M-TEST')) return jsonResponse({market:{...providerMarket('BTC','KXBTC15M-TEST','KXBTC15M','0.48','0.50'),status:'settled',result:'yes',settlement_value_dollars:'1.0000',settlement_ts:'2026-10-02T06:15:10Z'}});
     throw new Error('unexpected URL '+u);
   };
   return {urls,restore:()=>{globalThis.fetch=original;}};
@@ -383,6 +385,39 @@ test('research event ledger route exposes durable observation decision events',a
     assert.equal(body.capitalMovedUsd,0);
     assert.ok(body.count>0);
     assert.ok(body.events.some(e=>e.type==='OBSERVATION_DECISION_EVENT'));
+  } finally { io.restore(); }
+});
+
+test('would-fire forensic route reconstructs persisted FIRE_READY evidence read-only',async()=>{
+  const env=await authEnv();
+  const io=installKalshiFetch();
+  try{
+    await updateFounderControl(env,'SET_THRESHOLD',.70);
+    await runReadOnlyScan(env,'SCHEDULED_CRON',Date.parse('2026-10-02T06:05:00Z'));
+    const response=await payneWorker.fetch(new Request('https://payne.test/forensic/would-fire?checkpoint=59&format=json'),env);
+    assert.equal(response.status,200);
+    const body=await response.json();
+    assert.equal(body.schema,'PAYNE_WOULD_FIRE_FORENSIC_V1');
+    assert.equal(body.safety.providerWrites,0);
+    assert.equal(body.safety.orders,0);
+    assert.equal(body.safety.capitalMovedUsd,0);
+    assert.equal(body.safety.baselineWrites,0);
+    assert.equal(body.summary.totalWouldFireAnalyzed,1);
+    assert.equal(body.rows.length,1);
+    assert.equal(body.rows[0].ticker,'KXBTC15M-TEST');
+    assert.equal(body.rows[0].marketResult,'YES');
+    assert.equal(body.rows[0].directionalClassification,'DIRECTIONALLY_CORRECT');
+    assert.equal(body.rows[0].baselineFilled,true);
+    assert.equal(body.rows[0].baselineFireTime,null);
+    assert.equal(body.rows[0].baselineFireTimeReason,'NOT_EXPOSED_BY_AUTHORITATIVE_SOURCE');
+    assert.equal(body.rows[0].netHypotheticalPnlUsd,null);
+    assert.match(body.rows[0].pnlReason,/FROZEN_LIFECYCLE_EXIT_PRICE|EXIT_FEE/);
+
+    const csv=await payneWorker.fetch(new Request('https://payne.test/forensic/would-fire?checkpoint=59&format=csv'),env);
+    assert.equal(csv.status,200);
+    const text=await csv.text();
+    assert.match(text,/eventId,payneObservationAt,payneWouldFireAt/);
+    assert.match(text,/KXBTC15M-TEST/);
   } finally { io.restore(); }
 });
 
