@@ -58,6 +58,14 @@ jobs:
           jq '.reverseBaselineView' /tmp/forensic.json
           echo 'LIMITATIONS='
           jq '.limitations' /tmp/forensic.json
+          echo 'BASELINE_CLASS_COUNTS='
+          jq '[.rows[].baselineClass] | group_by(.) | map({class:.[0],count:length})' /tmp/forensic.json
+          echo 'TIMING_CLASS_COUNTS='
+          jq '[.rows[].payneTimingVsBaseline] | group_by(.) | map({class:.[0],count:length})' /tmp/forensic.json
+          echo 'TIMING_DELTA_MS='
+          jq '[.rows[].payneToBaselineFillDeltaMs | select(type=="number")] as $x | {count:($x|length),average:(if ($x|length)>0 then ($x|add/length) else null end),min:(if ($x|length)>0 then ($x|min) else null end),max:(if ($x|length)>0 then ($x|max) else null end)}' /tmp/forensic.json
+          echo 'ROW_LEDGER='
+          jq -c '.rows[] | {eventId,payneWouldFireAt,asset,direction,outcomeSide,ticker,marketOpen,marketClose,timeRemainingMs,windowPositionPct,move,fair,edge,score,initialObservedPrice,freshLockPrice,preSubmitPrice,hypotheticalEntryPrice,freshLockAt,preSubmitAt,windowConsistency,qualificationReason,marketResult,directionalClassification,outcomeClassification,hypotheticalExitReason,hypotheticalExitAt,hypotheticalExitPrice,count,preFeeHypotheticalPnlUsd,netHypotheticalPnlUsd,pnlReason,baselineClass,baselineAttempted,baselineAttemptStatus,baselineFilled,baselineSideSame,baselineEntryPrice,baselineFillTime,baselineFireTimeReason,baselineScore,baselineFinalState,baselineExitReason,payneToBaselineFillDeltaMs,payneTimingVsBaseline,entryPriceDelta}' /tmp/forensic.json
 
           echo "ROW_COUNT=$(jq '.rows|length' /tmp/forensic.json)"
           echo "CSV_LINES=$(wc -l < /tmp/forensic.csv)"
