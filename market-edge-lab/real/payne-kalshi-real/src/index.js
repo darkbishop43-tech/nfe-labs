@@ -1667,6 +1667,11 @@ export async function buildCockpitData(env, nowMs=Date.now()) {
     observations:{initial:selected,freshLock,preSubmit},
     clocks,
     comparison,
+    researchCounters:latestPersistent?.researchCounters||{
+      observationsCollected:0,contractsExamined:0,radarCount:0,lockCount:0,pullCount:0,wouldFireCount:0,rejectCount:0,
+      freshLockInvalidations:0,preSubmitInvalidations:0,windowMismatches:0,baselineActualMatches:0,baselineActualFills:0,
+      paynePaperMatches:0,unknownPaperComparisons:0,
+    },
     zeroMoneyPreview,
     management:managementView(control,positions),
     discovery:{
