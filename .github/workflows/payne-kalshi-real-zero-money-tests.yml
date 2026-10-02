@@ -1,0 +1,27 @@
+name: PAYNE-KALSHI REAL zero-money tests
+
+on:
+  push:
+    branches:
+      - market-edge-payne-kalshi-real-step1
+    paths:
+      - "market-edge-lab/real/payne-kalshi-real/**"
+      - ".github/workflows/payne-kalshi-real-zero-money-tests.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: market-edge-lab/real/payne-kalshi-real
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Run complete PAYNE zero-money test suite
+        run: npm test
