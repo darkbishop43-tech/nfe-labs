@@ -1317,6 +1317,17 @@ function forensicNumber(v){
   if(v===null||v===undefined||v==='') return null;
   const n=Number(v); return Number.isFinite(n)?n:null;
 }
+function forensicTimeMs(v){
+  if(v===null||v===undefined||v==='') return null;
+  if(typeof v==='number'&&Number.isFinite(v)) return v>1e12?v:v*1000;
+  if(typeof v==='string'&&/^\d+(?:\.\d+)?$/.test(v.trim())){
+    const n=Number(v); if(Number.isFinite(n)) return n>1e12?n:n*1000;
+  }
+  const ms=Date.parse(String(v)); return Number.isFinite(ms)?ms:null;
+}
+function forensicIsoTime(v){
+  const ms=forensicTimeMs(v); return Number.isFinite(ms)?new Date(ms).toISOString():null;
+}
 function forensicMedian(values){
   const a=values.map(forensicNumber).filter(Number.isFinite).sort((x,y)=>x-y);
   if(!a.length)return null;
@@ -1429,20 +1440,20 @@ async function buildWouldFireForensic(env,{checkpointLimit=59}={}){
   for(let index=0;index<analyzed.length;index++){
     const s=analyzed[index],sel=s.selected||{},z=s.zeroMoneyPreview||{},clock=s.clocks?.consistency||{},b=s.comparison?.baselineReal||{};
     const entryAt=clock.preSubmitAt||sel.preSubmitAt||s.at||null;
-    const entryMs=Date.parse(entryAt||'');
+    const entryMs=forensicTimeMs(entryAt);
     const deadlineMs=Number.isFinite(entryMs)?entryMs+PAYNE_CONFIG.maxHoldMs:null;
     const future=snapshots.filter(x=>{const ms=Date.parse(x?.at||'');return Number.isFinite(entryMs)&&Number.isFinite(ms)&&ms>entryMs&&ms<=entryMs+PAYNE_CONFIG.maxHoldMs+20_000;});
     let exitEvidence=null;
     for(const x of future){
       const cand=forensicCandidateAt(x,sel.ticker,sel.outcomeSide);
       if(!cand)continue;
-      const ms=Date.parse(x.at||'');
+      const ms=forensicTimeMs(x.at);
       if(forensicNumber(cand.score)!==null&&forensicNumber(cand.score)<=PAYNE_CONFIG.exitScore){
         exitEvidence={reason:'SCORE_EXIT',at:x.at,price:forensicNumber(cand.liveBid),score:forensicNumber(cand.score),timingDeltaMs:Number.isFinite(ms)&&Number.isFinite(deadlineMs)?ms-deadlineMs:null};break;
       }
     }
     if(!exitEvidence&&Number.isFinite(deadlineMs)){
-      const candidates=future.map(x=>({x,cand:forensicCandidateAt(x,sel.ticker,sel.outcomeSide),ms:Date.parse(x?.at||'')})).filter(y=>y.cand&&Number.isFinite(y.ms)&&Math.abs(y.ms-deadlineMs)<=15_000).sort((a,b)=>Math.abs(a.ms-deadlineMs)-Math.abs(b.ms-deadlineMs));
+      const candidates=future.map(x=>({x,cand:forensicCandidateAt(x,sel.ticker,sel.outcomeSide),ms:forensicTimeMs(x?.at)})).filter(y=>y.cand&&Number.isFinite(y.ms)&&Math.abs(y.ms-deadlineMs)<=15_000).sort((a,b)=>Math.abs(a.ms-deadlineMs)-Math.abs(b.ms-deadlineMs));
       if(candidates.length)exitEvidence={reason:'MAX_HOLD_EXIT',at:candidates[0].x.at,price:forensicNumber(candidates[0].cand.liveBid),score:forensicNumber(candidates[0].cand.score),timingDeltaMs:candidates[0].ms-deadlineMs};
     }
     const marketRead=marketMap.get(sel.ticker)||{},market=marketRead.market||{};
@@ -1454,7 +1465,7 @@ async function buildWouldFireForensic(env,{checkpointLimit=59}={}){
     const gross=Number.isFinite(entryPrice)&&Number.isFinite(exitPrice)&&Number.isFinite(count)?Number(((exitPrice-entryPrice)*count).toFixed(6)):null;
     const outcomeClassification=Number.isFinite(gross)?(gross>0?'PROFITABLE':gross<0?'UNPROFITABLE':'UNPROFITABLE'):(!marketResult?'UNRESOLVED':'NOT_ENOUGH_AUTHORITATIVE_EVIDENCE');
     const baselineClass=forensicBaselineClass(b);
-    const fillTime=b?.fillTime||null,fillMs=Date.parse(fillTime||'');
+    const fillTimeRaw=b?.fillTime??null,fillTime=forensicIsoTime(fillTimeRaw),fillMs=forensicTimeMs(fillTimeRaw);
     const delta=Number.isFinite(entryMs)&&Number.isFinite(fillMs)?fillMs-entryMs:null;
     const timing=delta===null?'UNKNOWN':Math.abs(delta)<=1000?'SAME_SECOND':delta>0?'PAYNE_EARLIER_THAN_BASELINE_FILL':'PAYNE_LATER_THAN_BASELINE_FILL';
     const enrich=baselineProviderEnrichment({...b,ticker:sel.ticker},providerHistory);
@@ -1478,7 +1489,7 @@ async function buildWouldFireForensic(env,{checkpointLimit=59}={}){
       exitFeeUsd:null,netHypotheticalPnlUsd:null,
       pnlReason:Number.isFinite(gross)?'PRE_FEE_ONLY_EXIT_FEE_NOT_AUTHORITATIVELY_RECONSTRUCTED':'FROZEN_LIFECYCLE_EXIT_PRICE_NOT_AUTHORITATIVELY_RECONSTRUCTED',
       baselineClass,baselineMatchingContract:b?.sawMatchingContract??'UNKNOWN',baselineAttempted:b?.attempted??'UNKNOWN',baselineAttemptStatus:b?.attemptStatus||null,
-      baselineFilled:b?.filled??'UNKNOWN',baselineSideSame:b?.sameDirection??'UNKNOWN',baselineEntryPrice:b?.entryPrice??null,baselineFillTime:fillTime,
+      baselineFilled:b?.filled??'UNKNOWN',baselineSideSame:b?.sameDirection??'UNKNOWN',baselineEntryPrice:b?.entryPrice??null,baselineFillTime:fillTime,baselineFillTimeRaw:fillTimeRaw,
       baselineFireTime:null,baselineFireTimeReason:'NOT_EXPOSED_BY_AUTHORITATIVE_SOURCE',baselineScore:b?.score??null,
       baselineFinalState:b?.finalResult||null,baselineExitReason:b?.exitReason||null,baselineClosedAt:b?.closedAt||null,
       baselineRealizedPnlUsd:enrich.realizedPnl,baselineRealizedPnlReason:enrich.realizedPnlReason,
@@ -1491,7 +1502,7 @@ async function buildWouldFireForensic(env,{checkpointLimit=59}={}){
     const b=s?.comparison?.baselineReal;
     if(b?.filled!==true)continue;
     const key=String(b.orderId||[s?.selected?.ticker,s?.selected?.outcomeSide,b.fillTime].join('|'));
-    if(!baselineUnique.has(key)) baselineUnique.set(key,{ticker:s?.selected?.ticker||null,outcomeSide:s?.selected?.outcomeSide||null,fillTime:b.fillTime||null,entryPrice:b.entryPrice??null,orderId:b.orderId||null});
+    if(!baselineUnique.has(key)) baselineUnique.set(key,{ticker:s?.selected?.ticker||null,outcomeSide:s?.selected?.outcomeSide||null,fillTime:forensicIsoTime(b.fillTime),fillTimeRaw:b.fillTime??null,entryPrice:b.entryPrice??null,orderId:b.orderId||null});
   }
   const fireKeys=new Set(rows.map(r=>[r.ticker,r.outcomeSide,r.marketClose].join('|')));
   const reverseBaselineView=[...baselineUnique.values()].map(x=>{
