@@ -51,8 +51,17 @@ function baselineService(body=baselineShadow(),status=200){
     async fetch(request){
       assert.equal(request.method,'GET');
       const url=new URL(request.url);
-      assert.equal(url.pathname,'/shadow-state');
-      return jsonResponse(body,status);
+      if(url.pathname==='/shadow-state') return jsonResponse(body,status);
+      if(url.pathname==='/execution-test-state') return jsonResponse({
+        ok:true,readOnly:true,mode:'EXECUTION_TEST_NOT_PRODUCTION_BASELINE',
+        state:{
+          status:'COMPLETE',seriesId:'BASELINE-SERIES-TEST',
+          attempts:[{attemptNo:1,status:'FILLED',asset:'BTC',ticker:'KXBTC15M-TEST',side:'YES',observedScore:.71,liveScore:.72,liveAsk:.50,orderId:'ORDER-1',fillCount:1}],
+          positions:[{id:'P1',attemptNo:1,status:'CLOSED',asset:'BTC',ticker:'KXBTC15M-TEST',side:'YES',direction:'UP',entryScore:.72,entryOrderId:'ORDER-1',filledCount:1,entryAverageFillPrice:.50,filledAt:'2026-10-02T06:05:15Z',exitReason:'MAX_HOLD_EXIT',closedAt:'2026-10-02T06:10:15Z'}],
+        },
+        safety:{maxEntryDebitUsd:1,maxConcurrent:3}
+      });
+      return jsonResponse({ok:false,error:'NOT_FOUND'},404);
     },
   };
 }
@@ -178,7 +187,7 @@ test('cockpit calculates authentic Payne fields, decisions, clocks, exact reread
     assert.equal(out.ok,true);
     assert.equal(out.authentication,'PROVEN');
     assert.equal(out.providerGets,12);
-    assert.equal(out.baselineReads,1);
+    assert.equal(out.baselineReads,2);
     assert.equal(out.providerWrites,0);
     assert.equal(out.orders,0);
     assert.equal(out.capitalMovedUsd,0);
@@ -217,6 +226,16 @@ test('cockpit calculates authentic Payne fields, decisions, clocks, exact reread
     assert.equal(out.clocks.consistency.kalshiWindowRemainingMs,10*60_000);
     assert.equal(out.clocks.consistency.kalshiLifecycleFraction,1/3);
     assert.equal(out.clocks.consistency.baselineToPayneObservationDeltaMs,30_000);
+    assert.equal(out.comparison.schema,'PAYNE_CROSS_SYSTEM_COMPARISON_V1');
+    assert.equal(out.comparison.payne.wouldFire,true);
+    assert.equal(out.comparison.baselineReal.lane,'EXECUTION_TEST_NOT_PRODUCTION_BASELINE');
+    assert.equal(out.comparison.baselineReal.sawMatchingContract,true);
+    assert.equal(out.comparison.baselineReal.attempted,true);
+    assert.equal(out.comparison.baselineReal.filled,true);
+    assert.equal(out.comparison.baselineReal.fillTime,'2026-10-02T06:05:15Z');
+    assert.equal(out.comparison.baselineReal.entryPrice,.50);
+    assert.equal(out.comparison.paynePaper.available,false);
+    assert.equal(out.comparison.paynePaper.reason,'READ_ONLY_AUTHORITATIVE_EVENT_SOURCE_NOT_EXPOSED_TO_PAYNE_KALSHI_REAL');
     assert.equal(out.zeroMoneyPreview.status,'FIRE_READY');
     assert.equal(out.zeroMoneyPreview.timeInForce,'immediate_or_cancel');
     assert.equal(out.zeroMoneyPreview.providerPost,'STEP1_PROVIDER_POST_HARD_DISABLED');
@@ -303,6 +322,14 @@ test('each scheduled scan updates current observation while history remains boun
     assert.equal(secondCurrent.source,'SCHEDULED_CRON');
     assert.ok(Array.isArray(secondCurrent.decisions));
     assert.ok(secondCurrent.decisions.length>=2);
+    assert.equal(secondCurrent.researchCounters.observationsCollected,2);
+    assert.ok(secondCurrent.researchCounters.contractsExamined>=4);
+    assert.ok(secondCurrent.researchCounters.wouldFireCount>=2);
+    assert.ok(secondCurrent.researchCounters.baselineActualMatches>=2);
+    assert.ok(secondCurrent.researchCounters.unknownPaperComparisons>=2);
+    const events=[...env.PAYNE_KALSHI_STATE.store.entries()].filter(([k])=>k.startsWith('payne-kalshi:event:')).map(([,v])=>JSON.parse(v));
+    assert.ok(events.some(e=>e.type==='OBSERVATION_DECISION_EVENT'&&e.eventClass==='WOULD_FIRE'));
+    assert.ok(events.some(e=>e.type==='OBSERVATION_DECISION_EVENT'&&e.eventClass==='REJECT'));
   } finally { io.restore(); }
 });
 
@@ -326,6 +353,9 @@ test('read-only export route returns current JSON and CSV evidence without autho
     assert.ok(Object.hasOwn(body.rows[0],'windowConsistency'));
     assert.ok(Object.hasOwn(body.rows[0],'baselineToPayneObservationDeltaMs'));
     assert.equal(body.rows[0].windowConsistency,true);
+    assert.ok(Object.hasOwn(body.rows[0],'baselineActualMatch'));
+    assert.ok(Object.hasOwn(body.rows[0],'baselineFilled'));
+    assert.ok(Object.hasOwn(body.rows[0],'paynePaperComparisonStatus'));
 
     const csv=await payneWorker.fetch(new Request('https://payne.test/export?range=current&format=csv'),env);
     assert.equal(csv.status,200);
