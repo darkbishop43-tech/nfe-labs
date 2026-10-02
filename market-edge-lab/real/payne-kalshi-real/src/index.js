@@ -789,7 +789,7 @@ export function payneDecisionEvidence(candidate, activeThreshold = PAYNE_CONFIG.
 function featureForCandidate(featureState, ticker, outcomeSide, asset, activeThreshold) {
   if (!featureState?.fresh) {
     return {
-      source:'BASELINE_REAL_SHADOW_READ_ONLY',
+      source:featureState?.source||'BASELINE_REAL_SERVICE_BINDING_READ_ONLY',
       available:false,
       move:null,fair:null,edge:null,score:null,
       state:'UNKNOWN',
@@ -807,7 +807,7 @@ function featureForCandidate(featureState, ticker, outcomeSide, asset, activeThr
   const has=(key)=>row?.[key]!==null && row?.[key]!==undefined && Number.isFinite(Number(row[key]));
   if (!row || !['move','fair','edge','score'].every(has)) {
     return {
-      source:'BASELINE_REAL_SHADOW_READ_ONLY',
+      source:featureState?.source||'BASELINE_REAL_SERVICE_BINDING_READ_ONLY',
       available:false,
       move:null,fair:null,edge:null,score:null,
       state:'UNKNOWN',
@@ -821,7 +821,7 @@ function featureForCandidate(featureState, ticker, outcomeSide, asset, activeThr
   const move=Number(row.move), fair=Number(row.fair), edge=Number(row.edge), score=Number(row.score);
   const gate=payneStage({move,fair,edge,score},activeThreshold);
   return {
-    source:'BASELINE_REAL_SHADOW_READ_ONLY',
+    source:featureState?.source||'BASELINE_REAL_SERVICE_BINDING_READ_ONLY',
     available:true,
     move,fair,edge,score,
     state:gate.pullTrigger?'PULL_TRIGGER':gate.lockIn?'LOCK_IN':gate.radar?'RADAR':'NOT_QUALIFIED',
@@ -1126,7 +1126,7 @@ export async function buildCockpitData(env, nowMs=Date.now()) {
 
   const index3=providerIndex3Evidence(balance.body);
   const payne=selected?.payne||{
-    source:'BASELINE_REAL_SHADOW_READ_ONLY',
+    source:featureState?.source||'BASELINE_REAL_SERVICE_BINDING_READ_ONLY',
     available:false,
     move:null,fair:null,edge:null,score:null,
     state:'UNKNOWN',
