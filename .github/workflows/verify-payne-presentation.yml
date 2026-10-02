@@ -1,0 +1,109 @@
+name: Verify PAYNE final presentation
+
+on:
+  push:
+    branches:
+      - market-edge-payne-kalshi-real-step1
+    paths:
+      - ".github/workflows/verify-payne-presentation.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify live cockpit presentation and zero-money state
+        shell: bash
+        run: |
+          set -euo pipefail
+          base='https://market-edge-payne-kalshi-real.darkbishop43.workers.dev'
+
+          curl -fsS "$base/" -o /tmp/cockpit.html
+          curl -fsS "$base/cockpit-data" -o /tmp/cockpit.json
+          curl -fsS "$base/evidence/latest" -o /tmp/latest.json
+
+          grep -q 'NFE-OS MASTER CLOCKS' /tmp/cockpit.html
+          grep -q 'masterKalshiRemaining' /tmp/cockpit.html
+          grep -q 'masterBaselineRemaining' /tmp/cockpit.html
+          grep -q 'masterPayneAge' /tmp/cockpit.html
+          grep -q 'masterScan' /tmp/cockpit.html
+          grep -q 'AUTO SCAN ACTIVE' /tmp/cockpit.html
+          grep -q 'next cron time not fabricated' /tmp/cockpit.html
+          grep -q 'CYCLE CLOCKS' /tmp/cockpit.html
+          grep -q 'CURRENT KALSHI 15-MINUTE UNIVERSE' /tmp/cockpit.html
+          grep -q 'REMAINING' /tmp/cockpit.html
+          grep -q "BTC:'₿'" /tmp/cockpit.html
+          grep -q "ETH:'Ξ'" /tmp/cockpit.html
+          grep -q "SOL:'≋'" /tmp/cockpit.html
+          grep -q "XRP:'✕'" /tmp/cockpit.html
+          grep -q "HYPE:'HY'" /tmp/cockpit.html
+          grep -q "ZEC:'ⓩ'" /tmp/cockpit.html
+          grep -q "DOGE:'Ð'" /tmp/cockpit.html
+          grep -q "BNB:'◈'" /tmp/cockpit.html
+          grep -q "NEAR:'Ⓝ'" /tmp/cockpit.html
+          grep -q 'UNAVAILABLE' /tmp/cockpit.html
+          grep -q "v!==null&&v!==undefined" /tmp/cockpit.html
+
+          jq -e '
+            .providerWrites == 0 and
+            .orders == 0 and
+            .capitalMovedUsd == 0 and
+            .safety.providerPost == "HELD / HARD DISABLED" and
+            .safety.realExecution == "DISABLED" and
+            .safety.fundingAuthority == "DISABLED" and
+            .safety.secondIoc == "HOLD" and
+            .automaticScan.enabled == true and
+            .automaticScan.cadenceMs == 60000 and
+            .clocks.kalshi.currentWindowClose != null and
+            .clocks.kalshi.nextResetAt == .clocks.kalshi.currentWindowClose and
+            .clocks.baseline.nextObservationAt == null and
+            .clocks.baseline.nextObservationReason == "NOT_EXPOSED_BY_AUTHORITATIVE_SOURCE"
+          ' /tmp/cockpit.json >/dev/null
+
+          jq -e '
+            .source == "SCHEDULED_CRON" and
+            .providerWrites == 0 and
+            .orders == 0 and
+            .capitalMovedUsd == 0
+          ' /tmp/latest.json >/dev/null
+
+          fresh=$(jq -r '.featureProvenance.fresh' /tmp/cockpit.json)
+          reason=$(jq -r '.featureProvenance.error // "NONE"' /tmp/cockpit.json)
+          age=$(jq -r '.featureProvenance.ageMs // .payne.sourceAgeMs // "UNKNOWN"' /tmp/cockpit.json)
+          bclose=$(jq -r '.clocks.baseline.currentWindowClose // "UNKNOWN"' /tmp/cockpit.json)
+          kclose=$(jq -r '.clocks.kalshi.currentWindowClose // "UNKNOWN"' /tmp/cockpit.json)
+          pat=$(jq -r '.clocks.payne.observationAt // "UNKNOWN"' /tmp/cockpit.json)
+          frac=$(jq -r '.clocks.consistency.kalshiLifecycleFraction // "UNKNOWN"' /tmp/cockpit.json)
+
+          echo 'MASTER_CLOCK_STRIP=PASS'
+          echo 'KALSHI_TIMER_PRESENTATION=PASS'
+          echo "KALSHI_RESET=$kclose"
+          echo "BASELINE_FRESH=$fresh"
+          echo "BASELINE_REASON=$reason"
+          echo "BASELINE_AGE_MS=$age"
+          echo "BASELINE_WINDOW_CLOSE=$bclose"
+          echo "PAYNE_OBSERVED_AT=$pat"
+          echo "PAYNE_WINDOW_FRACTION=$frac"
+          echo 'SCAN_PRESENTATION=AUTO_SCAN_ACTIVE_60_SEC'
+          echo 'FABRICATED_CRON_TIMESTAMP=NO'
+          echo 'FABRICATED_BASELINE_NEXT_OBSERVATION=NO'
+          echo 'UNAVAILABLE_VS_ZERO_PRESENTATION=PASS'
+          echo 'BTC_ICON=PASS'
+          echo 'ETH_ICON=PASS'
+          echo 'SOL_ICON=PASS'
+          echo 'XRP_ICON=PASS'
+          echo 'HYPE_ICON=PASS'
+          echo 'ZEC_ICON=PASS'
+          echo 'DOGE_ICON=PASS'
+          echo 'BNB_ICON=PASS'
+          echo 'NEAR_ICON=PASS'
+          echo 'INDIVIDUAL_REMAINING_PRESENTATION=PASS'
+          echo 'DETAILED_CYCLE_CLOCKS=PASS'
+          echo "LATEST_SCAN_SOURCE=$(jq -r '.source' /tmp/latest.json)"
+          echo "LATEST_OBSERVATION_AT=$(jq -r '.at' /tmp/latest.json)"
+          echo 'providerWrites=0'
+          echo 'orders=0'
+          echo 'capitalMovedUsd=0'
