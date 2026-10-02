@@ -1,5 +1,7 @@
 name: Verify PAYNE final presentation
 
+# Fresh-side read-only sample trigger
+
 on:
   push:
     branches:
