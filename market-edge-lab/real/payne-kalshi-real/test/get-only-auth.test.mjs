@@ -111,3 +111,37 @@ test('proof failure suppresses secret material', async () => {
   assert.equal(text.includes(env.KALSHI_EXECUTION_KEY_ID),false);
   assert.equal(text.includes(env.KALSHI_EXECUTION_PRIVATE_KEY),false);
 });
+
+
+test('provider response failure exposes only safe response forensic evidence', async () => {
+  const env = await testEnv();
+  const responseBody = {
+    error: {
+      code:'unauthorized',
+      message:'request rejected for credential ABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890'
+    }
+  };
+  const fetchImpl = async (url, options) => ({
+    ok:false,
+    status:401,
+    headers:{get:(name)=>name.toLowerCase()==='content-type'?'application/json':null},
+    json:async()=>responseBody,
+  });
+  const out = await kalshiReadOnlyProof(env, fetchImpl);
+  const text = JSON.stringify(out);
+  assert.equal(out.ok,false);
+  assert.equal(out.authentication,'NOT_PROVEN');
+  assert.equal(out.authenticatedGet,'NOT_PROVEN');
+  assert.equal(out.providerGets,1);
+  assert.equal(out.failureStage,'RESPONSE');
+  assert.equal(out.httpStatus,401);
+  assert.equal(out.requestMethod,'GET');
+  assert.equal(out.requestedPath,'/trade-api/v2/portfolio/balance');
+  assert.equal(out.responseContentType,'application/json');
+  assert.equal(out.providerResponseCategory,'AUTHENTICATION');
+  assert.equal(out.providerErrorCode,'unauthorized');
+  assert.equal(out.providerErrorMessage.includes('[REDACTED]'),true);
+  assert.equal(out.secretsExposed,false);
+  assert.equal(text.includes(env.KALSHI_EXECUTION_KEY_ID),false);
+  assert.equal(text.includes(env.KALSHI_EXECUTION_PRIVATE_KEY),false);
+});
