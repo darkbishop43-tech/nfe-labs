@@ -1,5 +1,7 @@
 name: Verify PAYNE would-fire forensic
 
+# Final economic-price verification trigger
+
 # Timing-normalization verification trigger
 
 on:
