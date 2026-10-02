@@ -356,6 +356,9 @@ test('read-only export route returns current JSON and CSV evidence without autho
     assert.ok(Object.hasOwn(body.rows[0],'baselineActualMatch'));
     assert.ok(Object.hasOwn(body.rows[0],'baselineFilled'));
     assert.ok(Object.hasOwn(body.rows[0],'paynePaperComparisonStatus'));
+    assert.ok(Number.isInteger(body.eventCount));
+    assert.ok(Array.isArray(body.events));
+    assert.ok(body.events.some(e=>e.type==='OBSERVATION_DECISION_EVENT'));
 
     const csv=await payneWorker.fetch(new Request('https://payne.test/export?range=current&format=csv'),env);
     assert.equal(csv.status,200);
@@ -363,6 +366,23 @@ test('read-only export route returns current JSON and CSV evidence without autho
     const text=await csv.text();
     assert.match(text,/observationAt,scanSource,asset,direction,outcomeSide,ticker/);
     assert.match(text,/KXBTC15M-TEST/);
+  } finally { io.restore(); }
+});
+
+test('research event ledger route exposes durable observation decision events',async()=>{
+  const env=await authEnv();
+  const io=installKalshiFetch();
+  try{
+    await runReadOnlyScan(env,'SCHEDULED_CRON',Date.parse('2026-10-02T06:05:00Z'));
+    const response=await payneWorker.fetch(new Request('https://payne.test/evidence/events?limit=100'),env);
+    assert.equal(response.status,200);
+    const body=await response.json();
+    assert.equal(body.schema,'PAYNE_RESEARCH_EVENT_LEDGER_V1');
+    assert.equal(body.providerWrites,0);
+    assert.equal(body.orders,0);
+    assert.equal(body.capitalMovedUsd,0);
+    assert.ok(body.count>0);
+    assert.ok(body.events.some(e=>e.type==='OBSERVATION_DECISION_EVENT'));
   } finally { io.restore(); }
 });
 
