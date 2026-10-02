@@ -2350,3 +2350,123 @@ It DOES block authoritative live PAYNE ↔ Payne Paper event comparison until a 
 - Baseline deployments = 0
 - Payne Paper changes = 0
 
+
+
+---
+
+# OCTOBER 2, 2026 — FINAL COCKPIT PRESENTATION STANDARD
+
+## Scope
+
+This is presentation-only polish.
+
+No observer, strategy, threshold, scheduler, persistence, comparison, Baseline, or execution semantics are changed.
+
+## Above-the-fold master clocks
+
+The cockpit mirrors existing authoritative timing evidence into a compact:
+
+`NFE-OS MASTER CLOCKS`
+
+strip directly below the live-read status.
+
+It contains:
+
+- KALSHI WINDOW
+- BASELINE
+- PAYNE
+- SCAN
+
+### KALSHI
+
+Uses the existing provider-authoritative window close/reset timestamp.
+
+The visible countdown is reconstructed as:
+
+`authoritative close timestamp - browser current time`
+
+It is presentation only and is never persisted as market truth.
+
+### BASELINE
+
+When the authoritative Baseline feature/window evidence is fresh:
+
+- remaining time is displayed
+- current observation age is displayed
+- authoritative reset/window close is displayed
+
+When Baseline evidence is stale:
+
+- display `STALE`
+- display the real observation age
+- display the authoritative stale reason
+- do not manufacture a window countdown when no matched authoritative window is available
+
+The existing freshness gate remains unchanged.
+
+### PAYNE
+
+Displays:
+
+- PAYNE observation age
+- authoritative current-window lifecycle position where exposed
+
+### SCAN
+
+Displays:
+
+- `AUTO SCAN ACTIVE` or paused state
+- `60 SEC CADENCE`
+
+No future cron execution timestamp is fabricated.
+
+The presentation explicitly preserves:
+
+`scheduler cadence ≠ market clock`
+
+## Unavailable feature presentation
+
+The numeric cockpit formatter now distinguishes missing values from numeric zero.
+
+Null / undefined / unavailable feature evidence does not render as:
+
+`0.000000`
+`0.0000`
+`0.00`
+
+When PAYNE feature evidence is unavailable because the authoritative Baseline source is stale/unavailable, the feature panel shows:
+
+`UNAVAILABLE`
+
+while the existing state/reason remains authoritative.
+
+Actual numeric zero remains displayable when the source truly supplies a numeric zero.
+
+No classification or feature-calculation logic is changed.
+
+## Compact token identifiers
+
+The existing 28px circular token treatment is preserved.
+
+Local inline presentation marks are used with no external dependency:
+
+- BTC → `₿`
+- ETH → `Ξ`
+- SOL → `≋`
+- XRP → `✕`
+- HYPE → `HY`
+- ZEC → `ⓩ`
+- DOGE → `Ð`
+- BNB → `◈`
+- NEAR → `Ⓝ`
+
+These identifiers are presentation only.
+
+Asset mapping and market semantics remain unchanged.
+
+## Stop rule
+
+After this presentation change is live-validated, cockpit presentation work stops.
+
+PAYNE remains unattended so the zero-money research dataset can continue accumulating.
+
