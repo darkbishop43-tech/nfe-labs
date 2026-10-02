@@ -1,0 +1,66 @@
+name: Verify PAYNE would-fire forensic
+
+on:
+  push:
+    branches:
+      - market-edge-payne-kalshi-real-step1
+    paths:
+      - ".github/workflows/verify-payne-would-fire-forensic.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fetch authoritative checkpoint forensic read-only
+        shell: bash
+        run: |
+          set -euo pipefail
+          base='https://market-edge-payne-kalshi-real.darkbishop43.workers.dev'
+          curl -fsS "$base/forensic/would-fire?checkpoint=59&format=json" -o /tmp/forensic.json
+          curl -fsS "$base/forensic/would-fire?checkpoint=59&format=csv" -o /tmp/forensic.csv
+
+          jq -e '
+            .ok == true and
+            .schema == "PAYNE_WOULD_FIRE_FORENSIC_V1" and
+            .safety.providerWrites == 0 and
+            .safety.orders == 0 and
+            .safety.capitalMovedUsd == 0 and
+            .safety.baselineWrites == 0 and
+            .safety.baselineDeployments == 0 and
+            .safety.realExecution == "DISABLED" and
+            .safety.fundingAuthority == "DISABLED" and
+            .safety.secondIoc == "HOLD" and
+            (.rows | type == "array") and
+            (.summary.totalWouldFireAnalyzed == (.rows|length))
+          ' /tmp/forensic.json >/dev/null
+
+          grep -q '^eventId,payneObservationAt,payneWouldFireAt' /tmp/forensic.csv
+
+          echo 'CHECKPOINT='
+          jq '.checkpoint' /tmp/forensic.json
+          echo 'SUMMARY='
+          jq '.summary' /tmp/forensic.json
+          echo 'SCORE_BUCKETS='
+          jq '.buckets.score' /tmp/forensic.json
+          echo 'ENTRY_BUCKETS='
+          jq '.buckets.entryPrice' /tmp/forensic.json
+          echo 'TIME_BUCKETS='
+          jq '.buckets.timeRemaining' /tmp/forensic.json
+          echo 'ASSET_BUCKETS='
+          jq '.buckets.asset' /tmp/forensic.json
+          echo 'DIRECTION_BUCKETS='
+          jq '.buckets.direction' /tmp/forensic.json
+          echo 'REVERSE_BASELINE='
+          jq '.reverseBaselineView' /tmp/forensic.json
+          echo 'LIMITATIONS='
+          jq '.limitations' /tmp/forensic.json
+
+          echo "ROW_COUNT=$(jq '.rows|length' /tmp/forensic.json)"
+          echo "CSV_LINES=$(wc -l < /tmp/forensic.csv)"
+          echo "providerWrites=$(jq '.safety.providerWrites' /tmp/forensic.json)"
+          echo "orders=$(jq '.safety.orders' /tmp/forensic.json)"
+          echo "capitalMovedUsd=$(jq '.safety.capitalMovedUsd' /tmp/forensic.json)"
