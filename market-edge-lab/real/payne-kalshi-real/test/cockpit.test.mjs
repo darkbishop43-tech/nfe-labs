@@ -208,6 +208,15 @@ test('cockpit calculates authentic Payne fields, decisions, clocks, exact reread
     assert.equal(out.clocks.baseline.currentWindowClose,'2026-10-02T06:15:00Z');
     assert.equal(out.clocks.baseline.nextObservationAt,null);
     assert.equal(out.clocks.baseline.nextObservationReason,'NOT_EXPOSED_BY_AUTHORITATIVE_SOURCE');
+    assert.equal(out.clocks.payne.observationAt,'2026-10-02T06:05:00.000Z');
+    assert.equal(out.clocks.payne.associatedKalshiTicker,'KXBTC15M-TEST');
+    assert.equal(out.clocks.consistency.standard,'NFE_OS_UNIVERSAL_MARKET_CLOCK_V1');
+    assert.equal(out.clocks.consistency.windowConsistency,true);
+    assert.equal(out.clocks.consistency.diagnostic,'WINDOW_CONSISTENT');
+    assert.equal(out.clocks.consistency.kalshiWindowElapsedMs,5*60_000);
+    assert.equal(out.clocks.consistency.kalshiWindowRemainingMs,10*60_000);
+    assert.equal(out.clocks.consistency.kalshiLifecycleFraction,1/3);
+    assert.equal(out.clocks.consistency.baselineToPayneObservationDeltaMs,30_000);
     assert.equal(out.zeroMoneyPreview.status,'FIRE_READY');
     assert.equal(out.zeroMoneyPreview.timeInForce,'immediate_or_cancel');
     assert.equal(out.zeroMoneyPreview.providerPost,'STEP1_PROVIDER_POST_HARD_DISABLED');
@@ -230,6 +239,27 @@ test('stale Baseline feature observation stays UNKNOWN and cannot produce FIRE p
     assert.equal(out.pipeline.finalDecision,'FEATURES_UNAVAILABLE');
     assert.equal(out.zeroMoneyPreview.status,'NOT_REACHED');
     assert.equal(out.providerWrites,0);
+  } finally { io.restore(); }
+});
+
+test('window mismatch is recorded truthfully and blocks zero-money FIRE preview',async()=>{
+  const mismatch=baselineShadow({
+    opportunities:[
+      {marketTicker:'KXBTC15M-TEST',outcomeSide:'YES',direction:'UP',asset:'BTC',move:.003,fair:.554,edge:.054,score:.716,openTime:'2026-10-02T06:00:00Z',closeTime:'2026-10-02T06:30:00Z',durationMs:1800000,horizon:'30m'},
+    ],
+  });
+  const env=await authEnv(mismatch);
+  const io=installKalshiFetch();
+  try{
+    const out=await buildCockpitData(env,Date.parse('2026-10-02T06:05:00Z'));
+    assert.equal(out.clocks.consistency.windowConsistency,false);
+    assert.equal(out.clocks.consistency.diagnostic,'WINDOW_MISMATCH');
+    assert.equal(out.pipeline.finalDecision,'WINDOW_MISMATCH');
+    assert.equal(out.zeroMoneyPreview.status,'BLOCKED');
+    assert.equal(out.zeroMoneyPreview.reason,'WINDOW_MISMATCH');
+    assert.equal(out.providerWrites,0);
+    assert.equal(out.orders,0);
+    assert.equal(out.capitalMovedUsd,0);
   } finally { io.restore(); }
 });
 
@@ -293,6 +323,9 @@ test('read-only export route returns current JSON and CSV evidence without autho
     assert.equal(body.rows[0].providerWrites,0);
     assert.ok(Object.hasOwn(body.rows[0],'fair'));
     assert.ok(Object.hasOwn(body.rows[0],'contractCloseTime'));
+    assert.ok(Object.hasOwn(body.rows[0],'windowConsistency'));
+    assert.ok(Object.hasOwn(body.rows[0],'baselineToPayneObservationDeltaMs'));
+    assert.equal(body.rows[0].windowConsistency,true);
 
     const csv=await payneWorker.fetch(new Request('https://payne.test/export?range=current&format=csv'),env);
     assert.equal(csv.status,200);
@@ -314,6 +347,12 @@ test('cockpit HTML exposes clocks, decision evidence, automatic refresh, and no 
   assert.match(html,/CURRENT KALSHI 15-MINUTE UNIVERSE/);
   assert.match(html,/PAYNE FEATURE EVIDENCE/);
   assert.match(html,/CYCLE CLOCKS/);
+  assert.match(html,/KALSHI WINDOW/);
+  assert.match(html,/BASELINE WINDOW/);
+  assert.match(html,/PAYNE OBSERVATION/);
+  assert.match(html,/WINDOW CONSISTENCY/);
+  assert.match(html,/WINDOW POSITION/);
+  assert.match(html,/setInterval\(tickAuthoritativeClocks,1000\)/);
   assert.match(html,/DECISION EVIDENCE/);
   assert.match(html,/Qualification reason/);
   assert.match(html,/Final scan decision/);
