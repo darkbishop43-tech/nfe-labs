@@ -1338,6 +1338,31 @@ function exportRangeBounds(range, url, nowMs=Date.now()) {
   throw new Error('EXPORT_RANGE_NOT_ALLOWED');
 }
 
+async function listResearchEvents(env, bounds=null, limit=500) {
+  const kv=binding(env);
+  if (typeof kv.list!=='function') throw new Error('PAYNE_KALSHI_STATE_LIST_UNAVAILABLE');
+  const out=[];
+  let cursor=undefined,complete=false;
+  while(!complete && out.length<limit){
+    const page=await kv.list({prefix:EVENT_PREFIX,limit:1000,...(cursor?{cursor}:{})});
+    for(const item of page?.keys||[]){
+      const value=await kvGetJson(env,item.name);
+      if(!value) continue;
+      const atMs=Date.parse(value?.at||'');
+      const inRange=!bounds || bounds.range==='current' || (
+        Number.isFinite(atMs) &&
+        (bounds.fromMs===null||atMs>=bounds.fromMs) &&
+        (bounds.toMs===null||atMs<=bounds.toMs)
+      );
+      if(inRange && ['OBSERVATION_DECISION_EVENT','ZERO_MONEY_FIRE_PLAN_RECORDED','PAYNE_STATE_TRANSITION'].includes(String(value?.type||''))) out.push(value);
+      if(out.length>=limit) break;
+    }
+    complete=page?.list_complete===true || !page?.cursor;
+    cursor=page?.cursor;
+  }
+  return out.sort((a,b)=>Date.parse(a?.at||0)-Date.parse(b?.at||0));
+}
+
 async function listExportSnapshots(env, bounds) {
   const current=await kvGetJson(env,CURRENT_KEY);
   if (bounds.range==='current') return current?[current]:[];
@@ -1453,6 +1478,7 @@ async function buildExportResponse(env, url, nowMs=Date.now()) {
   if (!['json','csv'].includes(format)) throw new Error('EXPORT_FORMAT_NOT_ALLOWED');
   const snapshots=await listExportSnapshots(env,bounds);
   const rows=exportRowsFromSnapshots(snapshots);
+  const events=format==='json'?await listResearchEvents(env,bounds,1000):[];
   const stamp=new Date(nowMs).toISOString().replace(/[:.]/g,'-');
   const filename='payne-kalshi-'+bounds.range+'-'+stamp+'.'+format;
   const common={'cache-control':'no-store','content-disposition':'attachment; filename="'+filename+'"'};
@@ -1465,9 +1491,11 @@ async function buildExportResponse(env, url, nowMs=Date.now()) {
     to:bounds.toMs===null?null:new Date(bounds.toMs).toISOString(),
     observationCount:snapshots.length,
     rowCount:rows.length,
+    eventCount:events.length,
     providerWrites:0,orders:0,capitalMovedUsd:0,
     fields:EXPORT_ROW_FIELDS,
     rows,
+    events,
   },null,2),{headers:{...common,'content-type':'application/json; charset=utf-8'}});
 }
 
@@ -1772,6 +1800,12 @@ export default {
       catch (error) { return Response.json({ok:false,error:String(error?.message||'EXPORT_FAILED'),providerWrites:0,orders:0,capitalMovedUsd:0},{status:400,headers:{'cache-control':'no-store'}}); }
     }
     if (url.pathname === '/evidence/latest') return Response.json((await kvGetJson(env,CURRENT_KEY))||{ok:false,state:'NO_PERSISTED_OBSERVATION_YET'});
+    if (url.pathname === '/evidence/events') {
+      const requested=Number(url.searchParams.get('limit')||200);
+      const limit=Math.max(1,Math.min(1000,Number.isFinite(requested)?Math.trunc(requested):200));
+      const events=await listResearchEvents(env,null,limit);
+      return Response.json({ok:true,schema:'PAYNE_RESEARCH_EVENT_LEDGER_V1',count:events.length,events,providerWrites:0,orders:0,capitalMovedUsd:0},{headers:{'cache-control':'no-store'}});
+    }
     if (url.pathname === '/proof') {
       const provider = await kalshiReadOnlyProof(env);
       return Response.json({
