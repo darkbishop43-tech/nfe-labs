@@ -1,0 +1,47 @@
+name: Verify PAYNE live zero-money observer
+
+on:
+  push:
+    branches:
+      - market-edge-payne-kalshi-real-step1
+    paths:
+      - ".github/workflows/verify-payne-live-zero-money.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Read live PAYNE evidence only
+        shell: bash
+        run: |
+          set -euo pipefail
+          base='https://market-edge-payne-kalshi-real.darkbishop43.workers.dev'
+          curl -fsS "$base/status" -o /tmp/status.json
+          curl -fsS "$base/cockpit-data" -o /tmp/cockpit.json
+          curl -fsS "$base/evidence/latest" -o /tmp/latest.json || true
+          curl -fsS "$base/export?range=current&format=json" -o /tmp/export.json || true
+
+          echo 'STATUS_SAFE='
+          jq '{mode,providerWrites,providerWriteAuthority,realExecution,fundingAuthority,secondIoc}' /tmp/status.json
+
+          echo 'COCKPIT_SAFE='
+          jq '{
+            ok,authentication,providerGets,baselineReads,providerWrites,orders,capitalMovedUsd,
+            safety,
+            featureProvenance,
+            payne:{source:.payne.source,available:.payne.available,move:.payne.move,fair:.payne.fair,edge:.payne.edge,score:.payne.score,state:.payne.state,reason:.payne.reason},
+            selected:{asset:.selected.asset,ticker:.selected.ticker,direction:.selected.direction,outcomeSide:.selected.outcomeSide,openTime:.selected.openTime,closeTime:.selected.closeTime},
+            clocks,
+            comparison,
+            researchCounters
+          }' /tmp/cockpit.json
+
+          echo 'LATEST_SAFE='
+          jq '{schema,at,source,providerGets,providerWrites,orders,capitalMovedUsd,selected,pipeline,clocks,comparison,researchCounters}' /tmp/latest.json 2>/dev/null || cat /tmp/latest.json
+
+          echo 'EXPORT_SAFE='
+          jq '{schema,exportedAt,range,observationCount,rowCount,providerWrites,orders,capitalMovedUsd,fields}' /tmp/export.json 2>/dev/null || cat /tmp/export.json
