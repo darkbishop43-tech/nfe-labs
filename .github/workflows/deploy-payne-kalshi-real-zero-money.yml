@@ -1,5 +1,7 @@
 name: Deploy PAYNE-KALSHI REAL zero-money observer
 
+# Presentation-only redeploy trigger: final master clock / icon polish
+
 on:
   push:
     branches:
