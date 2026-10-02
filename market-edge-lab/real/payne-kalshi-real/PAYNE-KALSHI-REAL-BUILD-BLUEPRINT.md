@@ -2470,3 +2470,219 @@ After this presentation change is live-validated, cockpit presentation work stop
 
 PAYNE remains unattended so the zero-money research dataset can continue accumulating.
 
+
+
+---
+
+# OCTOBER 2, 2026 — PAYNE WOULD-FIRE FORENSIC STANDARD
+
+## Mission boundary
+
+This mission is forensic only.
+
+It does not authorize:
+
+- strategy tuning
+- threshold changes
+- score-formula changes
+- fair/edge changes
+- time-gate changes
+- Fresh LOCK changes
+- pre-submit changes
+- stake/run/concurrency changes
+- provider POST
+- real execution
+- Baseline writes or deployments
+
+## Primary forensic source
+
+Authoritative PAYNE WOULD-FIRE rows are reconstructed from persisted PAYNE scan-history snapshots whose:
+
+`zeroMoneyPreview.status === FIRE_READY`
+
+This is stronger than trusting only the cumulative counter because every FIRE-ready scan is already forced into history.
+
+The historical snapshot preserves, where available:
+
+- PAYNE observation time
+- exact ticker
+- asset / direction / outcome side
+- authoritative market open / close
+- time remaining
+- lifecycle fraction
+- MOVE / FAIR / EDGE / SCORE
+- initial price
+- Fresh LOCK price / timestamp
+- pre-submit price / timestamp
+- window consistency
+- final qualification chain
+- zero-money sizing evidence
+- per-event Baseline comparison evidence
+
+Stable forensic identity uses the checkpoint row number plus:
+
+`pre-submit timestamp + exact ticker + side`
+
+## Checkpoint rule
+
+The route defaults to:
+
+`checkpoint=59`
+
+It analyzes the first 59 persisted FIRE_READY snapshots chronologically when at least 59 exist.
+
+It also reports the newer authoritative total so the Founder can distinguish:
+
+- the preserved 59-event checkpoint
+- any later events accumulated after that checkpoint
+
+No count is hard-coded as the live total.
+
+## Outcome truth
+
+Each analyzed exact ticker is queried read-only from Kalshi.
+
+Directional classification is:
+
+- DIRECTIONALLY_CORRECT
+- DIRECTIONALLY_WRONG
+- UNRESOLVED
+
+based only on authoritative final market result/settlement evidence where exposed.
+
+Directional correctness is kept separate from financial profitability.
+
+## Frozen PAYNE lifecycle P/L
+
+Frozen lifecycle remains:
+
+- SCORE EXIT at score <= .20
+- MAX HOLD at 5 minutes
+- same ticker / same outcome side
+- reduce-only exit semantics
+
+Hypothetical P/L is reconstructed only when persisted same-ticker/side evidence provides an attributable exit bid:
+
+1. first subsequent SCORE_EXIT observation; otherwise
+2. a same-ticker/side observation within 15 seconds of the exact 5-minute deadline.
+
+If that evidence does not exist:
+
+`HYPOTHETICAL_PNL = UNKNOWN`
+
+No settlement payout is substituted for the frozen 5-minute lifecycle.
+
+When an exit price is reconstructable:
+
+`gross / pre-fee P&L = (exit bid - pre-submit entry price) × PAYNE count`
+
+The existing PAYNE fee-safe sizing entry-fee estimate is preserved when present.
+
+Net P/L remains UNKNOWN unless an attributable hypothetical exit fee can be reconstructed.
+
+No exit fee is fabricated.
+
+## Baseline overlap attribution
+
+The primary Baseline overlap source is the exact persisted comparison attached to the same PAYNE snapshot.
+
+This preserves what PAYNE could authoritatively read at the time:
+
+- exact matching contract
+- attempted
+- attempt status
+- filled
+- fill time
+- actual entry price
+- Baseline score
+- final state / exit reason where exposed
+
+Classification:
+
+- PAYNE_FIRED_BASELINE_FILLED
+- PAYNE_FIRED_BASELINE_NO_FILL
+- PAYNE_FIRED_BASELINE_ATTEMPTED_OTHER_STATE
+- PAYNE_FIRED_BASELINE_DID_NOT_ATTEMPT
+- PAYNE_FIRED_BASELINE_MATCH_UNKNOWN
+
+Baseline FIRE/submission time remains:
+
+`NOT_EXPOSED_BY_AUTHORITATIVE_SOURCE`
+
+Baseline fill time remains separately labeled.
+
+## Current Baseline read-only enrichment
+
+PAYNE may additionally GET through the existing Baseline service binding:
+
+- `/execution-test-state`
+- `/execution-test-nofill-forensic`
+- `/forensic-provider-history`
+
+These are enrichment only.
+
+Account-wide provider history is never silently treated as proof that a row was a Baseline trade.
+
+Exact persisted per-event attribution remains primary.
+
+## Descriptive buckets
+
+The forensic JSON includes descriptive summaries only:
+
+SCORE:
+
+- .70-.74
+- .75-.79
+- .80-.84
+- .85+
+
+ENTRY PRICE:
+
+- <.50
+- .50-.69
+- .70-.84
+- .85+
+
+TIME REMAINING:
+
+- 6.5-8m
+- 8-10m
+- 10m+
+
+plus:
+
+- asset
+- direction
+
+No bucket result authorizes tuning.
+
+## Read-only routes
+
+JSON:
+
+`GET /forensic/would-fire?checkpoint=59&format=json`
+
+CSV:
+
+`GET /forensic/would-fire?checkpoint=59&format=csv`
+
+Schema:
+
+`PAYNE_WOULD_FIRE_FORENSIC_V1`
+
+No forensic POST route exists.
+
+## Safety
+
+The forensic response reports:
+
+- providerWrites = 0
+- orders = 0
+- capitalMovedUsd = 0
+- provider POST = HELD / HARD DISABLED
+- real execution = DISABLED
+- funding authority = DISABLED
+- Second IOC = HOLD
+- Baseline writes = 0
+- Baseline deployments = 0
+
