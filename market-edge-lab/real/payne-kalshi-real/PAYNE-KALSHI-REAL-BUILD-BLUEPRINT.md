@@ -1834,3 +1834,26 @@ and:
 
 `presentation countdown ≠ authoritative time state`
 
+
+
+## Clock-standard validation workflow
+
+A project-scoped GitHub Actions workflow is present at:
+
+`.github/workflows/payne-kalshi-real-zero-money-tests.yml`
+
+Purpose:
+
+- run the complete PAYNE zero-money Node test suite
+- execute only against PAYNE source/tests
+- no deployment step
+- no provider credentials required by the workflow definition
+- no provider POST
+- no capital movement
+
+Workflow command:
+
+`npm test`
+
+This workflow exists to turn source assertions into executable validation evidence before live deployment.
+
