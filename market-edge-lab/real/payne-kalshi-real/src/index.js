@@ -864,8 +864,59 @@ function buildCandidateViews(markets, featureState, activeThreshold) {
   });
 }
 
+function universalClockEvidence(selected, payne, freshLock, preSubmit, observedAtMs) {
+  const observationAt=new Date(observedAtMs).toISOString();
+  const kalshiOpenMs=Date.parse(selected?.openTime||'');
+  const kalshiCloseMs=Date.parse(selected?.closeTime||'');
+  const baselineOpenMs=Date.parse(payne?.baselineOpenTime||'');
+  const baselineCloseMs=Date.parse(payne?.baselineCloseTime||'');
+  const baselineObservationMs=Date.parse(payne?.sourceLastRunAt||'');
+  const hasKalshiWindow=Number.isFinite(kalshiOpenMs)&&Number.isFinite(kalshiCloseMs);
+  const hasBaselineWindow=Number.isFinite(baselineOpenMs)&&Number.isFinite(baselineCloseMs);
+  const closeConsistent=hasKalshiWindow&&hasBaselineWindow?kalshiCloseMs===baselineCloseMs:null;
+  const openConsistent=hasKalshiWindow&&hasBaselineWindow?kalshiOpenMs===baselineOpenMs:null;
+  const windowConsistency=closeConsistent===null||openConsistent===null?'UNKNOWN':(closeConsistent&&openConsistent);
+  const elapsedMs=hasKalshiWindow?Math.max(0,observedAtMs-kalshiOpenMs):null;
+  const durationMs=hasKalshiWindow?Math.max(0,kalshiCloseMs-kalshiOpenMs):null;
+  const remainingMs=hasKalshiWindow?Math.max(0,kalshiCloseMs-observedAtMs):null;
+  const lifecycleFraction=durationMs>0?Math.min(1,Math.max(0,elapsedMs/durationMs)):null;
+  const observationDeltaMs=Number.isFinite(baselineObservationMs)?observedAtMs-baselineObservationMs:null;
+  return {
+    standard:'NFE_OS_UNIVERSAL_MARKET_CLOCK_V1',
+    providerWindowIdentity:selected?.ticker||null,
+    kalshiTicker:selected?.ticker||null,
+    kalshiWindowOpen:selected?.openTime||null,
+    kalshiWindowClose:selected?.closeTime||null,
+    baselineWindowOpen:payne?.baselineOpenTime||null,
+    baselineWindowClose:payne?.baselineCloseTime||null,
+    payneAssociatedWindowClose:selected?.closeTime||null,
+    windowConsistency,
+    diagnostic:windowConsistency===false?'WINDOW_MISMATCH':windowConsistency==='UNKNOWN'?'WINDOW_CONSISTENCY_UNKNOWN':'WINDOW_CONSISTENT',
+    observationAt,
+    observationAgeMs:0,
+    baselineObservationAt:payne?.sourceLastRunAt||null,
+    baselineToPayneObservationDeltaMs:observationDeltaMs,
+    kalshiWindowElapsedMs:elapsedMs,
+    kalshiWindowRemainingMs:remainingMs,
+    kalshiWindowDurationMs:durationMs,
+    kalshiLifecycleFraction:lifecycleFraction,
+    freshLockAt:freshLock?.readAt||null,
+    preSubmitAt:preSubmit?.readAt||null,
+  };
+}
+
 function zeroMoneyPreviewFor(selected, preSubmit, index3, control, nowMs) {
   if (!selected?.payne?.available) return {status:'NOT_REACHED',reason:'AUTHORITATIVE_PAYNE_FEATURES_UNAVAILABLE'};
+  const selectedCloseMs=Date.parse(selected?.closeTime||'');
+  const baselineCloseMs=Date.parse(selected?.payne?.baselineCloseTime||'');
+  const selectedOpenMs=Date.parse(selected?.openTime||'');
+  const baselineOpenMs=Date.parse(selected?.payne?.baselineOpenTime||'');
+  if (Number.isFinite(selectedCloseMs) && Number.isFinite(baselineCloseMs) && selectedCloseMs!==baselineCloseMs) {
+    return {status:'BLOCKED',reason:'WINDOW_MISMATCH',windowConsistency:false};
+  }
+  if (Number.isFinite(selectedOpenMs) && Number.isFinite(baselineOpenMs) && selectedOpenMs!==baselineOpenMs) {
+    return {status:'BLOCKED',reason:'WINDOW_MISMATCH',windowConsistency:false};
+  }
   const gate=payneStage(selected.payne,control.activeThreshold);
   if (!gate.pullTrigger) return {status:'NOT_REACHED',reason:'PAYNE_NOT_PULL_TRIGGER',gate};
   const eligibility=realEligibility({
@@ -1000,6 +1051,9 @@ function compactObservation(data, source, atMs) {
       initialPrice:data.selected.selectedAsk??null,
       freshLockPrice:data.selected.outcomeSide==='YES'?data.observations?.freshLock?.market?.yesAsk??null:data.observations?.freshLock?.market?.noAsk??null,
       preSubmitPrice:data.selected.outcomeSide==='YES'?data.observations?.preSubmit?.market?.yesAsk??null:data.observations?.preSubmit?.market?.noAsk??null,
+      freshLockAt:data.observations?.freshLock?.readAt||null,
+      preSubmitAt:data.observations?.preSubmit?.readAt||null,
+      clock:data.clocks?.consistency||null,
     }:null,
     decisions:(data.candidates||[]).map(c=>({
       asset:c.asset,ticker:c.ticker,direction:c.direction,outcomeSide:c.outcomeSide,
@@ -1094,7 +1148,9 @@ const EXPORT_ROW_FIELDS = Object.freeze([
   'decision','initialPrice','freshLockPrice','preSubmitPrice','timeGate','tickerConsistency','sideConsistency',
   'zeroMoneyFireStatus','zeroMoneyOrderCount','estimatedSizingUsd','providerGets','providerWrites','orders','capitalMovedUsd',
   'kalshiWindowStart','kalshiWindowClose','kalshiRemainingMs','kalshiNextResetAt',
-  'baselineObservationAt','baselineWindowStart','baselineWindowClose','baselineRemainingMs','baselineNextResetAt'
+  'baselineObservationAt','baselineWindowStart','baselineWindowClose','baselineRemainingMs','baselineNextResetAt',
+  'payneObservationAt','payneObservationAgeMs','kalshiWindowElapsedMs','kalshiLifecycleFraction',
+  'freshLockAt','preSubmitAt','windowConsistency','windowDiagnostic','baselineToPayneObservationDeltaMs'
 ]);
 
 function exportRangeBounds(range, url, nowMs=Date.now()) {
@@ -1190,6 +1246,15 @@ function exportRowsFromSnapshots(snapshots) {
         baselineWindowClose:snapshot?.clocks?.baseline?.currentWindowClose||null,
         baselineRemainingMs:snapshot?.clocks?.baseline?.remainingMs??null,
         baselineNextResetAt:snapshot?.clocks?.baseline?.nextResetAt||null,
+        payneObservationAt:snapshot?.clocks?.payne?.observationAt||snapshot?.at||null,
+        payneObservationAgeMs:snapshot?.clocks?.payne?.observationAgeMs??0,
+        kalshiWindowElapsedMs:snapshot?.clocks?.consistency?.kalshiWindowElapsedMs??null,
+        kalshiLifecycleFraction:snapshot?.clocks?.consistency?.kalshiLifecycleFraction??null,
+        freshLockAt:isSelected?snapshot?.clocks?.consistency?.freshLockAt||snapshot?.selected?.freshLockAt||null:null,
+        preSubmitAt:isSelected?snapshot?.clocks?.consistency?.preSubmitAt||snapshot?.selected?.preSubmitAt||null:null,
+        windowConsistency:snapshot?.clocks?.consistency?.windowConsistency??null,
+        windowDiagnostic:snapshot?.clocks?.consistency?.diagnostic||null,
+        baselineToPayneObservationDeltaMs:snapshot?.clocks?.consistency?.baselineToPayneObservationDeltaMs??null,
       });
     }
   }
@@ -1311,10 +1376,20 @@ export async function buildCockpitData(env, nowMs=Date.now()) {
       nextObservationAt:null,
       nextObservationReason:'NOT_EXPOSED_BY_AUTHORITATIVE_SOURCE',
     },
+    payne:{
+      source:'PAYNE_OBSERVATION',
+      observationAt:new Date(nowMs).toISOString(),
+      observationAgeMs:0,
+      associatedKalshiTicker:selected?.ticker||null,
+      associatedKalshiWindowOpen:selected?.openTime||null,
+      associatedKalshiWindowClose:selected?.closeTime||null,
+    },
+    consistency:universalClockEvidence(selected,payne,freshLock,preSubmit,nowMs),
   };
   const qualificationDecision=selected?.decision||payneDecisionEvidence(payne,control.activeThreshold);
   const finalDecision=!selected?'NO_CURRENT_CONTRACT':
     !payne.available?'FEATURES_UNAVAILABLE':
+    clocks.consistency.windowConsistency===false?'WINDOW_MISMATCH':
     qualificationDecision.pull!=='PULL_QUALIFIED'?qualificationDecision.decision:
     timeSafe!==true?'TIME_GATE_REJECT':
     freshLock?.ok!==true?'FRESH_LOCK_INVALIDATED':
