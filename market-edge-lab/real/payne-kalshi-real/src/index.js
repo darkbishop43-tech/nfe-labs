@@ -9,6 +9,12 @@ const EVENT_PREFIX = 'payne-kalshi:event:';
 const RUN_PREFIX = 'payne-kalshi:run:';
 const ATTEMPT_PREFIX = 'payne-kalshi:attempt:';
 const POSITION_PREFIX = 'payne-kalshi:position:';
+const SCAN_HISTORY_PREFIX = 'payne-kalshi:scan-history:';
+const SCAN_PERSIST_INTERVAL_MS = 5 * 60 * 1000;
+const SCAN_HISTORY_INTERVAL_MS = 15 * 60 * 1000;
+const CONTROL_THRESHOLD_OPTIONS = Object.freeze([0.70,0.75,0.80,0.85]);
+const CONTROL_STAKE_OPTIONS = Object.freeze([1,2,5,10]);
+const CONTROL_ATTEMPT_OPTIONS = Object.freeze([1,5,10,30]);
 const FORBIDDEN_KEYS = new Set([
   'baseline-real-execution-test-v1',
   'state:payne_method',
@@ -34,12 +40,42 @@ export function defaultControlState() {
     armed: false,
     attempts: 0,
     openPositions: 0,
+    maxPositions: 3,
+    attemptTarget: 10,
+    maxEntryDebitUsd: 1,
     activeThreshold: PAYNE_CONFIG.defaultThreshold,
+    scanEnabled: true,
+    scanCadenceMs: 60_000,
     providerWriteAuthority: 'DISABLED',
+    providerPostAuthority: 'HELD',
     realExecution: 'DISABLED',
     fundingAuthority: 'DISABLED',
     requiredExchangeIndex: null,
     index3: 'UNKNOWN_UNPROVEN_DISABLED_UNFUNDED',
+  };
+}
+
+function normalizeControlState(saved) {
+  const base=defaultControlState();
+  const src=saved&&typeof saved==='object'?saved:{};
+  return {
+    ...base,
+    service:SERVICE_ID,
+    armed:src.armed===true,
+    attempts:Number.isFinite(Number(src.attempts))?Number(src.attempts):0,
+    openPositions:Number.isFinite(Number(src.openPositions))?Number(src.openPositions):0,
+    maxPositions:3,
+    attemptTarget:CONTROL_ATTEMPT_OPTIONS.includes(Number(src.attemptTarget))?Number(src.attemptTarget):base.attemptTarget,
+    maxEntryDebitUsd:CONTROL_STAKE_OPTIONS.includes(Number(src.maxEntryDebitUsd))?Number(src.maxEntryDebitUsd):base.maxEntryDebitUsd,
+    activeThreshold:CONTROL_THRESHOLD_OPTIONS.includes(Number(src.activeThreshold))?Number(src.activeThreshold):base.activeThreshold,
+    scanEnabled:src.scanEnabled!==false,
+    scanCadenceMs:60_000,
+    providerWriteAuthority:'DISABLED',
+    providerPostAuthority:'HELD',
+    realExecution:'DISABLED',
+    fundingAuthority:'DISABLED',
+    requiredExchangeIndex:null,
+    index3:src.index3||base.index3,
   };
 }
 
@@ -79,16 +115,60 @@ async function kvPutJson(env, key, value) {
 
 export async function loadControl(env) {
   const saved = await kvGetJson(env, CONTROL_KEY);
-  return saved ?? defaultControlState();
+  return normalizeControlState(saved);
 }
 
 export async function initializeDisarmed(env) {
   const existing = await kvGetJson(env, CONTROL_KEY);
-  if (existing) return existing;
+  if (existing) return normalizeControlState(existing);
   const state = defaultControlState();
   await kvPutJson(env, CONTROL_KEY, state);
   await appendEvent(env, 'CONTROL_INITIALIZED', { armed:false, attempts:0, openPositions:0 });
   return state;
+}
+
+export async function updateFounderControl(env, action, rawValue = null) {
+  const before=await loadControl(env);
+  const next={...before};
+  const name=String(action||'').toUpperCase();
+  if (name==='ARM') next.armed=true;
+  else if (name==='DISARM') next.armed=false;
+  else if (name==='SET_THRESHOLD') {
+    const value=Number(rawValue);
+    if (!CONTROL_THRESHOLD_OPTIONS.includes(value)) throw new Error('PAYNE_CONTROL_THRESHOLD_NOT_ALLOWED');
+    next.activeThreshold=value;
+  } else if (name==='SET_STAKE') {
+    const value=Number(rawValue);
+    if (!CONTROL_STAKE_OPTIONS.includes(value)) throw new Error('PAYNE_CONTROL_STAKE_NOT_ALLOWED');
+    next.maxEntryDebitUsd=value;
+  } else if (name==='SET_ATTEMPT_TARGET') {
+    const value=Number(rawValue);
+    if (!CONTROL_ATTEMPT_OPTIONS.includes(value)) throw new Error('PAYNE_CONTROL_ATTEMPT_TARGET_NOT_ALLOWED');
+    next.attemptTarget=value;
+  } else if (name==='SET_SCAN_ENABLED') {
+    next.scanEnabled=rawValue===true || String(rawValue).toLowerCase()==='true';
+  } else {
+    throw new Error('PAYNE_CONTROL_ACTION_NOT_ALLOWED');
+  }
+  next.providerWriteAuthority='DISABLED';
+  next.providerPostAuthority='HELD';
+  next.realExecution='DISABLED';
+  next.fundingAuthority='DISABLED';
+  next.requiredExchangeIndex=null;
+  await kvPutJson(env,CONTROL_KEY,next);
+  await appendEvent(env,'FOUNDER_CONTROL_CHANGED',{
+    action:name,
+    armed:next.armed,
+    activeThreshold:next.activeThreshold,
+    maxEntryDebitUsd:next.maxEntryDebitUsd,
+    attemptTarget:next.attemptTarget,
+    scanEnabled:next.scanEnabled,
+    providerWriteAuthority:'DISABLED',
+    providerPostAuthority:'HELD',
+    realExecution:'DISABLED',
+    fundingAuthority:'DISABLED',
+  });
+  return next;
 }
 
 export async function appendEvent(env, type, payload = {}) {
@@ -561,7 +641,6 @@ export function providerMarketSnapshot(market, nowMs = Date.now(), assetHint = n
     durationMs,
     timeRemainingMs:Number.isFinite(closeMs)?Math.max(0,closeMs-nowMs):null,
     providerReadAt:readAt,
-    dataFreshnessMs:Math.max(0,Date.now()-Date.parse(readAt||''))||0,
     executionEligible:market?.status ? ['open','active'].includes(String(market.status).toLowerCase()) : null,
   };
 }
@@ -684,13 +763,13 @@ export async function readAuthoritativePayneFeatures(nowMs = Date.now()) {
   }
 }
 
-function featureForCandidate(featureState, ticker, outcomeSide, asset) {
+function featureForCandidate(featureState, ticker, outcomeSide, asset, activeThreshold) {
   if (!featureState?.fresh) {
     return {
       source:'BASELINE_REAL_SHADOW_READ_ONLY',
       available:false,
       move:null,fair:null,edge:null,score:null,
-      state:'UNKNOWN / UNAVAILABLE',
+      state:'UNKNOWN',
       reason:featureState?.error||'AUTHORITATIVE_LIVE_PAYNE_FEATURE_SOURCE_NOT_AVAILABLE',
       sourceLastRunAt:featureState?.lastRunAt||null,
       sourceAgeMs:featureState?.ageMs??null,
@@ -707,7 +786,7 @@ function featureForCandidate(featureState, ticker, outcomeSide, asset) {
       source:'BASELINE_REAL_SHADOW_READ_ONLY',
       available:false,
       move:null,fair:null,edge:null,score:null,
-      state:'UNKNOWN / UNAVAILABLE',
+      state:'UNKNOWN',
       reason:'EXACT_TICKER_SIDE_FEATURE_NOT_PRESENT_IN_BASELINE_SHADOW',
       sourceLastRunAt:featureState.lastRunAt,
       sourceAgeMs:featureState.ageMs,
@@ -715,12 +794,12 @@ function featureForCandidate(featureState, ticker, outcomeSide, asset) {
     };
   }
   const move=Number(row.move), fair=Number(row.fair), edge=Number(row.edge), score=Number(row.score);
-  const gate=payneStage({move,fair,edge,score},PAYNE_CONFIG.defaultThreshold);
+  const gate=payneStage({move,fair,edge,score},activeThreshold);
   return {
     source:'BASELINE_REAL_SHADOW_READ_ONLY',
     available:true,
     move,fair,edge,score,
-    state:gate.stage,
+    state:gate.pullTrigger?'PULL_TRIGGER':gate.lockIn?'LOCK_IN':gate.radar?'RADAR':'NOT_QUALIFIED',
     reason:null,
     direction:row?.direction||null,
     outcomeSide:row?.outcomeSide||outcomeSide||null,
@@ -730,11 +809,11 @@ function featureForCandidate(featureState, ticker, outcomeSide, asset) {
   };
 }
 
-function buildCandidateViews(markets, featureState) {
+function buildCandidateViews(markets, featureState, activeThreshold) {
   const out=[];
   for (const market of markets||[]) {
     for (const side of ['YES','NO']) {
-      const feature=featureForCandidate(featureState,market.ticker,side,market.asset);
+      const feature=featureForCandidate(featureState,market.ticker,side,market.asset,activeThreshold);
       out.push({
         ...market,
         outcomeSide:side,
@@ -756,7 +835,7 @@ function buildCandidateViews(markets, featureState) {
 
 function zeroMoneyPreviewFor(selected, preSubmit, index3, control, nowMs) {
   if (!selected?.payne?.available) return {status:'NOT_REACHED',reason:'AUTHORITATIVE_PAYNE_FEATURES_UNAVAILABLE'};
-  const gate=payneStage(selected.payne,PAYNE_CONFIG.defaultThreshold);
+  const gate=payneStage(selected.payne,control.activeThreshold);
   if (!gate.pullTrigger) return {status:'NOT_REACHED',reason:'PAYNE_NOT_PULL_TRIGGER',gate};
   const eligibility=realEligibility({
     asset:selected.asset,
@@ -771,7 +850,7 @@ function zeroMoneyPreviewFor(selected, preSubmit, index3, control, nowMs) {
     return {status:'BLOCKED',reason:'PRE_SUBMIT_NOT_PROVEN',gate,eligibility};
   }
   const ask=selected.outcomeSide==='YES'?Number(preSubmit.market.yesAsk):Number(preSubmit.market.noAsk);
-  const sizing=estimateKalshiFeeSafeSize(ask,1);
+  const sizing=estimateKalshiFeeSafeSize(ask,control.maxEntryDebitUsd);
   if (!sizing.ok) return {status:'BLOCKED',reason:'FEE_SAFE_SIZING_FAILED',gate,eligibility,sizing};
   const clientOrderId=payneClientOrderId('cockpit-zero-money',1,'entry');
   const payload=kalshiV2EntryPayload({
@@ -791,14 +870,19 @@ function zeroMoneyPreviewFor(selected, preSubmit, index3, control, nowMs) {
     funding,
   });
   return {
-    status:'PREVIEW_READY',
+    status:'FIRE_READY',
+    authority:'PROVIDER_POST_HELD',
     gate,
     eligibility,
     ticker:selected.ticker,
     asset:selected.asset,
     outcomeSide:selected.outcomeSide,
     direction:selected.direction,
-    entryPrice:ask,
+    score:selected.payne.score,
+    initialPrice:selected.selectedAsk,
+    freshLockPrice:selected.outcomeSide==='YES'?preSubmit?.market?.yesAsk:preSubmit?.market?.noAsk,
+    preSubmitPrice:ask,
+    maxEntryDebitUsd:control.maxEntryDebitUsd,
     count:sizing.count,
     premiumUsd:sizing.premiumUsd,
     estimatedFeeUsd:sizing.feeUsd,
@@ -807,8 +891,152 @@ function zeroMoneyPreviewFor(selected, preSubmit, index3, control, nowMs) {
     postOnly:payload.post_only,
     reduceOnly:payload.reduce_only,
     clientOrderId,
-    fundingGate:funding.failClosed?'FAIL_CLOSED':'PASS',
+    fundingEvidence:index3,
+    fundingGate:funding.failClosed?'AUTHORITY_HELD':'PASS',
     providerPost:stop.reason,
+    providerWrites:0,
+    orders:0,
+    capitalMovedUsd:0,
+  };
+}
+
+async function listPositionSnapshots(env) {
+  const kv=binding(env);
+  if (typeof kv.list!=='function') return [];
+  const listed=await kv.list({prefix:POSITION_PREFIX});
+  const rows=[];
+  for (const item of listed?.keys||[]) {
+    const value=await kvGetJson(env,item.name);
+    if (value) rows.push(value);
+  }
+  return rows.sort((a,b)=>Date.parse(b?.updatedAt||b?.openedAt||b?.createdAt||0)-Date.parse(a?.updatedAt||a?.openedAt||a?.createdAt||0));
+}
+
+function managementView(control, positions) {
+  const current=(positions||[]).find(p=>['OPEN','EXIT_RETRY'].includes(String(p?.status||'').toUpperCase()))||null;
+  return {
+    rules:{scoreExit:PAYNE_CONFIG.exitScore,maxHoldMs:PAYNE_CONFIG.maxHoldMs,maxPositions:control.maxPositions,exitReduceOnly:true},
+    activePositions:Number(control.openPositions||0),
+    position:current?{
+      status:current.status||null,
+      ownershipState:current.owned===true?'OWNED':current.owned===false?'NOT_OWNED':'UNKNOWN',
+      position_fp:current.position_fp??null,
+      entryTime:current.openedAt||current.entryTime||null,
+      currentScore:current.currentScore??null,
+      currentMarketPrice:current.currentMarketPrice??null,
+      exitReason:current.exitReason??null,
+      reconciliationState:current.reconciliationState||current.reconciliationClassification||'UNKNOWN',
+      marketTicker:current.marketTicker||null,
+      asset:current.asset||null,
+      direction:current.direction||null,
+      outcomeSide:current.outcomeSide||null,
+      reduceOnlyExit:true,
+    }:{
+      status:'NO_OWNED_POSITION',
+      ownershipState:'NONE',
+      position_fp:null,
+      entryTime:null,
+      currentScore:null,
+      currentMarketPrice:null,
+      exitReason:null,
+      reconciliationState:'FLAT / NO LOCAL OWNED POSITION',
+      marketTicker:null,
+      asset:null,
+      direction:null,
+      outcomeSide:null,
+      reduceOnlyExit:true,
+    },
+  };
+}
+
+function compactObservation(data, source, atMs) {
+  return {
+    schema:'PAYNE_KALSHI_PRELIVE_OBSERVATION_V1',
+    at:new Date(atMs).toISOString(),
+    source,
+    authentication:data.authentication,
+    selected:data.selected?{
+      asset:data.selected.asset,
+      ticker:data.selected.ticker,
+      direction:data.selected.direction,
+      outcomeSide:data.selected.outcomeSide,
+      selectedBid:data.selected.selectedBid,
+      selectedAsk:data.selected.selectedAsk,
+      closeTime:data.selected.closeTime,
+      payne:data.payne,
+    }:null,
+    pipeline:data.pipeline,
+    zeroMoneyPreview:data.zeroMoneyPreview,
+    assets:data.discovery?.assets||[],
+    providerGets:data.providerGets,
+    providerWrites:0,
+    orders:0,
+    capitalMovedUsd:0,
+    control:{
+      armed:data.control?.armed===true,
+      activeThreshold:data.control?.threshold,
+      maxEntryDebitUsd:data.control?.maxEntryDebitUsd,
+      attemptTarget:data.control?.attemptTarget,
+      scanEnabled:data.control?.scanEnabled,
+    },
+    safety:data.safety,
+  };
+}
+
+export async function runReadOnlyScan(env, source='SCHEDULED_CRON', nowMs=Date.now()) {
+  const control=await loadControl(env);
+  if (!control.scanEnabled && source==='SCHEDULED_CRON') {
+    return {ok:true,skipped:true,reason:'AUTO_SCAN_PAUSED',providerWrites:0,orders:0,capitalMovedUsd:0};
+  }
+  const data=await buildCockpitData(env,nowMs);
+  const snapshot=compactObservation(data,source,nowMs);
+  const previous=await kvGetJson(env,CURRENT_KEY);
+  const previousAt=Date.parse(previous?.at||'');
+  const previousHistoryAt=Date.parse(previous?.lastHistoryAt||'');
+  const prevKey=[previous?.selected?.ticker,previous?.selected?.outcomeSide,previous?.selected?.payne?.state].join('|');
+  const nextKey=[snapshot?.selected?.ticker,snapshot?.selected?.outcomeSide,snapshot?.selected?.payne?.state].join('|');
+  const transition=Boolean(previous && prevKey!==nextKey);
+  const previewReady=snapshot?.zeroMoneyPreview?.status==='FIRE_READY';
+  const persistLatest=!previous || !Number.isFinite(previousAt) || nowMs-previousAt>=SCAN_PERSIST_INTERVAL_MS || transition || previewReady;
+  const persistHistory=!previous || !Number.isFinite(previousHistoryAt) || nowMs-previousHistoryAt>=SCAN_HISTORY_INTERVAL_MS || transition || previewReady;
+  if (persistHistory) snapshot.lastHistoryAt=snapshot.at;
+  else snapshot.lastHistoryAt=previous?.lastHistoryAt||null;
+  if (persistLatest) await kvPutJson(env,CURRENT_KEY,snapshot);
+  if (persistHistory) {
+    const historyKey=SCAN_HISTORY_PREFIX+snapshot.at+':'+crypto.randomUUID();
+    await kvPutJson(env,historyKey,snapshot);
+  }
+  if (transition) {
+    await appendEvent(env,'PAYNE_STATE_TRANSITION',{
+      from:prevKey||null,
+      to:nextKey||null,
+      ticker:snapshot?.selected?.ticker||null,
+      asset:snapshot?.selected?.asset||null,
+      direction:snapshot?.selected?.direction||null,
+      score:snapshot?.selected?.payne?.score??null,
+    });
+  }
+  if (previewReady) {
+    await appendEvent(env,'ZERO_MONEY_FIRE_PLAN_RECORDED',{
+      ticker:snapshot.zeroMoneyPreview.ticker,
+      asset:snapshot.zeroMoneyPreview.asset,
+      direction:snapshot.zeroMoneyPreview.direction,
+      score:snapshot.zeroMoneyPreview.score,
+      count:snapshot.zeroMoneyPreview.count,
+      estimatedDebitUsd:snapshot.zeroMoneyPreview.estimatedDebitUsd,
+      providerPost:snapshot.zeroMoneyPreview.providerPost,
+    });
+  }
+  return {
+    ok:data.ok,
+    skipped:false,
+    persistedLatest:persistLatest,
+    persistedHistory:persistHistory,
+    transition,
+    firePlanRecorded:previewReady,
+    snapshot,
+    providerGets:data.providerGets,
+    baselineReads:data.baselineReads,
     providerWrites:0,
     orders:0,
     capitalMovedUsd:0,
@@ -826,21 +1054,24 @@ export async function buildCockpitData(env, nowMs=Date.now()) {
     balance={ok:response.ok,httpStatus:response.status,body:await safeProviderJson(response)};
   } catch (error) {
     return {
-      ok:false,service:SERVICE_ID,mode:'ZERO-MONEY / GET-ONLY',
+      ok:false,service:SERVICE_ID,mode:'PRELIVE_REAL_COCKPIT / ZERO-MONEY',
       updatedAt:new Date().toISOString(),refreshIntervalMs:COCKPIT_REFRESH_MS,
       providerGets,baselineReads:0,providerWrites:0,orders:0,capitalMovedUsd:0,
       authentication:'NOT_PROVEN',
       error:'AUTHENTICATED_BALANCE_GET_FAILED',errorClass:error?.name||'Error',
-      safety:{payneArmed:false,realExecution:'DISABLED',fundingAuthority:'DISABLED',providerWrites:0,orders:0,capitalMovedUsd:0,getOnly:'ACTIVE',providerPost:'HARD DISABLED',secondIoc:'HOLD'},
+      control:{...control,threshold:control.activeThreshold},
+      safety:{payneArmed:control.armed,realExecution:'DISABLED',fundingAuthority:'DISABLED',providerWrites:0,orders:0,capitalMovedUsd:0,getOnly:'ACTIVE',providerPost:'HELD / HARD DISABLED',secondIoc:'HOLD'},
     };
   }
 
-  const [discovery,featureState]=await Promise.all([
+  const [discovery,featureState,positions,latestPersistent]=await Promise.all([
     discoverCockpitMarkets(env,{nowMs}),
     readAuthoritativePayneFeatures(nowMs),
+    listPositionSnapshots(env),
+    kvGetJson(env,CURRENT_KEY),
   ]);
   providerGets+=Number(discovery.providerGets||0);
-  const candidates=buildCandidateViews(discovery.markets||[],featureState);
+  const candidates=buildCandidateViews(discovery.markets||[],featureState,control.activeThreshold);
   const selected=candidates[0]||null;
 
   let freshLock=null, preSubmit=null;
@@ -860,7 +1091,7 @@ export async function buildCockpitData(env, nowMs=Date.now()) {
     source:'BASELINE_REAL_SHADOW_READ_ONLY',
     available:false,
     move:null,fair:null,edge:null,score:null,
-    state:'UNKNOWN / UNAVAILABLE',
+    state:'UNKNOWN',
     reason:featureState?.error||'NO_SELECTED_LIVE_CONTRACT',
     sourceLastRunAt:featureState?.lastRunAt||null,
     sourceAgeMs:featureState?.ageMs??null,
@@ -869,15 +1100,24 @@ export async function buildCockpitData(env, nowMs=Date.now()) {
   const tickerConsistent=Boolean(selected?.ticker && freshLock?.market?.ticker===selected.ticker && preSubmit?.market?.ticker===selected.ticker);
   const sideConsistent=Boolean(selected?.outcomeSide==='YES'||selected?.outcomeSide==='NO');
   const timeSafe=selected?.closeTime ? kalshiCandidateTimeSafe({closeTime:selected.closeTime},nowMs) : null;
-  const gate=payne.available?payneStage(payne,PAYNE_CONFIG.defaultThreshold):null;
+  const gate=payne.available?payneStage(payne,control.activeThreshold):null;
   const zeroMoneyPreview=zeroMoneyPreviewFor(selected,preSubmit,index3,control,nowMs);
 
   return {
     ok:Boolean(balance.ok && discovery.ok),
     service:SERVICE_ID,
-    mode:'ZERO-MONEY / GET-ONLY',
+    mode:'PRELIVE_REAL_COCKPIT / ZERO-MONEY',
     updatedAt:new Date().toISOString(),
     refreshIntervalMs:COCKPIT_REFRESH_MS,
+    automaticScan:{enabled:control.scanEnabled,cadenceMs:60_000,cron:'* * * * *',authority:'READ_ONLY'},
+    persistence:{
+      binding:STATE_BINDING,
+      latestObservationAt:latestPersistent?.at||null,
+      historyCadenceMs:SCAN_HISTORY_INTERVAL_MS,
+      latestCadenceMs:SCAN_PERSIST_INTERVAL_MS,
+      transitionLogging:'ENABLED',
+      firePlanLogging:'ENABLED',
+    },
     providerGets,
     baselineReads:1,
     providerWrites:0,
@@ -887,13 +1127,21 @@ export async function buildCockpitData(env, nowMs=Date.now()) {
     balanceHttpStatus:balance.httpStatus,
     index3,
     control:{
-      armed:Boolean(control?.armed),
-      attempts:Number(control?.attempts||0),
-      openPositions:Number(control?.openPositions||0),
-      threshold:Number(control?.activeThreshold??PAYNE_CONFIG.defaultThreshold),
-      realExecution:control?.realExecution||'DISABLED',
-      fundingAuthority:control?.fundingAuthority||'DISABLED',
-      providerWriteAuthority:control?.providerWriteAuthority||'DISABLED',
+      armed:Boolean(control.armed),
+      attempts:Number(control.attempts||0),
+      attemptTarget:control.attemptTarget,
+      openPositions:Number(control.openPositions||0),
+      maxPositions:control.maxPositions,
+      maxEntryDebitUsd:control.maxEntryDebitUsd,
+      threshold:control.activeThreshold,
+      thresholdOptions:CONTROL_THRESHOLD_OPTIONS,
+      stakeOptions:CONTROL_STAKE_OPTIONS,
+      attemptOptions:CONTROL_ATTEMPT_OPTIONS,
+      scanEnabled:control.scanEnabled,
+      realExecution:'DISABLED',
+      fundingAuthority:'DISABLED',
+      providerWriteAuthority:'DISABLED',
+      providerPostAuthority:'HELD',
     },
     markets:discovery.markets||[],
     candidates,
@@ -910,9 +1158,10 @@ export async function buildCockpitData(env, nowMs=Date.now()) {
       error:featureState.error,
     },
     pipeline:{
-      radar:gate ? (gate.radar?'PASS':'FAIL') : 'UNKNOWN / UNAVAILABLE',
-      lockIn:gate ? (gate.lockIn?'PASS':'FAIL') : 'UNKNOWN / UNAVAILABLE',
-      pullTrigger:gate ? (gate.pullTrigger?'PASS':'FAIL') : 'UNKNOWN / UNAVAILABLE',
+      radar:gate ? (gate.radar?'PASS':'FAIL') : 'UNKNOWN',
+      lockIn:gate ? (gate.lockIn?'PASS':'FAIL') : 'UNKNOWN',
+      pullTrigger:gate ? (gate.pullTrigger?'PASS':'FAIL') : 'UNKNOWN',
+      fireState:zeroMoneyPreview?.status==='FIRE_READY'?'FIRE READY / PROVIDER POST HELD':'NOT READY',
       realEligibility:selected ? {
         assetAllowed:PAYNE_CONFIG.executableAssets.includes(selected.asset),
         executionEligible:selected.executionEligible,
@@ -923,17 +1172,18 @@ export async function buildCockpitData(env, nowMs=Date.now()) {
       preSubmit:preSubmit?.ok?'PROVEN':selected?'NOT_PROVEN':'NOT_AVAILABLE',
       tickerConsistent:selected?tickerConsistent:null,
       sideConsistent:selected?sideConsistent:null,
-      feeSafeSizing:zeroMoneyPreview?.sizing?.ok===false?'FAIL':zeroMoneyPreview?.status==='PREVIEW_READY'?'PASS':'NOT_REACHED',
-      iocPayload:zeroMoneyPreview?.status==='PREVIEW_READY'?'PASS':'NOT_REACHED',
+      feeSafeSizing:zeroMoneyPreview?.sizing?.ok===false?'FAIL':zeroMoneyPreview?.status==='FIRE_READY'?'PASS':'NOT_REACHED',
+      iocPayload:zeroMoneyPreview?.status==='FIRE_READY'?'PASS':'NOT_REACHED',
       fundingGate:{
         index3:index3.status,
         fundingAuthority:'DISABLED',
-        result:zeroMoneyPreview?.fundingGate||'FAIL_CLOSED',
+        result:zeroMoneyPreview?.fundingGate||'AUTHORITY_HELD',
       },
-      providerPost:'HARD DISABLED',
+      providerPost:'HELD / HARD DISABLED',
     },
     observations:{initial:selected,freshLock,preSubmit},
     zeroMoneyPreview,
+    management:managementView(control,positions),
     discovery:{
       ok:discovery.ok,
       source:discovery.source,
@@ -941,11 +1191,11 @@ export async function buildCockpitData(env, nowMs=Date.now()) {
       currentContractCount:(discovery.markets||[]).length,
     },
     safety:{
-      payneArmed:Boolean(control?.armed),
-      realExecution:control?.realExecution||'DISABLED',
-      fundingAuthority:control?.fundingAuthority||'DISABLED',
+      payneArmed:Boolean(control.armed),
+      realExecution:'DISABLED',
+      fundingAuthority:'DISABLED',
       providerWrites:0,orders:0,capitalMovedUsd:0,getOnly:'ACTIVE',
-      providerPost:'HARD DISABLED',secondIoc:'HOLD',
+      providerPost:'HELD / HARD DISABLED',secondIoc:'HOLD',
     },
   };
 }
@@ -968,9 +1218,66 @@ export function step1Status() {
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
-    if (request.method !== 'GET') return Response.json({ ok:false, reason:'GET_ONLY' }, { status:405 });
+
+    if (request.method === 'POST' && url.pathname === '/control') {
+      let body={}; try { body=await request.json(); } catch {}
+      try {
+        const control=await updateFounderControl(env,body?.action,body?.value);
+        return Response.json({
+          ok:true,
+          control:{
+            armed:control.armed,
+            threshold:control.activeThreshold,
+            maxEntryDebitUsd:control.maxEntryDebitUsd,
+            attemptTarget:control.attemptTarget,
+            scanEnabled:control.scanEnabled,
+            providerWriteAuthority:'DISABLED',
+            providerPostAuthority:'HELD',
+            realExecution:'DISABLED',
+            fundingAuthority:'DISABLED',
+          },
+          providerWrites:0,
+          orders:0,
+          capitalMovedUsd:0,
+        });
+      } catch (error) {
+        return Response.json({ok:false,error:String(error?.message||'CONTROL_REJECTED'),providerWrites:0,orders:0,capitalMovedUsd:0},{status:400});
+      }
+    }
+
+    if (request.method === 'POST' && url.pathname === '/scan-now') {
+      const result=await runReadOnlyScan(env,'FOUNDER_MANUAL_SCAN');
+      return Response.json(result,{headers:{'cache-control':'no-store'}});
+    }
+
+    if (request.method !== 'GET') return Response.json({ ok:false, reason:'GET_ONLY_PROVIDER_AUTHORITY / CONTROL_POSTS_LOCAL_ONLY' }, { status:405 });
+
     if (url.pathname === '/status') return Response.json(step1Status());
+    if (url.pathname === '/control') {
+      const control=await loadControl(env);
+      return Response.json({
+        ok:true,
+        control:{
+          armed:control.armed,
+          attempts:control.attempts,
+          attemptTarget:control.attemptTarget,
+          openPositions:control.openPositions,
+          maxPositions:control.maxPositions,
+          maxEntryDebitUsd:control.maxEntryDebitUsd,
+          activeThreshold:control.activeThreshold,
+          scanEnabled:control.scanEnabled,
+          providerWriteAuthority:'DISABLED',
+          providerPostAuthority:'HELD',
+          realExecution:'DISABLED',
+          fundingAuthority:'DISABLED',
+        },
+        providerWrites:0,
+        orders:0,
+        capitalMovedUsd:0,
+      });
+    }
     if (url.pathname === '/cockpit-data') return Response.json(await buildCockpitData(env), { headers:{'cache-control':'no-store'} });
+    if (url.pathname === '/evidence/latest') return Response.json((await kvGetJson(env,CURRENT_KEY))||{ok:false,state:'NO_PERSISTED_OBSERVATION_YET'});
     if (url.pathname === '/proof') {
       const provider = await kalshiReadOnlyProof(env);
       return Response.json({
@@ -983,7 +1290,12 @@ export default {
     if (url.pathname === '/' || url.pathname === '/cockpit') return new Response(cockpitHtml(), { headers:{'content-type':'text/html; charset=utf-8','cache-control':'no-store'} });
     return Response.json({ ok:false, error:'NOT_FOUND' }, { status:404 });
   },
+
   async scheduled(controller, env) {
     await initializeDisarmed(env);
+    const control=await loadControl(env);
+    if (control.scanEnabled) {
+      try { await runReadOnlyScan(env,'SCHEDULED_CRON'); } catch {}
+    }
   },
 };
