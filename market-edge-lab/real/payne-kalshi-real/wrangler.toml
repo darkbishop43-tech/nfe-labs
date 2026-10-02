@@ -19,6 +19,12 @@ MARKET_SCOPE = "BTC_ETH_SOL_XRP_HYPE_ZEC_DOGE_BNB_NEAR_AUTO_SELECT"
 binding = "PAYNE_KALSHI_STATE"
 id = "03352b0ccb034f1bb8206f663a04b125"
 
+# Read-only source bridge to the existing Baseline Worker.
+# PAYNE code uses this binding only for GET /shadow-state.
+[[services]]
+binding = "BASELINE_REAL_READ"
+service = "market-edge-baseline-real"
+
 [triggers]
 crons = ["* * * * *"]
 
