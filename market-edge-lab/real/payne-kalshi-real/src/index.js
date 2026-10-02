@@ -719,7 +719,9 @@ export async function buildCockpitData(env, nowMs=Date.now()) {
     zeroMoneyPreview:null,
     discovery:{ok:discovery.ok,httpStatus:discovery.httpStatus,error:discovery.error||null,cursorRemaining:Boolean(discovery.cursorRemaining)},
     safety:{
-      payneArmed:false,realExecution:'DISABLED',fundingAuthority:'DISABLED',
+      payneArmed:Boolean(control?.armed),
+      realExecution:control?.realExecution||'DISABLED',
+      fundingAuthority:control?.fundingAuthority||'DISABLED',
       providerWrites:0,orders:0,capitalMovedUsd:0,getOnly:'ACTIVE',
       providerPost:'HARD DISABLED',secondIoc:'HOLD',
     },
