@@ -74,41 +74,57 @@ jobs:
             .clocks.consistency.standard == "NFE_OS_UNIVERSAL_MARKET_CLOCK_V1"
           ' /tmp/cockpit.json >/dev/null
 
+          # A browser refresh may legitimately land between Baseline observations.
+          # Require the binding itself to be live now, then prove authentic features
+          # from an unattended persisted SCHEDULED_CRON observation.
           jq -e '
-            .payne.source == "BASELINE_REAL_SERVICE_BINDING_READ_ONLY" and
-            (.payne.move != null) and
-            (.payne.fair != null) and
-            (.payne.edge != null) and
-            (.payne.score != null) and
-            (.payne.state != "UNKNOWN")
+            .featureProvenance.source == "BASELINE_REAL_SERVICE_BINDING_READ_ONLY" and
+            .featureProvenance.transport == "SERVICE_BINDING" and
+            .featureProvenance.binding == "BASELINE_REAL_READ" and
+            .featureProvenance.httpStatus == 200
           ' /tmp/cockpit.json >/dev/null
+
+          scheduled=0
+          for i in $(seq 1 24); do
+            curl -fsS "$base/evidence/latest" -o /tmp/latest.json || true
+            if jq -e '
+              .source == "SCHEDULED_CRON" and
+              .providerWrites == 0 and
+              .orders == 0 and
+              .capitalMovedUsd == 0 and
+              .selected.payne.source == "BASELINE_REAL_SERVICE_BINDING_READ_ONLY" and
+              (.selected.payne.move != null) and
+              (.selected.payne.fair != null) and
+              (.selected.payne.edge != null) and
+              (.selected.payne.score != null) and
+              (.selected.payne.state != "UNKNOWN") and
+              .clocks.consistency.standard == "NFE_OS_UNIVERSAL_MARKET_CLOCK_V1"
+            ' /tmp/latest.json >/dev/null 2>&1; then scheduled=1; break; fi
+            sleep 5
+          done
+          test "$scheduled" = "1"
 
           curl -fsS "$base/export?range=current&format=json" -o /tmp/export.json
           jq -e '
             .schema == "PAYNE_KALSHI_EXPORT_V1" and
             .providerWrites == 0 and
             .orders == 0 and
-            .capitalMovedUsd == 0
+            .capitalMovedUsd == 0 and
+            (.eventCount >= 0) and
+            (.events | type == "array")
           ' /tmp/export.json >/dev/null
 
           curl -fsS "$base/export?range=current&format=csv" -o /tmp/export.csv
           grep -q 'observationAt,scanSource,asset,direction,outcomeSide,ticker' /tmp/export.csv
 
-          scheduled=0
-          for i in $(seq 1 18); do
-            curl -fsS "$base/evidence/latest" -o /tmp/latest.json || true
-            source=$(jq -r '.source // ""' /tmp/latest.json 2>/dev/null || true)
-            if [ "$source" = "SCHEDULED_CRON" ]; then scheduled=1; break; fi
-            sleep 5
-          done
-          test "$scheduled" = "1"
-
+          curl -fsS "$base/evidence/events?limit=200" -o /tmp/events.json
           jq -e '
+            .schema == "PAYNE_RESEARCH_EVENT_LEDGER_V1" and
             .providerWrites == 0 and
             .orders == 0 and
             .capitalMovedUsd == 0 and
-            .source == "SCHEDULED_CRON"
-          ' /tmp/latest.json >/dev/null
+            (.events | type == "array")
+          ' /tmp/events.json >/dev/null
 
           echo "LIVE_STATUS=GREEN_ZERO_MONEY"
           echo "FEATURE_HTTP=$(jq -r '.featureProvenance.httpStatus' /tmp/cockpit.json)"
