@@ -5,7 +5,7 @@ workers_dev = true
 
 [vars]
 EXPERIMENT_NAME = "MARKET EDGE — PAYNE-KALSHI REAL"
-EXECUTION_MODE = "STEP1B_GET_ONLY"
+EXECUTION_MODE = "PRELIVE_REAL_COCKPIT_ZERO_MONEY"
 LIVE_ORDER_SUBMISSION = "DISABLED"
 FUNDING_AUTHORITY = "DISABLED"
 PAYNE_THRESHOLD = "0.70"
@@ -19,5 +19,10 @@ MARKET_SCOPE = "BTC_ETH_SOL_XRP_HYPE_ZEC_DOGE_BNB_NEAR_AUTO_SELECT"
 binding = "PAYNE_KALSHI_STATE"
 id = "03352b0ccb034f1bb8206f663a04b125"
 
-# Step 1B remains GET-only: no cron, no order submission, no funding authority.
+[triggers]
+crons = ["* * * * *"]
+
+# PRE-LIVE AUTHORITY:
+# Cron performs read-only observation / evidence collection only.
+# Provider order submission, funding authority, and real execution remain disabled.
 # This Worker MUST NOT bind BASELINE_REAL_SHADOW_STATE or any Payne Paper namespace.
