@@ -1317,3 +1317,210 @@ Reason:
 - fundingAuthority: DISABLED
 - Second IOC: HOLD / UNCHANGED
 - Baseline source changes: 0
+
+
+---
+
+# OCTOBER 2, 2026 — FOUNDER DATA EXPORT + RUN-MODE ROADMAP UPDATE
+
+## Source reconciliation
+
+Accepted blueprint head before the interrupted Builder:
+
+`4012e601b48168be2f48c74363a596b07da511a3`
+
+Interrupted Builder tip recovered on the authoritative branch:
+
+`5cdd50b84ef295a7610f9adcefa9c513a49da0d0`
+
+Repository comparison proves `5cdd50b...` is six commits ahead of `4012e601...`, zero commits behind, and is therefore a continuation of the accepted branch rather than a detached reconstruction.
+
+Its feature-source repair is source-complete and fixture-tested but still requires live deployment validation.
+
+## Export architecture
+
+Founder export is implemented as a GET-only read path on the isolated PAYNE Worker.
+
+Route:
+
+`GET /export`
+
+Supported query parameters:
+
+- `range=current|daily|weekly|monthly|custom`
+- `format=csv|json`
+- custom only: `from=<ISO timestamp>`
+- custom optional: `to=<ISO timestamp>`
+
+Window semantics:
+
+- current = latest persisted observation only
+- daily = current UTC calendar day
+- weekly = rolling seven days
+- monthly = current UTC calendar month
+- custom = Founder-selected ISO range
+
+The cockpit exposes Founder buttons for:
+
+- current CSV / JSON
+- daily CSV / JSON
+- weekly CSV / JSON
+- monthly CSV / JSON
+- custom CSV / JSON
+
+The browser export controls call only `GET /export`.
+
+No provider POST, order, cancel, close, funding, or capital path is called by export.
+
+## Export evidence source
+
+Exports are generated only from isolated PAYNE persisted observation keys:
+
+- `payne-kalshi:current:v1`
+- `payne-kalshi:scan-history:*`
+
+The export path does not read secret bindings or credential values.
+
+Each export row may include:
+
+- observation timestamp / scan source
+- asset
+- UP / DOWN
+- outcome side
+- exact ticker
+- contract open / close
+- live bid / ask / selected price
+- MOVE / FAIR / EDGE / SCORE
+- PAYNE state
+- RADAR / LOCK / PULL result
+- rejection / advancement decision
+- initial price
+- fresh LOCK price
+- pre-submit price
+- 6.5-minute time-gate result
+- ticker consistency
+- side consistency
+- zero-money FIRE status
+- zero-money hypothetical count
+- estimated zero-money debit
+- provider GET count
+- providerWrites
+- orders
+- capitalMovedUsd
+- Kalshi window timing
+- Baseline observation / window timing
+
+Terminal safety values in export remain:
+
+- providerWrites = 0
+- orders = 0
+- capitalMovedUsd = 0
+
+## Evidence-model extension
+
+The isolated PAYNE observation snapshot now retains candidate-level:
+
+- contract open / close
+- live bid / ask / selected price
+- MOVE / FAIR / EDGE / SCORE
+- PAYNE state
+- decision evidence
+
+The selected candidate additionally retains:
+
+- initial price
+- fresh LOCK price
+- pre-submit price
+
+This extension is PAYNE-only.
+
+No Baseline state or execution model is modified.
+
+## Continuous vs bounded run model
+
+The intended control model remains two distinct run modes:
+
+### BOUNDED
+
+Used for controlled experiments such as:
+
+- 10 observations
+- 30 observations
+- other explicit Founder-defined targets
+
+A bounded target is an experiment/reporting boundary and must not redefine the observer architecture.
+
+### CONTINUOUS
+
+The one-minute read-only observer continues unattended until Founder pauses/stops it.
+
+Current authorized continuous authority:
+
+`READ-ONLY OBSERVATION ONLY`
+
+Current unauthorized continuous authority:
+
+`REAL EXECUTION`
+
+Do not hardcode a permanent 30-observation ceiling into the final observer architecture.
+
+## Stake-control roadmap
+
+Current source still exposes the historical validated presets:
+
+- $1
+- $2
+- $5
+- $10
+
+This is not the intended final Founder interface.
+
+Future design requirement:
+
+- validated Founder numeric input
+- explicit lower/upper validation
+- fee-safe sizing reread
+- no hidden default escalation
+- no provider-write authority merely from editing the value
+
+This roadmap does not authorize larger real-money execution.
+
+Provider POST remains held.
+
+## Deployment / validation state
+
+Source implementation now includes:
+
+- service-bound authoritative Baseline feature read
+- autonomous one-minute read-only scan evidence
+- cycle clocks
+- decision evidence
+- CSV / JSON export route
+- Founder export controls
+- export route tests
+
+Live Cloudflare deployment has not been claimed by this source update.
+
+Before live acceptance:
+
+1. deploy the PAYNE Worker source from the authoritative branch
+2. preserve `PAYNE_KALSHI_STATE`
+3. preserve the one-minute cron
+4. configure/preserve `BASELINE_REAL_READ → market-edge-baseline-real`
+5. verify `GET /shadow-state` through the binding
+6. verify scheduled evidence source is `SCHEDULED_CRON`
+7. verify `/export?range=current&format=json`
+8. verify one CSV export
+9. verify cockpit export controls
+10. verify providerWrites = 0
+11. verify orders = 0
+12. verify capitalMovedUsd = 0
+
+## Safety state
+
+- provider POST: HELD / HARD DISABLED
+- real execution: DISABLED
+- funding authority: DISABLED
+- Second IOC: HOLD / UNCHANGED
+- Baseline execution changes: 0
+- Payne Paper changes: 0
