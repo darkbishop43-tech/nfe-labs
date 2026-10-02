@@ -12,6 +12,7 @@ import {
   updateFounderControl,
   runReadOnlyScan,
   loadControl,
+  normalizeBaselineEconomicEntryPrice,
 } from '../src/index.js';
 import payneWorker from '../src/index.js';
 import { cockpitHtml } from '../src/cockpit-html.js';
@@ -118,6 +119,21 @@ function installKalshiFetch(){
   };
   return {urls,restore:()=>{globalThis.fetch=original;}};
 }
+
+test('Baseline forensic price normalization preserves YES and complements NO',()=>{
+  const yes=normalizeBaselineEconomicEntryPrice(.24,'YES');
+  assert.equal(yes.rawYesLeg,.24);
+  assert.equal(yes.economicOutcomePrice,.24);
+  assert.equal(yes.semantics,'KALSHI_YES_LEG_EQUALS_OUTCOME_PRICE');
+
+  const no=normalizeBaselineEconomicEntryPrice(.24,'NO');
+  assert.equal(no.rawYesLeg,.24);
+  assert.equal(no.economicOutcomePrice,.76);
+  assert.equal(no.semantics,'OUTCOME_SIDE_PRICE_NORMALIZED_FROM_KALSHI_YES_LEG');
+
+  const unknown=normalizeBaselineEconomicEntryPrice(null,'NO');
+  assert.equal(unknown.economicOutcomePrice,null);
+});
 
 test('provider snapshot preserves authentic live contract timing and price evidence',()=>{
   const now=Date.parse('2026-10-02T06:00:00Z');
@@ -408,6 +424,9 @@ test('would-fire forensic route reconstructs persisted FIRE_READY evidence read-
     assert.equal(body.rows[0].marketResult,'YES');
     assert.equal(body.rows[0].directionalClassification,'DIRECTIONALLY_CORRECT');
     assert.equal(body.rows[0].baselineFilled,true);
+    assert.equal(body.rows[0].baselineEntryPrice,.50);
+    assert.equal(body.rows[0].baselineEntryPriceRawYesLeg,.50);
+    assert.equal(body.rows[0].baselineEntryPriceSemantics,'KALSHI_YES_LEG_EQUALS_OUTCOME_PRICE');
     assert.equal(body.rows[0].baselineFillTime,'2026-10-02T06:05:15.000Z');
     assert.equal(body.rows[0].payneTimingVsBaseline,'PAYNE_LATER_THAN_BASELINE_FILL');
     assert.equal(Number.isFinite(body.rows[0].payneToBaselineFillDeltaMs),true);
