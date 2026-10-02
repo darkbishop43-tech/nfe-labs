@@ -993,13 +993,19 @@ function compactObservation(data, source, atMs) {
       outcomeSide:data.selected.outcomeSide,
       selectedBid:data.selected.selectedBid,
       selectedAsk:data.selected.selectedAsk,
+      openTime:data.selected.openTime||null,
       closeTime:data.selected.closeTime,
       payne:data.payne,
       decision:data.selected.decision||null,
+      initialPrice:data.selected.selectedAsk??null,
+      freshLockPrice:data.selected.outcomeSide==='YES'?data.observations?.freshLock?.market?.yesAsk??null:data.observations?.freshLock?.market?.noAsk??null,
+      preSubmitPrice:data.selected.outcomeSide==='YES'?data.observations?.preSubmit?.market?.yesAsk??null:data.observations?.preSubmit?.market?.noAsk??null,
     }:null,
     decisions:(data.candidates||[]).map(c=>({
       asset:c.asset,ticker:c.ticker,direction:c.direction,outcomeSide:c.outcomeSide,
-      score:c.payne?.score??null,edge:c.payne?.edge??null,move:c.payne?.move??null,
+      contractOpenTime:c.openTime||null,contractCloseTime:c.closeTime||null,
+      liveBid:c.selectedBid??null,liveAsk:c.selectedAsk??null,livePrice:c.selectedAsk??null,
+      move:c.payne?.move??null,fair:c.payne?.fair??null,edge:c.payne?.edge??null,score:c.payne?.score??null,
       state:c.payne?.state||'UNKNOWN',decision:c.decision||null,
     })),
     pipeline:data.pipeline,
@@ -1079,6 +1085,149 @@ export async function runReadOnlyScan(env, source='SCHEDULED_CRON', nowMs=Date.n
     orders:0,
     capitalMovedUsd:0,
   };
+}
+
+
+const EXPORT_ROW_FIELDS = Object.freeze([
+  'observationAt','scanSource','asset','direction','outcomeSide','ticker','contractOpenTime','contractCloseTime',
+  'liveBid','liveAsk','livePrice','move','fair','edge','score','payneState','radarResult','lockResult','pullResult',
+  'decision','initialPrice','freshLockPrice','preSubmitPrice','timeGate','tickerConsistency','sideConsistency',
+  'zeroMoneyFireStatus','zeroMoneyOrderCount','estimatedSizingUsd','providerGets','providerWrites','orders','capitalMovedUsd',
+  'kalshiWindowStart','kalshiWindowClose','kalshiRemainingMs','kalshiNextResetAt',
+  'baselineObservationAt','baselineWindowStart','baselineWindowClose','baselineRemainingMs','baselineNextResetAt'
+]);
+
+function exportRangeBounds(range, url, nowMs=Date.now()) {
+  const name=String(range||'current').toLowerCase();
+  const now=new Date(nowMs);
+  if (name==='current') return {range:name,fromMs:null,toMs:null};
+  if (name==='daily') return {range:name,fromMs:Date.UTC(now.getUTCFullYear(),now.getUTCMonth(),now.getUTCDate()),toMs:nowMs};
+  if (name==='weekly') return {range:name,fromMs:nowMs-(7*24*60*60*1000),toMs:nowMs};
+  if (name==='monthly') return {range:name,fromMs:Date.UTC(now.getUTCFullYear(),now.getUTCMonth(),1),toMs:nowMs};
+  if (name==='custom') {
+    const fromMs=Date.parse(url.searchParams.get('from')||'');
+    const toRaw=url.searchParams.get('to');
+    const toMs=toRaw?Date.parse(toRaw):nowMs;
+    if (!Number.isFinite(fromMs)||!Number.isFinite(toMs)||fromMs>toMs) throw new Error('INVALID_CUSTOM_EXPORT_RANGE');
+    return {range:name,fromMs,toMs};
+  }
+  throw new Error('EXPORT_RANGE_NOT_ALLOWED');
+}
+
+async function listExportSnapshots(env, bounds) {
+  const current=await kvGetJson(env,CURRENT_KEY);
+  if (bounds.range==='current') return current?[current]:[];
+  const kv=binding(env);
+  if (typeof kv.list!=='function') throw new Error('PAYNE_KALSHI_STATE_LIST_UNAVAILABLE');
+  const snapshots=[];
+  let cursor=undefined;
+  let complete=false;
+  while (!complete && snapshots.length<5000) {
+    const page=await kv.list({prefix:SCAN_HISTORY_PREFIX,limit:1000,...(cursor?{cursor}:{})});
+    for (const item of page?.keys||[]) {
+      const value=await kvGetJson(env,item.name);
+      const atMs=Date.parse(value?.at||'');
+      if (value && Number.isFinite(atMs) && atMs>=bounds.fromMs && atMs<=bounds.toMs) snapshots.push(value);
+      if (snapshots.length>=5000) break;
+    }
+    complete=page?.list_complete===true || !page?.cursor;
+    cursor=page?.cursor;
+  }
+  if (current) {
+    const atMs=Date.parse(current.at||'');
+    if (Number.isFinite(atMs) && atMs>=bounds.fromMs && atMs<=bounds.toMs && !snapshots.some(x=>x?.at===current.at)) snapshots.push(current);
+  }
+  return snapshots.sort((a,b)=>Date.parse(a?.at||0)-Date.parse(b?.at||0));
+}
+
+function exportRowsFromSnapshots(snapshots) {
+  const rows=[];
+  for (const snapshot of snapshots||[]) {
+    const decisions=Array.isArray(snapshot?.decisions)&&snapshot.decisions.length?snapshot.decisions:[snapshot?.selected||{}];
+    for (const d of decisions) {
+      const isSelected=Boolean(snapshot?.selected && d?.ticker===snapshot.selected.ticker && d?.outcomeSide===snapshot.selected.outcomeSide);
+      const decision=d?.decision||{};
+      rows.push({
+        observationAt:snapshot?.at||null,
+        scanSource:snapshot?.source||null,
+        asset:d?.asset||null,
+        direction:d?.direction||null,
+        outcomeSide:d?.outcomeSide||null,
+        ticker:d?.ticker||null,
+        contractOpenTime:d?.contractOpenTime||snapshot?.selected?.openTime||null,
+        contractCloseTime:d?.contractCloseTime||snapshot?.selected?.closeTime||null,
+        liveBid:d?.liveBid??(isSelected?snapshot?.selected?.selectedBid:null)??null,
+        liveAsk:d?.liveAsk??(isSelected?snapshot?.selected?.selectedAsk:null)??null,
+        livePrice:d?.livePrice??d?.liveAsk??(isSelected?snapshot?.selected?.selectedAsk:null)??null,
+        move:d?.move??(isSelected?snapshot?.selected?.payne?.move:null)??null,
+        fair:d?.fair??(isSelected?snapshot?.selected?.payne?.fair:null)??null,
+        edge:d?.edge??(isSelected?snapshot?.selected?.payne?.edge:null)??null,
+        score:d?.score??(isSelected?snapshot?.selected?.payne?.score:null)??null,
+        payneState:d?.state||snapshot?.selected?.payne?.state||'UNKNOWN',
+        radarResult:decision?.radar||null,
+        lockResult:decision?.lock||null,
+        pullResult:decision?.pull||null,
+        decision:decision?.decision||snapshot?.pipeline?.finalDecision||null,
+        initialPrice:isSelected?snapshot?.selected?.initialPrice??snapshot?.selected?.selectedAsk??null:null,
+        freshLockPrice:isSelected?snapshot?.selected?.freshLockPrice??snapshot?.zeroMoneyPreview?.freshLockPrice??null:null,
+        preSubmitPrice:isSelected?snapshot?.selected?.preSubmitPrice??snapshot?.zeroMoneyPreview?.preSubmitPrice??null:null,
+        timeGate:isSelected?snapshot?.pipeline?.timeGate6_5m||null:null,
+        tickerConsistency:isSelected?snapshot?.pipeline?.tickerConsistent??null:null,
+        sideConsistency:isSelected?snapshot?.pipeline?.sideConsistent??null:null,
+        zeroMoneyFireStatus:isSelected?snapshot?.zeroMoneyPreview?.status||null:null,
+        zeroMoneyOrderCount:isSelected?snapshot?.zeroMoneyPreview?.count??null:null,
+        estimatedSizingUsd:isSelected?snapshot?.zeroMoneyPreview?.estimatedDebitUsd??null:null,
+        providerGets:snapshot?.providerGets??null,
+        providerWrites:0,
+        orders:0,
+        capitalMovedUsd:0,
+        kalshiWindowStart:snapshot?.clocks?.kalshi?.currentWindowStart||null,
+        kalshiWindowClose:snapshot?.clocks?.kalshi?.currentWindowClose||null,
+        kalshiRemainingMs:snapshot?.clocks?.kalshi?.remainingMs??null,
+        kalshiNextResetAt:snapshot?.clocks?.kalshi?.nextResetAt||null,
+        baselineObservationAt:snapshot?.clocks?.baseline?.observationAt||null,
+        baselineWindowStart:snapshot?.clocks?.baseline?.currentWindowStart||null,
+        baselineWindowClose:snapshot?.clocks?.baseline?.currentWindowClose||null,
+        baselineRemainingMs:snapshot?.clocks?.baseline?.remainingMs??null,
+        baselineNextResetAt:snapshot?.clocks?.baseline?.nextResetAt||null,
+      });
+    }
+  }
+  return rows;
+}
+
+function csvCell(value) {
+  if (value===null||value===undefined) return '';
+  const text=typeof value==='object'?JSON.stringify(value):String(value);
+  return /[",\n\r]/.test(text)?'"'+text.replaceAll('"','""')+'"':text;
+}
+
+function exportCsv(rows) {
+  return [EXPORT_ROW_FIELDS.join(','),...rows.map(row=>EXPORT_ROW_FIELDS.map(k=>csvCell(row[k])).join(','))].join('\n');
+}
+
+async function buildExportResponse(env, url, nowMs=Date.now()) {
+  const bounds=exportRangeBounds(url.searchParams.get('range')||'current',url,nowMs);
+  const format=String(url.searchParams.get('format')||'json').toLowerCase();
+  if (!['json','csv'].includes(format)) throw new Error('EXPORT_FORMAT_NOT_ALLOWED');
+  const snapshots=await listExportSnapshots(env,bounds);
+  const rows=exportRowsFromSnapshots(snapshots);
+  const stamp=new Date(nowMs).toISOString().replace(/[:.]/g,'-');
+  const filename='payne-kalshi-'+bounds.range+'-'+stamp+'.'+format;
+  const common={'cache-control':'no-store','content-disposition':'attachment; filename="'+filename+'"'};
+  if (format==='csv') return new Response(exportCsv(rows),{headers:{...common,'content-type':'text/csv; charset=utf-8'}});
+  return new Response(JSON.stringify({
+    schema:'PAYNE_KALSHI_EXPORT_V1',
+    exportedAt:new Date(nowMs).toISOString(),
+    range:bounds.range,
+    from:bounds.fromMs===null?null:new Date(bounds.fromMs).toISOString(),
+    to:bounds.toMs===null?null:new Date(bounds.toMs).toISOString(),
+    observationCount:snapshots.length,
+    rowCount:rows.length,
+    providerWrites:0,orders:0,capitalMovedUsd:0,
+    fields:EXPORT_ROW_FIELDS,
+    rows,
+  },null,2),{headers:{...common,'content-type':'application/json; charset=utf-8'}});
 }
 
 export async function buildCockpitData(env, nowMs=Date.now()) {
@@ -1355,6 +1504,10 @@ export default {
       });
     }
     if (url.pathname === '/cockpit-data') return Response.json(await buildCockpitData(env), { headers:{'cache-control':'no-store'} });
+    if (url.pathname === '/export') {
+      try { return await buildExportResponse(env,url); }
+      catch (error) { return Response.json({ok:false,error:String(error?.message||'EXPORT_FAILED'),providerWrites:0,orders:0,capitalMovedUsd:0},{status:400,headers:{'cache-control':'no-store'}}); }
+    }
     if (url.pathname === '/evidence/latest') return Response.json((await kvGetJson(env,CURRENT_KEY))||{ok:false,state:'NO_PERSISTED_OBSERVATION_YET'});
     if (url.pathname === '/proof') {
       const provider = await kalshiReadOnlyProof(env);
