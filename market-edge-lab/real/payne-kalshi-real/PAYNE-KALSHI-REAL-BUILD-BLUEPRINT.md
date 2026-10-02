@@ -2215,3 +2215,138 @@ Safety remains:
 - orders = 0
 - capitalMovedUsd = 0
 
+
+
+---
+
+# OCTOBER 2, 2026 — LIVE ZERO-MONEY OBSERVATORY ACCEPTANCE
+
+## Validated source
+
+Pre-deployment complete suite:
+
+- tests: 59
+- pass: 59
+- fail: 0
+- skipped: 0
+
+## Live deployment
+
+Worker:
+
+`market-edge-payne-kalshi-real`
+
+Live URL:
+
+`https://market-edge-payne-kalshi-real.darkbishop43.workers.dev`
+
+Cloudflare Worker version:
+
+`bd5683fa-8e1d-4044-8ee4-c45c643fcfbc`
+
+Cron:
+
+`* * * * *`
+
+Live bindings reported by Wrangler include:
+
+- `PAYNE_KALSHI_STATE`
+- `BASELINE_REAL_READ → market-edge-baseline-real`
+
+## Live zero-money proof
+
+Live acceptance returned:
+
+```text
+LIVE_STATUS=GREEN_ZERO_MONEY
+FEATURE_HTTP=200
+PAYNE_STATE=RADAR
+WINDOW_CONSISTENCY=true
+BASELINE_ACTUAL_LANE=EXECUTION_TEST_NOT_PRODUCTION_BASELINE
+PAYNE_PAPER_STATUS=READ_ONLY_AUTHORITATIVE_EVENT_SOURCE_NOT_EXPOSED_TO_PAYNE_KALSHI_REAL
+SCHEDULED_SOURCE=SCHEDULED_CRON
+providerWrites=0
+orders=0
+capitalMovedUsd=0
+```
+
+This proves the unattended observer is running from scheduled Cloudflare invocation without Founder scan clicks.
+
+## Live scheduled evidence specimen
+
+A live persisted `SCHEDULED_CRON` observation demonstrated:
+
+- authentic live 15-minute Kalshi contract
+- authentic Baseline service-bound PAYNE fields
+- RADAR classification
+- exact-ticker Fresh LOCK
+- pre-submit reread
+- universal market-clock association
+- `WINDOW_CONSISTENT`
+- zero provider writes
+- zero orders
+- zero capital movement
+
+The observed example was in the provider 09:30 → 09:45 UTC market window and retained both Fresh LOCK and pre-submit timestamps.
+
+The specific market/state is evidence only and is not a trading-performance conclusion.
+
+## Live export / event-ledger proof
+
+Live acceptance successfully validated:
+
+- `GET /export?range=current&format=json`
+- `GET /export?range=current&format=csv`
+- `GET /evidence/events?limit=200`
+
+JSON export contains observation rows plus durable research events.
+
+Event-ledger schema:
+
+`PAYNE_RESEARCH_EVENT_LEDGER_V1`
+
+## Baseline comparison status
+
+Live read-only Baseline execution-test comparison is active.
+
+Lane is explicitly:
+
+`EXECUTION_TEST_NOT_PRODUCTION_BASELINE`
+
+It is not represented as production Baseline.
+
+## Payne Paper comparison blocker
+
+Payne Paper comparison remains:
+
+`READ_ONLY_AUTHORITATIVE_EVENT_SOURCE_NOT_EXPOSED_TO_PAYNE_KALSHI_REAL`
+
+This is the remaining cross-system research-source gap.
+
+It does NOT block PAYNE from:
+
+- watching
+- RADAR
+- LOCK
+- PULL
+- zero-money WOULD-FIRE planning
+- rejecting
+- recording
+- exporting
+- comparing with currently exposed Baseline evidence
+
+It DOES block authoritative live PAYNE ↔ Payne Paper event comparison until a separate read-only paper history/state source is proven.
+
+## Authority state after live acceptance
+
+- providerWrites = 0
+- orders = 0
+- capitalMovedUsd = $0
+- provider POST = HELD / HARD DISABLED
+- real execution = DISABLED
+- funding authority = DISABLED
+- Second IOC = HOLD
+- Baseline source changes = 0
+- Baseline deployments = 0
+- Payne Paper changes = 0
+
