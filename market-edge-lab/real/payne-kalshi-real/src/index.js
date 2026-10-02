@@ -497,6 +497,19 @@ export async function recordReconciliationEvidence(env, evidence) {
 
 
 export const COCKPIT_REFRESH_MS = 60_000;
+const BASELINE_SHADOW_STATE_URL = 'https://market-edge-baseline-real.darkbishop43.workers.dev/shadow-state';
+const BASELINE_FEATURE_MAX_AGE_MS = 120_000;
+const KALSHI_15M_SERIES = Object.freeze([
+  {asset:'BTC', seriesTicker:'KXBTC15M'},
+  {asset:'ETH', seriesTicker:'KXETH15M'},
+  {asset:'SOL', seriesTicker:'KXSOL15M'},
+  {asset:'XRP', seriesTicker:'KXXRP15M'},
+  {asset:'HYPE', seriesTicker:'KXHYPE15M'},
+  {asset:'ZEC', seriesTicker:'KXZEC15M'},
+  {asset:'DOGE', seriesTicker:'KXDOGE15M'},
+  {asset:'BNB', seriesTicker:'KXBNB15M'},
+  {asset:'NEAR', seriesTicker:'KXNEAR15M'},
+]);
 
 function normalizeProviderProbability(value) {
   if (value === null || value === undefined || value === '') return null;
@@ -507,7 +520,8 @@ function normalizeProviderProbability(value) {
   return null;
 }
 
-function marketAsset(market) {
+function marketAsset(market, assetHint = null) {
+  if (PAYNE_CONFIG.executableAssets.includes(assetHint)) return assetHint;
   const text=[market?.ticker,market?.series_ticker,market?.seriesTicker,market?.title,market?.subtitle]
     .filter(Boolean).join(' ').toUpperCase();
   const aliases={
@@ -517,29 +531,20 @@ function marketAsset(market) {
   };
   for (const asset of PAYNE_CONFIG.executableAssets) {
     if ((aliases[asset]||[asset]).some(alias=>new RegExp('(^|[^A-Z])'+alias+'([^A-Z]|$)').test(text))) return asset;
-    if (String(market?.series_ticker||market?.seriesTicker||'').toUpperCase().includes(asset+'15M')) return asset;
   }
   return null;
 }
 
-function marketLooks15m(market) {
-  const series=String(market?.series_ticker||market?.seriesTicker||'').toUpperCase();
-  const ticker=String(market?.ticker||'').toUpperCase();
-  if (series.includes('15M') || ticker.includes('15M')) return true;
-  const open=Date.parse(market?.open_time||market?.openTime||'');
-  const close=Date.parse(market?.close_time||market?.closeTime||'');
-  if (!Number.isFinite(open) || !Number.isFinite(close)) return false;
-  const duration=close-open;
-  return duration>=10*60_000 && duration<=20*60_000;
-}
-
-export function providerMarketSnapshot(market, nowMs = Date.now()) {
+export function providerMarketSnapshot(market, nowMs = Date.now(), assetHint = null, providerReadAt = null) {
   const ticker=String(market?.ticker||market?.market_ticker||'').trim();
   const closeTime=market?.close_time||market?.closeTime||null;
   const closeMs=Date.parse(closeTime||'');
+  const openMs=Date.parse(market?.open_time||market?.openTime||'');
+  const durationMs=Number.isFinite(openMs)&&Number.isFinite(closeMs)?closeMs-openMs:null;
+  const readAt=providerReadAt||new Date(nowMs).toISOString();
   return {
     source:'LIVE_PROVIDER_DATA',
-    asset:marketAsset(market),
+    asset:marketAsset(market,assetHint),
     direction:null,
     outcomeSide:null,
     ticker,
@@ -552,56 +557,64 @@ export function providerMarketSnapshot(market, nowMs = Date.now()) {
     noAsk:normalizeProviderProbability(market?.no_ask_dollars??market?.no_ask),
     noBid:normalizeProviderProbability(market?.no_bid_dollars??market?.no_bid),
     closeTime,
+    openTime:market?.open_time||market?.openTime||null,
+    durationMs,
     timeRemainingMs:Number.isFinite(closeMs)?Math.max(0,closeMs-nowMs):null,
+    providerReadAt:readAt,
+    dataFreshnessMs:Math.max(0,Date.now()-Date.parse(readAt||''))||0,
     executionEligible:market?.status ? ['open','active'].includes(String(market.status).toLowerCase()) : null,
   };
-}
-
-export function livePayneFeatureState(candidate) {
-  const has=(key)=>candidate?.[key]!==null && candidate?.[key]!==undefined && Number.isFinite(Number(candidate[key]));
-  const authoritative=['move','fair','edge','score'].every(has);
-  if (!authoritative) {
-    return {
-      source:'DERIVED_PAYNE_DATA',
-      available:false,
-      move:null,fair:null,edge:null,score:null,
-      state:'UNKNOWN / UNAVAILABLE',
-      reason:'AUTHORITATIVE_LIVE_PAYNE_FEATURE_SOURCE_NOT_WIRED',
-    };
-  }
-  const move=Number(candidate.move), fair=Number(candidate.fair), edge=Number(candidate.edge), score=Number(candidate.score);
-  const gate=payneStage({move,fair,edge,score},PAYNE_CONFIG.defaultThreshold);
-  return {source:'DERIVED_PAYNE_DATA',available:true,move,fair,edge,score,state:gate.stage,reason:null};
 }
 
 async function safeProviderJson(response) {
   try { return await response.json(); } catch { return {}; }
 }
 
-export async function discoverCockpitMarkets(env, { nowMs=Date.now(), maxPages=5 } = {}) {
-  const byAsset=new Map();
-  let cursor='', providerGets=0, lastStatus=null;
-  for (let page=0; page<maxPages; page++) {
-    const path='/trade-api/v2/markets?status=open&limit=200'+(cursor?'&cursor='+encodeURIComponent(cursor):'');
-    providerGets++;
-    const response=await kalshiGetOnly(env,path);
-    lastStatus=response.status;
-    if (!response.ok) return {ok:false,providerGets,httpStatus:response.status,markets:[],error:'MARKET_DISCOVERY_HTTP_'+response.status};
-    const body=await safeProviderJson(response);
-    const rows=Array.isArray(body?.markets)?body.markets:[];
-    for (const raw of rows) {
-      const asset=marketAsset(raw);
-      if (!asset || !marketLooks15m(raw)) continue;
-      const snap=providerMarketSnapshot(raw,nowMs);
-      if (!snap.ticker || !(snap.timeRemainingMs>0)) continue;
-      const prior=byAsset.get(asset);
-      if (!prior || Number(snap.timeRemainingMs)<Number(prior.timeRemainingMs)) byAsset.set(asset,snap);
+export async function discoverCockpitMarkets(env, { nowMs=Date.now() } = {}) {
+  const results=await Promise.all(KALSHI_15M_SERIES.map(async spec=>{
+    const path='/trade-api/v2/markets?series_ticker='+encodeURIComponent(spec.seriesTicker)+'&status=open&limit=20';
+    try {
+      const response=await kalshiGetOnly(env,path);
+      const readAt=new Date().toISOString();
+      const body=await safeProviderJson(response);
+      const rows=Array.isArray(body?.markets)?body.markets:[];
+      if (!response.ok) {
+        return {asset:spec.asset,seriesTicker:spec.seriesTicker,path,httpStatus:response.status,ok:false,markets:[],error:'MARKETS_READ_FAILED_'+response.status};
+      }
+      const markets=rows.map(raw=>providerMarketSnapshot(raw,nowMs,spec.asset,readAt))
+        .filter(m=>{
+          const closeMs=Date.parse(m.closeTime||'');
+          const freshnessMs=Number.isFinite(closeMs)?closeMs-nowMs:NaN;
+          return Boolean(
+            m.ticker &&
+            m.asset===spec.asset &&
+            ['open','active'].includes(String(m.status||'').toLowerCase()) &&
+            Number.isFinite(freshnessMs) &&
+            freshnessMs>0 &&
+            freshnessMs<=20*60_000
+          );
+        })
+        .sort((a,b)=>Number(a.timeRemainingMs??Infinity)-Number(b.timeRemainingMs??Infinity));
+      return {asset:spec.asset,seriesTicker:spec.seriesTicker,path,httpStatus:response.status,ok:true,markets,error:null};
+    } catch (error) {
+      return {asset:spec.asset,seriesTicker:spec.seriesTicker,path,httpStatus:null,ok:false,markets:[],error:String(error?.name||'READ_FAILED')};
     }
-    cursor=String(body?.cursor||'');
-    if (!cursor || byAsset.size>=PAYNE_CONFIG.executableAssets.length) break;
-  }
-  const markets=[...byAsset.values()].sort((a,b)=>Number(a.timeRemainingMs??Infinity)-Number(b.timeRemainingMs??Infinity));
-  return {ok:true,providerGets,httpStatus:lastStatus,markets,cursorRemaining:Boolean(cursor)};
+  }));
+  const markets=results.flatMap(x=>x.markets.slice(0,1));
+  return {
+    ok:results.some(x=>x.ok),
+    providerGets:results.length,
+    markets,
+    assets:results.map(x=>({
+      asset:x.asset,
+      seriesTicker:x.seriesTicker,
+      ok:x.ok,
+      httpStatus:x.httpStatus,
+      currentContractCount:x.markets.length,
+      error:x.error,
+    })),
+    source:'BASELINE_SERIES_SCOPED_KALSHI_DISCOVERY',
+  };
 }
 
 function providerIndex3Evidence(balanceBody) {
@@ -613,16 +626,192 @@ function providerIndex3Evidence(balanceBody) {
   return {status:'READ-PROVEN AVAILABLE',balance:Number.isFinite(balance)?balance:null};
 }
 
-async function exactMarketRead(env,ticker) {
+async function exactMarketRead(env, ticker, assetHint = null) {
   const path='/trade-api/v2/markets/'+encodeURIComponent(ticker);
   const response=await kalshiGetOnly(env,path);
+  const readAt=new Date().toISOString();
   const body=await safeProviderJson(response);
+  const market=body?.market||body;
   return {
     ok:response.ok,
     httpStatus:response.status,
     path,
-    readAt:new Date().toISOString(),
-    market:response.ok?providerMarketSnapshot(body?.market||body):null,
+    readAt,
+    market:response.ok?providerMarketSnapshot(market,Date.now(),assetHint,readAt):null,
+  };
+}
+
+export async function readAuthoritativePayneFeatures(nowMs = Date.now()) {
+  try {
+    const response=await fetch(BASELINE_SHADOW_STATE_URL,{method:'GET',headers:{accept:'application/json','cache-control':'no-cache'}});
+    const body=await safeProviderJson(response);
+    const lastRunAt=body?.lastRunAt||body?.lastSuccessfulObservationAt||null;
+    const observedMs=Date.parse(lastRunAt||'');
+    const ageMs=Number.isFinite(observedMs)?Math.max(0,nowMs-observedMs):null;
+    const fresh=Boolean(
+      response.ok &&
+      body?.mode==='REAL_KALSHI_SHADOW' &&
+      ageMs!==null &&
+      ageMs<=BASELINE_FEATURE_MAX_AGE_MS
+    );
+    return {
+      ok:response.ok,
+      source:'BASELINE_REAL_SHADOW_READ_ONLY',
+      endpoint:BASELINE_SHADOW_STATE_URL,
+      httpStatus:response.status,
+      lastRunAt,
+      ageMs,
+      fresh,
+      status:body?.status||null,
+      priceSources:body?.priceSources||{},
+      opportunities:Array.isArray(body?.opportunities)?body.opportunities:[],
+      error:fresh?null:(response.ok?'BASELINE_SHADOW_NOT_FRESH':'BASELINE_SHADOW_READ_FAILED_'+response.status),
+    };
+  } catch (error) {
+    return {
+      ok:false,
+      source:'BASELINE_REAL_SHADOW_READ_ONLY',
+      endpoint:BASELINE_SHADOW_STATE_URL,
+      httpStatus:null,
+      lastRunAt:null,
+      ageMs:null,
+      fresh:false,
+      status:null,
+      priceSources:{},
+      opportunities:[],
+      error:String(error?.name||'BASELINE_SHADOW_READ_FAILED'),
+    };
+  }
+}
+
+function featureForCandidate(featureState, ticker, outcomeSide, asset) {
+  if (!featureState?.fresh) {
+    return {
+      source:'BASELINE_REAL_SHADOW_READ_ONLY',
+      available:false,
+      move:null,fair:null,edge:null,score:null,
+      state:'UNKNOWN / UNAVAILABLE',
+      reason:featureState?.error||'AUTHORITATIVE_LIVE_PAYNE_FEATURE_SOURCE_NOT_AVAILABLE',
+      sourceLastRunAt:featureState?.lastRunAt||null,
+      sourceAgeMs:featureState?.ageMs??null,
+      underlyingPriceSource:featureState?.priceSources?.[asset]||null,
+    };
+  }
+  const row=(featureState.opportunities||[]).find(o=>
+    String(o?.marketTicker||o?.slug||'')===String(ticker||'') &&
+    String(o?.outcomeSide||'').toUpperCase()===String(outcomeSide||'').toUpperCase()
+  );
+  const has=(key)=>row?.[key]!==null && row?.[key]!==undefined && Number.isFinite(Number(row[key]));
+  if (!row || !['move','fair','edge','score'].every(has)) {
+    return {
+      source:'BASELINE_REAL_SHADOW_READ_ONLY',
+      available:false,
+      move:null,fair:null,edge:null,score:null,
+      state:'UNKNOWN / UNAVAILABLE',
+      reason:'EXACT_TICKER_SIDE_FEATURE_NOT_PRESENT_IN_BASELINE_SHADOW',
+      sourceLastRunAt:featureState.lastRunAt,
+      sourceAgeMs:featureState.ageMs,
+      underlyingPriceSource:featureState?.priceSources?.[asset]||null,
+    };
+  }
+  const move=Number(row.move), fair=Number(row.fair), edge=Number(row.edge), score=Number(row.score);
+  const gate=payneStage({move,fair,edge,score},PAYNE_CONFIG.defaultThreshold);
+  return {
+    source:'BASELINE_REAL_SHADOW_READ_ONLY',
+    available:true,
+    move,fair,edge,score,
+    state:gate.stage,
+    reason:null,
+    direction:row?.direction||null,
+    outcomeSide:row?.outcomeSide||outcomeSide||null,
+    sourceLastRunAt:featureState.lastRunAt,
+    sourceAgeMs:featureState.ageMs,
+    underlyingPriceSource:featureState?.priceSources?.[asset]||null,
+  };
+}
+
+function buildCandidateViews(markets, featureState) {
+  const out=[];
+  for (const market of markets||[]) {
+    for (const side of ['YES','NO']) {
+      const feature=featureForCandidate(featureState,market.ticker,side,market.asset);
+      out.push({
+        ...market,
+        outcomeSide:side,
+        direction:side==='YES'?'UP':'DOWN',
+        selectedBid:side==='YES'?market.yesBid:market.noBid,
+        selectedAsk:side==='YES'?market.yesAsk:market.noAsk,
+        payne:feature,
+      });
+    }
+  }
+  return out.sort((a,b)=>{
+    const av=a.payne?.available?1:0, bv=b.payne?.available?1:0;
+    if (av!==bv) return bv-av;
+    const as=Number(a.payne?.score), bs=Number(b.payne?.score);
+    if (Number.isFinite(as)&&Number.isFinite(bs)&&as!==bs) return bs-as;
+    return Number(a.timeRemainingMs??Infinity)-Number(b.timeRemainingMs??Infinity);
+  });
+}
+
+function zeroMoneyPreviewFor(selected, preSubmit, index3, control, nowMs) {
+  if (!selected?.payne?.available) return {status:'NOT_REACHED',reason:'AUTHORITATIVE_PAYNE_FEATURES_UNAVAILABLE'};
+  const gate=payneStage(selected.payne,PAYNE_CONFIG.defaultThreshold);
+  if (!gate.pullTrigger) return {status:'NOT_REACHED',reason:'PAYNE_NOT_PULL_TRIGGER',gate};
+  const eligibility=realEligibility({
+    asset:selected.asset,
+    executionEligible:selected.executionEligible,
+    closeTime:selected.closeTime,
+    marketTicker:selected.ticker,
+  },nowMs);
+  if (!eligibility.assetAllowed || !eligibility.executionEligible || !eligibility.timeSafe || !eligibility.tickerPresent) {
+    return {status:'BLOCKED',reason:'REAL_ELIGIBILITY_GATE',gate,eligibility};
+  }
+  if (!preSubmit?.ok || preSubmit?.market?.ticker!==selected.ticker) {
+    return {status:'BLOCKED',reason:'PRE_SUBMIT_NOT_PROVEN',gate,eligibility};
+  }
+  const ask=selected.outcomeSide==='YES'?Number(preSubmit.market.yesAsk):Number(preSubmit.market.noAsk);
+  const sizing=estimateKalshiFeeSafeSize(ask,1);
+  if (!sizing.ok) return {status:'BLOCKED',reason:'FEE_SAFE_SIZING_FAILED',gate,eligibility,sizing};
+  const clientOrderId=payneClientOrderId('cockpit-zero-money',1,'entry');
+  const payload=kalshiV2EntryPayload({
+    marketTicker:selected.ticker,
+    outcomeSide:selected.outcomeSide,
+    yes:ask,
+  },sizing,clientOrderId);
+  if (!payload) return {status:'BLOCKED',reason:'IOC_PAYLOAD_INVALID',gate,eligibility,sizing};
+  const funding=fundingGate({...control,requiredExchangeIndex:index3?.status==='READ-PROVEN AVAILABLE'?3:null});
+  const stop=hardStopBeforeProviderPost({
+    ticker:selected.ticker,
+    stage:gate.stage,
+    sizing,
+    clientOrderId,
+    entryPayload:payload,
+    index3,
+    funding,
+  });
+  return {
+    status:'PREVIEW_READY',
+    gate,
+    eligibility,
+    ticker:selected.ticker,
+    asset:selected.asset,
+    outcomeSide:selected.outcomeSide,
+    direction:selected.direction,
+    entryPrice:ask,
+    count:sizing.count,
+    premiumUsd:sizing.premiumUsd,
+    estimatedFeeUsd:sizing.feeUsd,
+    estimatedDebitUsd:sizing.totalDebitUsd,
+    timeInForce:payload.time_in_force,
+    postOnly:payload.post_only,
+    reduceOnly:payload.reduce_only,
+    clientOrderId,
+    fundingGate:funding.failClosed?'FAIL_CLOSED':'PASS',
+    providerPost:stop.reason,
+    providerWrites:0,
+    orders:0,
+    capitalMovedUsd:0,
   };
 }
 
@@ -639,27 +828,26 @@ export async function buildCockpitData(env, nowMs=Date.now()) {
     return {
       ok:false,service:SERVICE_ID,mode:'ZERO-MONEY / GET-ONLY',
       updatedAt:new Date().toISOString(),refreshIntervalMs:COCKPIT_REFRESH_MS,
-      providerGets,providerWrites:0,orders:0,capitalMovedUsd:0,
+      providerGets,baselineReads:0,providerWrites:0,orders:0,capitalMovedUsd:0,
       authentication:'NOT_PROVEN',
       error:'AUTHENTICATED_BALANCE_GET_FAILED',errorClass:error?.name||'Error',
       safety:{payneArmed:false,realExecution:'DISABLED',fundingAuthority:'DISABLED',providerWrites:0,orders:0,capitalMovedUsd:0,getOnly:'ACTIVE',providerPost:'HARD DISABLED',secondIoc:'HOLD'},
     };
   }
 
-  let discovery;
-  try {
-    discovery=await discoverCockpitMarkets(env,{nowMs});
-    providerGets+=Number(discovery.providerGets||0);
-  } catch (error) {
-    discovery={ok:false,httpStatus:null,markets:[],error:'MARKET_DISCOVERY_FAILED',errorClass:error?.name||'Error'};
-  }
+  const [discovery,featureState]=await Promise.all([
+    discoverCockpitMarkets(env,{nowMs}),
+    readAuthoritativePayneFeatures(nowMs),
+  ]);
+  providerGets+=Number(discovery.providerGets||0);
+  const candidates=buildCandidateViews(discovery.markets||[],featureState);
+  const selected=candidates[0]||null;
 
-  const selected=discovery.markets?.[0]||null;
   let freshLock=null, preSubmit=null;
   if (selected?.ticker) {
     try {
-      freshLock=await exactMarketRead(env,selected.ticker); providerGets++;
-      preSubmit=await exactMarketRead(env,selected.ticker); providerGets++;
+      freshLock=await exactMarketRead(env,selected.ticker,selected.asset); providerGets++;
+      preSubmit=await exactMarketRead(env,selected.ticker,selected.asset); providerGets++;
     } catch (error) {
       const fail={ok:false,httpStatus:null,path:null,readAt:new Date().toISOString(),market:null,errorClass:error?.name||'Error'};
       freshLock=freshLock||fail;
@@ -668,9 +856,21 @@ export async function buildCockpitData(env, nowMs=Date.now()) {
   }
 
   const index3=providerIndex3Evidence(balance.body);
-  const payne=livePayneFeatureState(selected);
+  const payne=selected?.payne||{
+    source:'BASELINE_REAL_SHADOW_READ_ONLY',
+    available:false,
+    move:null,fair:null,edge:null,score:null,
+    state:'UNKNOWN / UNAVAILABLE',
+    reason:featureState?.error||'NO_SELECTED_LIVE_CONTRACT',
+    sourceLastRunAt:featureState?.lastRunAt||null,
+    sourceAgeMs:featureState?.ageMs??null,
+    underlyingPriceSource:null,
+  };
   const tickerConsistent=Boolean(selected?.ticker && freshLock?.market?.ticker===selected.ticker && preSubmit?.market?.ticker===selected.ticker);
+  const sideConsistent=Boolean(selected?.outcomeSide==='YES'||selected?.outcomeSide==='NO');
   const timeSafe=selected?.closeTime ? kalshiCandidateTimeSafe({closeTime:selected.closeTime},nowMs) : null;
+  const gate=payne.available?payneStage(payne,PAYNE_CONFIG.defaultThreshold):null;
+  const zeroMoneyPreview=zeroMoneyPreviewFor(selected,preSubmit,index3,control,nowMs);
 
   return {
     ok:Boolean(balance.ok && discovery.ok),
@@ -679,6 +879,7 @@ export async function buildCockpitData(env, nowMs=Date.now()) {
     updatedAt:new Date().toISOString(),
     refreshIntervalMs:COCKPIT_REFRESH_MS,
     providerGets,
+    baselineReads:1,
     providerWrites:0,
     orders:0,
     capitalMovedUsd:0,
@@ -695,12 +896,23 @@ export async function buildCockpitData(env, nowMs=Date.now()) {
       providerWriteAuthority:control?.providerWriteAuthority||'DISABLED',
     },
     markets:discovery.markets||[],
+    candidates,
     selected,
     payne,
+    featureProvenance:{
+      source:featureState.source,
+      endpoint:featureState.endpoint,
+      httpStatus:featureState.httpStatus,
+      status:featureState.status,
+      lastRunAt:featureState.lastRunAt,
+      ageMs:featureState.ageMs,
+      fresh:featureState.fresh,
+      error:featureState.error,
+    },
     pipeline:{
-      radar:payne.available ? (payne.score>=PAYNE_CONFIG.radarScore?'PASS':'FAIL') : 'UNKNOWN / UNAVAILABLE',
-      lockIn:payne.available ? (payne.score>=PAYNE_CONFIG.lockScore && payne.edge>0?'PASS':'FAIL') : 'UNKNOWN / UNAVAILABLE',
-      pullTrigger:payne.available ? (payneStage(payne,PAYNE_CONFIG.defaultThreshold).pullTrigger?'PASS':'FAIL') : 'UNKNOWN / UNAVAILABLE',
+      radar:gate ? (gate.radar?'PASS':'FAIL') : 'UNKNOWN / UNAVAILABLE',
+      lockIn:gate ? (gate.lockIn?'PASS':'FAIL') : 'UNKNOWN / UNAVAILABLE',
+      pullTrigger:gate ? (gate.pullTrigger?'PASS':'FAIL') : 'UNKNOWN / UNAVAILABLE',
       realEligibility:selected ? {
         assetAllowed:PAYNE_CONFIG.executableAssets.includes(selected.asset),
         executionEligible:selected.executionEligible,
@@ -710,14 +922,24 @@ export async function buildCockpitData(env, nowMs=Date.now()) {
       freshLock:freshLock?.ok?'PROVEN':selected?'NOT_PROVEN':'NOT_AVAILABLE',
       preSubmit:preSubmit?.ok?'PROVEN':selected?'NOT_PROVEN':'NOT_AVAILABLE',
       tickerConsistent:selected?tickerConsistent:null,
-      feeSafeSizing:'NOT_RUN_NO_AUTHORITATIVE_PAYNE_QUALIFICATION',
-      iocPayload:'NOT_RUN_NO_AUTHORITATIVE_PAYNE_QUALIFICATION',
-      fundingGate:{index3:index3.status,fundingAuthority:'DISABLED',result:'FAIL_CLOSED'},
+      sideConsistent:selected?sideConsistent:null,
+      feeSafeSizing:zeroMoneyPreview?.sizing?.ok===false?'FAIL':zeroMoneyPreview?.status==='PREVIEW_READY'?'PASS':'NOT_REACHED',
+      iocPayload:zeroMoneyPreview?.status==='PREVIEW_READY'?'PASS':'NOT_REACHED',
+      fundingGate:{
+        index3:index3.status,
+        fundingAuthority:'DISABLED',
+        result:zeroMoneyPreview?.fundingGate||'FAIL_CLOSED',
+      },
       providerPost:'HARD DISABLED',
     },
     observations:{initial:selected,freshLock,preSubmit},
-    zeroMoneyPreview:null,
-    discovery:{ok:discovery.ok,httpStatus:discovery.httpStatus,error:discovery.error||null,cursorRemaining:Boolean(discovery.cursorRemaining)},
+    zeroMoneyPreview,
+    discovery:{
+      ok:discovery.ok,
+      source:discovery.source,
+      assets:discovery.assets,
+      currentContractCount:(discovery.markets||[]).length,
+    },
     safety:{
       payneArmed:Boolean(control?.armed),
       realExecution:control?.realExecution||'DISABLED',
