@@ -1,0 +1,122 @@
+name: Deploy PAYNE-KALSHI REAL zero-money observer
+
+on:
+  push:
+    branches:
+      - market-edge-payne-kalshi-real-step1
+    paths:
+      - ".github/workflows/deploy-payne-kalshi-real-zero-money.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-payne-kalshi-real-zero-money
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: market-edge-lab/real/payne-kalshi-real
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Re-run complete zero-money suite before deploy
+        run: npm test
+
+      - name: Validate Cloudflare deploy secrets
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          test -n "$CLOUDFLARE_API_TOKEN" || { echo "Missing CLOUDFLARE_API_TOKEN"; exit 1; }
+          test -n "$CLOUDFLARE_ACCOUNT_ID" || { echo "Missing CLOUDFLARE_ACCOUNT_ID"; exit 1; }
+
+      - name: Deploy PAYNE Worker only
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: npx --yes wrangler@4 deploy | tee /tmp/payne-deploy.txt
+
+      - name: Verify live zero-money observatory
+        shell: bash
+        working-directory: .
+        run: |
+          set -euo pipefail
+          base='https://market-edge-payne-kalshi-real.darkbishop43.workers.dev'
+
+          for i in $(seq 1 24); do
+            code=$(curl -sS -o /tmp/status.json -w '%{http_code}' "$base/status" || true)
+            [ "$code" = "200" ] && break
+            sleep 5
+          done
+          test "$code" = "200"
+
+          curl -fsS "$base/cockpit-data" -o /tmp/cockpit.json
+          jq -e '
+            .providerWrites == 0 and
+            .orders == 0 and
+            .capitalMovedUsd == 0 and
+            .safety.realExecution == "DISABLED" and
+            .safety.fundingAuthority == "DISABLED" and
+            .safety.providerPost == "HELD / HARD DISABLED" and
+            .safety.secondIoc == "HOLD" and
+            .featureProvenance.transport == "SERVICE_BINDING" and
+            .featureProvenance.binding == "BASELINE_REAL_READ" and
+            .clocks.consistency.standard == "NFE_OS_UNIVERSAL_MARKET_CLOCK_V1"
+          ' /tmp/cockpit.json >/dev/null
+
+          jq -e '
+            .payne.source == "BASELINE_REAL_SERVICE_BINDING_READ_ONLY" and
+            (.payne.move != null) and
+            (.payne.fair != null) and
+            (.payne.edge != null) and
+            (.payne.score != null) and
+            (.payne.state != "UNKNOWN")
+          ' /tmp/cockpit.json >/dev/null
+
+          curl -fsS "$base/export?range=current&format=json" -o /tmp/export.json
+          jq -e '
+            .schema == "PAYNE_KALSHI_EXPORT_V1" and
+            .providerWrites == 0 and
+            .orders == 0 and
+            .capitalMovedUsd == 0
+          ' /tmp/export.json >/dev/null
+
+          curl -fsS "$base/export?range=current&format=csv" -o /tmp/export.csv
+          grep -q 'observationAt,scanSource,asset,direction,outcomeSide,ticker' /tmp/export.csv
+
+          scheduled=0
+          for i in $(seq 1 18); do
+            curl -fsS "$base/evidence/latest" -o /tmp/latest.json || true
+            source=$(jq -r '.source // ""' /tmp/latest.json 2>/dev/null || true)
+            if [ "$source" = "SCHEDULED_CRON" ]; then scheduled=1; break; fi
+            sleep 5
+          done
+          test "$scheduled" = "1"
+
+          jq -e '
+            .providerWrites == 0 and
+            .orders == 0 and
+            .capitalMovedUsd == 0 and
+            .source == "SCHEDULED_CRON"
+          ' /tmp/latest.json >/dev/null
+
+          echo "LIVE_STATUS=GREEN_ZERO_MONEY"
+          echo "FEATURE_HTTP=$(jq -r '.featureProvenance.httpStatus' /tmp/cockpit.json)"
+          echo "PAYNE_STATE=$(jq -r '.payne.state' /tmp/cockpit.json)"
+          echo "WINDOW_CONSISTENCY=$(jq -r '.clocks.consistency.windowConsistency' /tmp/cockpit.json)"
+          echo "BASELINE_ACTUAL_LANE=$(jq -r '.comparison.baselineReal.lane' /tmp/cockpit.json)"
+          echo "PAYNE_PAPER_STATUS=$(jq -r '.comparison.paynePaper.reason' /tmp/cockpit.json)"
+          echo "SCHEDULED_SOURCE=$(jq -r '.source' /tmp/latest.json)"
+          echo "providerWrites=0"
+          echo "orders=0"
+          echo "capitalMovedUsd=0"
