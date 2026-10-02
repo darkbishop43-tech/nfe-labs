@@ -1857,3 +1857,322 @@ Workflow command:
 
 This workflow exists to turn source assertions into executable validation evidence before live deployment.
 
+
+
+---
+
+# OCTOBER 2, 2026 — ZERO-MONEY OBSERVATION / COMPARISON TARGET
+
+## Immediate operating objective
+
+Tonight's operating sequence is:
+
+```text
+LIVE OBSERVATION
+→ RADAR
+→ LOCK
+→ WOULD FIRE
+→ RECORD
+→ COMPARE
+```
+
+Trading is not the objective.
+
+PAYNE-KALSHI REAL is intended to remain unattended in:
+
+- LIVE provider data
+- LIVE one-minute scanning
+- LIVE feature classification
+- LIVE evidence collection
+- ZERO MONEY
+
+Founder manual `RUN SAFE SCAN NOW` remains diagnostic only.
+
+## Durable decision-event evidence
+
+The observer records bounded decision-transition events as:
+
+`OBSERVATION_DECISION_EVENT`
+
+with event classes:
+
+- `RADAR`
+- `LOCK`
+- `PULL`
+- `WOULD_FIRE`
+- `REJECT`
+
+The event includes, where authoritative:
+
+- asset
+- exact ticker
+- direction
+- outcome side
+- score
+- edge
+- move
+- rejection / advancement reason
+- PAYNE observation timestamp
+- provider window close
+- time remaining
+- Fresh LOCK timestamp
+- pre-submit timestamp
+- selected-candidate comparison evidence
+- providerWrites = 0
+- orders = 0
+- capitalMovedUsd = 0
+
+Events are written on a decision-signature transition rather than blindly duplicating every unchanged candidate every minute.
+
+This preserves research evidence while avoiding needless KV write amplification.
+
+Existing zero-money FIRE-ready evidence remains separately recordable as:
+
+`ZERO_MONEY_FIRE_PLAN_RECORDED`
+
+## Accumulated descriptive counters
+
+Cumulative counters are carried inside the existing current observation snapshot instead of requiring a second per-minute counter key write.
+
+Counters include:
+
+- observations collected
+- contracts examined
+- RADAR count
+- LOCK count
+- PULL count
+- WOULD-FIRE count
+- REJECT count
+- Fresh-LOCK invalidations
+- pre-submit invalidations
+- window mismatches
+- Baseline actual matches
+- Baseline actual fills
+- Payne Paper matches
+- Payne Paper unknown comparisons
+
+These are descriptive research counts.
+
+They are not profitability or strategy-performance claims.
+
+## PAYNE ↔ Baseline actual comparison
+
+Repository evidence proves Baseline exposes the GET-only route:
+
+`GET /execution-test-state`
+
+through the existing Baseline Worker.
+
+PAYNE may access that exact path through the existing:
+
+`BASELINE_REAL_READ`
+
+Service Binding.
+
+Allowed PAYNE service-binding read paths are currently constrained to:
+
+- `GET /shadow-state`
+- `GET /execution-test-state`
+
+No POST path is allowed.
+
+The Baseline actual comparison is explicitly labeled:
+
+`EXECUTION_TEST_NOT_PRODUCTION_BASELINE`
+
+This prevents execution-test evidence from being falsely represented as the frozen production Baseline lane.
+
+For an exact ticker + outcome-side match, the comparison may retain:
+
+- matching contract
+- attempted
+- attempt status
+- filled
+- filled count
+- fill timestamp
+- actual entry fill price
+- Baseline execution-test score where exposed
+- order ID where exposed
+- closed status / exit reason where exposed
+
+Important limitation:
+
+the execution-test route does not expose an authoritative provider submission/FIRE timestamp.
+
+Therefore:
+
+`fireTime = null`
+
+with:
+
+`NOT_EXPOSED_BY_AUTHORITATIVE_SOURCE`
+
+Do not substitute fill time for FIRE time.
+
+## PAYNE hypothetical FIRE comparison
+
+When the full zero-money path reaches:
+
+`PULL_QUALIFIED_ZERO_MONEY_FIRE_READY`
+
+PAYNE comparison evidence records:
+
+- wouldFire = true
+- wouldFireAt = pre-submit reread timestamp
+- hypothetical entry price = pre-submit selected ask
+- score
+- exact ticker
+- asset
+- direction
+- authoritative Kalshi window
+- remaining time
+
+This is hypothetical execution evidence only.
+
+It creates no provider order.
+
+## Payne Paper comparison status
+
+Repository evidence proves a paper executor workflow calls:
+
+`https://market-edge-siblings.darkbishop43.workers.dev/api/run`
+
+and expects an isolated `payne_method` state in its response.
+
+However, the PAYNE-KALSHI REAL repository does NOT currently expose or document a proven read-only Payne Paper historical/event endpoint.
+
+PAYNE-KALSHI REAL MUST NOT call the paper `/api/run` mutation/executor endpoint merely to perform comparison reads.
+
+Therefore the current comparison truth is:
+
+`READ_ONLY_AUTHORITATIVE_EVENT_SOURCE_NOT_EXPOSED_TO_PAYNE_KALSHI_REAL`
+
+and Payne Paper event comparison fields remain UNKNOWN.
+
+This is an active research-source blocker, not permission to fabricate paper events.
+
+A future mission may connect a proven read-only Payne Paper history/state source.
+
+## Cross-system comparison schema
+
+Current schema:
+
+`PAYNE_CROSS_SYSTEM_COMPARISON_V1`
+
+PAYNE side may contain:
+
+- watched contract
+- ticker
+- asset
+- direction
+- score
+- state
+- observation timestamp
+- would-fire state
+- would-fire timestamp
+- hypothetical entry price
+- market-window close
+- time remaining
+
+Baseline side may contain actual attributable execution-test evidence where present.
+
+Payne Paper side remains UNKNOWN until a read-only authoritative event source is proven.
+
+Unlike metrics are not forced into equivalence.
+
+## Research exports
+
+The Founder CSV / JSON export now includes additional comparison fields:
+
+- baselineActualLane
+- baselineActualMatch
+- baselineAttempted
+- baselineFilled
+- baselineFillTime
+- baselineEntryPrice
+- baselineScore
+- paynePaperComparisonStatus
+
+Together with the universal-clock fields, this supports later analysis of:
+
+- same asset
+- same contract/window
+- same direction
+- observation-time differences
+- hypothetical PAYNE FIRE time
+- Baseline actual fill time
+- entry-price differences
+- score differences where comparable
+- Fresh LOCK effects
+- remaining-time differences
+
+Final result comparison remains available only where an authoritative source exposes it.
+
+## Future Founder control architecture — documentation only
+
+Current values are validation defaults / active safety constraints, not permanent architectural ceilings.
+
+Future control model should support:
+
+### STAKE
+
+validated numeric Founder input
+
+### RUN LENGTH
+
+validated bounded numeric Founder input
+
+### RUN MODE
+
+- BOUNDED
+- CONTINUOUS
+
+### POSITION CAP
+
+validated Founder-configurable multi-position limit
+
+Current values such as:
+
+- $1 / $2 / $5 / $10
+- 10 / 30 attempts
+- 3 simultaneous positions
+
+must not silently become permanent design ceilings.
+
+However, this requirement grants ZERO authority to relax any active live execution safety limit.
+
+Tonight:
+
+- do not increase live-money authority
+- do not enable unlimited positions
+- do not enable continuous real-money execution
+- do not remove current safety caps from Baseline or any active execution path
+
+## Future real-money readiness sequence
+
+A later separately-authorized mission may follow:
+
+```text
+FUND REQUIRED ACCOUNT / INDEX
+→ VALIDATE NUMERIC STAKE INPUT
+→ VALIDATE RUN MODE / RUN LENGTH
+→ VALIDATE POSITION CAP
+→ CONNECT PROVEN CONTROLS TO GOVERNED EXECUTION AUTHORITY
+→ PROVE BUTTONS / STATE TRANSITIONS
+→ SEPARATELY AUTHORIZED BOUNDED LIVE VALIDATION
+```
+
+This mission ends before that boundary.
+
+## Terminal safety
+
+PAYNE-KALSHI REAL remains:
+
+- providerWrites = 0
+- orders = 0
+- capitalMovedUsd = $0
+- provider POST = HELD / HARD DISABLED
+- real execution = DISABLED
+- funding authority = DISABLED
+- Second IOC = HOLD
+
