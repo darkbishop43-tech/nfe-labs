@@ -6,9 +6,9 @@ import {
   providerMarketSnapshot,
   livePayneFeatureState,
   buildCockpitData,
-  cockpitHtml,
   defaultControlState,
 } from '../src/index.js';
+import { cockpitHtml } from '../src/cockpit-html.js';
 
 if (!globalThis.crypto) globalThis.crypto = webcrypto;
 
