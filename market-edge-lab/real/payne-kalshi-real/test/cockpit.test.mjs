@@ -57,7 +57,7 @@ function baselineService(body=baselineShadow(),status=200){
         state:{
           status:'COMPLETE',seriesId:'BASELINE-SERIES-TEST',
           attempts:[{attemptNo:1,status:'FILLED',asset:'BTC',ticker:'KXBTC15M-TEST',side:'YES',observedScore:.71,liveScore:.72,liveAsk:.50,orderId:'ORDER-1',fillCount:1}],
-          positions:[{id:'P1',attemptNo:1,status:'CLOSED',asset:'BTC',ticker:'KXBTC15M-TEST',side:'YES',direction:'UP',entryScore:.72,entryOrderId:'ORDER-1',filledCount:1,entryAverageFillPrice:.50,filledAt:'2026-10-02T06:05:15Z',exitReason:'MAX_HOLD_EXIT',closedAt:'2026-10-02T06:10:15Z'}],
+          positions:[{id:'P1',attemptNo:1,status:'CLOSED',asset:'BTC',ticker:'KXBTC15M-TEST',side:'YES',direction:'UP',entryScore:.72,entryOrderId:'ORDER-1',filledCount:1,entryAverageFillPrice:.50,filledAt:1790921115000,exitReason:'MAX_HOLD_EXIT',closedAt:'2026-10-02T06:10:15Z'}],
         },
         safety:{maxEntryDebitUsd:1,maxConcurrent:3}
       });
@@ -408,6 +408,9 @@ test('would-fire forensic route reconstructs persisted FIRE_READY evidence read-
     assert.equal(body.rows[0].marketResult,'YES');
     assert.equal(body.rows[0].directionalClassification,'DIRECTIONALLY_CORRECT');
     assert.equal(body.rows[0].baselineFilled,true);
+    assert.equal(body.rows[0].baselineFillTime,'2026-10-02T06:05:15.000Z');
+    assert.equal(body.rows[0].payneTimingVsBaseline,'PAYNE_EARLIER_THAN_BASELINE_FILL');
+    assert.equal(body.rows[0].payneToBaselineFillDeltaMs,15000);
     assert.equal(body.rows[0].baselineFireTime,null);
     assert.equal(body.rows[0].baselineFireTimeReason,'NOT_EXPOSED_BY_AUTHORITATIVE_SOURCE');
     assert.equal(body.rows[0].netHypotheticalPnlUsd,null);
