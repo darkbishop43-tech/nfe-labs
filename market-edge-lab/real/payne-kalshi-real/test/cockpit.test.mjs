@@ -8,6 +8,9 @@ import {
   readAuthoritativePayneFeatures,
   buildCockpitData,
   defaultControlState,
+  updateFounderControl,
+  runReadOnlyScan,
+  loadControl,
 } from '../src/index.js';
 import { cockpitHtml } from '../src/cockpit-html.js';
 
@@ -180,7 +183,7 @@ test('cockpit performs authenticated series discovery, exact rereads, authentic 
     assert.equal(out.pipeline.preSubmit,'PROVEN');
     assert.equal(out.pipeline.tickerConsistent,true);
     assert.equal(out.pipeline.sideConsistent,true);
-    assert.equal(out.zeroMoneyPreview.status,'PREVIEW_READY');
+    assert.equal(out.zeroMoneyPreview.status,'FIRE_READY');
     assert.equal(out.zeroMoneyPreview.timeInForce,'immediate_or_cancel');
     assert.equal(out.zeroMoneyPreview.postOnly,false);
     assert.equal(out.zeroMoneyPreview.reduceOnly,false);
@@ -220,19 +223,89 @@ test('stale Baseline feature observation stays UNKNOWN and cannot produce previe
   } finally { globalThis.fetch=original; }
 });
 
-test('cockpit HTML exposes functional observability without execution controls',()=>{
+test('Founder controls mutate isolated cockpit state but cannot enable provider authority',async()=>{
+  const env=await authEnv();
+  let c=await loadControl(env);
+  assert.equal(c.armed,false);
+  assert.equal(c.activeThreshold,.70);
+  assert.equal(c.maxEntryDebitUsd,1);
+
+  c=await updateFounderControl(env,'ARM');
+  assert.equal(c.armed,true);
+  assert.equal(c.providerWriteAuthority,'DISABLED');
+  assert.equal(c.providerPostAuthority,'HELD');
+  assert.equal(c.realExecution,'DISABLED');
+  assert.equal(c.fundingAuthority,'DISABLED');
+
+  c=await updateFounderControl(env,'SET_THRESHOLD',.75);
+  assert.equal(c.activeThreshold,.75);
+  c=await updateFounderControl(env,'SET_STAKE',5);
+  assert.equal(c.maxEntryDebitUsd,5);
+  c=await updateFounderControl(env,'SET_ATTEMPT_TARGET',30);
+  assert.equal(c.attemptTarget,30);
+  c=await updateFounderControl(env,'SET_SCAN_ENABLED',false);
+  assert.equal(c.scanEnabled,false);
+
+  await assert.rejects(updateFounderControl(env,'SET_THRESHOLD',.65),/PAYNE_CONTROL_THRESHOLD_NOT_ALLOWED/);
+  await assert.rejects(updateFounderControl(env,'SET_STAKE',3),/PAYNE_CONTROL_STAKE_NOT_ALLOWED/);
+});
+
+test('scheduled-style safe scan persists isolated evidence and still records zero provider writes',async()=>{
+  const env=await authEnv();
+  const original=globalThis.fetch;
+  globalThis.fetch=async (url,options={})=>{
+    const u=String(url);
+    if(u.includes('market-edge-baseline-real')) return jsonResponse({
+      mode:'REAL_KALSHI_SHADOW',
+      status:'LIVE_KALSHI_SHADOW',
+      lastRunAt:'2026-10-02T06:04:30Z',
+      priceSources:{BTC:'COINBASE'},
+      opportunities:[{marketTicker:'KXBTC15M-TEST',outcomeSide:'YES',direction:'UP',move:.003,fair:.554,edge:.054,score:.716}],
+    });
+    if(u.includes('/portfolio/balance')) return jsonResponse({balance_breakdown:[{exchange_index:3,balance:7.25}]});
+    if(u.includes('series_ticker=KXBTC15M')) return jsonResponse({markets:[providerMarket('BTC','KXBTC15M-TEST','KXBTC15M')]});
+    if(u.includes('/trade-api/v2/markets?series_ticker=')) return jsonResponse({markets:[]});
+    if(u.includes('/markets/KXBTC15M-TEST')) return jsonResponse({market:providerMarket('BTC','KXBTC15M-TEST','KXBTC15M','0.48','0.50')});
+    throw new Error('unexpected URL '+u);
+  };
+  try{
+    const out=await runReadOnlyScan(env,'SCHEDULED_CRON',Date.parse('2026-10-02T06:05:00Z'));
+    assert.equal(out.ok,true);
+    assert.equal(out.providerWrites,0);
+    assert.equal(out.orders,0);
+    assert.equal(out.capitalMovedUsd,0);
+    assert.equal(out.persistedLatest,true);
+    assert.equal(out.persistedHistory,true);
+    assert.equal(out.snapshot.zeroMoneyPreview.status,'FIRE_READY');
+    assert.equal(out.snapshot.zeroMoneyPreview.providerPost,'STEP1_PROVIDER_POST_HARD_DISABLED');
+    assert.ok([...env.PAYNE_KALSHI_STATE.store.keys()].some(k=>k==='payne-kalshi:current:v1'));
+    assert.ok([...env.PAYNE_KALSHI_STATE.store.keys()].some(k=>k.startsWith('payne-kalshi:scan-history:')));
+  } finally { globalThis.fetch=original; }
+});
+
+test('cockpit HTML is a pre-live real trading cockpit with real local controls and provider POST held',()=>{
   const html=cockpitHtml();
   assert.equal(COCKPIT_REFRESH_MS,60_000);
+  assert.match(html,/PAYNE-KALSHI REAL · PRE-LIVE COCKPIT/);
+  assert.match(html,/FOUNDER CONTROLS/);
+  assert.match(html,/ARM \/ DISARM/);
+  assert.match(html,/MAX ENTRY DEBIT \/ STAKE/);
+  assert.match(html,/ATTEMPT TARGET/);
+  assert.match(html,/AUTOMATIC SCAN/);
   assert.match(html,/CURRENT KALSHI 15-MINUTE UNIVERSE/);
+  assert.match(html,/UP \/ DOWN/);
   assert.match(html,/PAYNE FEATURE EVIDENCE/);
-  assert.match(html,/MOVE:/);
-  assert.match(html,/RADAR ≥ \.50/);
-  assert.match(html,/PULL ≥ \.70/);
-  assert.match(html,/FRESH LOCK \/ PRE-SUBMIT/);
-  assert.match(html,/ZERO-MONEY FIRE BOUNDARY/);
-  assert.match(html,/PROVIDER POST: HARD DISABLED/);
+  assert.match(html,/MOVE/);
+  assert.match(html,/FRESH LOCK/);
+  assert.match(html,/ZERO-MONEY FIRE/);
+  assert.match(html,/MANAGEMENT \/ POSITION LANE/);
+  assert.match(html,/SCORE EXIT/);
+  assert.match(html,/MAX HOLD/);
+  assert.match(html,/REDUCE-ONLY/);
+  assert.match(html,/PROVIDER POST HELD/);
   assert.match(html,/setInterval\(load,60000\)/);
+  assert.match(html,/fetch\('\/control',\{method:'POST'/);
+  assert.match(html,/fetch\('\/scan-now',\{method:'POST'/);
   assert.doesNotMatch(html,/PLACE ORDER/i);
   assert.doesNotMatch(html,/SUBMIT ORDER/i);
-  assert.doesNotMatch(html,/method=["']post["']/i);
 });
