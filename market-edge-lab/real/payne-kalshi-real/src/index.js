@@ -721,22 +721,29 @@ async function exactMarketRead(env, ticker, assetHint = null) {
   };
 }
 
-async function baselineShadowRead(env) {
+async function baselineReadOnlyPath(env, path) {
   const service=env?.[BASELINE_SERVICE_BINDING];
   if (!service || typeof service.fetch!=='function') {
     return {ok:false,status:null,body:{},error:'BASELINE_REAL_SERVICE_BINDING_UNBOUND'};
   }
+  if (!['/shadow-state','/execution-test-state'].includes(String(path||''))) {
+    return {ok:false,status:null,body:{},error:'BASELINE_READ_PATH_NOT_ALLOWED'};
+  }
   try {
-    const request=new Request('https://market-edge-baseline-real.internal'+BASELINE_SHADOW_STATE_PATH,{
+    const request=new Request('https://market-edge-baseline-real.internal'+path,{
       method:'GET',
       headers:{accept:'application/json','cache-control':'no-cache'},
     });
     const response=await service.fetch(request);
     const body=await safeProviderJson(response);
-    return {ok:response.ok,status:response.status,body,error:response.ok?null:'BASELINE_SHADOW_READ_FAILED_'+response.status};
+    return {ok:response.ok,status:response.status,body,error:response.ok?null:'BASELINE_READ_FAILED_'+response.status};
   } catch (error) {
-    return {ok:false,status:null,body:{},error:String(error?.name||'BASELINE_SHADOW_SERVICE_READ_FAILED')};
+    return {ok:false,status:null,body:{},error:String(error?.name||'BASELINE_SERVICE_READ_FAILED')};
   }
+}
+
+async function baselineShadowRead(env) {
+  return baselineReadOnlyPath(env,BASELINE_SHADOW_STATE_PATH);
 }
 
 export async function readAuthoritativePayneFeatures(env, nowMs = Date.now()) {
@@ -862,6 +869,131 @@ function buildCandidateViews(markets, featureState, activeThreshold) {
     if (Number.isFinite(as)&&Number.isFinite(bs)&&as!==bs) return bs-as;
     return Number(a.timeRemainingMs??Infinity)-Number(b.timeRemainingMs??Infinity);
   });
+}
+
+async function readBaselineActualComparison(env, selected) {
+  const read=await baselineReadOnlyPath(env,'/execution-test-state');
+  const body=read.body||{};
+  if (!read.ok) {
+    return {
+      source:'BASELINE_REAL_EXECUTION_TEST_READ_ONLY',
+      lane:'EXECUTION_TEST_NOT_PRODUCTION_BASELINE',
+      available:false,
+      reason:read.error||'BASELINE_EXECUTION_TEST_READ_FAILED',
+      sawMatchingContract:'UNKNOWN',
+      sameTicker:'UNKNOWN',
+      sameDirection:'UNKNOWN',
+      attempted:'UNKNOWN',
+      filled:'UNKNOWN',
+      fireTime:null,
+      fillTime:null,
+      entryPrice:null,
+      score:null,
+    };
+  }
+  const state=body?.state||{};
+  const ticker=String(selected?.ticker||'');
+  const side=String(selected?.outcomeSide||'').toUpperCase();
+  const attempts=Array.isArray(state?.attempts)?state.attempts:[];
+  const positions=Array.isArray(state?.positions)?state.positions:[];
+  const attempt=attempts.find(a=>String(a?.ticker||'')===ticker && String(a?.side||'').toUpperCase()===side)||null;
+  const position=positions.find(p=>String(p?.ticker||'')===ticker && String(p?.side||'').toUpperCase()===side)||null;
+  const filled=Boolean(position && Number(position?.filledCount||0)>0);
+  return {
+    source:'BASELINE_REAL_EXECUTION_TEST_READ_ONLY',
+    lane:String(body?.mode||'EXECUTION_TEST_NOT_PRODUCTION_BASELINE'),
+    available:true,
+    sourceHttpStatus:read.status,
+    seriesId:state?.seriesId||null,
+    sawMatchingContract:Boolean(attempt||position),
+    sameTicker:attempt||position?true:false,
+    sameDirection:attempt||position?true:false,
+    attempted:Boolean(attempt),
+    attemptStatus:attempt?.status||null,
+    filled,
+    fireTime:null,
+    fireTimeReason:'NOT_EXPOSED_BY_AUTHORITATIVE_SOURCE',
+    fillTime:position?.filledAt||null,
+    entryPrice:position?.entryAverageFillPrice??null,
+    score:attempt?.liveScore??attempt?.observedScore??position?.entryScore??null,
+    orderId:position?.entryOrderId||attempt?.orderId||null,
+    filledCount:position?.filledCount??attempt?.fillCount??0,
+    finalResult:position?.status||null,
+    exitReason:position?.exitReason||null,
+    closedAt:position?.closedAt||null,
+  };
+}
+
+function paynePaperComparisonUnavailable() {
+  return {
+    source:'PAYNE_PAPER',
+    available:false,
+    reason:'READ_ONLY_AUTHORITATIVE_EVENT_SOURCE_NOT_EXPOSED_TO_PAYNE_KALSHI_REAL',
+    sawMatchingContract:'UNKNOWN',
+    sameTicker:'UNKNOWN',
+    sameDirection:'UNKNOWN',
+    observedAt:null,
+    fireTime:null,
+    entryPrice:null,
+    score:null,
+    finalResult:null,
+  };
+}
+
+function buildResearchComparison(selected, payne, zeroMoneyPreview, baselineActual, clocks) {
+  const wouldFire=zeroMoneyPreview?.status==='FIRE_READY';
+  return {
+    schema:'PAYNE_CROSS_SYSTEM_COMPARISON_V1',
+    payne:{
+      sawContract:Boolean(selected?.ticker),
+      ticker:selected?.ticker||null,
+      asset:selected?.asset||null,
+      direction:selected?.direction||null,
+      outcomeSide:selected?.outcomeSide||null,
+      score:payne?.score??null,
+      state:payne?.state||'UNKNOWN',
+      observedAt:clocks?.payne?.observationAt||null,
+      wouldFire,
+      wouldFireAt:wouldFire?(clocks?.consistency?.preSubmitAt||clocks?.payne?.observationAt||null):null,
+      entryPrice:wouldFire?zeroMoneyPreview?.preSubmitPrice??null:null,
+      windowClose:clocks?.kalshi?.currentWindowClose||null,
+      timeRemainingMs:clocks?.kalshi?.remainingMs??null,
+    },
+    baselineReal:baselineActual,
+    paynePaper:paynePaperComparisonUnavailable(),
+  };
+}
+
+function decisionEventClass(decision, isSelected, finalDecision) {
+  if (isSelected && finalDecision==='PULL_QUALIFIED_ZERO_MONEY_FIRE_READY') return 'WOULD_FIRE';
+  if (isSelected && ['FRESH_LOCK_INVALIDATED','PRE_SUBMIT_INVALIDATED','WINDOW_MISMATCH','TIME_GATE_REJECT'].includes(finalDecision)) return 'REJECT';
+  if (decision?.pull==='PULL_QUALIFIED') return 'PULL';
+  if (decision?.lock==='LOCK_PASS') return 'LOCK';
+  if (decision?.radar==='RADAR_PASS') return 'RADAR';
+  return 'REJECT';
+}
+
+function incrementResearchCounters(previous, snapshot) {
+  const prev=previous?.researchCounters||{};
+  const decisions=Array.isArray(snapshot?.decisions)?snapshot.decisions:[];
+  const finalDecision=snapshot?.pipeline?.finalDecision||null;
+  const next={
+    observationsCollected:Number(prev.observationsCollected||0)+1,
+    contractsExamined:Number(prev.contractsExamined||0)+decisions.length,
+    radarCount:Number(prev.radarCount||0)+decisions.filter(x=>x?.decision?.radar==='RADAR_PASS').length,
+    lockCount:Number(prev.lockCount||0)+decisions.filter(x=>x?.decision?.lock==='LOCK_PASS').length,
+    pullCount:Number(prev.pullCount||0)+decisions.filter(x=>x?.decision?.pull==='PULL_QUALIFIED').length,
+    wouldFireCount:Number(prev.wouldFireCount||0)+(snapshot?.zeroMoneyPreview?.status==='FIRE_READY'?1:0),
+    rejectCount:Number(prev.rejectCount||0)+decisions.filter(x=>decisionEventClass(x?.decision,false,null)==='REJECT').length,
+    freshLockInvalidations:Number(prev.freshLockInvalidations||0)+(finalDecision==='FRESH_LOCK_INVALIDATED'?1:0),
+    preSubmitInvalidations:Number(prev.preSubmitInvalidations||0)+(finalDecision==='PRE_SUBMIT_INVALIDATED'?1:0),
+    windowMismatches:Number(prev.windowMismatches||0)+(finalDecision==='WINDOW_MISMATCH'?1:0),
+    baselineActualMatches:Number(prev.baselineActualMatches||0)+(snapshot?.comparison?.baselineReal?.sawMatchingContract===true?1:0),
+    baselineActualFills:Number(prev.baselineActualFills||0)+(snapshot?.comparison?.baselineReal?.filled===true?1:0),
+    paynePaperMatches:Number(prev.paynePaperMatches||0)+(snapshot?.comparison?.paynePaper?.sawMatchingContract===true?1:0),
+    unknownPaperComparisons:Number(prev.unknownPaperComparisons||0)+(snapshot?.comparison?.paynePaper?.available===false?1:0),
+  };
+  return next;
 }
 
 function universalClockEvidence(selected, payne, freshLock, preSubmit, observedAtMs) {
@@ -1064,6 +1196,7 @@ function compactObservation(data, source, atMs) {
     })),
     pipeline:data.pipeline,
     clocks:data.clocks,
+    comparison:data.comparison||null,
     zeroMoneyPreview:data.zeroMoneyPreview,
     assets:data.discovery?.assets||[],
     providerGets:data.providerGets,
@@ -1089,6 +1222,7 @@ export async function runReadOnlyScan(env, source='SCHEDULED_CRON', nowMs=Date.n
   const data=await buildCockpitData(env,nowMs);
   const snapshot=compactObservation(data,source,nowMs);
   const previous=await kvGetJson(env,CURRENT_KEY);
+  snapshot.researchCounters=incrementResearchCounters(previous,snapshot);
   const previousAt=Date.parse(previous?.at||'');
   const previousHistoryAt=Date.parse(previous?.lastHistoryAt||'');
   const prevKey=[previous?.selected?.ticker,previous?.selected?.outcomeSide,previous?.selected?.payne?.state].join('|');
@@ -1125,6 +1259,38 @@ export async function runReadOnlyScan(env, source='SCHEDULED_CRON', nowMs=Date.n
       providerPost:snapshot.zeroMoneyPreview.providerPost,
     });
   }
+  const previousDecisionMap=new Map((previous?.decisions||[]).map(x=>[[x?.ticker,x?.outcomeSide].join('|'),x]));
+  for (const d of snapshot.decisions||[]) {
+    const key=[d?.ticker,d?.outcomeSide].join('|');
+    const prior=previousDecisionMap.get(key);
+    const isSelected=Boolean(snapshot?.selected?.ticker===d?.ticker && snapshot?.selected?.outcomeSide===d?.outcomeSide);
+    const eventClass=decisionEventClass(d?.decision,isSelected,snapshot?.pipeline?.finalDecision);
+    const signature=[eventClass,d?.decision?.decision,isSelected?snapshot?.pipeline?.finalDecision:null].join('|');
+    const priorClass=prior?decisionEventClass(prior?.decision,Boolean(previous?.selected?.ticker===prior?.ticker&&previous?.selected?.outcomeSide===prior?.outcomeSide),previous?.pipeline?.finalDecision):null;
+    const priorSignature=prior?[priorClass,prior?.decision?.decision,(previous?.selected?.ticker===prior?.ticker&&previous?.selected?.outcomeSide===prior?.outcomeSide)?previous?.pipeline?.finalDecision:null].join('|'):null;
+    if (!prior || signature!==priorSignature) {
+      await appendEvent(env,'OBSERVATION_DECISION_EVENT',{
+        eventClass,
+        ticker:d?.ticker||null,
+        asset:d?.asset||null,
+        direction:d?.direction||null,
+        outcomeSide:d?.outcomeSide||null,
+        score:d?.score??null,
+        edge:d?.edge??null,
+        move:d?.move??null,
+        reason:isSelected?snapshot?.pipeline?.finalDecision||d?.decision?.decision:d?.decision?.decision||null,
+        payneObservationAt:snapshot?.at||null,
+        kalshiWindowClose:d?.contractCloseTime||null,
+        timeRemainingMs:isSelected?snapshot?.clocks?.kalshi?.remainingMs??null:null,
+        freshLockAt:isSelected?snapshot?.clocks?.consistency?.freshLockAt||null:null,
+        preSubmitAt:isSelected?snapshot?.clocks?.consistency?.preSubmitAt||null:null,
+        comparison:isSelected?snapshot?.comparison||null:null,
+        providerWrites:0,
+        orders:0,
+        capitalMovedUsd:0,
+      });
+    }
+  }
   return {
     ok:data.ok,
     skipped:false,
@@ -1150,7 +1316,9 @@ const EXPORT_ROW_FIELDS = Object.freeze([
   'kalshiWindowStart','kalshiWindowClose','kalshiRemainingMs','kalshiNextResetAt',
   'baselineObservationAt','baselineWindowStart','baselineWindowClose','baselineRemainingMs','baselineNextResetAt',
   'payneObservationAt','payneObservationAgeMs','kalshiWindowElapsedMs','kalshiLifecycleFraction',
-  'freshLockAt','preSubmitAt','windowConsistency','windowDiagnostic','baselineToPayneObservationDeltaMs'
+  'freshLockAt','preSubmitAt','windowConsistency','windowDiagnostic','baselineToPayneObservationDeltaMs',
+  'baselineActualLane','baselineActualMatch','baselineAttempted','baselineFilled','baselineFillTime','baselineEntryPrice','baselineScore',
+  'paynePaperComparisonStatus'
 ]);
 
 function exportRangeBounds(range, url, nowMs=Date.now()) {
@@ -1255,6 +1423,14 @@ function exportRowsFromSnapshots(snapshots) {
         windowConsistency:snapshot?.clocks?.consistency?.windowConsistency??null,
         windowDiagnostic:snapshot?.clocks?.consistency?.diagnostic||null,
         baselineToPayneObservationDeltaMs:snapshot?.clocks?.consistency?.baselineToPayneObservationDeltaMs??null,
+        baselineActualLane:snapshot?.comparison?.baselineReal?.lane||null,
+        baselineActualMatch:snapshot?.comparison?.baselineReal?.sawMatchingContract??'UNKNOWN',
+        baselineAttempted:snapshot?.comparison?.baselineReal?.attempted??'UNKNOWN',
+        baselineFilled:snapshot?.comparison?.baselineReal?.filled??'UNKNOWN',
+        baselineFillTime:snapshot?.comparison?.baselineReal?.fillTime||null,
+        baselineEntryPrice:snapshot?.comparison?.baselineReal?.entryPrice??null,
+        baselineScore:snapshot?.comparison?.baselineReal?.score??null,
+        paynePaperComparisonStatus:snapshot?.comparison?.paynePaper?.reason||null,
       });
     }
   }
@@ -1339,6 +1515,11 @@ export async function buildCockpitData(env, nowMs=Date.now()) {
   }
 
   const index3=providerIndex3Evidence(balance.body);
+  const baselineActual=selected?await readBaselineActualComparison(env,selected):{
+    source:'BASELINE_REAL_EXECUTION_TEST_READ_ONLY',lane:'EXECUTION_TEST_NOT_PRODUCTION_BASELINE',
+    available:false,reason:'NO_SELECTED_CONTRACT',sawMatchingContract:'UNKNOWN',sameTicker:'UNKNOWN',sameDirection:'UNKNOWN',
+    attempted:'UNKNOWN',filled:'UNKNOWN',fireTime:null,fillTime:null,entryPrice:null,score:null
+  };
   const payne=selected?.payne||{
     source:featureState?.source||'BASELINE_REAL_SERVICE_BINDING_READ_ONLY',
     available:false,
@@ -1386,6 +1567,7 @@ export async function buildCockpitData(env, nowMs=Date.now()) {
     },
     consistency:universalClockEvidence(selected,payne,freshLock,preSubmit,nowMs),
   };
+  const comparison=buildResearchComparison(selected,payne,zeroMoneyPreview,baselineActual,clocks);
   const qualificationDecision=selected?.decision||payneDecisionEvidence(payne,control.activeThreshold);
   const finalDecision=!selected?'NO_CURRENT_CONTRACT':
     !payne.available?'FEATURES_UNAVAILABLE':
@@ -1416,7 +1598,7 @@ export async function buildCockpitData(env, nowMs=Date.now()) {
       firePlanLogging:'ENABLED',
     },
     providerGets,
-    baselineReads:1,
+    baselineReads:selected?2:1,
     providerWrites:0,
     orders:0,
     capitalMovedUsd:0,
@@ -1484,6 +1666,7 @@ export async function buildCockpitData(env, nowMs=Date.now()) {
     },
     observations:{initial:selected,freshLock,preSubmit},
     clocks,
+    comparison,
     zeroMoneyPreview,
     management:managementView(control,positions),
     discovery:{
