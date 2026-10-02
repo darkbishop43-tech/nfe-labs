@@ -386,8 +386,12 @@ test('cockpit HTML exposes clocks, decision evidence, automatic refresh, and no 
   assert.match(html,/DECISION EVIDENCE/);
   assert.match(html,/Qualification reason/);
   assert.match(html,/Final scan decision/);
-  assert.match(html,/Next Kalshi reset/);
-  assert.match(html,/Baseline observation/);
+  assert.match(html,/NEXT RESET/);
+  assert.match(html,/OBSERVED AT/);
+  assert.match(html,/RESEARCH COMPARISON/);
+  assert.match(html,/RESEARCH COUNTERS/);
+  assert.match(html,/BASELINE ACTUAL/);
+  assert.match(html,/PAYNE PAPER/);
   assert.match(html,/FRESH LOCK/);
   assert.match(html,/ZERO-MONEY FIRE/);
   assert.match(html,/PROVIDER POST HELD/);
