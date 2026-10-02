@@ -410,6 +410,8 @@ test('cockpit HTML exposes clocks, decision evidence, automatic refresh, and no 
   assert.match(html,/OBSERVED AT/);
   assert.match(html,/RESEARCH COMPARISON/);
   assert.match(html,/RESEARCH COUNTERS/);
+  assert.match(html,/RESEARCH EVENT LEDGER/);
+  assert.match(html,/\/evidence\/events\?limit=500/);
   assert.match(html,/BASELINE ACTUAL/);
   assert.match(html,/PAYNE PAPER/);
   assert.match(html,/FRESH LOCK/);
