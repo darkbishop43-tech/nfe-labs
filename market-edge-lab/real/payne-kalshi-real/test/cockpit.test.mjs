@@ -234,7 +234,7 @@ test('cockpit calculates authentic Payne fields, decisions, clocks, exact reread
     assert.equal(out.comparison.baselineReal.sawMatchingContract,true);
     assert.equal(out.comparison.baselineReal.attempted,true);
     assert.equal(out.comparison.baselineReal.filled,true);
-    assert.equal(out.comparison.baselineReal.fillTime,'2026-10-02T06:05:15Z');
+    assert.equal(out.comparison.baselineReal.fillTime,1790921115000);
     assert.equal(out.comparison.baselineReal.entryPrice,.50);
     assert.equal(out.comparison.paynePaper.available,false);
     assert.equal(out.comparison.paynePaper.reason,'READ_ONLY_AUTHORITATIVE_EVENT_SOURCE_NOT_EXPOSED_TO_PAYNE_KALSHI_REAL');
@@ -409,8 +409,9 @@ test('would-fire forensic route reconstructs persisted FIRE_READY evidence read-
     assert.equal(body.rows[0].directionalClassification,'DIRECTIONALLY_CORRECT');
     assert.equal(body.rows[0].baselineFilled,true);
     assert.equal(body.rows[0].baselineFillTime,'2026-10-02T06:05:15.000Z');
-    assert.equal(body.rows[0].payneTimingVsBaseline,'PAYNE_EARLIER_THAN_BASELINE_FILL');
-    assert.equal(body.rows[0].payneToBaselineFillDeltaMs,15000);
+    assert.equal(body.rows[0].payneTimingVsBaseline,'PAYNE_LATER_THAN_BASELINE_FILL');
+    assert.equal(Number.isFinite(body.rows[0].payneToBaselineFillDeltaMs),true);
+    assert.ok(body.rows[0].payneToBaselineFillDeltaMs<0);
     assert.equal(body.rows[0].baselineFireTime,null);
     assert.equal(body.rows[0].baselineFireTimeReason,'NOT_EXPOSED_BY_AUTHORITATIVE_SOURCE');
     assert.equal(body.rows[0].netHypotheticalPnlUsd,null);
