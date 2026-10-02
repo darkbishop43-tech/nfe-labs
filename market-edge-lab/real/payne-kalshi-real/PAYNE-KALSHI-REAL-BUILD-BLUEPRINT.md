@@ -2176,3 +2176,42 @@ PAYNE-KALSHI REAL remains:
 - funding authority = DISABLED
 - Second IOC = HOLD
 
+
+
+## Research event ledger access
+
+PAYNE now exposes a GET-only research event ledger:
+
+`GET /evidence/events?limit=<1..1000>`
+
+Response schema:
+
+`PAYNE_RESEARCH_EVENT_LEDGER_V1`
+
+It returns persisted research events such as:
+
+- `OBSERVATION_DECISION_EVENT`
+- `ZERO_MONEY_FIRE_PLAN_RECORDED`
+- `PAYNE_STATE_TRANSITION`
+
+The cockpit exposes a Founder control:
+
+`RESEARCH EVENT LEDGER → LATEST EVENTS JSON`
+
+The standard JSON `GET /export` response also includes:
+
+- `eventCount`
+- `events[]`
+
+for the requested export range.
+
+CSV remains the tabular observation/candidate evidence export.
+
+JSON carries both the observation rows and durable transition/event ledger.
+
+Safety remains:
+
+- providerWrites = 0
+- orders = 0
+- capitalMovedUsd = 0
+
