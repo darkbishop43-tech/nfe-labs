@@ -643,6 +643,10 @@ export function providerMarketSnapshot(market, nowMs = Date.now(), assetHint = n
     timeRemainingMs:Number.isFinite(closeMs)?Math.max(0,closeMs-nowMs):null,
     providerReadAt:readAt,
     executionEligible:market?.status ? ['open','active'].includes(String(market.status).toLowerCase()) : null,
+    result:market?.result??market?.market_result??null,
+    settlementValue:normalizeProviderProbability(market?.settlement_value_dollars??market?.settlement_value),
+    settlementTs:market?.settlement_ts||market?.settled_time||null,
+    expirationValue:market?.expiration_value??null,
   };
 }
 
@@ -726,7 +730,7 @@ async function baselineReadOnlyPath(env, path) {
   if (!service || typeof service.fetch!=='function') {
     return {ok:false,status:null,body:{},error:'BASELINE_REAL_SERVICE_BINDING_UNBOUND'};
   }
-  if (!['/shadow-state','/execution-test-state'].includes(String(path||''))) {
+  if (!['/shadow-state','/execution-test-state','/execution-test-nofill-forensic','/forensic-provider-history'].includes(String(path||''))) {
     return {ok:false,status:null,body:{},error:'BASELINE_READ_PATH_NOT_ALLOWED'};
   }
   try {
@@ -1308,6 +1312,244 @@ export async function runReadOnlyScan(env, source='SCHEDULED_CRON', nowMs=Date.n
 }
 
 
+
+function forensicNumber(v){
+  if(v===null||v===undefined||v==='') return null;
+  const n=Number(v); return Number.isFinite(n)?n:null;
+}
+function forensicMedian(values){
+  const a=values.map(forensicNumber).filter(Number.isFinite).sort((x,y)=>x-y);
+  if(!a.length)return null;
+  const m=Math.floor(a.length/2);
+  return a.length%2?a[m]:(a[m-1]+a[m])/2;
+}
+function forensicAverage(values){
+  const a=values.map(forensicNumber).filter(Number.isFinite);
+  return a.length?a.reduce((s,x)=>s+x,0)/a.length:null;
+}
+function normalizeMarketOutcome(market){
+  const raw=String(market?.result??'').trim().toUpperCase();
+  if(['YES','Y','TRUE'].includes(raw)) return 'YES';
+  if(['NO','N','FALSE'].includes(raw)) return 'NO';
+  const settlement=forensicNumber(market?.settlementValue);
+  if(settlement===1)return 'YES';
+  if(settlement===0)return 'NO';
+  return null;
+}
+function forensicEventId(snapshot,index){
+  const at=snapshot?.clocks?.consistency?.preSubmitAt||snapshot?.selected?.preSubmitAt||snapshot?.at||'UNKNOWN_TIME';
+  return ['WF',String(index+1).padStart(4,'0'),at,snapshot?.selected?.ticker||'UNKNOWN',snapshot?.selected?.outcomeSide||'UNKNOWN'].join('|');
+}
+function forensicCandidateAt(snapshot,ticker,side){
+  return (snapshot?.decisions||[]).find(x=>String(x?.ticker||'')===String(ticker||'')&&String(x?.outcomeSide||'').toUpperCase()===String(side||'').toUpperCase())||null;
+}
+function forensicBaselineClass(b){
+  if(!b||b.available!==true) return 'PAYNE_FIRED_BASELINE_MATCH_UNKNOWN';
+  if(b.filled===true) return 'PAYNE_FIRED_BASELINE_FILLED';
+  if(b.attempted===true && String(b.attemptStatus||'').toUpperCase()==='NO_FILL') return 'PAYNE_FIRED_BASELINE_NO_FILL';
+  if(b.attempted===true) return 'PAYNE_FIRED_BASELINE_ATTEMPTED_OTHER_STATE';
+  if(b.sawMatchingContract===false) return 'PAYNE_FIRED_BASELINE_DID_NOT_ATTEMPT';
+  return 'PAYNE_FIRED_BASELINE_MATCH_UNKNOWN';
+}
+function forensicBucketSummary(rows,keyFn){
+  const out={};
+  for(const row of rows){
+    const key=String(keyFn(row)??'UNKNOWN');
+    const x=out[key]||(out[key]={total:0,profitable:0,unprofitable:0,unresolved:0,notEnoughEvidence:0,directionallyCorrect:0,directionallyWrong:0,preFeePnlUsd:0,preFeePnlRows:0});
+    x.total++;
+    if(row.outcomeClassification==='PROFITABLE')x.profitable++;
+    else if(row.outcomeClassification==='UNPROFITABLE')x.unprofitable++;
+    else if(row.outcomeClassification==='UNRESOLVED')x.unresolved++;
+    else x.notEnoughEvidence++;
+    if(row.directionalClassification==='DIRECTIONALLY_CORRECT')x.directionallyCorrect++;
+    if(row.directionalClassification==='DIRECTIONALLY_WRONG')x.directionallyWrong++;
+    if(Number.isFinite(row.preFeeHypotheticalPnlUsd)){x.preFeePnlUsd+=row.preFeeHypotheticalPnlUsd;x.preFeePnlRows++;}
+  }
+  return out;
+}
+async function listAllForensicSnapshots(env){
+  const kv=binding(env);
+  if(typeof kv.list!=='function') throw new Error('PAYNE_KALSHI_STATE_LIST_UNAVAILABLE');
+  const out=[],seen=new Set();
+  let cursor=undefined,complete=false;
+  while(!complete && out.length<5000){
+    const page=await kv.list({prefix:SCAN_HISTORY_PREFIX,limit:1000,...(cursor?{cursor}:{})});
+    for(const item of page?.keys||[]){
+      const value=await kvGetJson(env,item.name);
+      if(value?.at && !seen.has(value.at)){seen.add(value.at);out.push(value);}
+    }
+    complete=page?.list_complete===true||!page?.cursor;cursor=page?.cursor;
+  }
+  const current=await kvGetJson(env,CURRENT_KEY);
+  if(current?.at&&!seen.has(current.at))out.push(current);
+  return out.sort((a,b)=>Date.parse(a?.at||0)-Date.parse(b?.at||0));
+}
+async function readBaselineForensicSources(env){
+  const [state,noFill,history]=await Promise.all([
+    baselineReadOnlyPath(env,'/execution-test-state'),
+    baselineReadOnlyPath(env,'/execution-test-nofill-forensic'),
+    baselineReadOnlyPath(env,'/forensic-provider-history'),
+  ]);
+  return {state,noFill,history};
+}
+function baselineProviderEnrichment(persisted,providerHistory){
+  const out={providerHistoryAvailable:providerHistory?.ok===true,entryFillMatched:false,providerFill:null,providerSettlement:null,realizedPnl:null,realizedPnlReason:'NOT_EXPOSED_AS_ATTRIBUTABLE_BASELINE_RESULT'};
+  const orderId=String(persisted?.orderId||'');
+  const ticker=String(persisted?.ticker||persisted?.marketTicker||'');
+  const fills=[...(providerHistory?.body?.fills||[]),...(providerHistory?.body?.historicalFills||[])];
+  const fill=orderId?fills.find(x=>String(x?.orderId||'')===orderId):null;
+  if(fill){out.entryFillMatched=true;out.providerFill=fill;}
+  const settlements=providerHistory?.body?.settlements||[];
+  const settlement=ticker?settlements.find(x=>String(x?.ticker||'')===ticker):null;
+  if(settlement)out.providerSettlement=settlement;
+  return out;
+}
+function csvEscapeForensic(v){
+  if(v===null||v===undefined)return '';
+  const s=typeof v==='object'?JSON.stringify(v):String(v);
+  return /[",\n]/.test(s)?'"'+s.replace(/"/g,'""')+'"':s;
+}
+function forensicRowsCsv(rows){
+  const fields=['eventId','payneObservationAt','payneWouldFireAt','asset','direction','outcomeSide','ticker','marketOpen','marketClose','timeRemainingMs','windowPositionPct','move','fair','edge','score','initialObservedPrice','freshLockPrice','preSubmitPrice','hypotheticalEntryPrice','freshLockAt','preSubmitAt','windowConsistency','qualificationReason','marketResult','directionalClassification','outcomeClassification','hypotheticalExitReason','hypotheticalExitAt','hypotheticalExitPrice','count','grossHypotheticalPnlUsd','preFeeHypotheticalPnlUsd','netHypotheticalPnlUsd','pnlReason','baselineClass','baselineAttempted','baselineAttemptStatus','baselineFilled','baselineSideSame','baselineEntryPrice','baselineFillTime','baselineFireTime','baselineScore','baselineFinalState','baselineExitReason','payneToBaselineFillDeltaMs','payneTimingVsBaseline','entryPriceDelta'];
+  return [fields.join(','),...rows.map(r=>fields.map(k=>csvEscapeForensic(r[k])).join(','))].join('\n');
+}
+async function buildWouldFireForensic(env,{checkpointLimit=59}={}){
+  const snapshots=await listAllForensicSnapshots(env);
+  const fireSnapshots=snapshots.filter(s=>s?.zeroMoneyPreview?.status==='FIRE_READY'&&s?.selected?.ticker);
+  const authoritativeTotal=fireSnapshots.length;
+  const analyzed=fireSnapshots.slice(0,Math.max(0,Math.min(checkpointLimit,authoritativeTotal)));
+  const uniqueTickers=[...new Set(analyzed.map(s=>s.selected.ticker).filter(Boolean))];
+  const marketPairs=await Promise.all(uniqueTickers.map(async ticker=>{
+    try{return [ticker,await exactMarketRead(env,ticker)];}catch(error){return [ticker,{ok:false,error:String(error?.message||'MARKET_READ_FAILED'),market:null}];}
+  }));
+  const marketMap=new Map(marketPairs);
+  const baselineSources=await readBaselineForensicSources(env);
+  const providerHistory=baselineSources.history;
+  const rows=[];
+  for(let index=0;index<analyzed.length;index++){
+    const s=analyzed[index],sel=s.selected||{},z=s.zeroMoneyPreview||{},clock=s.clocks?.consistency||{},b=s.comparison?.baselineReal||{};
+    const entryAt=clock.preSubmitAt||sel.preSubmitAt||s.at||null;
+    const entryMs=Date.parse(entryAt||'');
+    const deadlineMs=Number.isFinite(entryMs)?entryMs+PAYNE_CONFIG.maxHoldMs:null;
+    const future=snapshots.filter(x=>{const ms=Date.parse(x?.at||'');return Number.isFinite(entryMs)&&Number.isFinite(ms)&&ms>entryMs&&ms<=entryMs+PAYNE_CONFIG.maxHoldMs+20_000;});
+    let exitEvidence=null;
+    for(const x of future){
+      const cand=forensicCandidateAt(x,sel.ticker,sel.outcomeSide);
+      if(!cand)continue;
+      const ms=Date.parse(x.at||'');
+      if(forensicNumber(cand.score)!==null&&forensicNumber(cand.score)<=PAYNE_CONFIG.exitScore){
+        exitEvidence={reason:'SCORE_EXIT',at:x.at,price:forensicNumber(cand.liveBid),score:forensicNumber(cand.score),timingDeltaMs:Number.isFinite(ms)&&Number.isFinite(deadlineMs)?ms-deadlineMs:null};break;
+      }
+    }
+    if(!exitEvidence&&Number.isFinite(deadlineMs)){
+      const candidates=future.map(x=>({x,cand:forensicCandidateAt(x,sel.ticker,sel.outcomeSide),ms:Date.parse(x?.at||'')})).filter(y=>y.cand&&Number.isFinite(y.ms)&&Math.abs(y.ms-deadlineMs)<=15_000).sort((a,b)=>Math.abs(a.ms-deadlineMs)-Math.abs(b.ms-deadlineMs));
+      if(candidates.length)exitEvidence={reason:'MAX_HOLD_EXIT',at:candidates[0].x.at,price:forensicNumber(candidates[0].cand.liveBid),score:forensicNumber(candidates[0].cand.score),timingDeltaMs:candidates[0].ms-deadlineMs};
+    }
+    const marketRead=marketMap.get(sel.ticker)||{},market=marketRead.market||{};
+    const marketResult=normalizeMarketOutcome(market);
+    const directionalClassification=!marketResult?'UNRESOLVED':String(sel.outcomeSide||'').toUpperCase()===marketResult?'DIRECTIONALLY_CORRECT':'DIRECTIONALLY_WRONG';
+    const entryPrice=forensicNumber(z.preSubmitPrice??sel.preSubmitPrice);
+    const exitPrice=forensicNumber(exitEvidence?.price);
+    const count=forensicNumber(z.count);
+    const gross=Number.isFinite(entryPrice)&&Number.isFinite(exitPrice)&&Number.isFinite(count)?Number(((exitPrice-entryPrice)*count).toFixed(6)):null;
+    const outcomeClassification=Number.isFinite(gross)?(gross>0?'PROFITABLE':gross<0?'UNPROFITABLE':'UNPROFITABLE'):(!marketResult?'UNRESOLVED':'NOT_ENOUGH_AUTHORITATIVE_EVIDENCE');
+    const baselineClass=forensicBaselineClass(b);
+    const fillTime=b?.fillTime||null,fillMs=Date.parse(fillTime||'');
+    const delta=Number.isFinite(entryMs)&&Number.isFinite(fillMs)?fillMs-entryMs:null;
+    const timing=delta===null?'UNKNOWN':Math.abs(delta)<=1000?'SAME_SECOND':delta>0?'PAYNE_EARLIER_THAN_BASELINE_FILL':'PAYNE_LATER_THAN_BASELINE_FILL';
+    const enrich=baselineProviderEnrichment({...b,ticker:sel.ticker},providerHistory);
+    rows.push({
+      eventId:forensicEventId(s,index),
+      payneObservationAt:s.at||null,payneWouldFireAt:entryAt,
+      asset:sel.asset||null,direction:sel.direction||null,outcomeSide:sel.outcomeSide||null,ticker:sel.ticker||null,
+      marketOpen:sel.openTime||clock.kalshiWindowOpen||null,marketClose:sel.closeTime||clock.kalshiWindowClose||null,
+      timeRemainingMs:clock.kalshiWindowRemainingMs??s.clocks?.kalshi?.remainingMs??null,
+      windowPositionPct:forensicNumber(clock.kalshiLifecycleFraction)!==null?Number((Number(clock.kalshiLifecycleFraction)*100).toFixed(4)):null,
+      move:sel.payne?.move??null,fair:sel.payne?.fair??null,edge:sel.payne?.edge??null,score:sel.payne?.score??null,
+      initialObservedPrice:sel.initialPrice??null,freshLockPrice:sel.freshLockPrice??null,preSubmitPrice:sel.preSubmitPrice??null,hypotheticalEntryPrice:entryPrice,
+      freshLockAt:clock.freshLockAt||sel.freshLockAt||null,preSubmitAt:clock.preSubmitAt||sel.preSubmitAt||null,
+      windowConsistency:clock.windowConsistency??null,qualificationReason:s.pipeline?.finalDecision||sel.decision?.decision||null,
+      marketProviderStatus:market?.status||null,marketResult,marketSettlementValue:market?.settlementValue??null,marketSettlementTs:market?.settlementTs||null,
+      directionalClassification,outcomeClassification,
+      hypotheticalExitReason:exitEvidence?.reason||null,hypotheticalExitAt:exitEvidence?.at||null,hypotheticalExitPrice:exitPrice,
+      maxHoldDeadline:Number.isFinite(deadlineMs)?new Date(deadlineMs).toISOString():null,maxHoldQuoteDeltaMs:exitEvidence?.reason==='MAX_HOLD_EXIT'?exitEvidence?.timingDeltaMs:null,
+      count,grossHypotheticalPnlUsd:gross,preFeeHypotheticalPnlUsd:gross,
+      entryFeeEstimateUsd:z.estimatedFeeUsd??null,entryFeeSource:z.estimatedFeeUsd!=null?'PAYNE_FEE_SAFE_SIZING_ESTIMATE':null,
+      exitFeeUsd:null,netHypotheticalPnlUsd:null,
+      pnlReason:Number.isFinite(gross)?'PRE_FEE_ONLY_EXIT_FEE_NOT_AUTHORITATIVELY_RECONSTRUCTED':'FROZEN_LIFECYCLE_EXIT_PRICE_NOT_AUTHORITATIVELY_RECONSTRUCTED',
+      baselineClass,baselineMatchingContract:b?.sawMatchingContract??'UNKNOWN',baselineAttempted:b?.attempted??'UNKNOWN',baselineAttemptStatus:b?.attemptStatus||null,
+      baselineFilled:b?.filled??'UNKNOWN',baselineSideSame:b?.sameDirection??'UNKNOWN',baselineEntryPrice:b?.entryPrice??null,baselineFillTime:fillTime,
+      baselineFireTime:null,baselineFireTimeReason:'NOT_EXPOSED_BY_AUTHORITATIVE_SOURCE',baselineScore:b?.score??null,
+      baselineFinalState:b?.finalResult||null,baselineExitReason:b?.exitReason||null,baselineClosedAt:b?.closedAt||null,
+      baselineRealizedPnlUsd:enrich.realizedPnl,baselineRealizedPnlReason:enrich.realizedPnlReason,
+      payneToBaselineFillDeltaMs:delta,payneTimingVsBaseline:timing,
+      entryPriceDelta:Number.isFinite(entryPrice)&&Number.isFinite(forensicNumber(b?.entryPrice))?Number((forensicNumber(b.entryPrice)-entryPrice).toFixed(6)):null,
+    });
+  }
+  const baselineUnique=new Map();
+  for(const s of snapshots){
+    const b=s?.comparison?.baselineReal;
+    if(b?.filled!==true)continue;
+    const key=String(b.orderId||[s?.selected?.ticker,s?.selected?.outcomeSide,b.fillTime].join('|'));
+    if(!baselineUnique.has(key)) baselineUnique.set(key,{ticker:s?.selected?.ticker||null,outcomeSide:s?.selected?.outcomeSide||null,fillTime:b.fillTime||null,entryPrice:b.entryPrice??null,orderId:b.orderId||null});
+  }
+  const fireKeys=new Set(rows.map(r=>[r.ticker,r.outcomeSide,r.marketClose].join('|')));
+  const reverseBaselineView=[...baselineUnique.values()].map(x=>{
+    const matches=rows.filter(r=>r.ticker===x.ticker&&r.outcomeSide===x.outcomeSide);
+    return {...x,classification:matches.length?'BASELINE_FILLED_PAYNE_FIRED':'BASELINE_FILLED_PAYNE_DID_NOT_FIRE'};
+  });
+  const sumClass=name=>rows.filter(r=>r.outcomeClassification===name).length;
+  const baselineCount=name=>rows.filter(r=>r.baselineClass===name).length;
+  const preFeeRows=rows.filter(r=>Number.isFinite(r.preFeeHypotheticalPnlUsd));
+  const summary={
+    checkpointRequested:checkpointLimit,authoritativeWouldFireTotal:authoritativeTotal,totalWouldFireAnalyzed:rows.length,
+    profitable:sumClass('PROFITABLE'),unprofitable:sumClass('UNPROFITABLE'),unresolved:sumClass('UNRESOLVED'),notEnoughAuthoritativeEvidence:sumClass('NOT_ENOUGH_AUTHORITATIVE_EVIDENCE'),
+    directionallyCorrect:rows.filter(r=>r.directionalClassification==='DIRECTIONALLY_CORRECT').length,
+    directionallyWrong:rows.filter(r=>r.directionalClassification==='DIRECTIONALLY_WRONG').length,
+    grossHypotheticalPnlUsd:preFeeRows.length?Number(preFeeRows.reduce((s,r)=>s+r.preFeeHypotheticalPnlUsd,0).toFixed(6)):null,
+    netHypotheticalPnlUsd:null,netPnlReason:'EXIT_FEES_NOT_AUTHORITATIVELY_RECONSTRUCTED',
+    preFeeHypotheticalPnlUsd:preFeeRows.length?Number(preFeeRows.reduce((s,r)=>s+r.preFeeHypotheticalPnlUsd,0).toFixed(6)):null,
+    pnlCalculableRows:preFeeRows.length,
+    averageHypotheticalEntry:forensicAverage(rows.map(r=>r.hypotheticalEntryPrice)),
+    medianHypotheticalEntry:forensicMedian(rows.map(r=>r.hypotheticalEntryPrice)),
+    averageScore:forensicAverage(rows.map(r=>r.score)),medianScore:forensicMedian(rows.map(r=>r.score)),
+    averageTimeRemainingMs:forensicAverage(rows.map(r=>r.timeRemainingMs)),
+    payneBaselineOverlapCount:rows.filter(r=>r.baselineMatchingContract===true).length,
+    payneBaselineFillOverlapCount:baselineCount('PAYNE_FIRED_BASELINE_FILLED'),
+    payneBaselineNoFillOverlapCount:baselineCount('PAYNE_FIRED_BASELINE_NO_FILL'),
+    payneOnlyCount:baselineCount('PAYNE_FIRED_BASELINE_DID_NOT_ATTEMPT'),
+    baselineFillOnlyCount:reverseBaselineView.filter(x=>x.classification==='BASELINE_FILLED_PAYNE_DID_NOT_FIRE').length,
+    sameSideOverlapCount:rows.filter(r=>r.baselineSideSame===true&&r.baselineMatchingContract===true).length,
+    oppositeSideOverlapCount:rows.filter(r=>r.baselineSideSame===false&&r.baselineMatchingContract===true).length,
+  };
+  const buckets={
+    score:forensicBucketSummary(rows,r=>{const v=forensicNumber(r.score);return v===null?'UNKNOWN':v<.75?'.70-.74':v<.80?'.75-.79':v<.85?'.80-.84':'.85+';}),
+    entryPrice:forensicBucketSummary(rows,r=>{const v=forensicNumber(r.hypotheticalEntryPrice);return v===null?'UNKNOWN':v<.50?'<.50':v<.70?'.50-.69':v<.85?'.70-.84':'.85+';}),
+    timeRemaining:forensicBucketSummary(rows,r=>{const m=forensicNumber(r.timeRemainingMs);return m===null?'UNKNOWN':m<8*60_000?'6.5-8m':m<10*60_000?'8-10m':'10m+';}),
+    asset:forensicBucketSummary(rows,r=>r.asset||'UNKNOWN'),
+    direction:forensicBucketSummary(rows,r=>r.direction||'UNKNOWN'),
+  };
+  return {
+    ok:true,schema:'PAYNE_WOULD_FIRE_FORENSIC_V1',generatedAt:new Date().toISOString(),
+    checkpoint:{requestedWouldFireCount:checkpointLimit,analyzedCount:rows.length,authoritativeCurrentTotal:authoritativeTotal,advancedBeyondCheckpoint:authoritativeTotal>checkpointLimit},
+    summary,buckets,reverseBaselineView,rows,
+    baselineCurrentEvidence:{
+      executionTestStateHttpStatus:baselineSources.state.status??null,
+      noFillForensicHttpStatus:baselineSources.noFill.status??null,
+      providerHistoryHttpStatus:baselineSources.history.status??null,
+      note:'Persisted per-event comparison is primary attribution. Account-wide provider history is enrichment only and is not silently treated as Baseline attribution.'
+    },
+    limitations:[
+      'Baseline FIRE/submission time is not exposed; fill time remains separately labeled.',
+      'Net hypothetical P/L is UNKNOWN because attributable hypothetical exit fees are not reconstructed.',
+      'Frozen PAYNE lifecycle P/L is calculated only when an authoritative same-ticker/side exit quote is present at SCORE_EXIT or within 15 seconds of the 5-minute deadline.',
+      'Settlement correctness is reported separately from financial profitability.',
+      'Historical opposite-side Baseline attempts cannot be inferred when persisted comparison did not expose them.',
+    ],
+    safety:{providerWrites:0,orders:0,capitalMovedUsd:0,providerPost:'HELD / HARD DISABLED',realExecution:'DISABLED',fundingAuthority:'DISABLED',secondIoc:'HOLD',baselineWrites:0,baselineDeployments:0}
+  };
+}
+
 const EXPORT_ROW_FIELDS = Object.freeze([
   'observationAt','scanSource','asset','direction','outcomeSide','ticker','contractOpenTime','contractCloseTime',
   'liveBid','liveAsk','livePrice','move','fair','edge','score','payneState','radarResult','lockResult','pullResult',
@@ -1805,6 +2047,19 @@ export default {
       const limit=Math.max(1,Math.min(1000,Number.isFinite(requested)?Math.trunc(requested):200));
       const events=await listResearchEvents(env,null,limit);
       return Response.json({ok:true,schema:'PAYNE_RESEARCH_EVENT_LEDGER_V1',count:events.length,events,providerWrites:0,orders:0,capitalMovedUsd:0},{headers:{'cache-control':'no-store'}});
+    }
+    if (url.pathname === '/forensic/would-fire') {
+      try{
+        const requested=Number(url.searchParams.get('checkpoint')||59);
+        const checkpointLimit=Math.max(1,Math.min(500,Number.isFinite(requested)?Math.trunc(requested):59));
+        const data=await buildWouldFireForensic(env,{checkpointLimit});
+        const format=String(url.searchParams.get('format')||'json').toLowerCase();
+        if(format==='csv') return new Response(forensicRowsCsv(data.rows),{headers:{'content-type':'text/csv; charset=utf-8','cache-control':'no-store','content-disposition':'attachment; filename="payne-would-fire-forensic.csv"'}});
+        if(format!=='json') return Response.json({ok:false,error:'FORENSIC_FORMAT_NOT_ALLOWED',providerWrites:0,orders:0,capitalMovedUsd:0},{status:400});
+        return Response.json(data,{headers:{'cache-control':'no-store'}});
+      }catch(error){
+        return Response.json({ok:false,schema:'PAYNE_WOULD_FIRE_FORENSIC_V1',error:String(error?.message||'FORENSIC_FAILED'),providerWrites:0,orders:0,capitalMovedUsd:0},{status:500,headers:{'cache-control':'no-store'}});
+      }
     }
     if (url.pathname === '/proof') {
       const provider = await kalshiReadOnlyProof(env);
