@@ -99,9 +99,10 @@ one-minute Cloudflare scheduled trigger
    - proof reads
 
 2. **PAYNE feature plane**
-   - currently points read-only to Baseline REAL shadow-state
-   - currently blocked live by HTTP 404
-   - documented as the next technical mission; not repaired here
+   - reads the existing Baseline REAL public shadow representation through a Cloudflare Service Binding
+   - binding: `BASELINE_REAL_READ`
+   - exact downstream path: `GET /shadow-state`
+   - no Baseline source, execution, state, credential, or deployment change is required
 
 3. **Isolated evidence plane**
    - PAYNE-only KV keys
@@ -360,51 +361,64 @@ The current cockpit uses provider truth; it does not substitute fixture prices i
 
 ## 14. PAYNE FEATURE-DATA SOURCE
 
-Current source constant:
+Authoritative feature source:
 
-`BASELINE_SHADOW_STATE_URL`
+the existing Baseline REAL `publicShadowView()` representation returned by:
 
-Current configured endpoint:
+`GET /shadow-state`
 
-`https://market-edge-baseline-real.darkbishop43.workers.dev/shadow-state`
+PAYNE reaches that route through a Cloudflare Service Binding:
 
-Intended authority:
+- binding: `BASELINE_REAL_READ`
+- target service: `market-edge-baseline-real`
+- transport: `SERVICE_BINDING`
+- method: `GET`
+- path: `/shadow-state`
 
-read-only Baseline REAL shadow evidence for exact ticker + exact side.
+### Why the former public workers.dev fetch returned 404
 
-Expected fields:
+PAYNE previously attempted:
 
-- move
-- fair
-- edge
-- score
-- direction
-- outcomeSide
-- lastRunAt
-- priceSources
+`fetch("https://market-edge-baseline-real.darkbishop43.workers.dev/shadow-state")`
+
+from inside another Cloudflare Worker.
+
+Cloudflare Worker-to-Worker routing on the same Cloudflare zone/account path is not equivalent to an ordinary browser request to the public `workers.dev` hostname. The platform-supported Worker-to-Worker mechanism is a Service Binding (or a deliberately enabled strictly-public global fetch mode).
+
+The Baseline repository source already contained `GET /shadow-state`; the defect was the **PAYNE transport path**, not a missing Baseline route and not a Baseline execution defect.
+
+Smallest repair:
+
+- add `[[services]] BASELINE_REAL_READ → market-edge-baseline-real` to PAYNE only
+- replace public-hostname global fetch with `env.BASELINE_REAL_READ.fetch()`
+- construct one exact `GET /shadow-state` request
+- fail closed when the binding is absent or the response is stale/invalid
+
+Baseline was not modified.
+
+### Authoritative field provenance
+
+For an exact `marketTicker + outcomeSide` match:
+
+- **MOVE** — Baseline shadow opportunity `move`
+- **FAIR** — Baseline shadow opportunity `fair`
+- **EDGE** — Baseline shadow opportunity `edge`
+- **SCORE** — Baseline shadow opportunity `score`
+- **direction / outcomeSide** — Baseline shadow opportunity
+- **underlying price source** — Baseline `priceSources[asset]`
+- **feature observation time** — Baseline `lastRunAt`
+- **Baseline contract/window timing** — exact shadow opportunity `openTime / closeTime / durationMs / horizon` when exposed
+- **PAYNE STATE** — derived locally from the frozen Payne thresholds; it is not supplied by Kalshi
 
 Freshness gate:
 
 120 seconds.
 
-**Current live blocker:** the configured endpoint returns HTTP 404.
+If the binding is missing, the route fails, the Baseline observation is stale, or the exact ticker/side fields are incomplete:
 
-Current cockpit consequence:
+PAYNE fields remain UNKNOWN.
 
-- Source: `BASELINE_REAL_SHADOW_READ_ONLY`
-- Source HTTP: `404`
-- Reason: `BASELINE_SHADOW_READ_FAILED_404`
-- MOVE unavailable
-- FAIR unavailable
-- EDGE unavailable
-- SCORE unavailable / rendered as zero-like placeholder in the current UI
-- PAYNE state UNKNOWN
-- RADAR UNKNOWN
-- LOCK IN UNKNOWN
-- PULL TRIGGER UNKNOWN
-- zero-money FIRE NOT_REACHED
-
-Do not infer that Kalshi contract price is Payne score.
+No Kalshi contract price is substituted for Payne score.
 
 ---
 
@@ -683,13 +697,17 @@ Latest observation key:
 
 `payne-kalshi:current:v1`
 
-Latest snapshot cadence:
+Current observation cadence:
 
-5 minutes maximum interval, or immediately on significant transition/FIRE plan.
+**every successful scheduled scan** updates `payne-kalshi:current:v1`.
+
+The one-minute observer is not limited by the controlled experiment attempt target.
 
 History cadence:
 
-15 minutes, plus transition/FIRE-plan triggers.
+15 minutes, plus state-transition and zero-money FIRE-plan triggers.
+
+Each persisted observation is bounded in size and includes the per-candidate decision explanation for the currently observed universe.
 
 Evidence includes:
 
@@ -791,8 +809,11 @@ Configuration must preserve:
 - existing `PAYNE_KALSHI_STATE` binding
 - installed secret names
 - one-minute cron
+- Cloudflare Service Binding `BASELINE_REAL_READ → market-edge-baseline-real`
 - no Baseline KV binding
 - no Payne Paper binding
+
+The Service Binding is a PAYNE configuration change only. PAYNE source constrains its use to one exact read path: `GET /shadow-state`.
 
 Do not create another Worker or namespace during normal deployment.
 
@@ -1010,33 +1031,46 @@ This is intentionally **not repaired in this blueprint/compaction mission**.
 
 ## 32. CURRENT KNOWN BLOCKERS
 
-### Active blocker
+### Repository/source state
 
-**Authoritative Payne feature source HTTP 404**
-
-Current impact:
-
-- market discovery works
-- live prices work
-- exact ticker reads work
-- fresh LOCK works
-- pre-submit works
-- automatic GET-only scan works
-- Payne feature values do not populate authoritatively
-- RADAR / LOCK / PULL remain UNKNOWN
-- zero-money FIRE cannot naturally reach qualification
-
-### Next technical mission
+The former PAYNE feature-source 404 has a source-level repair:
 
 ```text
-AUTHORITATIVE PAYNE FEATURE SOURCE
-→ TRACE 404
-→ COMPARE AGAINST PROVEN SOURCE
-→ SMALLEST READ-ONLY REPAIR
-→ ZERO-MONEY VALIDATION
+PAYNE Worker
+→ BASELINE_REAL_READ service binding
+→ GET /shadow-state
+→ Baseline publicShadowView
+→ exact ticker + outcomeSide feature match
 ```
 
-Do not cross into provider-write authority while repairing this blocker.
+Source-level fixture/harness proof confirms authentic MOVE / FAIR / EDGE / SCORE can populate from that shape.
+
+### Live deployment state
+
+The current repository repair is not equivalent to a live Cloudflare deployment.
+
+Before declaring the former 404 closed live, Founder must deploy:
+
+1. updated PAYNE `worker.js` from repository `src/index.js`
+2. unchanged/updated `cockpit-html.js` as applicable
+3. configure the PAYNE Worker Service Binding:
+   `BASELINE_REAL_READ → market-edge-baseline-real`
+4. preserve the existing one-minute cron, KV, and secrets
+5. reread public PAYNE cockpit/evidence
+
+Until that occurs, live authenticated feature-read success is **pending deployment validation**, not claimed.
+
+### Remaining platform truth that must stay UNKNOWN
+
+Baseline does not expose an authoritative next-observation timestamp. PAYNE therefore displays:
+
+`nextObservationAt = null`
+
+with reason:
+
+`NOT_EXPOSED_BY_AUTHORITATIVE_SOURCE`
+
+Kalshi next reset is represented truthfully by the current provider contract close time. PAYNE does not invent the next contract open time before the provider exposes it.
 
 ---
 
@@ -1065,10 +1099,11 @@ A fresh Builder/Main Chat should do the following in order:
 8. Verify Worker/KV names before any manual Cloudflare action.
 9. Never request secret values.
 10. Verify public `/proof` and `/cockpit-data` after deployment changes.
-11. Treat current Payne feature-source HTTP 404 as the next blocker.
-12. Repair only the feature-source read path in that mission.
-13. Run the full test suite before proposing a new deployment.
-14. Return evidence to Mission Control before crossing any provider-write boundary.
+11. Verify `BASELINE_REAL_READ` is configured on the PAYNE Worker.
+12. Verify service-bound `GET /shadow-state` returns HTTP 200 and fresh exact ticker/side features.
+13. Verify scheduled evidence shows `source = SCHEDULED_CRON` without manual interaction.
+14. Run the full test suite before proposing any provider-write authority.
+15. Return evidence to Mission Control before crossing any provider-write boundary.
 
 ---
 
@@ -1153,3 +1188,132 @@ HELD / HARD DISABLED
 SECOND IOC:
 HOLD / UNCHANGED
 ```
+
+
+---
+
+# OCTOBER 2, 2026 — AUTONOMOUS ZERO-MONEY OBSERVER ACTIVATION UPDATE
+
+## Feature-source 404 forensic conclusion
+
+Repository comparison proved that the Baseline source already implements:
+
+`GET /shadow-state → publicShadowView(await loadShadowState(env))`
+
+The former PAYNE URL was therefore targeting a real route in source, but it was being invoked through a cross-Worker public `workers.dev` fetch.
+
+The PAYNE-only repair adds:
+
+```toml
+[[services]]
+binding = "BASELINE_REAL_READ"
+service = "market-edge-baseline-real"
+```
+
+PAYNE now invokes exactly one downstream route:
+
+`GET /shadow-state`
+
+through that binding.
+
+No Baseline mutation is part of this repair.
+
+## Autonomous decision evidence
+
+Every observed candidate now carries bounded classification evidence:
+
+- `RADAR_REJECT_SCORE_BELOW_0_50`
+- `RADAR_PASS`
+- `LOCK_REJECT_SCORE_BELOW_0_65`
+- `LOCK_REJECT_EDGE_NOT_POSITIVE`
+- `LOCK_PASS`
+- `PULL_REJECTED_SCORE_BELOW_THRESHOLD`
+- `PULL_REJECTED_MOVE_BELOW_0_002`
+- `PULL_QUALIFIED`
+
+Selected-candidate final decisions can additionally record:
+
+- `FEATURES_UNAVAILABLE`
+- `TIME_GATE_REJECT`
+- `FRESH_LOCK_INVALIDATED`
+- `PRE_SUBMIT_INVALIDATED`
+- `FRESH_LOCK_TICKER_MISMATCH`
+- `PULL_QUALIFIED_ZERO_MONEY_FIRE_READY`
+
+These are evidence labels describing the frozen rules; they do not alter thresholds.
+
+## Zero-money FIRE evidence
+
+When authentic data satisfies PULL and all execution-read gates, PAYNE may build and persist the existing hypothetical IOC plan.
+
+The terminal authority remains:
+
+`STEP1_PROVIDER_POST_HARD_DISABLED`
+
+No order function is enabled.
+
+## Continuous observation semantics
+
+The one-minute scheduled observer is architecturally independent from controlled experiment attempt targets.
+
+Each scheduled scan updates:
+
+`payne-kalshi:current:v1`
+
+History remains lower-frequency:
+
+- 15-minute periodic history
+- state transitions
+- zero-money FIRE-ready plans
+
+The cockpit refreshes itself every 60 seconds; `RUN SAFE SCAN NOW` is diagnostic only.
+
+## Clock provenance
+
+### Kalshi
+
+Source:
+
+current authenticated provider contract.
+
+Displayed:
+
+- open time if provider returns it
+- close time
+- remaining time
+- next reset = current close time
+- next contract start = UNKNOWN until provider exposes the next contract
+
+### Baseline
+
+Source:
+
+exact matched Baseline shadow opportunity plus Baseline `lastRunAt`.
+
+Displayed when available:
+
+- Baseline feature observation time
+- observation age
+- matched opportunity open time
+- matched opportunity close time
+- remaining time
+- next reset = matched opportunity close time
+
+Not fabricated:
+
+- next Baseline observation timestamp
+
+Reason:
+
+`NOT_EXPOSED_BY_AUTHORITATIVE_SOURCE`
+
+## Safety state after this source mission
+
+- providerWrites: 0
+- orders: 0
+- capitalMovedUsd: $0
+- provider POST: HELD / HARD DISABLED
+- realExecution: DISABLED
+- fundingAuthority: DISABLED
+- Second IOC: HOLD / UNCHANGED
+- Baseline source changes: 0
