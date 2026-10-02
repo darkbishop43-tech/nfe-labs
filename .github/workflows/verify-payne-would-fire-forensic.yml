@@ -1,5 +1,7 @@
 name: Verify PAYNE would-fire forensic
 
+# Timing-normalization verification trigger
+
 on:
   push:
     branches:
