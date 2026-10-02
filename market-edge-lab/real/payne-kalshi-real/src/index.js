@@ -811,7 +811,8 @@ export function cockpitHtml() {
 const q=s=>document.querySelector(s);
 const fmtP=v=>Number.isFinite(Number(v))?(Number(v)*100).toFixed(1)+'¢':'—';
 const fmtT=ms=>Number.isFinite(Number(ms))?Math.max(0,Math.floor(ms/60000))+'m '+Math.floor((ms%60000)/1000)+'s':'—';
-const val=v=>v===null||v===undefined?'UNKNOWN / UNAVAILABLE':String(v);
+const esc=v=>String(v).replace(/[&<>"']/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
+const val=v=>v===null||v===undefined?'UNKNOWN / UNAVAILABLE':esc(v);
 const cls=v=>String(v).includes('PROVEN')||v===true||v==='PASS'?'good':String(v).includes('DISABLED')||String(v).includes('HARD')||String(v).includes('UNKNOWN')||v===false?'warn':'';
 function card(k,v){return '<div class="card"><div class="source">'+k+'</div><div class="value '+cls(v)+'">'+val(v)+'</div></div>'}
 function step(k,v){return '<div class="step"><div class="source">'+k+'</div><div class="value '+cls(v)+'">'+val(v)+'</div></div>'}
