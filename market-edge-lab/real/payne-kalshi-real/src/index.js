@@ -1328,6 +1328,22 @@ function forensicTimeMs(v){
 function forensicIsoTime(v){
   const ms=forensicTimeMs(v); return Number.isFinite(ms)?new Date(ms).toISOString():null;
 }
+export function normalizeBaselineEconomicEntryPrice(rawPrice,outcomeSide){
+  const raw=forensicNumber(rawPrice);
+  if(raw===null) return {rawYesLeg:null,economicOutcomePrice:null,semantics:'UNKNOWN'};
+  const side=String(outcomeSide||'').toUpperCase();
+  if(side==='NO') return {
+    rawYesLeg:raw,
+    economicOutcomePrice:Number((1-raw).toFixed(6)),
+    semantics:'OUTCOME_SIDE_PRICE_NORMALIZED_FROM_KALSHI_YES_LEG'
+  };
+  if(side==='YES') return {
+    rawYesLeg:raw,
+    economicOutcomePrice:raw,
+    semantics:'KALSHI_YES_LEG_EQUALS_OUTCOME_PRICE'
+  };
+  return {rawYesLeg:raw,economicOutcomePrice:null,semantics:'OUTCOME_SIDE_UNKNOWN'};
+}
 function forensicMedian(values){
   const a=values.map(forensicNumber).filter(Number.isFinite).sort((x,y)=>x-y);
   if(!a.length)return null;
@@ -1469,6 +1485,7 @@ async function buildWouldFireForensic(env,{checkpointLimit=59}={}){
     const delta=Number.isFinite(entryMs)&&Number.isFinite(fillMs)?fillMs-entryMs:null;
     const timing=delta===null?'UNKNOWN':Math.abs(delta)<=1000?'SAME_SECOND':delta>0?'PAYNE_EARLIER_THAN_BASELINE_FILL':'PAYNE_LATER_THAN_BASELINE_FILL';
     const enrich=baselineProviderEnrichment({...b,ticker:sel.ticker},providerHistory);
+    const baselineEntry=normalizeBaselineEconomicEntryPrice(b?.entryPrice,sel.outcomeSide);
     rows.push({
       eventId:forensicEventId(s,index),
       payneObservationAt:s.at||null,payneWouldFireAt:entryAt,
@@ -1489,12 +1506,14 @@ async function buildWouldFireForensic(env,{checkpointLimit=59}={}){
       exitFeeUsd:null,netHypotheticalPnlUsd:null,
       pnlReason:Number.isFinite(gross)?'PRE_FEE_ONLY_EXIT_FEE_NOT_AUTHORITATIVELY_RECONSTRUCTED':'FROZEN_LIFECYCLE_EXIT_PRICE_NOT_AUTHORITATIVELY_RECONSTRUCTED',
       baselineClass,baselineMatchingContract:b?.sawMatchingContract??'UNKNOWN',baselineAttempted:b?.attempted??'UNKNOWN',baselineAttemptStatus:b?.attemptStatus||null,
-      baselineFilled:b?.filled??'UNKNOWN',baselineSideSame:b?.sameDirection??'UNKNOWN',baselineEntryPrice:b?.entryPrice??null,baselineFillTime:fillTime,baselineFillTimeRaw:fillTimeRaw,
+      baselineFilled:b?.filled??'UNKNOWN',baselineSideSame:b?.sameDirection??'UNKNOWN',
+      baselineEntryPrice:baselineEntry.economicOutcomePrice,baselineEntryPriceRawYesLeg:baselineEntry.rawYesLeg,baselineEntryPriceSemantics:baselineEntry.semantics,
+      baselineFillTime:fillTime,baselineFillTimeRaw:fillTimeRaw,
       baselineFireTime:null,baselineFireTimeReason:'NOT_EXPOSED_BY_AUTHORITATIVE_SOURCE',baselineScore:b?.score??null,
       baselineFinalState:b?.finalResult||null,baselineExitReason:b?.exitReason||null,baselineClosedAt:b?.closedAt||null,
       baselineRealizedPnlUsd:enrich.realizedPnl,baselineRealizedPnlReason:enrich.realizedPnlReason,
       payneToBaselineFillDeltaMs:delta,payneTimingVsBaseline:timing,
-      entryPriceDelta:Number.isFinite(entryPrice)&&Number.isFinite(forensicNumber(b?.entryPrice))?Number((forensicNumber(b.entryPrice)-entryPrice).toFixed(6)):null,
+      entryPriceDelta:Number.isFinite(entryPrice)&&Number.isFinite(baselineEntry.economicOutcomePrice)?Number((baselineEntry.economicOutcomePrice-entryPrice).toFixed(6)):null,
     });
   }
   const baselineUnique=new Map();
@@ -1502,7 +1521,10 @@ async function buildWouldFireForensic(env,{checkpointLimit=59}={}){
     const b=s?.comparison?.baselineReal;
     if(b?.filled!==true)continue;
     const key=String(b.orderId||[s?.selected?.ticker,s?.selected?.outcomeSide,b.fillTime].join('|'));
-    if(!baselineUnique.has(key)) baselineUnique.set(key,{ticker:s?.selected?.ticker||null,outcomeSide:s?.selected?.outcomeSide||null,fillTime:forensicIsoTime(b.fillTime),fillTimeRaw:b.fillTime??null,entryPrice:b.entryPrice??null,orderId:b.orderId||null});
+    if(!baselineUnique.has(key)){
+      const normalizedEntry=normalizeBaselineEconomicEntryPrice(b.entryPrice,s?.selected?.outcomeSide);
+      baselineUnique.set(key,{ticker:s?.selected?.ticker||null,outcomeSide:s?.selected?.outcomeSide||null,fillTime:forensicIsoTime(b.fillTime),fillTimeRaw:b.fillTime??null,entryPrice:normalizedEntry.economicOutcomePrice,entryPriceRawYesLeg:normalizedEntry.rawYesLeg,entryPriceSemantics:normalizedEntry.semantics,orderId:b.orderId||null});
+    }
   }
   const fireKeys=new Set(rows.map(r=>[r.ticker,r.outcomeSide,r.marketClose].join('|')));
   const reverseBaselineView=[...baselineUnique.values()].map(x=>{
