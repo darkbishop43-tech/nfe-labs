@@ -143,6 +143,51 @@ async function safeJson(response) {
   try { return await response.json(); } catch { return {}; }
 }
 
+function safeProviderString(value) {
+  if (typeof value !== 'string') return null;
+  const text = value.trim().slice(0, 160);
+  if (!text) return null;
+  return text.replace(/[A-Za-z0-9_\-]{20,}/g, '[REDACTED]');
+}
+
+function classifyProviderResponse(status) {
+  const s = Number(status);
+  if (s === 401) return 'AUTHENTICATION';
+  if (s === 403) return 'PERMISSION_OR_AUTHORIZATION';
+  if (s === 404) return 'REQUEST_PATH_OR_ENDPOINT';
+  if (s === 405) return 'HTTP_METHOD';
+  if (s === 429) return 'RATE_LIMIT';
+  if (s >= 500) return 'PROVIDER_SERVER_ERROR';
+  if (s >= 400) return 'MALFORMED_OR_REJECTED_REQUEST';
+  if (s >= 200 && s < 300) return 'SUCCESS';
+  return 'OTHER';
+}
+
+function setResponseDiagnostic(diagnostic, response, body, path) {
+  const providerError = body?.error;
+  const providerErrorCode = safeProviderString(
+    typeof providerError === 'object' ? providerError?.code : body?.code
+  );
+  const providerErrorMessage = safeProviderString(
+    typeof providerError === 'object'
+      ? (providerError?.message ?? body?.message)
+      : (typeof providerError === 'string' ? providerError : body?.message)
+  );
+  let responseContentType = null;
+  try {
+    responseContentType = safeProviderString(response?.headers?.get?.('content-type') ?? null);
+  } catch {}
+  setDiagnostic(diagnostic, {
+    requestedPath: path,
+    requestMethod: ALLOWED_METHOD,
+    httpStatus: Number.isFinite(Number(response?.status)) ? Number(response.status) : null,
+    responseContentType,
+    providerResponseCategory: classifyProviderResponse(response?.status),
+    providerErrorCode,
+    providerErrorMessage,
+  });
+}
+
 export async function kalshiReadOnlyProof(env, fetchImpl = fetch) {
   let providerGets = 0;
   const diagnostic = {
@@ -156,7 +201,9 @@ export async function kalshiReadOnlyProof(env, fetchImpl = fetch) {
     const get = async path => {
       providerGets += 1;
       const response = await kalshiGetOnly(env, path, fetchImpl, diagnostic);
-      return { response, body: await safeJson(response) };
+      const body = await safeJson(response);
+      setResponseDiagnostic(diagnostic, response, body, path);
+      return { response, body };
     };
 
     const balance = await get('/trade-api/v2/portfolio/balance');
