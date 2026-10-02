@@ -13,6 +13,7 @@ import {
   runReadOnlyScan,
   loadControl,
 } from '../src/index.js';
+import payneWorker from '../src/index.js';
 import { cockpitHtml } from '../src/cockpit-html.js';
 
 if (!globalThis.crypto) globalThis.crypto = webcrypto;
@@ -275,10 +276,41 @@ test('each scheduled scan updates current observation while history remains boun
   } finally { io.restore(); }
 });
 
+test('read-only export route returns current JSON and CSV evidence without authority changes',async()=>{
+  const env=await authEnv();
+  const io=installKalshiFetch();
+  try{
+    await runReadOnlyScan(env,'SCHEDULED_CRON',Date.parse('2026-10-02T06:05:00Z'));
+    const json=await payneWorker.fetch(new Request('https://payne.test/export?range=current&format=json'),env);
+    assert.equal(json.status,200);
+    assert.match(json.headers.get('content-type'),/application\/json/);
+    const body=await json.json();
+    assert.equal(body.schema,'PAYNE_KALSHI_EXPORT_V1');
+    assert.equal(body.providerWrites,0);
+    assert.equal(body.orders,0);
+    assert.equal(body.capitalMovedUsd,0);
+    assert.ok(body.rows.length>=2);
+    assert.equal(body.rows[0].providerWrites,0);
+    assert.ok(Object.hasOwn(body.rows[0],'fair'));
+    assert.ok(Object.hasOwn(body.rows[0],'contractCloseTime'));
+
+    const csv=await payneWorker.fetch(new Request('https://payne.test/export?range=current&format=csv'),env);
+    assert.equal(csv.status,200);
+    assert.match(csv.headers.get('content-type'),/text\/csv/);
+    const text=await csv.text();
+    assert.match(text,/observationAt,scanSource,asset,direction,outcomeSide,ticker/);
+    assert.match(text,/KXBTC15M-TEST/);
+  } finally { io.restore(); }
+});
+
 test('cockpit HTML exposes clocks, decision evidence, automatic refresh, and no order-submit control',()=>{
   const html=cockpitHtml();
   assert.equal(COCKPIT_REFRESH_MS,60_000);
   assert.match(html,/FOUNDER CONTROLS/);
+  assert.match(html,/DATA EXPORT/);
+  assert.match(html,/CURRENT SNAPSHOT/);
+  assert.match(html,/CUSTOM RANGE/);
+  assert.match(html,/\/export\?/);
   assert.match(html,/CURRENT KALSHI 15-MINUTE UNIVERSE/);
   assert.match(html,/PAYNE FEATURE EVIDENCE/);
   assert.match(html,/CYCLE CLOCKS/);
