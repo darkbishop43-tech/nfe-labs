@@ -148,6 +148,192 @@ export function fundingGate(control) {
   return { ok: !authorityDisabled && !indexUnproven, authorityDisabled, indexUnproven, failClosed: authorityDisabled || indexUnproven };
 }
 
+export function kalshiGeneralTakerFeeUsd(price, count, multiplier = 1) {
+  const p=Number(price), n=Number(count), m=Number(multiplier);
+  if (!Number.isFinite(p) || p<=0 || p>=1 || !Number.isFinite(n) || n<=0 || !Number.isFinite(m) || m<0) return null;
+  const raw=m*0.07*n*p*(1-p);
+  return Math.ceil((raw-1e-12)*100)/100;
+}
+
+export function estimateKalshiFeeSafeSize(price, maxStakeUsd) {
+  const p=Number(price), cap=Number(maxStakeUsd);
+  if (!Number.isFinite(p) || p<=0 || p>=1 || !Number.isFinite(cap) || cap<=0) {
+    return {ok:false,reason:'INVALID_PRICE_OR_CAP',count:0,executionAllowed:false};
+  }
+  for (let count=Math.floor(cap/p); count>=1; count--) {
+    const premium=Number((count*p).toFixed(4));
+    const fee=kalshiGeneralTakerFeeUsd(p,count,1);
+    const total=Number((premium+fee).toFixed(4));
+    if (fee!==null && total<=cap) {
+      return {
+        ok:true,
+        reason:'GENERAL_TAKER_FEE_VERIFIED_AND_WITHIN_CAP',
+        scheduleEffective:'2026-07-07',
+        feeFormula:'ceil_to_cent(1 * 0.07 * C * P * (1-P))',
+        multiplier:1,
+        count,
+        premiumUsd:premium,
+        feeUsd:fee,
+        totalDebitUsd:total,
+        maxStakeUsd:cap,
+        executionAllowed:false,
+        note:'Sizing is fee-safe; execution remains separately hard-disabled.',
+      };
+    }
+  }
+  return {ok:false,reason:'NO_CONTRACT_FITS_PREMIUM_PLUS_FEE_CAP',count:0,premiumUsd:0,feeUsd:0,totalDebitUsd:0,maxStakeUsd:cap,executionAllowed:false};
+}
+
+export function kalshiV2BookSide(outcomeSide) {
+  return String(outcomeSide||'').toUpperCase()==='YES' ? 'bid' :
+    String(outcomeSide||'').toUpperCase()==='NO' ? 'ask' : null;
+}
+
+export function kalshiV2EntryPayload(candidate, sizing, clientOrderId) {
+  const side=kalshiV2BookSide(candidate?.outcomeSide);
+  if (!side) return null;
+  const yesLegPrice=side==='bid' ? Number(candidate?.yes) : Number(1-Number(candidate?.yes));
+  if (!Number.isFinite(yesLegPrice) || yesLegPrice<=0 || yesLegPrice>=1) return null;
+  return {
+    ticker:String(candidate.marketTicker),
+    client_order_id:String(clientOrderId),
+    side,
+    count:Number(sizing.count).toFixed(2),
+    price:yesLegPrice.toFixed(4),
+    time_in_force:'immediate_or_cancel',
+    self_trade_prevention_type:'taker_at_cross',
+    post_only:false,
+    cancel_order_on_pause:true,
+    reduce_only:false,
+  };
+}
+
+export function kalshiV2ExitPayload(state, currentBid, clientOrderId) {
+  const entrySide=kalshiV2BookSide(state?.outcomeSide);
+  if (!entrySide) return null;
+  const side=entrySide==='bid' ? 'ask' : 'bid';
+  const outcomeBid=Number(currentBid);
+  const yesLegPrice=String(state?.outcomeSide).toUpperCase()==='YES' ? outcomeBid : 1-outcomeBid;
+  if (!Number.isFinite(yesLegPrice) || yesLegPrice<=0 || yesLegPrice>=1) return null;
+  return {
+    ticker:String(state.marketTicker),
+    client_order_id:String(clientOrderId),
+    side,
+    count:Number(state.remainingExitCount||state.filledCount||state.entryCount||0).toFixed(2),
+    price:yesLegPrice.toFixed(4),
+    time_in_force:'immediate_or_cancel',
+    self_trade_prevention_type:'taker_at_cross',
+    post_only:false,
+    cancel_order_on_pause:true,
+    reduce_only:true,
+  };
+}
+
+export function payneClientOrderId(seriesId, attemptNo, phase) {
+  const seed=String(seriesId||'step2').replace(/[^0-9A-Za-z]/g,'').slice(-12);
+  return ('payne-real-'+seed+'-'+String(attemptNo)+'-'+String(phase||'entry')).slice(0,64);
+}
+
+export function index3FundingEvidence(balanceBody, minRequiredUsd = 1) {
+  const rows=Array.isArray(balanceBody?.balance_breakdown) ? balanceBody.balance_breakdown : null;
+  if (!rows) return {index:3,available:false,balanceUsd:null,sufficient:false,evidence:'UNKNOWN_PROVIDER_EVIDENCE_INSUFFICIENT'};
+  const row=rows.find(x=>Number(x?.exchange_index)===3);
+  if (!row) return {index:3,available:false,balanceUsd:null,sufficient:false,evidence:'READ_PROVEN_UNAVAILABLE'};
+  const balance=Number(row?.balance);
+  return {
+    index:3,
+    available:true,
+    balanceUsd:Number.isFinite(balance)?balance:null,
+    sufficient:Number.isFinite(balance) && balance>=Number(minRequiredUsd),
+    evidence:'READ_PROVEN_AVAILABLE',
+  };
+}
+
+export function interpretEntryFixture(providerOrder) {
+  const fillCount=Number(providerOrder?.fill_count??providerOrder?.filled_count??0);
+  const remainingCount=Number(providerOrder?.remaining_count??0);
+  return {
+    result:fillCount>0?'FILLED':'NO_FILL',
+    fillCount:Number.isFinite(fillCount)?fillCount:0,
+    remainingCount:Number.isFinite(remainingCount)?remainingCount:0,
+    orderId:providerOrder?.order_id||null,
+    clientOrderId:providerOrder?.client_order_id||null,
+    averageFillPrice:providerOrder?.average_fill_price??null,
+    averageFeePaid:providerOrder?.average_fee_paid??null,
+  };
+}
+
+export function ownershipFixture({ ticker, outcomeSide, fill, positionFp }) {
+  if (!fill || fill.result!=='FILLED' || !(Number(fill.fillCount)>0)) {
+    return {owned:false,status:'NO_POSITION',position_fp:null};
+  }
+  return {
+    owned:true,
+    status:'OPEN',
+    marketTicker:String(ticker),
+    outcomeSide:String(outcomeSide||'').toUpperCase(),
+    filledCount:Number(fill.fillCount),
+    entryOrderId:fill.orderId||null,
+    position_fp:positionFp??null,
+  };
+}
+
+export function classifyProviderPositionFixture(httpOk, body, ticker, meta = {}) {
+  const base={
+    providerReadAt:meta.providerReadAt||new Date().toISOString(),
+    providerHttpStatus:meta.providerHttpStatus??null,
+    recognizedSchema:null,
+    matchedTicker:null,
+    rawQuantityFieldUsed:null,
+    normalizedQuantity:null,
+    subaccount:0,
+    exchangeScope:'ALL',
+    accountContextKnown:true,
+    paginationComplete:meta.paginationComplete===true,
+  };
+  if (!httpOk) return {classification:'UNKNOWN',reason:'HTTP_FAILURE',...base};
+  if (!body || typeof body!=='object') return {classification:'UNKNOWN',reason:'MALFORMED_JSON_OR_BODY',...base};
+  let rows=null, schema=null;
+  if (Array.isArray(body.market_positions)) { rows=body.market_positions; schema='market_positions'; }
+  else if (Array.isArray(body.positions)) { rows=body.positions; schema='positions'; }
+  else return {classification:'UNKNOWN',reason:'UNKNOWN_SCHEMA',...base};
+  base.recognizedSchema=schema;
+  const matches=rows.filter(x=>String(x?.ticker||x?.market_ticker||'')===String(ticker||''));
+  if (matches.length!==1) return {classification:'UNKNOWN',reason:matches.length>1?'TICKER_AMBIGUOUS':'TICKER_NOT_FOUND_CONTEXT_UNPROVEN',...base};
+  const exact=matches[0];
+  base.matchedTicker=String(exact?.ticker||exact?.market_ticker||'');
+  let raw, field;
+  if (exact?.position_fp!==undefined && exact?.position_fp!==null && exact?.position_fp!=='') { raw=exact.position_fp; field='position_fp'; }
+  else if (exact?.position!==undefined && exact?.position!==null && exact?.position!=='') { raw=exact.position; field='position'; }
+  else if (exact?.quantity!==undefined && exact?.quantity!==null && exact?.quantity!=='') { raw=exact.quantity; field='quantity'; }
+  else return {classification:'UNKNOWN',reason:'QUANTITY_MISSING',...base};
+  base.rawQuantityFieldUsed=field;
+  if (typeof raw==='string' && raw.trim()!==raw) return {classification:'UNKNOWN',reason:'QUANTITY_MALFORMED_WHITESPACE',...base};
+  if (typeof raw==='string' && !/^[+-]?(?:\d+(?:\.\d+)?|\.\d+)$/.test(raw)) return {classification:'UNKNOWN',reason:'QUANTITY_INVALID',...base};
+  const qty=Number(raw);
+  if (!Number.isFinite(qty)) return {classification:'UNKNOWN',reason:'QUANTITY_INVALID',...base};
+  base.normalizedQuantity=qty;
+  if (Math.abs(qty)<=1e-9) return {classification:'FLAT',reason:'MATCHED_TICKER_VALID_ZERO_QUANTITY',...base};
+  return {classification:'OPEN',reason:'MATCHED_TICKER_VALID_NONZERO_QUANTITY',...base};
+}
+
+export function settlementFallbackFixture(reconciliation, settlements, ticker) {
+  if (reconciliation?.classification!=='UNKNOWN' || reconciliation?.reason!=='TICKER_NOT_FOUND_CONTEXT_UNPROVEN' || reconciliation?.paginationComplete!==true) return reconciliation;
+  const rows=Array.isArray(settlements)?settlements:[];
+  const exact=rows.find(x=>String(x?.ticker||'')===String(ticker||''))||null;
+  if (!exact) return reconciliation;
+  return {
+    ...reconciliation,
+    classification:'FLAT',
+    reason:'EXACT_TICKER_SETTLEMENT_CONFIRMED',
+    matchedTicker:String(ticker),
+    normalizedQuantity:0,
+    settlementConfirmed:true,
+    settledTime:exact?.settled_time||null,
+    marketResult:exact?.market_result||null,
+  };
+}
+
 export async function freshKalshiExecutionQuote(env, candidate, providerGet) {
   if (typeof providerGet !== 'function') throw new Error('PROVIDER_GET_ADAPTER_REQUIRED');
   const quote = await providerGet(candidate.marketTicker);
@@ -192,6 +378,98 @@ export async function evaluateZeroMoneyCandidate(env, candidate, { providerGet, 
   const stop = hardStopBeforeProviderPost({ ticker:candidate.marketTicker, stage:gate.stage, funding });
   await appendEvent(env, 'PROVIDER_POST_BLOCKED', { ticker:candidate.marketTicker, reason:stop.reason, funding });
   return { ok:true, fired:false, gate, eligibility, lock, preSubmit, funding, stopReason:stop.reason };
+}
+
+export async function evaluateStep2ZeroMoneyCandidate(env, candidate, {
+  providerGet,
+  balanceBody,
+  nowMs = Date.now(),
+  activeThreshold,
+  maxStakeUsd = 1,
+  seriesId = 'step2',
+  attemptNo = 1,
+} = {}) {
+  const control=await loadControl(env);
+  const threshold=Number.isFinite(Number(activeThreshold))?Number(activeThreshold):Number(control.activeThreshold??PAYNE_CONFIG.defaultThreshold);
+  const gate=payneStage(candidate,threshold);
+  const eligibility=realEligibility(candidate,nowMs);
+  await appendEvent(env,'STEP2_CANDIDATE_DECISION',{
+    ticker:candidate?.marketTicker??null,
+    asset:candidate?.asset??null,
+    direction:candidate?.direction??null,
+    outcomeSide:candidate?.outcomeSide??null,
+    payneScore:Number(candidate?.score),
+    payneEdge:Number(candidate?.edge),
+    payneMove:Number(candidate?.move),
+    payneStage:gate.stage,
+    payneThreshold:threshold,
+    eligibility,
+  });
+  if (!gate.pullTrigger) return {ok:true,fired:false,gate,eligibility,providerWrites:0,orders:0,capitalMovedUsd:0,stopReason:'NON_PULL_CANDIDATE'};
+  if (!eligibility.assetAllowed || !eligibility.executionEligible || !eligibility.timeSafe || !eligibility.tickerPresent) {
+    return {ok:true,fired:false,gate,eligibility,providerWrites:0,orders:0,capitalMovedUsd:0,stopReason:'REAL_ELIGIBILITY_GATE'};
+  }
+
+  const lock=await freshKalshiExecutionQuote(env,candidate,providerGet);
+  await appendEvent(env,'STEP2_FRESH_LOCK_READ',{ticker:candidate.marketTicker,outcomeSide:candidate?.outcomeSide??null,ok:lock.ok,reason:lock.reason??null});
+  if (!lock.ok) return {ok:true,fired:false,gate,eligibility,lock,providerWrites:0,orders:0,capitalMovedUsd:0,stopReason:'FRESH_LOCK_FAILED'};
+
+  const preSubmit=await freshKalshiExecutionQuote(env,candidate,providerGet);
+  await appendEvent(env,'STEP2_PRE_SUBMIT_READ',{ticker:candidate.marketTicker,outcomeSide:candidate?.outcomeSide??null,ok:preSubmit.ok,reason:preSubmit.reason??null});
+  if (!preSubmit.ok) return {ok:true,fired:false,gate,eligibility,lock,preSubmit,providerWrites:0,orders:0,capitalMovedUsd:0,stopReason:'PRE_SUBMIT_FAILED'};
+
+  const outcome=String(candidate?.outcomeSide||'').toUpperCase();
+  const selectedAsk=outcome==='YES'?Number(preSubmit.market?.yesAsk):outcome==='NO'?Number(preSubmit.market?.noAsk):NaN;
+  const executionCandidate={...candidate,yes:selectedAsk};
+  const sizing=estimateKalshiFeeSafeSize(selectedAsk,maxStakeUsd);
+  if (!sizing.ok) return {ok:true,fired:false,gate,eligibility,lock,preSubmit,sizing,providerWrites:0,orders:0,capitalMovedUsd:0,stopReason:'FEE_SAFE_SIZING_FAILED'};
+
+  const clientOrderId=payneClientOrderId(seriesId,attemptNo,'entry');
+  const entryPayload=kalshiV2EntryPayload(executionCandidate,sizing,clientOrderId);
+  if (!entryPayload) return {ok:true,fired:false,gate,eligibility,lock,preSubmit,sizing,providerWrites:0,orders:0,capitalMovedUsd:0,stopReason:'ENTRY_PAYLOAD_INVALID'};
+
+  const index3=index3FundingEvidence(balanceBody,sizing.totalDebitUsd);
+  const funding=fundingGate({
+    ...control,
+    requiredExchangeIndex:index3.available?3:null,
+  });
+  await appendEvent(env,'STEP2_ZERO_MONEY_PLAN',{
+    ticker:candidate.marketTicker,
+    outcomeSide:outcome,
+    clientOrderId,
+    sizing,
+    entryPayload,
+    index3,
+    funding,
+  });
+
+  const stop=hardStopBeforeProviderPost({
+    ticker:candidate.marketTicker,
+    stage:gate.stage,
+    sizing,
+    clientOrderId,
+    entryPayload,
+    index3,
+    funding,
+  });
+  await appendEvent(env,'PROVIDER_POST_BLOCKED',{ticker:candidate.marketTicker,reason:stop.reason,funding,index3});
+  return {
+    ok:true,
+    fired:false,
+    gate,
+    eligibility,
+    lock,
+    preSubmit,
+    sizing,
+    clientOrderId,
+    entryPayload,
+    index3,
+    funding,
+    providerWrites:0,
+    orders:0,
+    capitalMovedUsd:0,
+    stopReason:stop.reason,
+  };
 }
 
 export function reconcileFixture({ providerContextComplete, ownedPosition, settlementEvidence }) {
