@@ -20,7 +20,7 @@ binding = "PAYNE_KALSHI_STATE"
 id = "03352b0ccb034f1bb8206f663a04b125"
 
 # Read-only source bridge to the existing Baseline Worker.
-# PAYNE code uses this binding only for GET /shadow-state.
+# PAYNE code constrains this binding to GET /shadow-state and GET /execution-test-state only.
 [[services]]
 binding = "BASELINE_REAL_READ"
 service = "market-edge-baseline-real"
