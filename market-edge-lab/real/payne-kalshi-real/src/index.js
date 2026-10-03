@@ -743,6 +743,94 @@ function providerIndex3Evidence(balanceBody) {
   return {status:'READ-PROVEN AVAILABLE',balance:Number.isFinite(balance)?balance:null};
 }
 
+function finiteFinancialNumber(v){
+  if(v===null||v===undefined||v==='') return null;
+  const n=Number(v);
+  return Number.isFinite(n)?n:null;
+}
+function firstFinancialDollarField(body,fields){
+  for(const field of fields){
+    const value=finiteFinancialNumber(body?.[field]);
+    if(value!==null) return {value,field};
+  }
+  return {value:null,field:null};
+}
+export function buildAccountFinancialSummary({
+  balanceBody={},
+  ledger=[],
+  series={},
+  providerSyncedAt=null,
+  nowMs=Date.now(),
+  staleAfterMs=120000,
+}={}){
+  const rows=Array.isArray(balanceBody?.balance_breakdown)?balanceBody.balance_breakdown:[];
+  const breakdownValues=rows.map(x=>finiteFinancialNumber(x?.balance));
+  const breakdownComplete=rows.length>0 && breakdownValues.every(v=>v!==null);
+  const cashDirect=firstFinancialDollarField(balanceBody,['available_balance_dollars','cash_balance_dollars','balance_dollars']);
+  const cashUsd=cashDirect.value!==null?cashDirect.value:(breakdownComplete?Number(breakdownValues.reduce((a,b)=>a+b,0).toFixed(4)):null);
+  const cashSource=cashDirect.value!==null?'PROVIDER '+cashDirect.field.toUpperCase():(breakdownComplete?'NFE CALCULATED — SUM OF PROVIDER BALANCE_BREAKDOWN':'NOT EXPOSED');
+
+  const positionValue=firstFinancialDollarField(balanceBody,['open_position_value_dollars','position_value_dollars','portfolio_value_dollars']);
+  const totalValue=firstFinancialDollarField(balanceBody,['total_account_value_dollars','account_value_dollars','total_value_dollars']);
+  const realized=firstFinancialDollarField(balanceBody,['realized_pnl_dollars','realized_profit_loss_dollars']);
+  const unrealized=firstFinancialDollarField(balanceBody,['unrealized_pnl_dollars','unrealized_profit_loss_dollars']);
+
+  const payneRows=(Array.isArray(ledger)?ledger:[]).filter(x=>x?.owner===REAL_OWNER);
+  const currentSeriesId=series?.seriesId||null;
+  const runRows=currentSeriesId?payneRows.filter(x=>String(x?.seriesId||'')===String(currentSeriesId)):[];
+  const utcDay=new Date(nowMs).toISOString().slice(0,10);
+  const dayRows=payneRows.filter(x=>String(x?.at||'').slice(0,10)===utcDay);
+  const realizedSum=rows=>Number(rows.reduce((sum,row)=>{
+    const value=finiteFinancialNumber(row?.realizedPnlUsd);
+    return sum+(value===null?0:value);
+  },0).toFixed(4));
+  const runRealizedEvents=runRows.filter(x=>finiteFinancialNumber(x?.realizedPnlUsd)!==null);
+  const dayRealizedEvents=dayRows.filter(x=>finiteFinancialNumber(x?.realizedPnlUsd)!==null);
+  const runHasNoAttempt=Number(series?.attemptsStarted||0)===0;
+  const runPnlUsd=runRealizedEvents.length?realizedSum(runRealizedEvents):(currentSeriesId&&runHasNoAttempt?0:null);
+  const dayPnlUsd=dayRealizedEvents.length?realizedSum(dayRealizedEvents):0;
+
+  const position=series?.position||null;
+  const entryFee=finiteFinancialNumber(position?.entryAverageFeePaid);
+  const exitFee=finiteFinancialNumber(position?.exitAverageFeePaid);
+  const runFeesUsd=(entryFee!==null||exitFee!==null)?Number(((entryFee||0)+(exitFee||0)).toFixed(4)):(currentSeriesId&&runHasNoAttempt?0:null);
+
+  const syncedMs=Date.parse(providerSyncedAt||'');
+  const ageMs=Number.isFinite(syncedMs)?Math.max(0,nowMs-syncedMs):null;
+  const stale=ageMs===null?true:ageMs>staleAfterMs;
+
+  return {
+    schema:'PAYNE_ACCOUNT_FINANCIALS_V1',
+    scopeNotice:'ACCOUNT PROVIDER FINANCIALS ARE SEPARATE FROM FUNDING AUTHORITY / INDEX 3. PAYNE P/L NEVER INCLUDES AUTO OR FOUNDER MANUAL.',
+    providerSource:'KALSHI AUTHENTICATED /portfolio/balance',
+    providerSyncedAt:providerSyncedAt||null,
+    providerFinancialAgeMs:ageMs,
+    providerFinancialStatus:providerSyncedAt?(stale?'STALE':'FRESH'):'UNKNOWN',
+    account:{
+      cashUsd,
+      cashStatus:cashUsd===null?'NOT EXPOSED':cashSource,
+      openPositionValueUsd:positionValue.value,
+      openPositionValueStatus:positionValue.value===null?'NOT EXPOSED':'PROVIDER '+positionValue.field.toUpperCase(),
+      totalAccountValueUsd:totalValue.value,
+      totalAccountValueStatus:totalValue.value===null?'NOT EXPOSED':'PROVIDER '+totalValue.field.toUpperCase(),
+      realizedPnlUsd:realized.value,
+      realizedPnlStatus:realized.value===null?'NOT EXPOSED':'PROVIDER '+realized.field.toUpperCase(),
+      unrealizedPnlUsd:unrealized.value,
+      unrealizedPnlStatus:unrealized.value===null?'NOT EXPOSED':'PROVIDER '+unrealized.field.toUpperCase(),
+    },
+    payne:{
+      currentRunPnlUsd:runPnlUsd,
+      currentRunPnlStatus:runPnlUsd===null?'UNKNOWN':'NFE CALCULATED — PAYNE REAL LEDGER REALIZED P/L ONLY',
+      utcDayPnlUsd:dayPnlUsd,
+      utcDayPnlStatus:'NFE CALCULATED — PAYNE REAL LEDGER REALIZED P/L ONLY',
+      feesUsd:runFeesUsd,
+      feesStatus:runFeesUsd===null?'UNKNOWN':'NFE CALCULATED — PAYNE CURRENT SERIES PROVIDER FEES ONLY',
+      currentSeriesId,
+      excludes:['AUTO','FOUNDER_MANUAL'],
+    },
+  };
+}
+
 async function exactMarketRead(env, ticker, assetHint = null) {
   const path='/trade-api/v2/markets/'+encodeURIComponent(ticker);
   const response=await kalshiGetOnly(env,path);
@@ -1846,12 +1934,15 @@ export async function buildCockpitData(env, nowMs=Date.now()) {
     };
   }
 
-  const [discovery,featureState,positions,latestPersistent,realExecution]=await Promise.all([
+  const providerFinancialSyncedAt=balance.ok?new Date(nowMs).toISOString():null;
+  const [discovery,featureState,positions,latestPersistent,realExecution,realSeries,realLedger]=await Promise.all([
     discoverCockpitMarkets(env,{nowMs}),
     readAuthoritativePayneFeatures(env,nowMs),
     listPositionSnapshots(env),
     kvGetJson(env,CURRENT_KEY),
     buildRealExecutionObservability(env),
+    loadRealSeriesState(env),
+    listRealLedger(env,1000),
   ]);
   providerGets+=Number(discovery.providerGets||0);
   const candidates=buildCandidateViews(discovery.markets||[],featureState,control.activeThreshold);
@@ -1870,6 +1961,13 @@ export async function buildCockpitData(env, nowMs=Date.now()) {
   }
 
   const index3=providerIndex3Evidence(balance.body);
+  const financials=buildAccountFinancialSummary({
+    balanceBody:balance.body,
+    ledger:realLedger,
+    series:realSeries,
+    providerSyncedAt:providerFinancialSyncedAt,
+    nowMs,
+  });
   const baselineActual=selected?await readBaselineActualComparison(env,selected):{
     source:'BASELINE_REAL_EXECUTION_TEST_READ_ONLY',lane:'EXECUTION_TEST_NOT_PRODUCTION_BASELINE',
     available:false,reason:'NO_SELECTED_CONTRACT',sawMatchingContract:'UNKNOWN',sameTicker:'UNKNOWN',sameDirection:'UNKNOWN',
@@ -1959,6 +2057,7 @@ export async function buildCockpitData(env, nowMs=Date.now()) {
     capitalMovedUsd:0,
     authentication:balance.ok?'PROVEN':'NOT_PROVEN',
     balanceHttpStatus:balance.httpStatus,
+    financials,
     index3,
     control:{
       armed:Boolean(control.armed),
