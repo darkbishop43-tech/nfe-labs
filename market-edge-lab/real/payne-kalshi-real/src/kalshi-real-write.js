@@ -49,12 +49,13 @@ function assertPayload(kind,payload,scope) {
 
   if(kind==='ENTRY'){
     if(scope?.armed!==true) throw new Error('PAYNE_ENTRY_ARM_REQUIRED');
-    const target=Number(scope?.attemptTarget), before=Number(scope?.attemptsBefore), cap=Number(scope?.maxEntryDebitUsd);
+    const target=Number(scope?.attemptTarget), before=Number(scope?.attemptsBefore), cap=Number(scope?.maxEntryDebitUsd), entryDebitUsd=Number(scope?.entryDebitUsd);
     if(scope?.seriesConfigFrozen!==true) throw new Error('PAYNE_ENTRY_SERIES_CONFIG_NOT_FROZEN');
     if(!Number.isInteger(target)||target<1||!Number.isInteger(before)||before<0||before>=target) throw new Error('PAYNE_ENTRY_SERIES_ATTEMPT_NOT_AUTHORIZED');
     if(scope?.priorAttemptClean!==true) throw new Error('PAYNE_ENTRY_PRIOR_ATTEMPT_NOT_CLEAN');
     if(!Number.isFinite(cap)||!(cap>0)) throw new Error('PAYNE_ENTRY_SERIES_STAKE_CAP_INVALID');
-    if(count*price>cap+1e-9) throw new Error('PAYNE_ENTRY_EXCEEDS_SERIES_STAKE_CAP');
+    if(!Number.isFinite(entryDebitUsd)||!(entryDebitUsd>0)) throw new Error('PAYNE_ENTRY_DEBIT_EVIDENCE_REQUIRED');
+    if(entryDebitUsd>cap+1e-9) throw new Error('PAYNE_ENTRY_EXCEEDS_SERIES_STAKE_CAP');
     if(payload.reduce_only!==false) throw new Error('PAYNE_ENTRY_REDUCE_ONLY_FALSE_REQUIRED');
   } else {
     if(scope?.ownedByPayne!==true) throw new Error('PAYNE_EXIT_OWNERSHIP_REQUIRED');
@@ -92,6 +93,7 @@ export function payneOrderWriteProof(kind,payload,scope){
     clientOrderId:String(payload.client_order_id),
     count:Number(payload.count),
     price:Number(payload.price),
+    entryDebitUsd:kind==='ENTRY'?Number(scope?.entryDebitUsd):null,
     timeInForce:payload.time_in_force,
     postOnly:payload.post_only,
     reduceOnly:payload.reduce_only,
@@ -99,11 +101,18 @@ export function payneOrderWriteProof(kind,payload,scope){
 }
 
 export async function kalshiPayneOrderPost(env,kind,payload,scope,{fetchImpl=fetch}={}){
-  const proof=payneOrderWriteProof(kind,payload,scope);
-  const headers=await signedHeaders(env,ALLOWED_METHOD,ORDER_PATH);
-  const response=await fetchImpl(KALSHI_ORIGIN+ORDER_PATH,{method:ALLOWED_METHOD,headers,body:JSON.stringify(payload)});
-  if(!response || typeof response.ok!=='boolean') throw new Error('PAYNE_WRITE_INVALID_PROVIDER_RESPONSE');
-  return {response,proof};
+  let providerPostStarted=false;
+  try{
+    const proof=payneOrderWriteProof(kind,payload,scope);
+    const headers=await signedHeaders(env,ALLOWED_METHOD,ORDER_PATH);
+    providerPostStarted=true;
+    const response=await fetchImpl(KALSHI_ORIGIN+ORDER_PATH,{method:ALLOWED_METHOD,headers,body:JSON.stringify(payload)});
+    if(!response || typeof response.ok!=='boolean') throw new Error('PAYNE_WRITE_INVALID_PROVIDER_RESPONSE');
+    return {response,proof};
+  }catch(error){
+    if(error && typeof error==='object') error.payneProviderPostStarted=providerPostStarted;
+    throw error;
+  }
 }
 
 export const PAYNE_WRITE_CONTRACT = Object.freeze({
