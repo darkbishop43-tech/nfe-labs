@@ -2107,7 +2107,9 @@ export async function listRealLedger(env,limit=200) {
 
 
 export function summarizeRealExecutionState({control={},series={},ledger=[],asOf=new Date().toISOString()}={}) {
-  const rows=Array.isArray(ledger)?[...ledger].sort((a,b)=>Date.parse(a?.at||0)-Date.parse(b?.at||0)):[];
+  const seriesId=series?.seriesId||null;
+  const allRows=Array.isArray(ledger)?[...ledger].sort((a,b)=>Date.parse(a?.at||0)-Date.parse(b?.at||0)):[];
+  const rows=seriesId?allRows.filter(row=>String(row?.seriesId||'')===String(seriesId)):allRows.filter(row=>!row?.seriesId);
   const attemptIds=new Set();
   const filledIds=new Set();
   const noFillIds=new Set();
