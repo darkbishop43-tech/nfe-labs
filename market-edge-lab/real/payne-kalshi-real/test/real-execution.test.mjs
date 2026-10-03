@@ -1,3 +1,4 @@
+import worker from '../src/index.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { webcrypto } from 'node:crypto';
@@ -197,6 +198,31 @@ test('UNKNOWN entry remains fail-closed when provider ownership is OPEN but PAYN
   }finally{io.restore();}
 });
 
+
+test('scheduled tick self-reconciles a disarmed unresolved entry before any new entry authority',async()=>{
+  const e=await env(),io=installProvider({position:'ABSENT',orders:[],fills:[],historicalFills:[],settlements:[]});
+  try{
+    await saveRealSeriesState(e,{
+      ...defaultRealSeriesState(),seriesId:'SCHEDULED-RECON',status:'ENTRY_RECONCILIATION_REQUIRED',
+      attemptsStarted:1,attemptTarget:1,configFrozen:true,unresolvedEntry:true,
+      currentAttempt:{
+        schema:'PAYNE_REAL_ATTEMPT_V1',owner:'PAYNE_KALSHI_REAL',seriesId:'SCHEDULED-RECON',
+        attemptId:'SCHEDULED-RECON-1',attemptNo:1,status:'WRITE_ERROR_UNKNOWN',
+        asset:'BTC',marketTicker:'KXBTC15M-REALTEST',outcomeSide:'YES',direction:'UP',
+        clientOrderId:'payne-real-sched-1-entry',payload:{client_order_id:'payne-real-sched-1-entry'},
+      },
+    });
+    assert.equal((await loadControl(e)).armed,false);
+    await worker.scheduled({},e);
+    const after=await loadRealSeriesState(e);
+    assert.equal(after.unresolvedEntry,false);
+    assert.equal(after.position,null);
+    assert.equal(after.currentAttempt.status,'NO_FILL');
+    assert.equal(after.status,'COMPLETE_NO_FILL_RECONCILED');
+    assert.equal((await loadControl(e)).armed,false);
+    assert.equal(io.calls.filter(c=>c.method==='POST').length,0);
+  }finally{io.restore();}
+});
 
 test('authenticated Payne write transport is fixed to one order POST and zero-money intercepts ENTRY',async()=>{
   const e=await env();
