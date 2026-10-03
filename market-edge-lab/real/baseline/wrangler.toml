@@ -19,6 +19,12 @@ KALSHI_ONE_TRADE_CONTROLLER_ENABLED = "ENABLED"
 binding = "BASELINE_REAL_SHADOW_STATE"
 id = "d110292129c94b26942c25d0c462a17b"
 
+# Read-only safety bridge to PAYNE for Founder Funding review/confirm.
+# Baseline uses this binding only to GET PAYNE /real-state.
+[[services]]
+binding = "PAYNE_REAL_READ"
+service = "market-edge-payne-kalshi-real"
+
 [triggers]
 crons = ["* * * * *"]
 
