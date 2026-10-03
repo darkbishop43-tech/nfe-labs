@@ -20,7 +20,7 @@ const qualifying = () => ({ marketTicker:'KXTEST-1', asset:'BTC', direction:'UP'
 test('default state is disarmed and zero authority', ()=>{
   const s=defaultControlState();
   assert.equal(s.armed,false); assert.equal(s.attempts,0); assert.equal(s.openPositions,0);
-  assert.equal(s.providerWriteAuthority,'DISABLED'); assert.equal(s.realExecution,'DISABLED'); assert.equal(s.fundingAuthority,'DISABLED');
+  assert.equal(s.providerWriteAuthority,'BUILT_INACTIVE_DISARMED'); assert.equal(s.realExecution,'BUILT_INACTIVE_DISARMED'); assert.equal(s.fundingAuthority,'INDEX3_ONLY_INACTIVE_DISARMED'); assert.equal(s.requiredExchangeIndex,3); assert.equal(s.attemptTarget,1); assert.equal(s.maxEntryDebitUsd,1);
 });
 
 test('Payne gate fixtures deterministic', ()=>{
@@ -36,7 +36,7 @@ test('qualifying candidate reaches fresh lock twice then stops before POST', asy
   const providerGet=async ticker=>{ gets++; return {ok:true,marketTicker:ticker,yesAsk:.60,yesBid:.59,noAsk:.41,noBid:.40}; };
   const out=await evaluateZeroMoneyCandidate(e,qualifying(),{providerGet});
   assert.equal(out.gate.stage,'PULL_TRIGGER'); assert.equal(gets,2); assert.equal(out.stopReason,'STEP1_PROVIDER_POST_HARD_DISABLED'); assert.equal(out.fired,false);
-  assert.equal(out.funding.failClosed,true); assert.equal(out.funding.authorityDisabled,true); assert.equal(out.funding.indexUnproven,true);
+  assert.equal(out.funding.failClosed,true); assert.equal(out.funding.authorityDisabled,true); assert.equal(out.funding.indexUnproven,false);
 });
 
 test('non-pull candidate cannot reach provider GET or fire', async ()=>{
@@ -55,7 +55,7 @@ test('real eligibility/time gate blocks unsafe candidate before provider read', 
 
 test('funding gate remains fail-closed in Step 1', ()=>{
   const f=fundingGate(defaultControlState());
-  assert.equal(f.ok,false); assert.equal(f.failClosed,true); assert.equal(f.authorityDisabled,true); assert.equal(f.indexUnproven,true);
+  assert.equal(f.ok,false); assert.equal(f.failClosed,true); assert.equal(f.authorityDisabled,true); assert.equal(f.indexUnproven,false);
 });
 
 test('OPEN / FLAT / UNKNOWN reconciliation fixtures', ()=>{
@@ -95,5 +95,5 @@ test('no forbidden baseline or Payne Paper keys are used', async ()=>{
 
 test('status freezes Step 1 authority', ()=>{
   const s=step1Status(); assert.equal(PAYNE_CONFIG.providerWritesEnabled,false); assert.equal(PAYNE_CONFIG.realExecutionEnabled,false);
-  assert.equal(s.providerWrites,0); assert.equal(s.index3,'UNKNOWN'); assert.equal(s.secondIoc,'HOLD_UNCHANGED');
+  assert.equal(PAYNE_CONFIG.realCapabilityBuilt,true); assert.equal(s.providerWrites,0); assert.equal(s.requiredExchangeIndex,3); assert.equal(s.index3,'READ_REQUIRED_BEFORE_ENTRY'); assert.equal(s.secondIoc,'HOLD_UNCHANGED');
 });
