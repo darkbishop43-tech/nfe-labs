@@ -131,10 +131,10 @@ export async function kalshiGetOnly(env, path, fetchImpl = fetch, diagnostic = n
   return response;
 }
 
-export function classifyIndex3(balanceBody) {
+export function classifyIndex2(balanceBody) {
   const rows = Array.isArray(balanceBody?.balance_breakdown) ? balanceBody.balance_breakdown : null;
   if (!rows) return 'UNKNOWN / PROVIDER EVIDENCE INSUFFICIENT';
-  return rows.some(row => Number(row?.exchange_index) === 3)
+  return rows.some(row => Number(row?.exchange_index) === 2)
     ? 'READ-PROVEN AVAILABLE'
     : 'READ-PROVEN UNAVAILABLE';
 }
@@ -220,7 +220,7 @@ export async function kalshiReadOnlyProof(env, fetchImpl = fetch) {
         liveMarketGet:'NOT_TESTED_AUTH_FAILED',
         freshLockGet:'NOT_TESTED_AUTH_FAILED',
         preSubmitGet:'NOT_TESTED_AUTH_FAILED',
-        index3:classifyIndex3(balance.body),
+        index2:classifyIndex2(balance.body),
         providerWrites:0,
         secretsExposed:false,
         ...diagnostic,
@@ -252,7 +252,7 @@ export async function kalshiReadOnlyProof(env, fetchImpl = fetch) {
       liveTickerObserved: Boolean(ticker),
       freshLockGet: freshLock ? (freshLock.response.ok ? 'PROVEN' : 'NOT_PROVEN') : 'NOT_TESTED_NO_TICKER',
       preSubmitGet: preSubmit ? (preSubmit.response.ok ? 'PROVEN' : 'NOT_PROVEN') : 'NOT_TESTED_NO_TICKER',
-      index3: classifyIndex3(balance.body),
+      index2: classifyIndex2(balance.body),
       providerWrites: 0,
       secretsExposed: false,
       ...diagnostic,
@@ -269,7 +269,7 @@ export async function kalshiReadOnlyProof(env, fetchImpl = fetch) {
       freshLockGet: 'NOT_PROVEN',
       preSubmitGet: 'NOT_PROVEN',
       message: 'Authenticated Kalshi GET proof failed. Secret values suppressed.',
-      index3: 'UNKNOWN / PROVIDER EVIDENCE INSUFFICIENT',
+      index2: 'UNKNOWN / PROVIDER EVIDENCE INSUFFICIENT',
       providerWrites: 0,
       secretsExposed: false,
       credentialsPresent: diagnostic.credentialsPresent,
