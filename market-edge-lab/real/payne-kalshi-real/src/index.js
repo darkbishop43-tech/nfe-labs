@@ -1234,6 +1234,7 @@ function compactObservation(data, source, atMs) {
     pipeline:data.pipeline,
     clocks:data.clocks,
     comparison:data.comparison||null,
+    realExecution:data.realExecution||null,
     zeroMoneyPreview:data.zeroMoneyPreview,
     assets:data.discovery?.assets||[],
     providerGets:data.providerGets,
@@ -1626,7 +1627,9 @@ const EXPORT_ROW_FIELDS = Object.freeze([
   'payneObservationAt','payneObservationAgeMs','kalshiWindowElapsedMs','kalshiLifecycleFraction',
   'freshLockAt','preSubmitAt','windowConsistency','windowDiagnostic','baselineToPayneObservationDeltaMs',
   'baselineActualLane','baselineActualMatch','baselineAttempted','baselineFilled','baselineFillTime','baselineEntryPrice','baselineScore',
-  'paynePaperComparisonStatus'
+  'paynePaperComparisonStatus',
+  'realStateAsOf','realSeriesId','realArmed','attemptsStarted','attemptTarget','attemptsRemaining',
+  'filledCount','noFillCount','unknownCount','lastAttemptResult','lastProviderOrderId','realSeriesStatus','lastRealLedgerEvent'
 ]);
 
 function exportRangeBounds(range, url, nowMs=Date.now()) {
@@ -1697,7 +1700,7 @@ async function listExportSnapshots(env, bounds) {
   return snapshots.sort((a,b)=>Date.parse(a?.at||0)-Date.parse(b?.at||0));
 }
 
-function exportRowsFromSnapshots(snapshots) {
+function exportRowsFromSnapshots(snapshots, currentRealExecution=null) {
   const rows=[];
   for (const snapshot of snapshots||[]) {
     const decisions=Array.isArray(snapshot?.decisions)&&snapshot.decisions.length?snapshot.decisions:[snapshot?.selected||{}];
@@ -1764,6 +1767,19 @@ function exportRowsFromSnapshots(snapshots) {
         baselineEntryPrice:snapshot?.comparison?.baselineReal?.entryPrice??null,
         baselineScore:snapshot?.comparison?.baselineReal?.score??null,
         paynePaperComparisonStatus:snapshot?.comparison?.paynePaper?.reason||null,
+        realStateAsOf:snapshot?.realExecution?.asOf||currentRealExecution?.asOf||null,
+        realSeriesId:snapshot?.realExecution?.seriesId??currentRealExecution?.seriesId??null,
+        realArmed:snapshot?.realExecution?.armed??currentRealExecution?.armed??null,
+        attemptsStarted:snapshot?.realExecution?.attempted??currentRealExecution?.attempted??null,
+        attemptTarget:snapshot?.realExecution?.target??currentRealExecution?.target??null,
+        attemptsRemaining:snapshot?.realExecution?.remaining??currentRealExecution?.remaining??null,
+        filledCount:snapshot?.realExecution?.filled??currentRealExecution?.filled??null,
+        noFillCount:snapshot?.realExecution?.noFill??currentRealExecution?.noFill??null,
+        unknownCount:snapshot?.realExecution?.unknown??currentRealExecution?.unknown??null,
+        lastAttemptResult:snapshot?.realExecution?.lastAttempt?.result??currentRealExecution?.lastAttempt?.result??null,
+        lastProviderOrderId:snapshot?.realExecution?.lastAttempt?.providerOrderId??currentRealExecution?.lastAttempt?.providerOrderId??null,
+        realSeriesStatus:snapshot?.realExecution?.status??currentRealExecution?.status??null,
+        lastRealLedgerEvent:snapshot?.realExecution?.latestLedgerEvent?.type??currentRealExecution?.latestLedgerEvent?.type??null,
       });
     }
   }
@@ -1785,7 +1801,8 @@ async function buildExportResponse(env, url, nowMs=Date.now()) {
   const format=String(url.searchParams.get('format')||'json').toLowerCase();
   if (!['json','csv'].includes(format)) throw new Error('EXPORT_FORMAT_NOT_ALLOWED');
   const snapshots=await listExportSnapshots(env,bounds);
-  const rows=exportRowsFromSnapshots(snapshots);
+  const currentRealExecution=await buildRealExecutionObservability(env);
+  const rows=exportRowsFromSnapshots(snapshots,currentRealExecution);
   const events=format==='json'?await listResearchEvents(env,bounds,1000):[];
   const stamp=new Date(nowMs).toISOString().replace(/[:.]/g,'-');
   const filename='payne-kalshi-'+bounds.range+'-'+stamp+'.'+format;
@@ -1801,6 +1818,7 @@ async function buildExportResponse(env, url, nowMs=Date.now()) {
     rowCount:rows.length,
     eventCount:events.length,
     providerWrites:0,orders:0,capitalMovedUsd:0,
+    realExecution:currentRealExecution,
     fields:EXPORT_ROW_FIELDS,
     rows,
     events,
@@ -1828,11 +1846,12 @@ export async function buildCockpitData(env, nowMs=Date.now()) {
     };
   }
 
-  const [discovery,featureState,positions,latestPersistent]=await Promise.all([
+  const [discovery,featureState,positions,latestPersistent,realExecution]=await Promise.all([
     discoverCockpitMarkets(env,{nowMs}),
     readAuthoritativePayneFeatures(env,nowMs),
     listPositionSnapshots(env),
     kvGetJson(env,CURRENT_KEY),
+    buildRealExecutionObservability(env),
   ]);
   providerGets+=Number(discovery.providerGets||0);
   const candidates=buildCandidateViews(discovery.markets||[],featureState,control.activeThreshold);
@@ -2004,6 +2023,7 @@ export async function buildCockpitData(env, nowMs=Date.now()) {
     observations:{initial:selected,freshLock,preSubmit},
     clocks,
     comparison,
+    realExecution,
     researchCounters:latestPersistent?.researchCounters||{
       observationsCollected:0,contractsExamined:0,radarCount:0,lockCount:0,pullCount:0,wouldFireCount:0,rejectCount:0,
       freshLockInvalidations:0,preSubmitInvalidations:0,windowMismatches:0,baselineActualMatches:0,baselineActualFills:0,
@@ -2083,6 +2103,148 @@ export async function listRealLedger(env,limit=200) {
   const rows=[];
   for(const item of page?.keys||[]){const x=await kvGetJson(env,item.name);if(x)rows.push(x);}
   return rows.sort((a,b)=>String(a.at).localeCompare(String(b.at))).slice(-Math.max(1,Math.min(1000,Number(limit)||200)));
+}
+
+
+export function summarizeRealExecutionState({control={},series={},ledger=[],asOf=new Date().toISOString()}={}) {
+  const rows=Array.isArray(ledger)?[...ledger].sort((a,b)=>Date.parse(a?.at||0)-Date.parse(b?.at||0)):[];
+  const attemptIds=new Set();
+  const filledIds=new Set();
+  const noFillIds=new Set();
+  const unknownIds=new Set();
+  for(const row of rows){
+    const attemptId=row?.attemptId||null;
+    if(attemptId && ['ENTRY_PRE_SUBMIT_LATCHED','ENTRY_NO_FILL','ENTRY_RESULT_UNKNOWN','ENTRY_PROVIDER_REJECTED_OR_UNKNOWN','ENTRY_WRITE_ERROR_UNKNOWN','POSITION_OWNERSHIP_ESTABLISHED'].includes(String(row?.type||''))) attemptIds.add(attemptId);
+    if(attemptId && row?.type==='POSITION_OWNERSHIP_ESTABLISHED') filledIds.add(attemptId);
+    if(attemptId && row?.type==='ENTRY_NO_FILL') noFillIds.add(attemptId);
+    if(attemptId && ['ENTRY_RESULT_UNKNOWN','ENTRY_PROVIDER_REJECTED_OR_UNKNOWN','ENTRY_WRITE_ERROR_UNKNOWN'].includes(String(row?.type||''))) unknownIds.add(attemptId);
+  }
+  const attempted=Math.max(
+    Number.isFinite(Number(series?.attemptsStarted))?Math.max(0,Math.trunc(Number(series.attemptsStarted))):0,
+    Number.isFinite(Number(control?.attempts))?Math.max(0,Math.trunc(Number(control.attempts))):0,
+    attemptIds.size
+  );
+  const target=Number.isFinite(Number(series?.attemptTarget))?Math.max(1,Math.trunc(Number(series.attemptTarget))):
+    Number.isFinite(Number(control?.attemptTarget))?Math.max(1,Math.trunc(Number(control.attemptTarget))):1;
+  const remaining=Math.max(0,target-attempted);
+  const position=series?.position||null;
+  const positionStatus=String(position?.status||'');
+  const managing=Boolean(position && ['OPEN','EXIT_RETRY','EXIT_RECONCILIATION_REQUIRED','RECONCILIATION_UNKNOWN'].includes(positionStatus));
+  const rawSeriesStatus=String(series?.status||'UNKNOWN');
+  const status=managing?'MANAGING':
+    rawSeriesStatus==='COMPLETE_NO_FILL'?'COMPLETE_NO_FILL':
+    rawSeriesStatus.startsWith('COMPLETE')?'COMPLETE':
+    rawSeriesStatus.startsWith('HOLD_')||rawSeriesStatus.includes('BLOCK')?'BLOCKED':
+    control?.armed===true && remaining>0?'FISHING':
+    control?.armed===false && attempted===0?'DISARMED':
+    rawSeriesStatus||'UNKNOWN';
+
+  const latestLedgerEvent=rows.length?rows[rows.length-1]:null;
+  const currentAttempt=series?.currentAttempt||null;
+  const providerResult=currentAttempt?.providerResult||null;
+  let lastAttemptResult='NO_PROVIDER_ATTEMPT';
+  if(attempted>0){
+    const state=String(providerResult?.state||currentAttempt?.status||'').toUpperCase();
+    if(state==='FILLED'||state==='PARTIAL') lastAttemptResult='FILLED';
+    else if(state==='NO_FILL') lastAttemptResult='NO_FILL';
+    else if(state==='UNKNOWN'||rawSeriesStatus.includes('UNKNOWN')||series?.unresolvedEntry===true) lastAttemptResult='UNKNOWN';
+    else if(filledIds.size>0) lastAttemptResult='FILLED';
+    else if(noFillIds.size>0) lastAttemptResult='NO_FILL';
+    else if(unknownIds.size>0) lastAttemptResult='UNKNOWN';
+    else lastAttemptResult='UNKNOWN';
+  }
+  const holdReason=attempted===0 && rawSeriesStatus.startsWith('HOLD_')?rawSeriesStatus:null;
+  const lastAttempt={
+    result:lastAttemptResult,
+    holdReason,
+    asset:currentAttempt?.asset||position?.asset||null,
+    ticker:currentAttempt?.marketTicker||position?.marketTicker||null,
+    side:currentAttempt?.outcomeSide||position?.outcomeSide||null,
+    direction:currentAttempt?.direction||position?.direction||null,
+    score:currentAttempt?.score??position?.entryScore??null,
+    move:currentAttempt?.move??position?.entryMove??null,
+    edge:currentAttempt?.edge??position?.entryEdge??null,
+    submittedPrice:currentAttempt?.preSubmitPrice??null,
+    freshLockPrice:currentAttempt?.freshLockPrice??null,
+    preSubmitPrice:currentAttempt?.preSubmitPrice??null,
+    providerOrderId:providerResult?.orderId||position?.entryOrderId||null,
+    timestamp:currentAttempt?.preSubmitAt||currentAttempt?.observedAt||position?.entryTime||latestLedgerEvent?.at||null,
+  };
+  return {
+    schema:'PAYNE_REAL_OBSERVABILITY_V1',
+    asOf,
+    seriesId:series?.seriesId||null,
+    armed:control?.armed===true,
+    attempted,target,remaining,
+    filled:filledIds.size,
+    noFill:noFillIds.size,
+    unknown:unknownIds.size,
+    status,
+    rawSeriesStatus,
+    unresolvedEntry:series?.unresolvedEntry===true,
+    ownedPositions:managing?1:0,
+    latestLedgerEvent:latestLedgerEvent?{
+      type:latestLedgerEvent.type||null,
+      at:latestLedgerEvent.at||null,
+      attemptId:latestLedgerEvent.attemptId||null,
+      ticker:latestLedgerEvent.ticker||null,
+      result:latestLedgerEvent.result?.state||latestLedgerEvent.result||null,
+      providerOrderId:latestLedgerEvent.result?.orderId||latestLedgerEvent.entryOrderId||null,
+    }:null,
+    lastAttempt,
+    safeguards:{
+      owner:REAL_OWNER,
+      threshold:.70,
+      maxEntryDebitUsd:1,
+      requiredExchangeIndex:3,
+      timeInForce:'immediate_or_cancel',
+      scoreExit:PAYNE_CONFIG.exitScore,
+      maxHoldMs:PAYNE_CONFIG.maxHoldMs,
+      reduceOnlyExit:true,
+      autoTickerConflictGuard:true,
+      restartSafeAttemptLockout:true,
+    },
+  };
+}
+
+export async function buildRealExecutionObservability(env) {
+  const [control,series,ledger]=await Promise.all([
+    loadControl(env),
+    loadRealSeriesState(env),
+    listRealLedger(env,1000),
+  ]);
+  return summarizeRealExecutionState({control,series,ledger,asOf:new Date().toISOString()});
+}
+
+async function buildFastUiState(env) {
+  const [control,latestPersistent,realExecution]=await Promise.all([
+    loadControl(env),
+    kvGetJson(env,CURRENT_KEY),
+    buildRealExecutionObservability(env),
+  ]);
+  return {
+    ok:true,
+    schema:'PAYNE_FAST_UI_STATE_V1',
+    updatedAt:new Date().toISOString(),
+    uiPollAuthority:'PERSISTED_STATE_ONLY',
+    providerGets:0,
+    providerWrites:0,
+    orders:0,
+    capitalMovedUsd:0,
+    control:{
+      armed:control.armed===true,
+      attemptTarget:control.attemptTarget,
+      maxEntryDebitUsd:control.maxEntryDebitUsd,
+      threshold:control.activeThreshold,
+      requiredExchangeIndex:3,
+      scanEnabled:control.scanEnabled,
+    },
+    baselineObservationAt:latestPersistent?.selected?.payne?.sourceLastRunAt||latestPersistent?.clocks?.baseline?.observationAt||null,
+    payneObservationAt:latestPersistent?.at||latestPersistent?.clocks?.payne?.observationAt||null,
+    decisions:latestPersistent?.decisions||[],
+    selected:latestPersistent?.selected||null,
+    realExecution,
+  };
 }
 
 export function interpretPayneOrderResponse(body) {
@@ -2531,6 +2693,9 @@ export default {
         orders:0,
         capitalMovedUsd:0,
       });
+    }
+    if (url.pathname === '/ui-state') {
+      return Response.json(await buildFastUiState(env),{headers:{'cache-control':'no-store'}});
     }
     if (url.pathname === '/real-state') {
       const control=await loadControl(env);
