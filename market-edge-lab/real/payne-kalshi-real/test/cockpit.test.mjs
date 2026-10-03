@@ -10,6 +10,7 @@ import {
   buildCockpitData,
   defaultControlState,
   updateFounderControl,
+  loadRealSeriesState,
   runReadOnlyScan,
   loadControl,
   normalizeBaselineEconomicEntryPrice,
@@ -394,7 +395,7 @@ test('window mismatch is recorded truthfully and blocks zero-money FIRE preview'
   } finally { io.restore(); }
 });
 
-test('Founder real controls default disarmed and ARM is bounded to .70 / $1 / 1 attempt / Index 2',async()=>{
+test('Founder real controls default disarmed and ARM validates founder config against existing bounds, freezes it into the series, Index 2 required',async()=>{
   const env=await authEnv();
   let c=await loadControl(env);
   assert.equal(c.armed,false);
@@ -417,7 +418,12 @@ test('Founder real controls default disarmed and ARM is bounded to .70 / $1 / 1 
   assert.equal(c.providerWriteAuthority,'BUILT_INACTIVE_DISARMED');
   c=await updateFounderControl(env,'SET_THRESHOLD',.75);
   assert.equal(c.activeThreshold,.75);
-  await assert.rejects(updateFounderControl(env,'ARM'),/PAYNE_REAL_ARM_THRESHOLD_MUST_BE_0_70/);
+  c=await updateFounderControl(env,'ARM');   // validated founder config (.75) is frozen into the series; no .70-only gate
+  assert.equal(c.armed,true);
+  const frozen=await loadRealSeriesState(env);
+  assert.equal(frozen.threshold,.75);
+  assert.equal(frozen.configFrozen,true);
+  c=await updateFounderControl(env,'DISARM');
   c=await updateFounderControl(env,'SET_THRESHOLD',.70);
   await assert.rejects(updateFounderControl(env,'SET_THRESHOLD',.65),/PAYNE_CONTROL_THRESHOLD_NOT_ALLOWED/);
 });
