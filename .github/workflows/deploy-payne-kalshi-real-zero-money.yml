@@ -76,7 +76,28 @@ jobs:
 
           curl -fsS "$base/real-state" -o /tmp/real-state.json
           curl -fsS "$base/ui-state" -o /tmp/ui-state.json
+          curl -fsS "$base/cockpit-data" -o /tmp/cockpit.json
           curl -fsS "$base/" -o /tmp/cockpit.html
+
+          echo "LIVE_SHARD_AUDIT="
+          jq '{
+            observedAt:.updatedAt,
+            requiredFundingIndex:.control.requiredExchangeIndex,
+            fundingBalanceUsd:.index3.balance,
+            markets:[.markets[]|{
+              asset,ticker,status,exchangeIndex,timeRemainingMs,
+              executionEligible,
+              eligibleApartFromShard:(.executionEligible==true and (.ticker|length)>0 and (.timeRemainingMs>390000))
+            }],
+            shardCounts:{
+              index0:([.markets[]|select(.exchangeIndex==0)]|length),
+              index1:([.markets[]|select(.exchangeIndex==1)]|length),
+              index2:([.markets[]|select(.exchangeIndex==2)]|length),
+              index3:([.markets[]|select(.exchangeIndex==3)]|length),
+              otherOrNull:([.markets[]|select((.exchangeIndex!=0) and (.exchangeIndex!=1) and (.exchangeIndex!=2) and (.exchangeIndex!=3))]|length)
+            },
+            index3Assets:[.markets[]|select(.exchangeIndex==3)|.asset]
+          }' /tmp/cockpit.json
 
           echo "LIVE_UI_STATE_SAFE="
           jq '{schema,uiPollAuthority,providerGets,providerWrites,orders,capitalMovedUsd,control,realExecution:{schema:.realExecution.schema,seriesId:.realExecution.seriesId,armed:.realExecution.armed,attempted:.realExecution.attempted,target:.realExecution.target,remaining:.realExecution.remaining,filled:.realExecution.filled,noFill:.realExecution.noFill,unknown:.realExecution.unknown,status:.realExecution.status,rawSeriesStatus:.realExecution.rawSeriesStatus,unresolvedEntry:.realExecution.unresolvedEntry,ownedPositions:.realExecution.ownedPositions,lastAttempt:.realExecution.lastAttempt,latestLedgerEvent:.realExecution.latestLedgerEvent}}' /tmp/ui-state.json
@@ -132,7 +153,6 @@ jobs:
             .capitalMovedUsd == 0
           ' /tmp/real-state.json >/dev/null
 
-          curl -fsS "$base/cockpit-data" -o /tmp/cockpit.json
           jq -e '
             .providerWrites == 0 and
             .orders == 0 and
