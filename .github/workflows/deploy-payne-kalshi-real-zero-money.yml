@@ -79,6 +79,10 @@ jobs:
           curl -fsS "$base/cockpit-data" -o /tmp/cockpit.json
           curl -fsS "$base/" -o /tmp/cockpit.html
 
+          curl -fsS "https://market-edge-baseline-real.darkbishop43.workers.dev/founder-capital-ledger" -o /tmp/capital-ledger.json
+          echo "PRE_MOVE_PROVIDER_BALANCES="
+          jq '{readOnly,state,provider:{cashUsd:.provider.cashUsd,balanceBreakdown:.provider.balanceBreakdown},safety}' /tmp/capital-ledger.json
+
           echo "LIVE_SHARD_AUDIT="
           jq '{
             observedAt:.updatedAt,
