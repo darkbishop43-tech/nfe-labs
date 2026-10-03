@@ -513,7 +513,7 @@ export function founderFundingReturnReviewGate({sourceIndex,destinationIndex,amo
   const amount=Number(amountUsd),source=Number(sourceBalanceUsd);
   if(!Number.isFinite(amount)||amount<=0) return {ok:false,state:"TRANSFER_AMOUNT_INVALID"};
   if(!Number.isFinite(source)||source<=0) return {ok:false,state:"INDEX3_SOURCE_EMPTY"};
-  if(Math.abs(amount-source)>=0.0001) return {ok:false,state:"INDEX3_RETURN_MUST_USE_FULL_CURRENT_BALANCE"};
+  if(amount>source+1e-9) return {ok:false,state:"TRANSFER_EXCEEDS_FRESH_INDEX3"};
   if(payneArmed===true) return {ok:false,state:"PAYNE_MUST_BE_DISARMED"};
   if(Number(payneOpenPositions||0)!==0) return {ok:false,state:"PAYNE_OPEN_POSITION_TRANSFER_BLOCKED"};
   return {ok:true,state:"INDEX3_TO_INDEX2_REVIEW_ALLOWED"};
@@ -527,16 +527,30 @@ export function founderFundingReturnConfirmGate({reviewPresent,reviewAgeMs,balan
   if(Number(payneOpenPositions||0)!==0) return {ok:false,state:"PAYNE_OPEN_POSITION_TRANSFER_BLOCKED"};
   return {ok:true,state:"INDEX3_TO_INDEX2_CONFIRM_ALLOWED"};
 }
-async function payneFundingSafetyRead() {
+export function parseFounderFundingAmountUsd(raw) {
+  const text=String(raw??"").trim();
+  const match=/^(?:0|[1-9]\d*)(?:\.(\d{1,2}))?$/.exec(text);
+  if(!match) return {ok:false,state:"TRANSFER_AMOUNT_INVALID",amountUsd:null,amountCents:null};
+  const whole=Number(text.split(".")[0]);
+  const cents=Number((match[1]||"").padEnd(2,"0"));
+  const amountCents=whole*100+cents;
+  if(!Number.isInteger(amountCents)||amountCents<=0) return {ok:false,state:"TRANSFER_AMOUNT_INVALID",amountUsd:null,amountCents:null};
+  return {ok:true,state:"TRANSFER_AMOUNT_VALID",amountUsd:amountCents/100,amountCents};
+}
+async function payneFundingSafetyRead(env) {
   try {
-    const r=await fetch("https://market-edge-payne-kalshi-real.darkbishop43.workers.dev/real-state",{method:"GET",headers:{"accept":"application/json"}});
+    if(!env?.PAYNE_REAL_READ?.fetch) return {ok:false,armed:null,openPositions:null,positionStatus:null,requiredExchangeIndex:null,httpStatus:null,error:"PAYNE_SERVICE_BINDING_UNAVAILABLE"};
+    const r=await env.PAYNE_REAL_READ.fetch(new Request("https://payne.internal/real-state",{method:"GET",headers:{"accept":"application/json"}}));
     const body=await r.json().catch(()=>({}));
     const positionStatus=String(body?.series?.position?.status||body?.series?.positionStatus||"").toUpperCase();
+    const explicitOpen=Number(body?.control?.openPositions);
     const openPosition=['OPEN','EXIT_RETRY','EXIT_RECONCILIATION_REQUIRED','RECONCILIATION_UNKNOWN'].includes(positionStatus);
+    const openPositions=Number.isFinite(explicitOpen)?Math.max(0,Math.trunc(explicitOpen)):(openPosition?1:0);
     return {
-      ok:r.ok,
+      ok:Boolean(r.ok&&body?.ok===true&&body?.schema==="PAYNE_REAL_STATE_V1"),
+      source:"CLOUDFLARE_SERVICE_BINDING:PAYNE_REAL_READ:/real-state",
       armed:body?.control?.armed===true,
-      openPositions:openPosition?1:0,
+      openPositions,
       positionStatus:positionStatus||null,
       requiredExchangeIndex:Number(body?.control?.requiredExchangeIndex),
       httpStatus:r.status
@@ -4807,7 +4821,13 @@ document.getElementById('export')?.addEventListener('click',async()=>{const r=aw
     }
 
     if (request.method === "GET" && url.pathname === "/founder-funding-zero-money-proof") {
-      const reviewOk=founderFundingReturnReviewGate({sourceIndex:3,destinationIndex:2,amountUsd:9.8,sourceBalanceUsd:9.8,payneArmed:false,payneOpenPositions:0});
+      const amountDefault=parseFounderFundingAmountUsd("9.80");
+      const amountCustom=parseFounderFundingAmountUsd("5.25");
+      const amountInvalid=parseFounderFundingAmountUsd("5.555");
+      const amountZero=parseFounderFundingAmountUsd("0.00");
+      const reviewOk=founderFundingReturnReviewGate({sourceIndex:3,destinationIndex:2,amountUsd:amountDefault.amountUsd,sourceBalanceUsd:9.8,payneArmed:false,payneOpenPositions:0});
+      const reviewCustom=founderFundingReturnReviewGate({sourceIndex:3,destinationIndex:2,amountUsd:amountCustom.amountUsd,sourceBalanceUsd:9.8,payneArmed:false,payneOpenPositions:0});
+      const reviewTooLarge=founderFundingReturnReviewGate({sourceIndex:3,destinationIndex:2,amountUsd:9.81,sourceBalanceUsd:9.8,payneArmed:false,payneOpenPositions:0});
       const reviewWrongSource=founderFundingReturnReviewGate({sourceIndex:2,destinationIndex:3,amountUsd:9.8,sourceBalanceUsd:9.8,payneArmed:false,payneOpenPositions:0});
       const reviewWrongDestination=founderFundingReturnReviewGate({sourceIndex:3,destinationIndex:3,amountUsd:9.8,sourceBalanceUsd:9.8,payneArmed:false,payneOpenPositions:0});
       const reviewArmed=founderFundingReturnReviewGate({sourceIndex:3,destinationIndex:2,amountUsd:9.8,sourceBalanceUsd:9.8,payneArmed:true,payneOpenPositions:0});
@@ -4816,7 +4836,12 @@ document.getElementById('export')?.addEventListener('click',async()=>{const r=aw
       const confirmStale=founderFundingReturnConfirmGate({reviewPresent:true,reviewAgeMs:600001,balancesUnchanged:true,payneArmed:false,payneOpenPositions:0,sourceIndex:3,destinationIndex:2});
       const confirmChanged=founderFundingReturnConfirmGate({reviewPresent:true,reviewAgeMs:1000,balancesUnchanged:false,payneArmed:false,payneOpenPositions:0,sourceIndex:3,destinationIndex:2});
       const confirmReplay=founderFundingReturnConfirmGate({reviewPresent:false,reviewAgeMs:1000,balancesUnchanged:true,payneArmed:false,payneOpenPositions:0,sourceIndex:3,destinationIndex:2});
-      return json({ok:Boolean(reviewOk.ok&&confirmOk.ok&&!reviewWrongSource.ok&&!reviewWrongDestination.ok&&!reviewArmed.ok&&!reviewOpen.ok&&!confirmStale.ok&&!confirmChanged.ok&&!confirmReplay.ok),state:"FOUNDER_FUNDING_3_TO_2_ZERO_MONEY_PROOF",reviewOk,reviewWrongSource,reviewWrongDestination,reviewArmed,reviewOpen,confirmOk,confirmStale,confirmChanged,confirmReplay,providerTransferPosts:0,orders:0,capitalMovedUsd:0});
+      return json({ok:Boolean(amountDefault.ok&&amountCustom.ok&&!amountInvalid.ok&&!amountZero.ok&&reviewOk.ok&&reviewCustom.ok&&!reviewTooLarge.ok&&confirmOk.ok&&!reviewWrongSource.ok&&!reviewWrongDestination.ok&&!reviewArmed.ok&&!reviewOpen.ok&&!confirmStale.ok&&!confirmChanged.ok&&!confirmReplay.ok),state:"FOUNDER_FUNDING_3_TO_2_ZERO_MONEY_PROOF",amountDefault,amountCustom,amountInvalid,amountZero,reviewOk,reviewCustom,reviewTooLarge,reviewWrongSource,reviewWrongDestination,reviewArmed,reviewOpen,confirmOk,confirmStale,confirmChanged,confirmReplay,providerTransferPosts:0,orders:0,capitalMovedUsd:0});
+    }
+
+    if (request.method === "GET" && url.pathname === "/founder-funding-payne-state-proof") {
+      const payneSafety=await payneFundingSafetyRead(env);
+      return json({ok:payneSafety.ok,state:payneSafety.ok?"PAYNE_STATE_READ_PROVEN":"PAYNE_STATE_READ_FAILED",payneSafety,providerWrites:0,capitalMovedUsd:0},payneSafety.ok?200:502);
     }
 
     if (request.method === "GET" && url.pathname === "/founder-funding") {
@@ -4834,7 +4859,7 @@ document.getElementById('export')?.addEventListener('click',async()=>{const r=aw
       const money=n=>Number.isFinite(Number(n))?'$'+Number(n).toFixed(2):'—';
       const status=safe?'READY FOR REVIEW':(!disarmed?'FOUNDER ACTION REQUIRED — DISARM FIRST':expired.length?'BLOCKED — EXPIRED POSITION SAFETY HOLD':open.length?'BLOCKED — OPEN POSITION EXISTS':'BLOCKED — BALANCE READ FAILED');
       const index0Form=safe&&index0>0?`<form method="post" action="/founder-funding-review"><input type="hidden" name="sourceIndex" value="0"><label><b>DESTINATION</b></label><select name="destinationIndex" required style="font-size:18px;padding:12px;width:100%;box-sizing:border-box;margin:8px 0;border-radius:10px"><option value="2" selected>INDEX 2 — AUTO</option><option value="3">INDEX 3 — PAYNE</option></select><label><b>TRANSFER AMOUNT</b></label><input name="amountUsd" type="number" inputmode="decimal" min="0.01" step="0.01" max="${index0.toFixed(2)}" required style="font-size:18px;padding:12px;width:100%;box-sizing:border-box;margin:8px 0;border-radius:10px"><button type="submit">REVIEW INDEX 0 TRANSFER</button></form>`:'';
-      const returnForm=safe&&index3>0?`<form method="post" action="/founder-funding-review" style="margin-top:16px"><input type="hidden" name="sourceIndex" value="3"><input type="hidden" name="destinationIndex" value="2"><input type="hidden" name="amountUsd" value="${index3.toFixed(4)}"><button type="submit">REVIEW FULL INDEX 3 → INDEX 2 RETURN</button></form>`:'';
+      const returnForm=safe&&index3>0?`<form method="post" action="/founder-funding-review" style="margin-top:16px"><input type="hidden" name="sourceIndex" value="3"><input type="hidden" name="destinationIndex" value="2"><p><b>SOURCE INDEX:</b> 3</p><p><b>DESTINATION INDEX:</b> 2</p><p><b>CURRENT SOURCE BALANCE:</b> ${money(index3)}</p><p><b>CURRENT DESTINATION BALANCE:</b> ${money(index2)}</p><label for="returnAmount"><b>TRANSFER AMOUNT</b></label><input id="returnAmount" name="amountUsd" type="number" inputmode="decimal" min="0.01" step="0.01" max="${index3.toFixed(2)}" value="${index3.toFixed(2)}" required style="font-size:18px;padding:12px;width:100%;box-sizing:border-box;margin:8px 0;border-radius:10px"><button type="submit">REVIEW INDEX 3 → INDEX 2 TRANSFER</button></form>`:'';
       const page=`<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1"><title>Founder Funding</title><body style="font-family:system-ui;background:#050a11;color:#eef7ff;padding:20px;max-width:720px;margin:auto"><h2>FOUNDER FUNDING</h2><div><p>TOTAL PREDICTIONS CASH: <b>${money(total)}</b></p><p>INDEX 0: <b>${money(index0)}</b></p><p>INDEX 2 — AUTO: <b>${money(index2)}</b></p><p>INDEX 3 — PAYNE: <b>${money(index3)}</b></p><p>STATUS: <b>${status}</b></p>${index0Form+returnForm}<p>Read/review is zero-money. Index 3 → 2 additionally requires PAYNE disarmed and flat.</p></div></body>`;
       return new Response(page,{headers:{"content-type":"text/html;charset=utf-8","cache-control":"no-store"}});
     }
@@ -4844,12 +4869,14 @@ document.getElementById('export')?.addEventListener('click',async()=>{const r=aw
       const sourceIndex=Number(String(form?.get("sourceIndex")??"0").trim());
       const destinationIndex=Number(String(form?.get("destinationIndex")??"").trim());
       if(!founderFundingPairAllowed(sourceIndex,destinationIndex)) return json({ok:false,state:"TRANSFER_PAIR_NOT_AUTHORIZED",sourceIndex,destinationIndex,providerWrites:0,capitalMovedUsd:0},400);
-      const amount=Number(String(form?.get("amountUsd")??"").trim());
+      const amountParsed=parseFounderFundingAmountUsd(form?.get("amountUsd"));
+      if(!amountParsed.ok) return json({ok:false,state:amountParsed.state,providerWrites:0,capitalMovedUsd:0},400);
+      const amount=amountParsed.amountUsd;
       const state=await loadExecutionTestState(env);
       if(state?.armed||executionTestQueueActive(state)) return json({ok:false,state:"FOUNDER_ACTION_REQUIRED_DISARM_FIRST",providerWrites:0,capitalMovedUsd:0},409);
       const open=executionTestOpenPositions(state);
       if(open.length) return json({ok:false,state:"OPEN_POSITION_TRANSFER_BLOCKED",providerWrites:0,capitalMovedUsd:0},409);
-      const payneSafety=sourceIndex===3&&destinationIndex===2?await payneFundingSafetyRead():null;
+      const payneSafety=sourceIndex===3&&destinationIndex===2?await payneFundingSafetyRead(env):null;
       if(payneSafety && !payneSafety.ok) return json({ok:false,state:"PAYNE_STATE_READ_FAILED",providerWrites:0,capitalMovedUsd:0},502);
       const balanceProof=await kalshiExecutionBalanceSnapshot(env);
       if(!balanceProof?.ok) return json({ok:false,state:"BALANCE_READ_FAILED",providerWrites:0,capitalMovedUsd:0},502);
@@ -4865,7 +4892,9 @@ document.getElementById('export')?.addEventListener('click',async()=>{const r=aw
       const reviewId=crypto.randomUUID();
       await env.BASELINE_REAL_SHADOW_STATE.put("founder-funding-review-v2:"+reviewId,JSON.stringify({schema:"FOUNDER_FUNDING_REVIEW_V2",amountUsd:amount,sourceIndex,destinationIndex,reviewedAt:Date.now(),sourceUsd:sourceBalance,destinationUsd:destinationBalance,totalUsd:total,payneSafety}),{expirationTtl:600});
       const auth=founderFundingAuthorizationForPair(sourceIndex,destinationIndex);
-      return json({ok:true,state:"FOUNDER_FUNDING_REVIEW_READY",reviewId,authorization:auth,sourceIndex,destinationIndex,amountUsd:amount,pre:{sourceUsd:sourceBalance,destinationUsd:destinationBalance,totalUsd:total},expected:{sourceUsd:sourceBalance-amount,destinationUsd:destinationBalance+amount,totalUsd:total},payneSafety,providerWrites:0,capitalMovedUsd:0});
+      const reviewedAt=new Date().toISOString();
+      const page=`<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1"><title>Review Founder Funding</title><body style="font-family:system-ui;background:#050a11;color:#eef7ff;padding:20px;max-width:720px;margin:auto"><h2>REVIEW FOUNDER FUNDING</h2><div><p>SOURCE: <b>INDEX ${sourceIndex}</b></p><p>DESTINATION: <b>INDEX ${destinationIndex}</b></p><p>TRANSFER AMOUNT: <b>${amount.toFixed(2)}</b></p><p>INDEX ${sourceIndex} BEFORE: <b>${sourceBalance.toFixed(4)}</b></p><p>INDEX ${destinationIndex} BEFORE: <b>${destinationBalance.toFixed(4)}</b></p><p>EXPECTED INDEX ${sourceIndex} AFTER: <b>${(sourceBalance-amount).toFixed(4)}</b></p><p>EXPECTED INDEX ${destinationIndex} AFTER: <b>${(destinationBalance+amount).toFixed(4)}</b></p><p>TOTAL CASH: <b>${total.toFixed(4)}</b></p><p>PAYNE ARMED: <b>${payneSafety?.armed===true?'true':'false'}</b></p><p>PAYNE OPEN POSITIONS: <b>${payneSafety?.openPositions??'—'}</b></p><p>PAYNE STATE SOURCE: <b>${payneSafety?.source||'—'}</b></p><p>REVIEW CREATED: <b>${reviewedAt}</b></p><p>REVIEW FRESHNESS: <b>VALID FOR 10 MINUTES</b></p><form method="post" action="/founder-funding-confirm"><input type="hidden" name="reviewId" value="${reviewId}"><input type="hidden" name="authorization" value="${auth}"><button type="submit">CONFIRM INDEX ${sourceIndex} → INDEX ${destinationIndex} TRANSFER</button></form><p>NO PROVIDER TRANSFER POST HAS OCCURRED.</p></div></body>`;
+      return new Response(page,{headers:{"content-type":"text/html;charset=utf-8","cache-control":"no-store"}});
     }
 
     if (request.method === "POST" && url.pathname === "/founder-funding-confirm") {
@@ -4883,7 +4912,7 @@ document.getElementById('export')?.addEventListener('click',async()=>{const r=aw
       if(!Number.isFinite(reviewedAt)||Date.now()-reviewedAt>600000){await env.BASELINE_REAL_SHADOW_STATE.delete(key);return json({ok:false,state:"REVIEW_STALE_REVIEW_AGAIN",providerWrites:0,capitalMovedUsd:0},409);}
       const state=await loadExecutionTestState(env);
       if(state?.armed||executionTestQueueActive(state)||executionTestOpenPositions(state).length) return json({ok:false,state:"FOUNDER_ACTION_REQUIRED_DISARM_FIRST",providerWrites:0,capitalMovedUsd:0},409);
-      const payneSafety=sourceIndex===3&&destinationIndex===2?await payneFundingSafetyRead():null;
+      const payneSafety=sourceIndex===3&&destinationIndex===2?await payneFundingSafetyRead(env):null;
       if(payneSafety && !payneSafety.ok) return json({ok:false,state:"PAYNE_STATE_READ_FAILED",providerWrites:0,capitalMovedUsd:0},502);
       const balanceProof=await kalshiExecutionBalanceSnapshot(env);
       if(!balanceProof?.ok) return json({ok:false,state:"BALANCE_READ_FAILED",providerWrites:0,capitalMovedUsd:0},502);
@@ -4895,7 +4924,6 @@ document.getElementById('export')?.addEventListener('click',async()=>{const r=aw
       if(sourceIndex===3&&destinationIndex===2){
         const gate=founderFundingReturnConfirmGate({reviewPresent:true,reviewAgeMs:Date.now()-reviewedAt,balancesUnchanged,payneArmed:payneSafety?.armed,payneOpenPositions:payneSafety?.openPositions,sourceIndex,destinationIndex});
         if(!gate.ok){await env.BASELINE_REAL_SHADOW_STATE.delete(key);return json({ok:false,state:gate.state,providerWrites:0,capitalMovedUsd:0},409);}
-        if(Math.abs(amount-sourceBalance)>=0.0001){await env.BASELINE_REAL_SHADOW_STATE.delete(key);return json({ok:false,state:"INDEX3_RETURN_MUST_USE_FULL_CURRENT_BALANCE",providerWrites:0,capitalMovedUsd:0},409);}
       } else if(!balancesUnchanged){await env.BASELINE_REAL_SHADOW_STATE.delete(key);return json({ok:false,state:"BALANCE_CHANGED_REVIEW_AGAIN",providerWrites:0,capitalMovedUsd:0},409);}
       const amountCenticents=Math.round(amount*10000);
       await env.BASELINE_REAL_SHADOW_STATE.delete(key);
