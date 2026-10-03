@@ -540,7 +540,7 @@ test('cockpit HTML exposes clocks, decision evidence, automatic refresh, and no 
   assert.match(html,/LAST ATTEMPT/);
   assert.match(html,/ATTEMPTED \/ TARGET/);
   assert.match(html,/NO_PROVIDER_ATTEMPT/);
-  assert.match(html,/ENTRY SENT/);
+  assert.match(html,/PRE-SUBMIT LATCHED/);
   assert.match(html,/FILLED \/ MANAGING/);
   assert.match(html,/last\.holdReason/);
   assert.match(html,/state-hold/);
