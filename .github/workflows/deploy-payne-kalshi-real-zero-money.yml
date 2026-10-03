@@ -87,7 +87,7 @@ jobs:
           jq '{
             observedAt:.updatedAt,
             requiredFundingIndex:.control.requiredExchangeIndex,
-            fundingBalanceUsd:.index3.balance,
+            fundingBalanceUsd:.index2.balance,
             markets:[.markets[]|{
               asset,ticker,status,exchangeIndex,timeRemainingMs,
               executionEligible,
@@ -100,7 +100,7 @@ jobs:
               index3:([.markets[]|select(.exchangeIndex==3)]|length),
               otherOrNull:([.markets[]|select((.exchangeIndex!=0) and (.exchangeIndex!=1) and (.exchangeIndex!=2) and (.exchangeIndex!=3))]|length)
             },
-            index3Assets:[.markets[]|select(.exchangeIndex==3)|.asset]
+            index2Assets:[.markets[]|select(.exchangeIndex==2)|.asset]
           }' /tmp/cockpit.json
 
           echo "LIVE_UI_STATE_SAFE="
@@ -144,14 +144,14 @@ jobs:
             .control.attemptTarget == 1 and
             .control.maxEntryDebitUsd == 1 and
             .control.activeThreshold == 0.70 and
-            .control.requiredExchangeIndex == 3 and
+            .control.requiredExchangeIndex == 2 and
             .control.providerWriteAuthority == "BUILT_INACTIVE_DISARMED" and
             .control.realExecution == "BUILT_INACTIVE_DISARMED" and
             .series.attemptTarget == 1 and
             .series.maxEntryDebitUsd == 1 and
             .series.threshold == 0.70 and
-            .series.requiredExchangeIndex == 3 and
-            .writeContract.requiredExchangeIndex == 3 and
+            .series.requiredExchangeIndex == 2 and
+            .writeContract.requiredExchangeIndex == 2 and
             .providerWrites == 0 and
             .ordersSubmittedByThisRead == 0 and
             .capitalMovedUsd == 0
@@ -163,7 +163,7 @@ jobs:
             .capitalMovedUsd == 0 and
             .safety.payneArmed == false and
             .safety.realExecution == "BUILT_INACTIVE_DISARMED" and
-            .safety.fundingAuthority == "INDEX3_ONLY_INACTIVE_DISARMED" and
+            .safety.fundingAuthority == "INDEX2_ONLY_INACTIVE_DISARMED" and
             .safety.providerPost == "BUILT_INACTIVE_DISARMED" and
             .safety.zeroMoneyProviderPost == "HARD_DISABLED" and
             .safety.secondIoc == "HOLD" and
