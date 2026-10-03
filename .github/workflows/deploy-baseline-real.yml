@@ -64,5 +64,18 @@ jobs:
           set -euo pipefail
           B='https://market-edge-baseline-real.darkbishop43.workers.dev'
           curl -fsS "$B/founder-funding-zero-money-proof" -o /tmp/funding-proof.json
-          jq -e '.ok==true and .state=="FOUNDER_FUNDING_3_TO_2_ZERO_MONEY_PROOF" and .providerTransferPosts==0 and .orders==0 and .capitalMovedUsd==0 and .reviewOk.ok==true and .confirmOk.ok==true and .reviewWrongSource.ok==false and .reviewWrongDestination.ok==false and .reviewArmed.ok==false and .reviewOpen.ok==false and .confirmStale.ok==false and .confirmChanged.ok==false and .confirmReplay.ok==false' /tmp/funding-proof.json >/dev/null
+          jq -e '.ok==true and .state=="FOUNDER_FUNDING_3_TO_2_ZERO_MONEY_PROOF" and .providerTransferPosts==0 and .orders==0 and .capitalMovedUsd==0 and .amountDefault.ok==true and .amountDefault.amountUsd==9.8 and .amountCustom.ok==true and .amountCustom.amountUsd==5.25 and .amountInvalid.ok==false and .amountZero.ok==false and .reviewOk.ok==true and .reviewCustom.ok==true and .reviewTooLarge.ok==false and .confirmOk.ok==true and .reviewWrongSource.ok==false and .reviewWrongDestination.ok==false and .reviewArmed.ok==false and .reviewOpen.ok==false and .confirmStale.ok==false and .confirmChanged.ok==false and .confirmReplay.ok==false' /tmp/funding-proof.json >/dev/null
           echo "FUNDING_ZERO_MONEY_PROOF=$(jq -c . /tmp/funding-proof.json)"
+
+          curl -fsS "$B/founder-funding-payne-state-proof" -o /tmp/payne-state-proof.json
+          jq -e '.ok==true and .state=="PAYNE_STATE_READ_PROVEN" and .payneSafety.source=="CLOUDFLARE_SERVICE_BINDING:PAYNE_REAL_READ:/real-state" and .payneSafety.armed==false and .payneSafety.openPositions==0 and .providerWrites==0 and .capitalMovedUsd==0' /tmp/payne-state-proof.json >/dev/null
+          echo "PAYNE_STATE_READ_PROOF=$(jq -c . /tmp/payne-state-proof.json)"
+
+          curl -fsS "$B/founder-funding" -o /tmp/founder-funding.html
+          grep -q 'SOURCE INDEX:</b> 3' /tmp/founder-funding.html
+          grep -q 'DESTINATION INDEX:</b> 2' /tmp/founder-funding.html
+          grep -q 'id="returnAmount"' /tmp/founder-funding.html
+          grep -q 'name="amountUsd"' /tmp/founder-funding.html
+          grep -q 'step="0.01"' /tmp/founder-funding.html
+          grep -q 'REVIEW INDEX 3 → INDEX 2 TRANSFER' /tmp/founder-funding.html
+          echo "FOUNDER_FUNDING_UX=AMOUNT_ENTRY_PRESENT"
