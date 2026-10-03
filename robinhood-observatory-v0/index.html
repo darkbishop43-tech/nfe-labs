@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+  <title>NFE-OS Robinhood Observatory</title>
+  <meta name="description" content="Read-only Robinhood market and options reconnaissance cockpit." />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div>
+      <div class="eyebrow">NFE-OS</div>
+      <h1>ROBINHOOD OBSERVATORY</h1>
+      <p>Read-only market + options reconnaissance</p>
+    </div>
+    <div class="badges"><span class="badge lock">🔒 READ ONLY</span><span id="modeBadge" class="badge snapshot">⚪ SNAPSHOT</span></div>
+  </header>
+  <main>
+    <section class="status-strip">
+      <div><span class="muted">Snapshot captured</span><strong id="capturedAt">—</strong></div>
+      <div><span class="muted">Execution surface</span><strong>NOT CONNECTED</strong></div>
+      <div><span class="muted">Strategy</span><strong>NONE</strong></div>
+    </section>
+
+    <section><div class="section-head"><h2>Account Snapshot</h2><span class="source">Provider facts</span></div><div id="account" class="grid account-grid"></div></section>
+
+    <section><div class="section-head"><h2>Market Pulse</h2><span class="source">Robinhood + labeled NFE calculations</span></div><div id="markets" class="grid market-grid"></div></section>
+
+    <section>
+      <div class="section-head"><h2>Equity Detail</h2><div class="seg"><button class="active" data-symbol="SPY">SPY</button><button data-symbol="QQQ">QQQ</button></div></div>
+      <div class="detail-grid">
+        <article class="panel"><h3>Historical specimen</h3><canvas id="chart" width="800" height="260" aria-label="historical price chart"></canvas><div id="intervals" class="chips"></div></article>
+        <article class="panel"><h3>Price Book</h3><div id="book"></div></article>
+        <article class="panel"><h3>Native Technicals</h3><div id="technicals"></div></article>
+      </div>
+    </section>
+
+    <section><div class="section-head"><h2>Options Lab</h2><span class="badge lock">NO TRADE CONTROLS</span></div><div id="options" class="options-wrap"></div></section>
+
+    <section><div class="section-head"><h2>Existing Robinhood Options — Read Only</h2><span class="source">Other readable brokerage accounts</span></div><div id="existingOptions" class="panel"></div></section>
+
+    <section><div class="section-head"><h2>Crypto</h2><span class="source">Provider quote facts</span></div><div id="crypto" class="grid crypto-grid"></div></section>
+
+    <section><div class="section-head"><h2>Provider Evidence</h2><span class="source">Validation over everything</span></div><div id="evidence" class="panel evidence"></div></section>
+  </main>
+  <footer>ROBINHOOD OBSERVATORY V0 · snapshot-backed · zero execution authority</footer>
+  <script src="app.js"></script>
+</body>
+</html>
