@@ -86,7 +86,7 @@ async function authEnv(body=baselineShadow(),status=200){
   };
 }
 
-function providerMarket(asset,ticker,series,yesBid='0.47',yesAsk='0.49',exchangeIndex=3){
+function providerMarket(asset,ticker,series,yesBid='0.47',yesAsk='0.49',exchangeIndex=2){
   return {
     ticker,
     series_ticker:series,
@@ -102,7 +102,7 @@ function providerMarket(asset,ticker,series,yesBid='0.47',yesAsk='0.49',exchange
   };
 }
 
-function installKalshiFetch({btcExchangeIndex=3,index3Balance=7.25}={}){
+function installKalshiFetch({btcExchangeIndex=2,index2Balance=15.91,index3Balance=0}={}){
   const original=globalThis.fetch;
   const urls=[];
   globalThis.fetch=async (url,options={})=>{
@@ -110,7 +110,7 @@ function installKalshiFetch({btcExchangeIndex=3,index3Balance=7.25}={}){
     const u=String(url);
     if(u.includes('/portfolio/balance')) return jsonResponse({balance_breakdown:[
       {exchange_index:0,balance:0},
-      {exchange_index:2,balance:11.41},
+      {exchange_index:2,balance:index2Balance},
       {exchange_index:3,balance:index3Balance},
     ]});
     if(u.includes('series_ticker=KXBTC15M')) return jsonResponse({markets:[providerMarket('BTC','KXBTC15M-TEST','KXBTC15M','0.47','0.49',btcExchangeIndex)]});
@@ -142,7 +142,7 @@ test('account financial summary separates provider account truth, PAYNE scope, m
   const summary=buildAccountFinancialSummary({
     balanceBody:{balance_breakdown:[
       {exchange_index:0,balance:1.00},
-      {exchange_index:2,balance:11.41},
+      {exchange_index:2,balance:index2Balance},
       {exchange_index:3,balance:7.25},
     ]},
     series:{seriesId:'PAYNE-S1',attemptsStarted:1,position:{entryAverageFeePaid:.03,exitAverageFeePaid:.02}},
@@ -168,7 +168,7 @@ test('account financial summary separates provider account truth, PAYNE scope, m
   assert.equal(summary.payne.feesUsd,.05);
   assert.deepEqual(summary.payne.excludes,['AUTO','FOUNDER_MANUAL']);
   assert.equal(summary.providerFinancialStatus,'STALE');
-  assert.match(summary.scopeNotice,/SEPARATE FROM FUNDING AUTHORITY \/ INDEX 3/);
+  assert.match(summary.scopeNotice,/SEPARATE FROM FUNDING AUTHORITY \/ INDEX 2/);
 });
 
 test('provider snapshot preserves authentic live contract timing and price evidence',()=>{
@@ -306,18 +306,18 @@ test('cockpit calculates authentic Payne fields, decisions, clocks, exact reread
   } finally { io.restore(); }
 });
 
-test('zero-money preview blocks shard mismatch with sufficient Index 3 and permits matching shard only',async()=>{
+test('zero-money preview permits matching Index 2, blocks mismatch, and reports Index 2 balance',async()=>{
   const mismatchEnv=await authEnv();
-  const mismatchIo=installKalshiFetch({btcExchangeIndex:2,index3Balance:9.80});
+  const mismatchIo=installKalshiFetch({btcExchangeIndex:3,index2Balance:15.91,index3Balance:0});
   try{
     const out=await buildCockpitData(mismatchEnv,Date.parse('2026-10-02T06:05:00Z'));
     assert.equal(out.selected.exchangeIndex,2);
-    assert.equal(out.index3.balance,9.80);
+    assert.equal(out.index2.balance,15.91);
     assert.equal(out.zeroMoneyPreview.status,'BLOCKED');
-    assert.equal(out.zeroMoneyPreview.reason,'HOLD_REQUIRED_EXCHANGE_INDEX_3');
-    assert.equal(out.zeroMoneyPreview.shardEvidence.marketExchangeIndex,2);
-    assert.equal(out.zeroMoneyPreview.shardEvidence.requiredFundingIndex,3);
-    assert.equal(out.zeroMoneyPreview.shardEvidence.fundingBalanceUsd,9.80);
+    assert.equal(out.zeroMoneyPreview.reason,'HOLD_REQUIRED_EXCHANGE_INDEX_2');
+    assert.equal(out.zeroMoneyPreview.shardEvidence.marketExchangeIndex,3);
+    assert.equal(out.zeroMoneyPreview.shardEvidence.requiredFundingIndex,2);
+    assert.equal(out.zeroMoneyPreview.shardEvidence.fundingBalanceUsd,15.91);
     assert.equal(out.zeroMoneyPreview.shardEvidence.match,false);
     assert.equal(out.pipeline.shardMatch,false);
     assert.equal(out.providerWrites,0);
@@ -326,18 +326,32 @@ test('zero-money preview blocks shard mismatch with sufficient Index 3 and permi
   } finally { mismatchIo.restore(); }
 
   const matchEnv=await authEnv();
-  const matchIo=installKalshiFetch({btcExchangeIndex:3,index3Balance:9.80});
+  const matchIo=installKalshiFetch({btcExchangeIndex:2,index2Balance:15.91,index3Balance:0});
   try{
     const out=await buildCockpitData(matchEnv,Date.parse('2026-10-02T06:05:00Z'));
-    assert.equal(out.selected.exchangeIndex,3);
+    assert.equal(out.selected.exchangeIndex,2);
     assert.equal(out.zeroMoneyPreview.status,'FIRE_READY');
     assert.equal(out.zeroMoneyPreview.shardMatch,true);
-    assert.equal(out.zeroMoneyPreview.requiredFundingIndex,3);
-    assert.equal(out.zeroMoneyPreview.fundingBalanceUsd,9.80);
+    assert.equal(out.zeroMoneyPreview.requiredFundingIndex,2);
+    assert.equal(out.zeroMoneyPreview.fundingBalanceUsd,15.91);
     assert.equal(out.providerWrites,0);
     assert.equal(out.orders,0);
     assert.equal(out.capitalMovedUsd,0);
   } finally { matchIo.restore(); }
+});
+
+test('zero-money preview blocks when matching Index 2 funding is insufficient',async()=>{
+  const env=await authEnv();
+  const io=installKalshiFetch({btcExchangeIndex:2,index2Balance:0.25,index3Balance:0});
+  try{
+    const out=await buildCockpitData(env,Date.parse('2026-10-02T06:05:00Z'));
+    assert.equal(out.selected.exchangeIndex,2);
+    assert.equal(out.index2.balance,0.25);
+    assert.notEqual(out.zeroMoneyPreview.status,'FIRE_READY');
+    assert.equal(out.providerWrites,0);
+    assert.equal(out.orders,0);
+    assert.equal(out.capitalMovedUsd,0);
+  } finally { io.restore(); }
 });
 
 test('stale Baseline feature observation stays UNKNOWN and cannot produce FIRE plan',async()=>{
@@ -379,14 +393,14 @@ test('window mismatch is recorded truthfully and blocks zero-money FIRE preview'
   } finally { io.restore(); }
 });
 
-test('Founder real controls default disarmed and ARM is bounded to .70 / $1 / 1 attempt / Index 3',async()=>{
+test('Founder real controls default disarmed and ARM is bounded to .70 / $1 / 1 attempt / Index 2',async()=>{
   const env=await authEnv();
   let c=await loadControl(env);
   assert.equal(c.armed,false);
   assert.equal(c.attemptTarget,1);
   assert.equal(c.maxEntryDebitUsd,1);
   assert.equal(c.activeThreshold,.70);
-  assert.equal(c.requiredExchangeIndex,3);
+  assert.equal(c.requiredExchangeIndex,2);
   assert.equal(c.providerWriteAuthority,'BUILT_INACTIVE_DISARMED');
 
   c=await updateFounderControl(env,'ARM');
@@ -394,7 +408,7 @@ test('Founder real controls default disarmed and ARM is bounded to .70 / $1 / 1 
   assert.equal(c.providerWriteAuthority,'ENABLED_GOVERNED_PAYNE_ONLY');
   assert.equal(c.providerPostAuthority,'ENABLED_GOVERNED_PAYNE_ONLY');
   assert.equal(c.realExecution,'ENABLED_GOVERNED_PAYNE_ONLY');
-  assert.equal(c.fundingAuthority,'INDEX3_ONLY');
+  assert.equal(c.fundingAuthority,'INDEX2_ONLY');
   await assert.rejects(updateFounderControl(env,'SET_THRESHOLD',.75),/PAYNE_REAL_CONFIG_LOCKED_WHILE_ARMED/);
 
   c=await updateFounderControl(env,'DISARM');
@@ -584,7 +598,7 @@ test('cockpit HTML exposes clocks, decision evidence, automatic refresh, and no 
   assert.match(html,/UTC DAY P\/L/);
   assert.match(html,/PAYNE RUN FEES/);
   assert.match(html,/LAST PROVIDER FINANCIAL SYNC/);
-  assert.match(html,/separate from FUNDING AUTHORITY \/ INDEX 3/i);
+  assert.match(html,/separate from FUNDING AUTHORITY \/ INDEX 2/i);
   assert.match(html,/excludes AUTO and FOUNDER MANUAL/i);
   assert.match(html,/FOUNDER CONTROLS/);
   assert.match(html,/DATA EXPORT/);
