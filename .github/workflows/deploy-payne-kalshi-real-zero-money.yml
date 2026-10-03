@@ -93,7 +93,7 @@ jobs:
           grep -q 'LAST UI UPDATE' /tmp/cockpit.html
           grep -q 'setInterval(loadFastState,5000)' /tmp/cockpit.html
           grep -q 'setInterval(load,60000)' /tmp/cockpit.html
-          grep -q 'ENTRY SENT' /tmp/cockpit.html
+          grep -q 'PRE-SUBMIT LATCHED' /tmp/cockpit.html
           grep -q 'FILLED / MANAGING' /tmp/cockpit.html
           grep -q 'NO_PROVIDER_ATTEMPT' /tmp/cockpit.html
           grep -q "BTC:'<svg" /tmp/cockpit.html
