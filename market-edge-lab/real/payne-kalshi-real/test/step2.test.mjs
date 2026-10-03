@@ -12,7 +12,7 @@ import {
   kalshiV2EntryPayload,
   kalshiV2ExitPayload,
   payneClientOrderId,
-  index3FundingEvidence,
+  index2FundingEvidence,
   interpretEntryFixture,
   ownershipFixture,
   classifyProviderPositionFixture,
@@ -59,11 +59,11 @@ const quote = (ticker='KXTEST-1') => ({
   noAsk:.41,
   noBid:.40,
 });
-const index3Balance = (balance=10) => ({
+const index2Balance = (balance=10) => ({
   balance_breakdown:[
     {exchange_index:0,balance:0},
-    {exchange_index:2,balance:11.41},
-    {exchange_index:3,balance},
+    {exchange_index:0,balance:0},
+    {exchange_index:2,balance},
   ]
 });
 
@@ -75,7 +75,7 @@ test('02 non-PULL candidate cannot reach FIRE path', async ()=>{
   const e=makeEnv(); await initializeDisarmed(e); let gets=0;
   const out=await evaluateStep2ZeroMoneyCandidate(e,candidate({score:.69}),{
     providerGet:async()=>{gets++; return quote();},
-    balanceBody:index3Balance(),
+    balanceBody:index2Balance(),
   });
   assert.equal(gets,0);
   assert.equal(out.stopReason,'NON_PULL_CANDIDATE');
@@ -96,7 +96,7 @@ test('05 exact ticker is preserved through fresh LOCK', async ()=>{
   const e=makeEnv(); await initializeDisarmed(e); const seen=[];
   const out=await evaluateStep2ZeroMoneyCandidate(e,candidate(),{
     providerGet:async t=>{seen.push(t); return quote(t);},
-    balanceBody:index3Balance(),
+    balanceBody:index2Balance(),
   });
   assert.equal(out.lock.market.marketTicker,'KXTEST-1');
   assert.equal(seen[0],'KXTEST-1');
@@ -106,7 +106,7 @@ test('06 same ticker and side are preserved through pre-submit reread', async ()
   const e=makeEnv(); await initializeDisarmed(e); const seen=[];
   const out=await evaluateStep2ZeroMoneyCandidate(e,candidate({outcomeSide:'YES'}),{
     providerGet:async t=>{seen.push(t); return quote(t);},
-    balanceBody:index3Balance(),
+    balanceBody:index2Balance(),
   });
   assert.deepEqual(seen,['KXTEST-1','KXTEST-1']);
   assert.equal(out.entryPayload.ticker,'KXTEST-1');
@@ -133,26 +133,26 @@ test('09 no retry chase or resting-order path exists in Step2 result', async ()=
   const e=makeEnv(); await initializeDisarmed(e);
   const out=await evaluateStep2ZeroMoneyCandidate(e,candidate(),{
     providerGet:async t=>quote(t),
-    balanceBody:index3Balance(),
+    balanceBody:index2Balance(),
   });
   assert.equal(out.entryPayload.time_in_force,'immediate_or_cancel');
   assert.equal('retry' in out,false);
   assert.equal('priceChase' in out,false);
 });
 
-test('10 Index 3 is selected only from provider evidence', ()=>{
-  assert.equal(index3FundingEvidence({balance_breakdown:[{exchange_index:2,balance:10}]}).available,false);
-  assert.equal(index3FundingEvidence(index3Balance(10)).available,true);
-  assert.equal(index3FundingEvidence(index3Balance(10)).index,3);
+test('10 Index 2 is selected only from provider evidence', ()=>{
+  assert.equal(index2FundingEvidence({balance_breakdown:[{exchange_index:3,balance:10}]}).available,false);
+  assert.equal(index2FundingEvidence(index2Balance(10)).available,true);
+  assert.equal(index2FundingEvidence(index2Balance(10)).index,2);
 });
 
-test('11 funding gate remains fail-closed despite sufficient Index 3 evidence', async ()=>{
+test('11 funding gate remains fail-closed despite sufficient Index 2 evidence', async ()=>{
   const e=makeEnv(); await initializeDisarmed(e);
   const out=await evaluateStep2ZeroMoneyCandidate(e,candidate(),{
     providerGet:async t=>quote(t),
-    balanceBody:index3Balance(10),
+    balanceBody:index2Balance(10),
   });
-  assert.equal(out.index3.sufficient,true);
+  assert.equal(out.index2.sufficient,true);
   assert.equal(out.funding.failClosed,true);
   assert.equal(out.funding.authorityDisabled,true);
 });
@@ -161,7 +161,7 @@ test('12 provider POST remains impossible at integrated boundary', async ()=>{
   const e=makeEnv(); await initializeDisarmed(e);
   const out=await evaluateStep2ZeroMoneyCandidate(e,candidate(),{
     providerGet:async t=>quote(t),
-    balanceBody:index3Balance(10),
+    balanceBody:index2Balance(10),
   });
   assert.equal(out.stopReason,'STEP1_PROVIDER_POST_HARD_DISABLED');
   assert.equal(out.providerWrites,0);
@@ -251,7 +251,7 @@ test('25 Baseline and Payne Paper state reads writes remain zero', async ()=>{
   const store=new Map(), e=makeEnv(store); await initializeDisarmed(e);
   await evaluateStep2ZeroMoneyCandidate(e,candidate(),{
     providerGet:async t=>quote(t),
-    balanceBody:index3Balance(),
+    balanceBody:index2Balance(),
   });
   for (const key of [...e.PAYNE_KALSHI_STATE.reads,...e.PAYNE_KALSHI_STATE.writes]) {
     assert.notEqual(key,'baseline-real-execution-test-v1');
@@ -265,7 +265,7 @@ test('26 integrated Step2 proof reports zero provider writes and zero orders', a
   const e=makeEnv(); await initializeDisarmed(e);
   const out=await evaluateStep2ZeroMoneyCandidate(e,candidate(),{
     providerGet:async t=>quote(t),
-    balanceBody:index3Balance(),
+    balanceBody:index2Balance(),
   });
   assert.equal(out.providerWrites,0);
   assert.equal(out.orders,0);
@@ -277,7 +277,7 @@ test('27 integrated Step2 proof reports zero capital movement and stays disarmed
   const e=makeEnv(); await initializeDisarmed(e);
   const out=await evaluateStep2ZeroMoneyCandidate(e,candidate(),{
     providerGet:async t=>quote(t),
-    balanceBody:index3Balance(),
+    balanceBody:index2Balance(),
     seriesId:'step2-isolated',
     attemptNo:1,
   });
