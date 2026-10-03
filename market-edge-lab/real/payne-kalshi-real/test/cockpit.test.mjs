@@ -384,6 +384,19 @@ test('read-only export route returns current JSON and CSV evidence without autho
     assert.ok(Object.hasOwn(body.rows[0],'baselineActualMatch'));
     assert.ok(Object.hasOwn(body.rows[0],'baselineFilled'));
     assert.ok(Object.hasOwn(body.rows[0],'paynePaperComparisonStatus'));
+    assert.ok(Object.hasOwn(body.rows[0],'realSeriesId'));
+    assert.ok(Object.hasOwn(body.rows[0],'realArmed'));
+    assert.ok(Object.hasOwn(body.rows[0],'attemptsStarted'));
+    assert.ok(Object.hasOwn(body.rows[0],'attemptTarget'));
+    assert.ok(Object.hasOwn(body.rows[0],'attemptsRemaining'));
+    assert.ok(Object.hasOwn(body.rows[0],'filledCount'));
+    assert.ok(Object.hasOwn(body.rows[0],'noFillCount'));
+    assert.ok(Object.hasOwn(body.rows[0],'unknownCount'));
+    assert.ok(Object.hasOwn(body.rows[0],'lastAttemptResult'));
+    assert.ok(Object.hasOwn(body.rows[0],'lastProviderOrderId'));
+    assert.ok(Object.hasOwn(body.rows[0],'realSeriesStatus'));
+    assert.ok(Object.hasOwn(body.rows[0],'lastRealLedgerEvent'));
+    assert.equal(body.realExecution.schema,'PAYNE_REAL_OBSERVABILITY_V1');
     assert.ok(Number.isInteger(body.eventCount));
     assert.ok(Array.isArray(body.events));
     assert.ok(body.events.some(e=>e.type==='OBSERVATION_DECISION_EVENT'));
@@ -393,8 +406,30 @@ test('read-only export route returns current JSON and CSV evidence without autho
     assert.match(csv.headers.get('content-type'),/text\/csv/);
     const text=await csv.text();
     assert.match(text,/observationAt,scanSource,asset,direction,outcomeSide,ticker/);
+    assert.match(text,/realSeriesId,realArmed,attemptsStarted,attemptTarget,attemptsRemaining/);
+    assert.match(text,/filledCount,noFillCount,unknownCount,lastAttemptResult,lastProviderOrderId,realSeriesStatus,lastRealLedgerEvent/);
     assert.match(text,/KXBTC15M-TEST/);
   } finally { io.restore(); }
+});
+
+test('fast UI-state route reads persisted state only and creates zero provider activity',async()=>{
+  const env=await authEnv();
+  const original=globalThis.fetch;
+  let providerFetches=0;
+  globalThis.fetch=async()=>{providerFetches++;throw new Error('provider fetch forbidden in ui-state test');};
+  try{
+    const response=await payneWorker.fetch(new Request('https://payne.test/ui-state'),env);
+    assert.equal(response.status,200);
+    const body=await response.json();
+    assert.equal(body.schema,'PAYNE_FAST_UI_STATE_V1');
+    assert.equal(body.uiPollAuthority,'PERSISTED_STATE_ONLY');
+    assert.equal(body.providerGets,0);
+    assert.equal(body.providerWrites,0);
+    assert.equal(body.orders,0);
+    assert.equal(body.capitalMovedUsd,0);
+    assert.equal(body.realExecution.schema,'PAYNE_REAL_OBSERVABILITY_V1');
+    assert.equal(providerFetches,0);
+  } finally { globalThis.fetch=original; }
 });
 
 test('research event ledger route exposes durable observation decision events',async()=>{
@@ -489,22 +524,41 @@ test('cockpit HTML exposes clocks, decision evidence, automatic refresh, and no 
   assert.match(html,/\/evidence\/events\?limit=500/);
   assert.match(html,/BASELINE ACTUAL/);
   assert.match(html,/PAYNE PAPER/);
-  assert.match(html,/BTC:'₿'/);
-  assert.match(html,/ETH:'Ξ'/);
-  assert.match(html,/SOL:'≋'/);
-  assert.match(html,/XRP:'✕'/);
-  assert.match(html,/HYPE:'HY'/);
-  assert.match(html,/ZEC:'ⓩ'/);
-  assert.match(html,/DOGE:'Ð'/);
-  assert.match(html,/BNB:'◈'/);
-  assert.match(html,/NEAR:'Ⓝ'/);
+  assert.match(html,/BTC:'<svg/);
+  assert.match(html,/ETH:'<svg/);
+  assert.match(html,/SOL:'<svg/);
+  assert.match(html,/XRP:'<svg/);
+  assert.match(html,/HYPE:'<svg/);
+  assert.match(html,/ZEC:'<svg/);
+  assert.match(html,/DOGE:'<svg/);
+  assert.match(html,/BNB:'<svg/);
+  assert.match(html,/NEAR:'<svg/);
   assert.match(html,/featureAvailable=p\.available===true/);
   assert.match(html,/UNAVAILABLE/);
   assert.match(html,/v!==null&&v!==undefined/);
+  assert.match(html,/CURRENT RUN/);
+  assert.match(html,/LAST ATTEMPT/);
+  assert.match(html,/ATTEMPTED \/ TARGET/);
+  assert.match(html,/NO_PROVIDER_ATTEMPT/);
+  assert.match(html,/ENTRY SENT/);
+  assert.match(html,/FILLED \/ MANAGING/);
+  assert.match(html,/HOLD_AUTO_TICKER_CONFLICT/);
   assert.match(html,/FRESH LOCK/);
   assert.match(html,/ZERO-MONEY FIRE/);
-  assert.match(html,/PROVIDER POST HELD/);
+  assert.match(html,/PROVIDER POST AUTHORITY/);
+  assert.match(html,/button:hover:not\(:disabled\)/);
+  assert.match(html,/button:active:not\(:disabled\)/);
+  assert.match(html,/button\.active/);
+  assert.match(html,/@keyframes stateFlash/);
+  assert.match(html,/setTimeout\(\(\)=>el\.classList\.remove\('flash-once'\),1000\)/);
+  assert.match(html,/@media\(min-width:1200px\)/);
+  assert.match(html,/@media\(max-width:850px\)/);
+  assert.match(html,/BASELINE AGE/);
+  assert.match(html,/PAYNE AGE/);
+  assert.match(html,/LAST UI UPDATE/);
+  assert.match(html,/setInterval\(loadFastState,5000\)/);
   assert.match(html,/setInterval\(load,60000\)/);
+  assert.doesNotMatch(html,/setInterval\(load,5000\)/);
   assert.doesNotMatch(html,/PLACE ORDER/i);
   assert.doesNotMatch(html,/SUBMIT ORDER/i);
 });
