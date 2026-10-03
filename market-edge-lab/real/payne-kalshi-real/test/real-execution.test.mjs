@@ -12,6 +12,7 @@ import {
   runPayneRealExecutionCycle,
   interpretPayneOrderResponse,
   runReadOnlyScan,
+  summarizeRealExecutionState,
 } from '../src/index.js';
 import { kalshiPayneOrderPost, payneOrderWriteProof } from '../src/kalshi-real-write.js';
 
@@ -285,4 +286,41 @@ test('restart with OPEN PAYNE position resumes management while zero-money histo
     const after=[...e.PAYNE_KALSHI_STATE.store.keys()].filter(k=>k.startsWith('payne-kalshi:scan-history:')).length;
     assert.equal(after,before);
   }finally{io.restore();}
+});
+
+
+test('observability fixture: untouched fishing 0/1 is not NO_FILL',()=>{
+  const x=summarizeRealExecutionState({control:{armed:true,attempts:0,attemptTarget:1},series:{seriesId:'FISH',status:'ARMED_FISHING',attemptsStarted:0,attemptTarget:1,unresolvedEntry:false,position:null},ledger:[],asOf:'2026-10-03T01:00:00Z'});
+  assert.equal(x.attempted,0); assert.equal(x.target,1); assert.equal(x.remaining,1); assert.equal(x.filled,0); assert.equal(x.noFill,0); assert.equal(x.unknown,0); assert.equal(x.status,'FISHING'); assert.equal(x.lastAttempt.result,'NO_PROVIDER_ATTEMPT');
+});
+
+test('observability fixture: consumed 1/1 NO_FILL is complete and cannot appear 0/1',()=>{
+  const x=summarizeRealExecutionState({control:{armed:false,attempts:1,attemptTarget:1},series:{seriesId:'NF',status:'COMPLETE_NO_FILL',attemptsStarted:1,attemptTarget:1,unresolvedEntry:false,currentAttempt:{status:'NO_FILL',asset:'NEAR',marketTicker:'T1',outcomeSide:'NO',preSubmitPrice:.61,providerResult:{state:'NO_FILL',orderId:'O-NF'}},position:null},ledger:[{type:'ENTRY_PRE_SUBMIT_LATCHED',attemptId:'NF-1',at:'2026-10-03T01:01:00Z',ticker:'T1'},{type:'ENTRY_NO_FILL',attemptId:'NF-1',at:'2026-10-03T01:01:01Z',ticker:'T1',result:{state:'NO_FILL',orderId:'O-NF'}}]});
+  assert.equal(x.attempted,1); assert.equal(x.remaining,0); assert.equal(x.noFill,1); assert.equal(x.filled,0); assert.equal(x.lastAttempt.result,'NO_FILL'); assert.equal(x.lastAttempt.providerOrderId,'O-NF'); assert.equal(x.status,'COMPLETE_NO_FILL');
+});
+
+test('observability fixture: 1/1 FILLED with open position renders MANAGING',()=>{
+  const x=summarizeRealExecutionState({control:{armed:false,attempts:1,attemptTarget:1},series:{seriesId:'FILL',status:'ATTEMPT_LIMIT_REACHED_MANAGING_POSITION',attemptsStarted:1,attemptTarget:1,unresolvedEntry:false,currentAttempt:{status:'FILLED',marketTicker:'T2',outcomeSide:'YES',providerResult:{state:'FILLED',orderId:'O-FILL'}},position:{status:'OPEN',asset:'BTC',marketTicker:'T2',outcomeSide:'YES',entryOrderId:'O-FILL'}},ledger:[{type:'POSITION_OWNERSHIP_ESTABLISHED',attemptId:'FILL-1',at:'2026-10-03T01:02:00Z',ticker:'T2',entryOrderId:'O-FILL'}]});
+  assert.equal(x.attempted,1); assert.equal(x.filled,1); assert.equal(x.remaining,0); assert.equal(x.ownedPositions,1); assert.equal(x.status,'MANAGING'); assert.equal(x.lastAttempt.result,'FILLED');
+});
+
+test('observability fixture: ambiguous entry remains UNKNOWN and consumed',()=>{
+  const x=summarizeRealExecutionState({control:{armed:false,attempts:1,attemptTarget:1},series:{seriesId:'UNK',status:'ENTRY_RECONCILIATION_REQUIRED',attemptsStarted:1,attemptTarget:1,unresolvedEntry:true,currentAttempt:{status:'UNKNOWN',marketTicker:'T3',providerResult:{state:'UNKNOWN'}}},ledger:[{type:'ENTRY_RESULT_UNKNOWN',attemptId:'UNK-1',at:'2026-10-03T01:03:00Z',ticker:'T3'}]});
+  assert.equal(x.attempted,1); assert.equal(x.remaining,0); assert.equal(x.unknown,1); assert.equal(x.lastAttempt.result,'UNKNOWN');
+});
+
+test('observability fixture: governed HOLD before POST stays NO_PROVIDER_ATTEMPT',()=>{
+  const x=summarizeRealExecutionState({control:{armed:true,attempts:0,attemptTarget:1},series:{seriesId:'HOLD',status:'HOLD_AUTO_TICKER_CONFLICT',attemptsStarted:0,attemptTarget:1,unresolvedEntry:false},ledger:[]});
+  assert.equal(x.attempted,0); assert.equal(x.noFill,0); assert.equal(x.status,'BLOCKED'); assert.equal(x.lastAttempt.result,'NO_PROVIDER_ATTEMPT'); assert.equal(x.lastAttempt.holdReason,'HOLD_AUTO_TICKER_CONFLICT');
+});
+
+test('observability fixture: generic mixed 5/10 run has correct remaining and outcome counts',()=>{
+  const ledger=[]; for(let i=1;i<=3;i++) ledger.push({type:'POSITION_OWNERSHIP_ESTABLISHED',attemptId:'M-'+i,at:'2026-10-03T01:0'+i+':00Z',ticker:'T'+i}); for(let i=4;i<=5;i++) ledger.push({type:'ENTRY_NO_FILL',attemptId:'M-'+i,at:'2026-10-03T01:0'+i+':00Z',ticker:'T'+i});
+  const x=summarizeRealExecutionState({control:{armed:true,attempts:5,attemptTarget:10},series:{seriesId:'MIX',status:'ARMED_FISHING',attemptsStarted:5,attemptTarget:10,unresolvedEntry:false},ledger});
+  assert.equal(x.attempted,5); assert.equal(x.target,10); assert.equal(x.remaining,5); assert.equal(x.filled,3); assert.equal(x.noFill,2); assert.equal(x.unknown,0); assert.equal(x.status,'FISHING');
+});
+
+test('observability invariant: NO_FILL ledger evidence forces consumed attempt count',()=>{
+  const x=summarizeRealExecutionState({control:{armed:true,attempts:0,attemptTarget:1},series:{seriesId:'INVARIANT',status:'ARMED_FISHING',attemptsStarted:0,attemptTarget:1,unresolvedEntry:false},ledger:[{type:'ENTRY_NO_FILL',attemptId:'INVARIANT-1',at:'2026-10-03T01:10:00Z',ticker:'T4'}]});
+  assert.equal(x.attempted,1); assert.equal(x.remaining,0); assert.equal(x.noFill,1); assert.equal(x.lastAttempt.result,'NO_FILL');
 });
