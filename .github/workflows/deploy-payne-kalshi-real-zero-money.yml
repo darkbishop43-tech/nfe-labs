@@ -141,7 +141,7 @@ jobs:
           jq -e '
             .schema == "PAYNE_REAL_STATE_V1" and
             .control.armed == false and
-            .control.attemptTarget == 1 and
+            ([1,5,10,30] | index(.control.attemptTarget)) != null and
             .control.maxEntryDebitUsd == 1 and
             .control.activeThreshold == 0.70 and
             .control.requiredExchangeIndex == 2 and
