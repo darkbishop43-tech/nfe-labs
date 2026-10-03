@@ -38,7 +38,7 @@ export const PAYNE_CONFIG = Object.freeze({
   realExecutionEnabled: false,
   fundingAuthorityEnabled: false,
   realCapabilityBuilt: true,
-  requiredExchangeIndex: 3,
+  requiredExchangeIndex: 2,
 });
 
 export function defaultControlState() {
@@ -57,9 +57,9 @@ export function defaultControlState() {
     providerWriteAuthority: 'BUILT_INACTIVE_DISARMED',
     providerPostAuthority: 'BUILT_INACTIVE_DISARMED',
     realExecution: 'BUILT_INACTIVE_DISARMED',
-    fundingAuthority: 'INDEX3_ONLY_INACTIVE_DISARMED',
-    requiredExchangeIndex: 3,
-    index3: 'READ_REQUIRED_BEFORE_ENTRY',
+    fundingAuthority: 'INDEX2_ONLY_INACTIVE_DISARMED',
+    requiredExchangeIndex: 2,
+    index2: 'READ_REQUIRED_BEFORE_ENTRY',
   };
 }
 
@@ -84,9 +84,9 @@ function normalizeControlState(saved) {
     providerWriteAuthority:armed?'ENABLED_GOVERNED_PAYNE_ONLY':'BUILT_INACTIVE_DISARMED',
     providerPostAuthority:armed?'ENABLED_GOVERNED_PAYNE_ONLY':'BUILT_INACTIVE_DISARMED',
     realExecution:armed?'ENABLED_GOVERNED_PAYNE_ONLY':'BUILT_INACTIVE_DISARMED',
-    fundingAuthority:armed?'INDEX3_ONLY':'INDEX3_ONLY_INACTIVE_DISARMED',
-    requiredExchangeIndex:3,
-    index3:src.index3||base.index3,
+    fundingAuthority:armed?'INDEX2_ONLY':'INDEX2_ONLY_INACTIVE_DISARMED',
+    requiredExchangeIndex:2,
+    index2:src.index2||base.index2,
   };
 }
 
@@ -133,9 +133,9 @@ export async function initializeDisarmed(env) {
   const existing = await kvGetJson(env, CONTROL_KEY);
   const state=normalizeControlState(existing);
   if (!existing || existing?.realControlSchema!==REAL_CONTROL_SCHEMA) {
-    const disarmed={...state,armed:false,attempts:0,openPositions:0,attemptTarget:1,maxEntryDebitUsd:1,activeThreshold:.70,providerWriteAuthority:'BUILT_INACTIVE_DISARMED',providerPostAuthority:'BUILT_INACTIVE_DISARMED',realExecution:'BUILT_INACTIVE_DISARMED',fundingAuthority:'INDEX3_ONLY_INACTIVE_DISARMED',requiredExchangeIndex:3};
+    const disarmed={...state,armed:false,attempts:0,openPositions:0,attemptTarget:1,maxEntryDebitUsd:1,activeThreshold:.70,providerWriteAuthority:'BUILT_INACTIVE_DISARMED',providerPostAuthority:'BUILT_INACTIVE_DISARMED',realExecution:'BUILT_INACTIVE_DISARMED',fundingAuthority:'INDEX2_ONLY_INACTIVE_DISARMED',requiredExchangeIndex:2};
     await kvPutJson(env, CONTROL_KEY, disarmed);
-    await appendEvent(env, 'REAL_CONTROL_INITIALIZED_DISARMED', { armed:false, attempts:0, attemptTarget:1, maxEntryDebitUsd:1, activeThreshold:.70, requiredExchangeIndex:3 });
+    await appendEvent(env, 'REAL_CONTROL_INITIALIZED_DISARMED', { armed:false, attempts:0, attemptTarget:1, maxEntryDebitUsd:1, activeThreshold:.70, requiredExchangeIndex:2 });
     return disarmed;
   }
   return state;
@@ -153,11 +153,11 @@ export async function updateFounderControl(env, action, rawValue = null) {
     if (Number(before.activeThreshold)!==.70) throw new Error('PAYNE_REAL_ARM_THRESHOLD_MUST_BE_0_70');
     if (Number(before.maxEntryDebitUsd)!==1) throw new Error('PAYNE_REAL_ARM_MAX_DEBIT_MUST_BE_1_USD');
     if (Number(before.attemptTarget)!==1) throw new Error('PAYNE_REAL_ARM_ATTEMPT_TARGET_MUST_BE_1');
-    if (Number(before.requiredExchangeIndex)!==3) throw new Error('PAYNE_REAL_ARM_INDEX3_REQUIRED');
+    if (Number(before.requiredExchangeIndex)!==2) throw new Error('PAYNE_REAL_ARM_INDEX2_REQUIRED');
     if (Number(series?.attemptsStarted||0)>=1) throw new Error('PAYNE_REAL_1X1_ALREADY_CONSUMED');
     if (series?.unresolvedEntry===true) throw new Error('PAYNE_REAL_ENTRY_RECONCILIATION_REQUIRED');
     if (series?.position && ['OPEN','EXIT_RETRY','EXIT_RECONCILIATION_REQUIRED','RECONCILIATION_UNKNOWN'].includes(String(series.position.status||''))) throw new Error('PAYNE_REAL_OPEN_POSITION_EXISTS');
-    const armedSeries={...series,seriesId:series.seriesId||crypto.randomUUID(),status:'ARMED_WAITING',attemptsStarted:0,attemptTarget:1,threshold:.70,maxEntryDebitUsd:1,requiredExchangeIndex:3,completedAt:null};
+    const armedSeries={...series,seriesId:series.seriesId||crypto.randomUUID(),status:'ARMED_WAITING',attemptsStarted:0,attemptTarget:1,threshold:.70,maxEntryDebitUsd:1,requiredExchangeIndex:2,completedAt:null};
     await saveRealSeriesState(env,armedSeries);
     next.armed=true;
   } else if (name==='DISARM') next.armed=false;
@@ -180,11 +180,11 @@ export async function updateFounderControl(env, action, rawValue = null) {
   }
 
   next.realControlSchema=REAL_CONTROL_SCHEMA;
-  next.requiredExchangeIndex=3;
+  next.requiredExchangeIndex=2;
   next.providerWriteAuthority=next.armed?'ENABLED_GOVERNED_PAYNE_ONLY':'BUILT_INACTIVE_DISARMED';
   next.providerPostAuthority=next.armed?'ENABLED_GOVERNED_PAYNE_ONLY':'BUILT_INACTIVE_DISARMED';
   next.realExecution=next.armed?'ENABLED_GOVERNED_PAYNE_ONLY':'BUILT_INACTIVE_DISARMED';
-  next.fundingAuthority=next.armed?'INDEX3_ONLY':'INDEX3_ONLY_INACTIVE_DISARMED';
+  next.fundingAuthority=next.armed?'INDEX2_ONLY':'INDEX2_ONLY_INACTIVE_DISARMED';
 
   await kvPutJson(env,CONTROL_KEY,next);
   await appendEvent(env,'FOUNDER_CONTROL_CHANGED',{
@@ -194,7 +194,7 @@ export async function updateFounderControl(env, action, rawValue = null) {
     maxEntryDebitUsd:next.maxEntryDebitUsd,
     attemptTarget:next.attemptTarget,
     scanEnabled:next.scanEnabled,
-    requiredExchangeIndex:3,
+    requiredExchangeIndex:2,
     providerWriteAuthority:next.providerWriteAuthority,
     providerPostAuthority:next.providerPostAuthority,
     realExecution:next.realExecution,
@@ -347,14 +347,14 @@ export function payneClientOrderId(seriesId, attemptNo, phase) {
   return ('payne-real-'+seed+'-'+String(attemptNo)+'-'+String(phase||'entry')).slice(0,64);
 }
 
-export function index3FundingEvidence(balanceBody, minRequiredUsd = 1) {
+export function index2FundingEvidence(balanceBody, minRequiredUsd = 1) {
   const rows=Array.isArray(balanceBody?.balance_breakdown) ? balanceBody.balance_breakdown : null;
-  if (!rows) return {index:3,available:false,balanceUsd:null,sufficient:false,evidence:'UNKNOWN_PROVIDER_EVIDENCE_INSUFFICIENT'};
-  const row=rows.find(x=>Number(x?.exchange_index)===3);
-  if (!row) return {index:3,available:false,balanceUsd:null,sufficient:false,evidence:'READ_PROVEN_UNAVAILABLE'};
+  if (!rows) return {index:2,available:false,balanceUsd:null,sufficient:false,evidence:'UNKNOWN_PROVIDER_EVIDENCE_INSUFFICIENT'};
+  const row=rows.find(x=>Number(x?.exchange_index)===2);
+  if (!row) return {index:2,available:false,balanceUsd:null,sufficient:false,evidence:'READ_PROVEN_UNAVAILABLE'};
   const balance=Number(row?.balance);
   return {
-    index:3,
+    index:2,
     available:true,
     balanceUsd:Number.isFinite(balance)?balance:null,
     sufficient:Number.isFinite(balance) && balance>=Number(minRequiredUsd),
@@ -541,10 +541,10 @@ export async function evaluateStep2ZeroMoneyCandidate(env, candidate, {
   const entryPayload=kalshiV2EntryPayload(executionCandidate,sizing,clientOrderId);
   if (!entryPayload) return {ok:true,fired:false,gate,eligibility,lock,preSubmit,sizing,providerWrites:0,orders:0,capitalMovedUsd:0,stopReason:'ENTRY_PAYLOAD_INVALID'};
 
-  const index3=index3FundingEvidence(balanceBody,sizing.totalDebitUsd);
+  const index2=index2FundingEvidence(balanceBody,sizing.totalDebitUsd);
   const funding=fundingGate({
     ...control,
-    requiredExchangeIndex:index3.available?3:null,
+    requiredExchangeIndex:index2.available?2:null,
   });
   await appendEvent(env,'STEP2_ZERO_MONEY_PLAN',{
     ticker:candidate.marketTicker,
@@ -552,7 +552,7 @@ export async function evaluateStep2ZeroMoneyCandidate(env, candidate, {
     clientOrderId,
     sizing,
     entryPayload,
-    index3,
+    index2,
     funding,
   });
 
@@ -562,10 +562,10 @@ export async function evaluateStep2ZeroMoneyCandidate(env, candidate, {
     sizing,
     clientOrderId,
     entryPayload,
-    index3,
+    index2,
     funding,
   });
-  await appendEvent(env,'PROVIDER_POST_BLOCKED',{ticker:candidate.marketTicker,reason:stop.reason,funding,index3});
+  await appendEvent(env,'PROVIDER_POST_BLOCKED',{ticker:candidate.marketTicker,reason:stop.reason,funding,index2});
   return {
     ok:true,
     fired:false,
@@ -576,7 +576,7 @@ export async function evaluateStep2ZeroMoneyCandidate(env, candidate, {
     sizing,
     clientOrderId,
     entryPayload,
-    index3,
+    index2,
     funding,
     providerWrites:0,
     orders:0,
@@ -734,10 +734,10 @@ export async function discoverCockpitMarkets(env, { nowMs=Date.now() } = {}) {
   };
 }
 
-function providerIndex3Evidence(balanceBody) {
+function providerIndex2Evidence(balanceBody) {
   const rows=Array.isArray(balanceBody?.balance_breakdown)?balanceBody.balance_breakdown:null;
   if (!rows) return {status:'UNKNOWN / PROVIDER EVIDENCE INSUFFICIENT',balance:null};
-  const row=rows.find(x=>Number(x?.exchange_index)===3);
+  const row=rows.find(x=>Number(x?.exchange_index)===2);
   if (!row) return {status:'READ-PROVEN UNAVAILABLE',balance:null};
   const balance=Number(row?.balance);
   return {status:'READ-PROVEN AVAILABLE',balance:Number.isFinite(balance)?balance:null};
@@ -801,7 +801,7 @@ export function buildAccountFinancialSummary({
 
   return {
     schema:'PAYNE_ACCOUNT_FINANCIALS_V1',
-    scopeNotice:'ACCOUNT PROVIDER FINANCIALS ARE SEPARATE FROM FUNDING AUTHORITY / INDEX 3. PAYNE P/L NEVER INCLUDES AUTO OR FOUNDER MANUAL.',
+    scopeNotice:'ACCOUNT PROVIDER FINANCIALS ARE SEPARATE FROM FUNDING AUTHORITY / INDEX 2. PAYNE P/L NEVER INCLUDES AUTO OR FOUNDER MANUAL.',
     providerSource:'KALSHI AUTHENTICATED /portfolio/balance',
     providerSyncedAt:providerSyncedAt||null,
     providerFinancialAgeMs:ageMs,
@@ -1162,7 +1162,7 @@ function universalClockEvidence(selected, payne, freshLock, preSubmit, observedA
   };
 }
 
-function zeroMoneyPreviewFor(selected, preSubmit, index3, control, nowMs) {
+function zeroMoneyPreviewFor(selected, preSubmit, index2, control, nowMs) {
   if (!selected?.payne?.available) return {status:'NOT_REACHED',reason:'AUTHORITATIVE_PAYNE_FEATURES_UNAVAILABLE'};
   const selectedCloseMs=Date.parse(selected?.closeTime||'');
   const baselineCloseMs=Date.parse(selected?.payne?.baselineCloseTime||'');
@@ -1182,7 +1182,7 @@ function zeroMoneyPreviewFor(selected, preSubmit, index3, control, nowMs) {
   const shardEvidence={
     marketExchangeIndex,
     requiredFundingIndex:Number.isInteger(requiredFundingIndex)?requiredFundingIndex:null,
-    fundingBalanceUsd:index3?.balance??null,
+    fundingBalanceUsd:index2?.balance??null,
     match:shardMatch,
   };
   if (!shardMatch) {
@@ -1218,14 +1218,14 @@ function zeroMoneyPreviewFor(selected, preSubmit, index3, control, nowMs) {
     yes:ask,
   },sizing,clientOrderId);
   if (!payload) return {status:'BLOCKED',reason:'IOC_PAYLOAD_INVALID',gate,eligibility,sizing};
-  const funding=fundingGate({...control,requiredExchangeIndex:index3?.status==='READ-PROVEN AVAILABLE'?3:null});
+  const funding=fundingGate({...control,requiredExchangeIndex:index2?.status==='READ-PROVEN AVAILABLE'?2:null});
   const stop=hardStopBeforeProviderPost({
     ticker:selected.ticker,
     stage:gate.stage,
     sizing,
     clientOrderId,
     entryPayload:payload,
-    index3,
+    index2,
     funding,
   });
   return {
@@ -1253,9 +1253,9 @@ function zeroMoneyPreviewFor(selected, preSubmit, index3, control, nowMs) {
     shardEvidence,
     marketExchangeIndex,
     requiredFundingIndex,
-    fundingBalanceUsd:index3?.balance??null,
+    fundingBalanceUsd:index2?.balance??null,
     shardMatch,
-    fundingEvidence:index3,
+    fundingEvidence:index2,
     fundingGate:funding.failClosed?'AUTHORITY_HELD':'PASS',
     providerPost:stop.reason,
     providerWrites:0,
@@ -1985,7 +1985,7 @@ export async function buildCockpitData(env, nowMs=Date.now()) {
     }
   }
 
-  const index3=providerIndex3Evidence(balance.body);
+  const index2=providerIndex2Evidence(balance.body);
   const financials=buildAccountFinancialSummary({
     balanceBody:balance.body,
     ledger:realLedger,
@@ -2012,7 +2012,7 @@ export async function buildCockpitData(env, nowMs=Date.now()) {
   const sideConsistent=Boolean(selected?.outcomeSide==='YES'||selected?.outcomeSide==='NO');
   const timeSafe=selected?.closeTime ? kalshiCandidateTimeSafe({closeTime:selected.closeTime},nowMs) : null;
   const gate=payne.available?payneStage(payne,control.activeThreshold):null;
-  const zeroMoneyPreview=zeroMoneyPreviewFor(selected,preSubmit,index3,control,nowMs);
+  const zeroMoneyPreview=zeroMoneyPreviewFor(selected,preSubmit,index2,control,nowMs);
   const kalshiCloseMs=Date.parse(selected?.closeTime||'');
   const baselineCloseMs=Date.parse(payne?.baselineCloseTime||'');
   const clocks={
@@ -2083,7 +2083,7 @@ export async function buildCockpitData(env, nowMs=Date.now()) {
     authentication:balance.ok?'PROVEN':'NOT_PROVEN',
     balanceHttpStatus:balance.httpStatus,
     financials,
-    index3,
+    index2,
     control:{
       armed:Boolean(control.armed),
       attempts:Number(control.attempts||0),
@@ -2100,7 +2100,7 @@ export async function buildCockpitData(env, nowMs=Date.now()) {
       fundingAuthority:control.fundingAuthority,
       providerWriteAuthority:control.providerWriteAuthority,
       providerPostAuthority:control.providerPostAuthority,
-      requiredExchangeIndex:3,
+      requiredExchangeIndex:2,
     },
     markets:discovery.markets||[],
     candidates,
@@ -2138,7 +2138,7 @@ export async function buildCockpitData(env, nowMs=Date.now()) {
       marketExchangeIndex:selected?.exchangeIndex??null,
       requiredFundingIndex:Number(control.requiredExchangeIndex),
       shardMatch:selected?Number(selected.exchangeIndex)===Number(control.requiredExchangeIndex):null,
-      fundingBalanceUsd:index3?.balance??null,
+      fundingBalanceUsd:index2?.balance??null,
       feeSafeSizing:zeroMoneyPreview?.sizing?.ok===false?'FAIL':zeroMoneyPreview?.status==='FIRE_READY'?'PASS':'NOT_REACHED',
       iocPayload:zeroMoneyPreview?.status==='FIRE_READY'?'PASS':'NOT_REACHED',
       fundingGate:{
@@ -2186,7 +2186,7 @@ export function defaultRealSeriesState() {
     attemptTarget:1,
     threshold:.70,
     maxEntryDebitUsd:1,
-    requiredExchangeIndex:3,
+    requiredExchangeIndex:2,
     unresolvedEntry:false,
     currentAttempt:null,
     position:null,
@@ -2206,13 +2206,13 @@ export async function loadRealSeriesState(env) {
     attemptTarget:1,
     threshold:.70,
     maxEntryDebitUsd:1,
-    requiredExchangeIndex:3,
+    requiredExchangeIndex:2,
     attemptsStarted:Number.isFinite(Number(saved?.attemptsStarted))?Math.max(0,Math.trunc(Number(saved.attemptsStarted))):0,
   };
 }
 
 export async function saveRealSeriesState(env,state) {
-  const next={...defaultRealSeriesState(),...state,owner:REAL_OWNER,attemptTarget:1,threshold:.70,maxEntryDebitUsd:1,requiredExchangeIndex:3,updatedAt:new Date().toISOString()};
+  const next={...defaultRealSeriesState(),...state,owner:REAL_OWNER,attemptTarget:1,threshold:.70,maxEntryDebitUsd:1,requiredExchangeIndex:2,updatedAt:new Date().toISOString()};
   await kvPutJson(env,REAL_SERIES_KEY,next);
   return next;
 }
@@ -2326,7 +2326,7 @@ export function summarizeRealExecutionState({control={},series={},ledger=[],asOf
       owner:REAL_OWNER,
       threshold:.70,
       maxEntryDebitUsd:1,
-      requiredExchangeIndex:3,
+      requiredExchangeIndex:2,
       timeInForce:'immediate_or_cancel',
       scoreExit:PAYNE_CONFIG.exitScore,
       maxHoldMs:PAYNE_CONFIG.maxHoldMs,
@@ -2366,7 +2366,7 @@ async function buildFastUiState(env) {
       attemptTarget:control.attemptTarget,
       maxEntryDebitUsd:control.maxEntryDebitUsd,
       threshold:control.activeThreshold,
-      requiredExchangeIndex:3,
+      requiredExchangeIndex:2,
       scanEnabled:control.scanEnabled,
     },
     baselineObservationAt:latestPersistent?.selected?.payne?.sourceLastRunAt||latestPersistent?.clocks?.baseline?.observationAt||null,
@@ -2452,7 +2452,7 @@ function realizedPnlFromPosition(position) {
 
 async function closeRealSeriesControl(env,attempts=1,openPositions=0) {
   const control=await loadControl(env);
-  const next={...control,armed:false,attempts,openPositions,providerWriteAuthority:'BUILT_INACTIVE_DISARMED',providerPostAuthority:'BUILT_INACTIVE_DISARMED',realExecution:'BUILT_INACTIVE_DISARMED',fundingAuthority:'INDEX3_ONLY_INACTIVE_DISARMED',requiredExchangeIndex:3,realControlSchema:REAL_CONTROL_SCHEMA};
+  const next={...control,armed:false,attempts,openPositions,providerWriteAuthority:'BUILT_INACTIVE_DISARMED',providerPostAuthority:'BUILT_INACTIVE_DISARMED',realExecution:'BUILT_INACTIVE_DISARMED',fundingAuthority:'INDEX3_ONLY_INACTIVE_DISARMED',requiredExchangeIndex:2,realControlSchema:REAL_CONTROL_SCHEMA};
   await kvPutJson(env,CONTROL_KEY,next);
   return next;
 }
@@ -2592,7 +2592,7 @@ export async function runPayneRealExecutionCycle(env,{postImpl=kalshiPayneOrderP
     series.status=Number(series.attemptsStarted||0)>=1?'COMPLETE_ENTRY_AUTHORITY':'READY_DISARMED';
     return saveRealSeriesState(env,series);
   }
-  if(Number(control.activeThreshold)!==.70 || Number(control.maxEntryDebitUsd)!==1 || Number(control.attemptTarget)!==1 || Number(control.requiredExchangeIndex)!==3){
+  if(Number(control.activeThreshold)!==.70 || Number(control.maxEntryDebitUsd)!==1 || Number(control.attemptTarget)!==1 || Number(control.requiredExchangeIndex)!==2){
     series.status='ARMED_CONFIGURATION_INVALID_FAIL_CLOSED';
     await closeRealSeriesControl(env,Number(series.attemptsStarted||0),series.position?1:0);
     return saveRealSeriesState(env,series);
@@ -2653,7 +2653,7 @@ export async function runPayneRealExecutionCycle(env,{postImpl=kalshiPayneOrderP
   }
   const balanceResponse=await kalshiGetOnly(env,'/trade-api/v2/portfolio/balance');
   const balanceBody=await balanceResponse.json().catch(()=>({}));
-  const index3=index3FundingEvidence(balanceBody,sizing.totalDebitUsd);
+  const index2=index2FundingEvidence(balanceBody,sizing.totalDebitUsd);
   if(!balanceResponse.ok || !index3.available || !index3.sufficient){
     series.status='HOLD_INDEX3_FUNDING_INSUFFICIENT'; return saveRealSeriesState(env,series);
   }
@@ -2669,7 +2669,7 @@ export async function runPayneRealExecutionCycle(env,{postImpl=kalshiPayneOrderP
     schema:'PAYNE_REAL_ATTEMPT_V1',owner:REAL_OWNER,seriesId,attemptId,attemptNo:1,status:'SUBMITTING',
     wouldFireEventId:data?.zeroMoneyPreview?.eventId||null,
     asset:candidate.asset,marketTicker:candidate.ticker,outcomeSide:candidate.outcomeSide,direction:candidate.direction,
-    exchangeIndex:3,score:finalFeature.score,move:finalFeature.move,edge:finalFeature.edge,
+    exchangeIndex:2,score:finalFeature.score,move:finalFeature.move,edge:finalFeature.edge,
     observedAt:data.updatedAt||new Date(nowMs).toISOString(),freshLockAt:freshLock.readAt,preSubmitAt:preSubmit.readAt,
     freshLockPrice:candidate.outcomeSide==='YES'?freshLock.market.yesAsk:freshLock.market.noAsk,
     preSubmitPrice:ask,maxEntryDebitUsd:1,count:sizing.count,estimatedEntryFeeUsd:sizing.feeUsd,
@@ -2681,7 +2681,7 @@ export async function runPayneRealExecutionCycle(env,{postImpl=kalshiPayneOrderP
   await saveRealSeriesState(env,series);
 
   control=await loadControl(env);
-  if(!control.armed || Number(control.attemptTarget)!==1 || Number(control.maxEntryDebitUsd)!==1 || Number(control.activeThreshold)!==.70 || Number(control.requiredExchangeIndex)!==3){
+  if(!control.armed || Number(control.attemptTarget)!==1 || Number(control.maxEntryDebitUsd)!==1 || Number(control.activeThreshold)!==.70 || Number(control.requiredExchangeIndex)!==2){
     series.status='ENTRY_AUTHORITY_REVOKED_AFTER_LATCH';
     await closeRealSeriesControl(env,1,0);
     return saveRealSeriesState(env,series);
@@ -2755,7 +2755,7 @@ export function step1Status() {
     providerWriteAuthority:'BUILT_INACTIVE_DISARMED',
     realExecution:'BUILT_INACTIVE_DISARMED',
     fundingAuthority:'INDEX3_ONLY_INACTIVE_DISARMED',
-    requiredExchangeIndex:3,
+    requiredExchangeIndex:2,
     index3:'READ_REQUIRED_BEFORE_ENTRY',
     secondIoc:'HOLD_UNCHANGED',
   };
@@ -2781,7 +2781,7 @@ export default {
             providerPostAuthority:control.providerPostAuthority,
             realExecution:control.realExecution,
             fundingAuthority:control.fundingAuthority,
-            requiredExchangeIndex:3,
+            requiredExchangeIndex:2,
           },
           providerWrites:0,
           orders:0,
@@ -2817,7 +2817,7 @@ export default {
           providerPostAuthority:control.providerPostAuthority,
           realExecution:control.realExecution,
           fundingAuthority:control.fundingAuthority,
-          requiredExchangeIndex:3,
+          requiredExchangeIndex:2,
         },
         providerWrites:0,
         orders:0,
