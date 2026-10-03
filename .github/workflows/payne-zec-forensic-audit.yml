@@ -1,0 +1,41 @@
+name: PAYNE ZEC forensic audit read-only
+on:
+  push:
+    branches: [payne-zec-forensic-audit]
+    paths:
+      - '.github/workflows/payne-zec-forensic-audit.yml'
+permissions:
+  contents: read
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Read live PAYNE and provider forensic truth only
+        shell: bash
+        run: |
+          set -euo pipefail
+          P='https://market-edge-payne-kalshi-real.darkbishop43.workers.dev'
+          B='https://market-edge-baseline-real.darkbishop43.workers.dev'
+
+          curl -fsS "$P/real-state" -o /tmp/state.json
+          curl -fsS "$P/real-ledger?limit=1000" -o /tmp/ledger.json
+          curl -fsS "$B/forensic-provider-history" -o /tmp/provider.json
+          curl -fsS "$B/founder-capital-ledger" -o /tmp/capital.json
+
+          TICKER=$(jq -r '.series.currentAttempt.marketTicker // empty' /tmp/state.json)
+          ATTEMPT=$(jq -r '.series.currentAttempt.attemptId // empty' /tmp/state.json)
+          CLIENT=$(jq -r '.series.currentAttempt.clientOrderId // .series.currentAttempt.providerProof.clientOrderId // .series.currentAttempt.providerProof.payload.client_order_id // empty' /tmp/state.json)
+
+          echo "LIVE_STATE=$(jq -c '{control,series,providerWrites,ordersSubmittedByThisRead,capitalMovedUsd}' /tmp/state.json)"
+          echo "TICKER=$TICKER"
+          echo "ATTEMPT_ID=$ATTEMPT"
+          echo "CLIENT_ORDER_ID=$CLIENT"
+
+          echo "LEDGER_EXACT=$(jq -c --arg t "$TICKER" --arg a "$ATTEMPT" '[.rows[]|select((.ticker==$t) or (.attemptId==$a))]' /tmp/ledger.json)"
+
+          echo "PROVIDER_FILLS_EXACT=$(jq -c --arg t "$TICKER" '[((.fills//[])+(.historicalFills//[]))[]|select((.ticker==$t) or (.marketTicker==$t))]' /tmp/provider.json)"
+          echo "PROVIDER_POSITIONS_EXACT=$(jq -c --arg t "$TICKER" '[.positions[]?|select((.ticker==$t) or (.market_ticker==$t))]' /tmp/provider.json)"
+          echo "PROVIDER_SETTLEMENTS_EXACT=$(jq -c --arg t "$TICKER" '[.settlements[]?|select(.ticker==$t)]' /tmp/provider.json)"
+          echo "PROVIDER_ORDERS_EXACT=$(jq -c --arg t "$TICKER" --arg c "$CLIENT" '[.orders[]?|select((.ticker==$t) or (.client_order_id==$c) or (.clientOrderId==$c))]' /tmp/provider.json)"
+          echo "PROVIDER_KEYS=$(jq -c 'keys' /tmp/provider.json)"
+          echo "CAPITAL=$(jq -c '{provider:.provider,safety:.safety}' /tmp/capital.json)"
