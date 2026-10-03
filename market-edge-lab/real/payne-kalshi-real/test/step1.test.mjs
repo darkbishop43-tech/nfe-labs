@@ -20,7 +20,7 @@ const qualifying = () => ({ marketTicker:'KXTEST-1', asset:'BTC', direction:'UP'
 test('default state is disarmed and zero authority', ()=>{
   const s=defaultControlState();
   assert.equal(s.armed,false); assert.equal(s.attempts,0); assert.equal(s.openPositions,0);
-  assert.equal(s.providerWriteAuthority,'BUILT_INACTIVE_DISARMED'); assert.equal(s.realExecution,'BUILT_INACTIVE_DISARMED'); assert.equal(s.fundingAuthority,'INDEX3_ONLY_INACTIVE_DISARMED'); assert.equal(s.requiredExchangeIndex,3); assert.equal(s.attemptTarget,1); assert.equal(s.maxEntryDebitUsd,1);
+  assert.equal(s.providerWriteAuthority,'BUILT_INACTIVE_DISARMED'); assert.equal(s.realExecution,'BUILT_INACTIVE_DISARMED'); assert.equal(s.fundingAuthority,'INDEX2_ONLY_INACTIVE_DISARMED'); assert.equal(s.requiredExchangeIndex,2); assert.equal(s.attemptTarget,1); assert.equal(s.maxEntryDebitUsd,1);
 });
 
 test('Payne gate fixtures deterministic', ()=>{
@@ -95,5 +95,5 @@ test('no forbidden baseline or Payne Paper keys are used', async ()=>{
 
 test('status freezes Step 1 authority', ()=>{
   const s=step1Status(); assert.equal(PAYNE_CONFIG.providerWritesEnabled,false); assert.equal(PAYNE_CONFIG.realExecutionEnabled,false);
-  assert.equal(PAYNE_CONFIG.realCapabilityBuilt,true); assert.equal(s.providerWrites,0); assert.equal(s.requiredExchangeIndex,3); assert.equal(s.index3,'READ_REQUIRED_BEFORE_ENTRY'); assert.equal(s.secondIoc,'HOLD_UNCHANGED');
+  assert.equal(PAYNE_CONFIG.realCapabilityBuilt,true); assert.equal(s.providerWrites,0); assert.equal(s.requiredExchangeIndex,2); assert.equal(s.index3,'READ_REQUIRED_BEFORE_ENTRY'); assert.equal(s.secondIoc,'HOLD_UNCHANGED');
 });
