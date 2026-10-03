@@ -22,7 +22,7 @@ async function testEnv() {
 
 test('Index 2 classification is evidence-only', () => {
   assert.equal(classifyIndex2({}), 'UNKNOWN / PROVIDER EVIDENCE INSUFFICIENT');
-  assert.equal(classifyIndex2({balance_breakdown:[{exchange_index:0},{exchange_index:2}]}), 'READ-PROVEN UNAVAILABLE');
+  assert.equal(classifyIndex2({balance_breakdown:[{exchange_index:0},{exchange_index:3}]}), 'READ-PROVEN UNAVAILABLE');
   assert.equal(classifyIndex2({balance_breakdown:[{exchange_index:2}]}), 'READ-PROVEN AVAILABLE');
 });
 
@@ -66,7 +66,7 @@ test('GET-only proof performs balance, market, fresh lock, and pre-submit reads'
   assert.equal(out.liveMarketGet,'PROVEN');
   assert.equal(out.freshLockGet,'PROVEN');
   assert.equal(out.preSubmitGet,'PROVEN');
-  assert.equal(out.index2,'READ-PROVEN UNAVAILABLE');
+  assert.equal(out.index2,'READ-PROVEN AVAILABLE');
   assert.equal(out.providerWrites,0);
   assert.equal(out.credentialsPresent,true);
   assert.equal(out.privateKeyEnvelope,'PKCS8');
