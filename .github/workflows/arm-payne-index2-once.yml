@@ -1,0 +1,72 @@
+name: One-shot Founder-authorized PAYNE Index 2 ARM
+
+on:
+  push:
+    branches: [market-edge-payne-kalshi-real-step1]
+    paths:
+      - '.github/workflows/arm-payne-index2-once.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  arm:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify live Index 2 state then call existing PAYNE ARM control once
+        shell: bash
+        run: |
+          set -euo pipefail
+          P='https://market-edge-payne-kalshi-real.darkbishop43.workers.dev'
+          B='https://market-edge-baseline-real.darkbishop43.workers.dev'
+
+          curl -fsS "$B/founder-capital-ledger" -o /tmp/capital.json
+          curl -fsS "$P/real-state" -o /tmp/before.json
+
+          jq -e '
+            .schema=="PAYNE_REAL_STATE_V1" and
+            .control.armed==false and
+            .control.activeThreshold==0.70 and
+            .control.maxEntryDebitUsd==1 and
+            .control.attemptTarget==1 and
+            .control.requiredExchangeIndex==2 and
+            .series.attemptsStarted==0 and
+            .series.unresolvedEntry==false and
+            ((.series.position.status // "")|IN("OPEN","EXIT_RETRY","EXIT_RECONCILIATION_REQUIRED","RECONCILIATION_UNKNOWN")|not) and
+            .providerWrites==0 and
+            .ordersSubmittedByThisRead==0 and
+            .capitalMovedUsd==0
+          ' /tmp/before.json >/dev/null
+
+          python - /tmp/capital.json <<'PY'
+          import json,sys
+          x=json.load(open(sys.argv[1]))
+          p=x['provider']; by={int(r['exchangeIndex']):float(r['balanceUsd']) for r in p['balanceBreakdown']}
+          total=float(p['cashUsd'])
+          assert abs(sum(by.values())-total)<0.0001,(by,total)
+          assert by.get(2,0)>0,by
+          assert abs(by.get(3,0))<0.0001,by
+          print('PRE_ARM_PROVIDER='+json.dumps({'cashUsd':total,'byIndex':by},sort_keys=True))
+          PY
+
+          echo "PRE_ARM_STATE=$(jq -c '{armed:.control.armed,threshold:.control.activeThreshold,stake:.control.maxEntryDebitUsd,attemptTarget:.control.attemptTarget,requiredExchangeIndex:.control.requiredExchangeIndex,attemptsStarted:.series.attemptsStarted,unresolvedEntry:.series.unresolvedEntry,positionStatus:(.series.position.status // null)}' /tmp/before.json)"
+
+          curl -fsS -X POST "$P/control"             -H 'content-type: application/json'             --data '{"action":"ARM"}'             -o /tmp/arm.json
+
+          jq -e '
+            .ok==true and
+            .control.armed==true and
+            .control.threshold==0.70 and
+            .control.maxEntryDebitUsd==1 and
+            .control.attemptTarget==1 and
+            .control.requiredExchangeIndex==2 and
+            .control.fundingAuthority=="INDEX2_ONLY" and
+            .providerWrites==0 and
+            .orders==0 and
+            .capitalMovedUsd==0
+          ' /tmp/arm.json >/dev/null
+
+          echo "ARM_RESULT=$(jq -c . /tmp/arm.json)"
+
+          curl -fsS "$P/real-state" -o /tmp/after.json
+          echo "POST_ARM_STATE=$(jq -c '{armed:.control.armed,threshold:.control.activeThreshold,stake:.control.maxEntryDebitUsd,attemptTarget:.control.attemptTarget,requiredExchangeIndex:.control.requiredExchangeIndex,fundingAuthority:.control.fundingAuthority,providerWriteAuthority:.control.providerWriteAuthority,seriesStatus:.series.status,attemptsStarted:.series.attemptsStarted,providerWrites,ordersSubmittedByThisRead,capitalMovedUsd}' /tmp/after.json)"
