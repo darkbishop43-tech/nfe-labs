@@ -1,0 +1,1 @@
+{"name":"nfe-os-robinhood-observatory-v0","private":true,"scripts":{"test":"node tests/firewall.test.mjs","serve":"python3 -m http.server 4173"}}
