@@ -13,6 +13,7 @@ import {
   interpretPayneOrderResponse,
   runReadOnlyScan,
   summarizeRealExecutionState,
+  reconcileUnresolvedEntryFromProvider,
 } from '../src/index.js';
 import { kalshiPayneOrderPost, payneOrderWriteProof } from '../src/kalshi-real-write.js';
 
@@ -79,6 +80,8 @@ function installProvider({index3=0,index2=15.91,position='ABSENT',exactSequence=
     if(u.includes('/portfolio/balance')) return jsonResponse({balance_breakdown:[{exchange_index:0,balance:0},{exchange_index:2,balance:index2},{exchange_index:3,balance:index3}]});
     if(u.includes('series_ticker=KXBTC15M')) return jsonResponse({markets:[providerMarket()]});
     if(u.includes('/trade-api/v2/markets?series_ticker=')) return jsonResponse({markets:[]});
+    if(u.includes('/portfolio/fills?')) return jsonResponse({fills:[]});
+    if(u.includes('/historical/fills?')) return jsonResponse({fills:[]});
     if(u.includes('/portfolio/positions?')){
       if(position==='HTTP_FAIL') return jsonResponse({error:'x'},500);
       if(position==='OPEN') return jsonResponse({market_positions:[{ticker:'KXBTC15M-REALTEST',position_fp:'1'}],cursor:''});
@@ -109,6 +112,51 @@ async function arm(e){
   assert.equal(c.armed,true);
   return c;
 }
+
+test('provider-gated unresolved entry reconciliation clears only proven no-execution 4xx attempt',async()=>{
+  const e=await env(),io=installProvider({position:'ABSENT',settled:false});
+  try{
+    const series={
+      ...defaultRealSeriesState(),
+      seriesId:'RECON-S1',
+      status:'ENTRY_RECONCILIATION_REQUIRED',
+      attemptsStarted:1,
+      attemptTarget:1,
+      unresolvedEntry:true,
+      currentAttempt:{
+        schema:'PAYNE_REAL_ATTEMPT_V1',
+        owner:'PAYNE_KALSHI_REAL',
+        seriesId:'RECON-S1',
+        attemptId:'RECON-S1-1',
+        attemptNo:1,
+        status:'PROVIDER_REJECTED_OR_UNKNOWN',
+        asset:'BTC',
+        marketTicker:'KXBTC15M-REALTEST',
+        outcomeSide:'YES',
+        direction:'UP',
+        providerHttpStatus:403,
+      },
+    };
+    await saveRealSeriesState(e,series);
+    const out=await reconcileUnresolvedEntryFromProvider(e,Date.parse('2026-10-02T06:16:00Z'));
+    assert.equal(out.ok,true);
+    assert.equal(out.classification,'NO_FILL');
+    assert.equal(out.reason,'PROVIDER_REJECTED_NO_EXECUTION_CONFIRMED');
+    assert.equal(out.exactTickerFillCount,0);
+    assert.equal(out.exactTickerSettlementCount,0);
+    assert.equal(out.providerPositionClassification,'ABSENT');
+    assert.equal(out.series.unresolvedEntry,false);
+    assert.equal(out.series.position,null);
+    assert.equal(out.series.status,'COMPLETE_NO_FILL_RECONCILED');
+    assert.equal(out.control.armed,false);
+    assert.equal(out.control.openPositions,0);
+    assert.equal(out.providerWrites,0);
+    assert.equal(out.orders,0);
+    assert.equal(out.capitalMovedUsd,0);
+    const ledger=await listRealLedger(e,100);
+    assert.ok(ledger.some(x=>x.type==='ENTRY_RECONCILED_NO_EXECUTION'&&x.attemptId==='RECON-S1-1'));
+  }finally{io.restore();}
+});
 
 test('authenticated Payne write transport is fixed to one order POST and zero-money intercepts ENTRY',async()=>{
   const e=await env();
