@@ -20,7 +20,6 @@ const SCAN_HISTORY_INTERVAL_MS = 15 * 60 * 1000;
 const CONTROL_THRESHOLD_OPTIONS = Object.freeze([0.70,0.75,0.80,0.85]);
 const CONTROL_STAKE_OPTIONS = Object.freeze([1,2,5,10]);
 const CONTROL_ATTEMPT_OPTIONS = Object.freeze([1,5,10,30]);
-const LIVE_ATTEMPT_TARGET_OPTIONS = Object.freeze([1,5]);
 const FORBIDDEN_KEYS = new Set([
   'baseline-real-execution-test-v1',
   'state:payne_method',
@@ -153,28 +152,14 @@ export async function updateFounderControl(env, action, rawValue = null) {
     const series=await loadRealSeriesState(env);
     if (Number(before.activeThreshold)!==.70) throw new Error('PAYNE_REAL_ARM_THRESHOLD_MUST_BE_0_70');
     if (Number(before.maxEntryDebitUsd)!==1) throw new Error('PAYNE_REAL_ARM_MAX_DEBIT_MUST_BE_1_USD');
-    if (!LIVE_ATTEMPT_TARGET_OPTIONS.includes(Number(before.attemptTarget))) throw new Error('PAYNE_REAL_ARM_ATTEMPT_TARGET_MUST_BE_1_OR_5');
+    if (Number(before.attemptTarget)!==1) throw new Error('PAYNE_REAL_ARM_ATTEMPT_TARGET_MUST_BE_1');
     if (Number(before.requiredExchangeIndex)!==2) throw new Error('PAYNE_REAL_ARM_INDEX2_REQUIRED');
+    if (Number(series?.attemptsStarted||0)>=1) throw new Error('PAYNE_REAL_1X1_ALREADY_CONSUMED');
     if (series?.unresolvedEntry===true) throw new Error('PAYNE_REAL_ENTRY_RECONCILIATION_REQUIRED');
     if (series?.position && ['OPEN','EXIT_RETRY','EXIT_RECONCILIATION_REQUIRED','RECONCILIATION_UNKNOWN'].includes(String(series.position.status||''))) throw new Error('PAYNE_REAL_OPEN_POSITION_EXISTS');
-    const armedSeries={
-      ...defaultRealSeriesState(),
-      seriesId:crypto.randomUUID(),
-      status:'ARMED_WAITING',
-      attemptsStarted:0,
-      attemptTarget:Number(before.attemptTarget),
-      threshold:.70,
-      maxEntryDebitUsd:1,
-      requiredExchangeIndex:2,
-      unresolvedEntry:false,
-      currentAttempt:null,
-      position:null,
-      completedAt:null,
-    };
+    const armedSeries={...series,seriesId:series.seriesId||crypto.randomUUID(),status:'ARMED_WAITING',attemptsStarted:0,attemptTarget:1,threshold:.70,maxEntryDebitUsd:1,requiredExchangeIndex:2,completedAt:null};
     await saveRealSeriesState(env,armedSeries);
     next.armed=true;
-    next.attempts=0;
-    next.openPositions=0;
   } else if (name==='DISARM') next.armed=false;
   else if (name==='SET_THRESHOLD') {
     const value=Number(rawValue);
