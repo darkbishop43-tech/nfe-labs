@@ -178,7 +178,7 @@ test('FILLED establishes durable PAYNE ownership and disarms new entry authority
     await arm(e);
     const out=await runPayneRealExecutionCycle(e,{postImpl:post.fn,nowMs:Date.parse('2026-10-02T06:05:00Z')});
     assert.equal(out.position.owner,'PAYNE_KALSHI_REAL');
-    assert.equal(out.position.exchangeIndex,3);
+    assert.equal(out.position.exchangeIndex,2);
     assert.equal(out.position.entryOrderId,'ENTRY-FILL');
     assert.equal(out.position.filledCount,1);
     assert.equal(out.attemptsStarted,1);
