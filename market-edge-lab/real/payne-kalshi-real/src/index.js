@@ -3217,7 +3217,8 @@ export default {
     try {
       const series=await loadRealSeriesState(env);
       const managementPending=Boolean(series?.position && ['OPEN','EXIT_RETRY','EXIT_RECONCILIATION_REQUIRED','RECONCILIATION_UNKNOWN'].includes(String(series.position.status||'')));
-      if (control.armed || managementPending) await runPayneRealExecutionCycle(env);
+      const entryReconciliationPending=series?.unresolvedEntry===true;
+      if (control.armed || managementPending || entryReconciliationPending) await runPayneRealExecutionCycle(env);
     } catch {}
   },
 };
