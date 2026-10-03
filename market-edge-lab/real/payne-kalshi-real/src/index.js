@@ -2142,7 +2142,7 @@ export async function buildCockpitData(env, nowMs=Date.now()) {
       feeSafeSizing:zeroMoneyPreview?.sizing?.ok===false?'FAIL':zeroMoneyPreview?.status==='FIRE_READY'?'PASS':'NOT_REACHED',
       iocPayload:zeroMoneyPreview?.status==='FIRE_READY'?'PASS':'NOT_REACHED',
       fundingGate:{
-        index3:index3.status,
+        index2:index2.status,
         fundingAuthority:control.fundingAuthority,
         result:zeroMoneyPreview?.fundingGate||'AUTHORITY_HELD',
       },
@@ -2432,7 +2432,7 @@ async function baselineAutoTickerConflict(env,ticker) {
 function payneRealScope(control,series,kind,position=null) {
   return {
     owner:REAL_OWNER,
-    exchangeIndex:3,
+    exchangeIndex:2,
     authorized:kind==='ENTRY'?Boolean(control?.armed):Boolean(position?.owner===REAL_OWNER),
     armed:Boolean(control?.armed),
     attemptTarget:1,
@@ -2452,13 +2452,13 @@ function realizedPnlFromPosition(position) {
 
 async function closeRealSeriesControl(env,attempts=1,openPositions=0) {
   const control=await loadControl(env);
-  const next={...control,armed:false,attempts,openPositions,providerWriteAuthority:'BUILT_INACTIVE_DISARMED',providerPostAuthority:'BUILT_INACTIVE_DISARMED',realExecution:'BUILT_INACTIVE_DISARMED',fundingAuthority:'INDEX3_ONLY_INACTIVE_DISARMED',requiredExchangeIndex:2,realControlSchema:REAL_CONTROL_SCHEMA};
+  const next={...control,armed:false,attempts,openPositions,providerWriteAuthority:'BUILT_INACTIVE_DISARMED',providerPostAuthority:'BUILT_INACTIVE_DISARMED',realExecution:'BUILT_INACTIVE_DISARMED',fundingAuthority:'INDEX2_ONLY_INACTIVE_DISARMED',requiredExchangeIndex:2,realControlSchema:REAL_CONTROL_SCHEMA};
   await kvPutJson(env,CONTROL_KEY,next);
   return next;
 }
 
 async function reconcileOwnedPaynePosition(env,position) {
-  if(!position || position.owner!==REAL_OWNER || Number(position.exchangeIndex)!==3 || !position.entryOrderId || !position.entryClientOrderId) {
+  if(!position || position.owner!==REAL_OWNER || Number(position.exchangeIndex)!==2 || !position.entryOrderId || !position.entryClientOrderId) {
     return {classification:'UNKNOWN',reason:'PAYNE_OWNERSHIP_IDENTITY_INCOMPLETE'};
   }
   const evidence=await providerTickerPositionEvidence(env,position.marketTicker);
@@ -2478,7 +2478,7 @@ async function reconcileOwnedPaynePosition(env,position) {
 async function managePayneRealPosition(env,control,series,postImpl=kalshiPayneOrderPost,nowMs=Date.now()) {
   const position=series?.position;
   if(!position) return series;
-  if(position.owner!==REAL_OWNER || Number(position.exchangeIndex)!==3) {
+  if(position.owner!==REAL_OWNER || Number(position.exchangeIndex)!==2) {
     series.status='HOLD_WRONG_OR_UNKNOWN_OWNERSHIP';
     await appendRealLedger(env,'MANAGEMENT_BLOCKED',{seriesId:series.seriesId,attemptId:position.attemptId||null,ticker:position.marketTicker||null,reason:series.status});
     return saveRealSeriesState(env,series);
@@ -2611,8 +2611,8 @@ export async function runPayneRealExecutionCycle(env,{postImpl=kalshiPayneOrderP
   if(data?.clocks?.consistency?.windowConsistency!==true){
     series.status='HOLD_WINDOW_MISMATCH'; return saveRealSeriesState(env,series);
   }
-  if(Number(candidate.exchangeIndex)!==3){
-    series.status='HOLD_REQUIRED_EXCHANGE_INDEX_3'; return saveRealSeriesState(env,series);
+  if(Number(candidate.exchangeIndex)!==2){
+    series.status='HOLD_REQUIRED_EXCHANGE_INDEX_2'; return saveRealSeriesState(env,series);
   }
   if(data?.pipeline?.freshLock!=='PROVEN' || data?.pipeline?.preSubmit!=='PROVEN' || data?.pipeline?.tickerConsistent!==true || data?.pipeline?.sideConsistent!==true || data?.pipeline?.timeGate6_5m!=='PASS'){
     series.status='HOLD_PREFIRE_EVIDENCE_INCOMPLETE'; return saveRealSeriesState(env,series);
@@ -2654,8 +2654,8 @@ export async function runPayneRealExecutionCycle(env,{postImpl=kalshiPayneOrderP
   const balanceResponse=await kalshiGetOnly(env,'/trade-api/v2/portfolio/balance');
   const balanceBody=await balanceResponse.json().catch(()=>({}));
   const index2=index2FundingEvidence(balanceBody,sizing.totalDebitUsd);
-  if(!balanceResponse.ok || !index3.available || !index3.sufficient){
-    series.status='HOLD_INDEX3_FUNDING_INSUFFICIENT'; return saveRealSeriesState(env,series);
+  if(!balanceResponse.ok || !index2.available || !index2.sufficient){
+    series.status='HOLD_INDEX2_FUNDING_INSUFFICIENT'; return saveRealSeriesState(env,series);
   }
 
   const attemptNo=1;
@@ -2729,7 +2729,7 @@ export async function runPayneRealExecutionCycle(env,{postImpl=kalshiPayneOrderP
   const position={
     schema:'PAYNE_REAL_POSITION_V1',owner:REAL_OWNER,seriesId,attemptId,attemptNo:1,status:'OPEN',
     asset:candidate.asset,marketTicker:candidate.ticker,outcomeSide:candidate.outcomeSide,direction:candidate.direction,
-    exchangeIndex:3,entryOrderId:result.orderId,entryClientOrderId:result.clientOrderId||clientOrderId,
+    exchangeIndex:2,entryOrderId:result.orderId,entryClientOrderId:result.clientOrderId||clientOrderId,
     filledCount:Number(result.fillCount),remainingExitCount:Number(result.fillCount),entryAverageFillPrice:result.averageFillPrice,
     entryAverageFeePaid:result.averageFeePaid,entryScore:finalFeature.score,entryMove:finalFeature.move,entryEdge:finalFeature.edge,
     entryTime:new Date(nowMs).toISOString(),freshLockAt:freshLock.readAt,preSubmitAt:preSubmit.readAt,
@@ -2738,7 +2738,7 @@ export async function runPayneRealExecutionCycle(env,{postImpl=kalshiPayneOrderP
   series.position=position;series.unresolvedEntry=false;series.status='ATTEMPT_LIMIT_REACHED_MANAGING_POSITION';
   await persistAttempt(env,{runId:seriesId,attemptId,attemptNo:1,result:result.state,...series.currentAttempt});
   await persistPosition(env,{positionId:attemptId,...position});
-  await appendRealLedger(env,'POSITION_OWNERSHIP_ESTABLISHED',{seriesId,attemptId,ticker:candidate.ticker,entryOrderId:position.entryOrderId,clientOrderId:position.entryClientOrderId,exchangeIndex:3,filledCount:position.filledCount,fillState:result.state});
+  await appendRealLedger(env,'POSITION_OWNERSHIP_ESTABLISHED',{seriesId,attemptId,ticker:candidate.ticker,entryOrderId:position.entryOrderId,clientOrderId:position.entryClientOrderId,exchangeIndex:2,filledCount:position.filledCount,fillState:result.state});
   await closeRealSeriesControl(env,1,1);
   return saveRealSeriesState(env,series);
 }
@@ -2754,9 +2754,9 @@ export function step1Status() {
     providerWrites:0,
     providerWriteAuthority:'BUILT_INACTIVE_DISARMED',
     realExecution:'BUILT_INACTIVE_DISARMED',
-    fundingAuthority:'INDEX3_ONLY_INACTIVE_DISARMED',
+    fundingAuthority:'INDEX2_ONLY_INACTIVE_DISARMED',
     requiredExchangeIndex:2,
-    index3:'READ_REQUIRED_BEFORE_ENTRY',
+    index2:'READ_REQUIRED_BEFORE_ENTRY',
     secondIoc:'HOLD_UNCHANGED',
   };
 }
