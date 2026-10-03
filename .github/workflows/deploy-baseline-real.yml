@@ -57,3 +57,12 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: npx --yes wrangler@4 deploy
+      - name: Verify zero-money Founder Funding return path
+        shell: bash
+        working-directory: .
+        run: |
+          set -euo pipefail
+          B='https://market-edge-baseline-real.darkbishop43.workers.dev'
+          curl -fsS "$B/founder-funding-zero-money-proof" -o /tmp/funding-proof.json
+          jq -e '.ok==true and .state=="FOUNDER_FUNDING_3_TO_2_ZERO_MONEY_PROOF" and .providerTransferPosts==0 and .orders==0 and .capitalMovedUsd==0 and .reviewOk.ok==true and .confirmOk.ok==true and .reviewWrongSource.ok==false and .reviewWrongDestination.ok==false and .reviewArmed.ok==false and .reviewOpen.ok==false and .confirmStale.ok==false and .confirmChanged.ok==false and .confirmReplay.ok==false' /tmp/funding-proof.json >/dev/null
+          echo "FUNDING_ZERO_MONEY_PROOF=$(jq -c . /tmp/funding-proof.json)"
