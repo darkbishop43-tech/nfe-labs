@@ -95,5 +95,5 @@ test('no forbidden baseline or Payne Paper keys are used', async ()=>{
 
 test('status freezes Step 1 authority', ()=>{
   const s=step1Status(); assert.equal(PAYNE_CONFIG.providerWritesEnabled,false); assert.equal(PAYNE_CONFIG.realExecutionEnabled,false);
-  assert.equal(PAYNE_CONFIG.realCapabilityBuilt,true); assert.equal(s.providerWrites,0); assert.equal(s.requiredExchangeIndex,2); assert.equal(s.index3,'READ_REQUIRED_BEFORE_ENTRY'); assert.equal(s.secondIoc,'HOLD_UNCHANGED');
+  assert.equal(PAYNE_CONFIG.realCapabilityBuilt,true); assert.equal(s.providerWrites,0); assert.equal(s.requiredExchangeIndex,2); assert.equal(s.index2,'READ_REQUIRED_BEFORE_ENTRY'); assert.equal(s.secondIoc,'HOLD_UNCHANGED');
 });
