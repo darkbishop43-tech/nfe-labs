@@ -2482,98 +2482,211 @@ async function providerTickerPositionEvidence(env,ticker) {
 
 export async function reconcileUnresolvedEntryFromProvider(env,nowMs=Date.now()) {
   const series=await loadRealSeriesState(env);
-  if(series?.unresolvedEntry!==true) throw new Error('PAYNE_NO_UNRESOLVED_ENTRY');
+  if(series?.unresolvedEntry!==true) return {
+    ok:true,classification:'CLEAN',reason:'NO_UNRESOLVED_ENTRY',
+    series,control:await loadControl(env),providerWrites:0,orders:0,capitalMovedUsd:0,
+  };
   const attempt=series?.currentAttempt||null;
   const ticker=String(attempt?.marketTicker||'').trim();
-  if(!ticker || !attempt?.attemptId) throw new Error('PAYNE_UNRESOLVED_ENTRY_IDENTITY_INCOMPLETE');
-
-  const positionEvidence=await providerTickerPositionEvidence(env,ticker);
-  if(!positionEvidence.ok || ['OPEN','UNKNOWN'].includes(String(positionEvidence.classification||''))) {
-    throw new Error('PAYNE_UNRESOLVED_ENTRY_POSITION_NOT_PROVEN_FLAT');
+  const clientOrderId=String(attempt?.clientOrderId||attempt?.payload?.client_order_id||'').trim();
+  if(!ticker || !attempt?.attemptId || !clientOrderId) {
+    series.status='ENTRY_RECONCILIATION_REQUIRED';
+    await appendRealLedger(env,'ENTRY_RECONCILIATION_STILL_UNKNOWN',{
+      seriesId:series.seriesId,attemptId:attempt?.attemptId||null,ticker:ticker||null,
+      reason:'PAYNE_UNRESOLVED_ENTRY_IDENTITY_INCOMPLETE',
+    });
+    await saveRealSeriesState(env,series);
+    return {ok:false,classification:'UNKNOWN',reason:'PAYNE_UNRESOLVED_ENTRY_IDENTITY_INCOMPLETE',series,control:await loadControl(env),providerWrites:0,orders:0,capitalMovedUsd:0};
   }
 
-  const readRows=async path=>{
-    const response=await kalshiGetOnly(env,path);
-    const body=await response.json().catch(()=>null);
-    if(!response.ok || !body) throw new Error('PAYNE_RECONCILIATION_PROVIDER_READ_FAILED_'+String(response.status));
-    return body;
+  const readJson=async path=>{
+    try{
+      const response=await kalshiGetOnly(env,path);
+      const body=await response.json().catch(()=>null);
+      return {ok:response.ok===true,httpStatus:response.status,body};
+    }catch(error){
+      return {ok:false,httpStatus:null,body:null,error:String(error?.message||error)};
+    }
   };
   const q='?limit=200&subaccount=0&ticker='+encodeURIComponent(ticker);
-  const [fillsNow,historicalFills,settlements]=await Promise.all([
-    readRows('/trade-api/v2/portfolio/fills'+q),
-    readRows('/trade-api/v2/historical/fills'+q),
-    readRows('/trade-api/v2/portfolio/settlements'+q),
+  const [positionEvidence,ordersRead,fillsRead,historicalFillsRead,settlementsRead]=await Promise.all([
+    providerTickerPositionEvidence(env,ticker),
+    readJson('/trade-api/v2/portfolio/orders'+q),
+    readJson('/trade-api/v2/portfolio/fills'+q),
+    readJson('/trade-api/v2/historical/fills'+q),
+    readJson('/trade-api/v2/portfolio/settlements'+q),
   ]);
-  const exactFills=[
-    ...(Array.isArray(fillsNow?.fills)?fillsNow.fills:[]),
-    ...(Array.isArray(historicalFills?.fills)?historicalFills.fills:[]),
-  ].filter(x=>String(x?.ticker||x?.market_ticker||'')===ticker);
-  const exactSettlements=(Array.isArray(settlements?.settlements)?settlements.settlements:[])
+
+  const providerReadsComplete=positionEvidence?.ok===true && ordersRead.ok && fillsRead.ok && historicalFillsRead.ok && settlementsRead.ok;
+  if(!providerReadsComplete){
+    series.status='ENTRY_RECONCILIATION_REQUIRED';
+    await appendRealLedger(env,'ENTRY_RECONCILIATION_STILL_UNKNOWN',{
+      seriesId:series.seriesId,attemptId:attempt.attemptId,ticker,clientOrderId,
+      reason:'PROVIDER_RECONCILIATION_READ_INCOMPLETE',
+      position:positionEvidence?.classification||'UNKNOWN',
+      orderHttpStatus:ordersRead.httpStatus,fillHttpStatus:fillsRead.httpStatus,
+      historicalFillHttpStatus:historicalFillsRead.httpStatus,settlementHttpStatus:settlementsRead.httpStatus,
+    });
+    await saveRealSeriesState(env,series);
+    return {ok:false,classification:'UNKNOWN',reason:'PROVIDER_RECONCILIATION_READ_INCOMPLETE',series,control:await loadControl(env),providerWrites:0,orders:0,capitalMovedUsd:0};
+  }
+
+  const orderRows=Array.isArray(ordersRead.body?.orders)?ordersRead.body.orders:
+    (ordersRead.body?.order?[ordersRead.body.order]:[]);
+  const exactOrders=orderRows.filter(x=>String(x?.client_order_id||x?.clientOrderId||'')===clientOrderId);
+  const providerOrderIds=new Set(exactOrders.map(x=>String(x?.order_id||x?.orderId||'')).filter(Boolean));
+  const allFillRows=[
+    ...(Array.isArray(fillsRead.body?.fills)?fillsRead.body.fills:[]),
+    ...(Array.isArray(historicalFillsRead.body?.fills)?historicalFillsRead.body.fills:[]),
+  ];
+  const exactFills=allFillRows.filter(x=>{
+    if(String(x?.ticker||x?.market_ticker||'')!==ticker) return false;
+    const fillClient=String(x?.client_order_id||x?.clientOrderId||'');
+    const fillOrder=String(x?.order_id||x?.orderId||'');
+    return (fillClient && fillClient===clientOrderId) || (fillOrder && providerOrderIds.has(fillOrder));
+  });
+  const exactSettlements=(Array.isArray(settlementsRead.body?.settlements)?settlementsRead.body.settlements:[])
     .filter(x=>String(x?.ticker||'')===ticker);
 
-  if(exactFills.length>0 || exactSettlements.length>0) {
-    throw new Error('PAYNE_UNRESOLVED_ENTRY_PROVIDER_EXECUTION_EVIDENCE_REQUIRES_DEEP_RECONCILIATION');
+  const orderFillCount=exactOrders.reduce((sum,x)=>{
+    const n=Number(x?.fill_count??x?.filled_count??x?.count_filled);
+    return sum+(Number.isFinite(n)&&n>0?n:0);
+  },0);
+  const fillRowCount=exactFills.reduce((sum,x)=>{
+    const n=Number(x?.count??x?.fill_count??x?.filled_count??x?.quantity);
+    return sum+(Number.isFinite(n)&&n>0?n:0);
+  },0);
+  const ownedFillCount=Math.max(orderFillCount,fillRowCount);
+  const orderId=String(exactOrders.find(x=>x?.order_id||x?.orderId)?.order_id||exactOrders.find(x=>x?.order_id||x?.orderId)?.orderId||exactFills.find(x=>x?.order_id||x?.orderId)?.order_id||exactFills.find(x=>x?.order_id||x?.orderId)?.orderId||'')||null;
+  const exactIdentityEvidence=exactOrders.length>0 || exactFills.length>0;
+
+  if(positionEvidence.classification==='OPEN'){
+    if(!exactIdentityEvidence || !(ownedFillCount>0)){
+      series.status='ENTRY_RECONCILIATION_REQUIRED';
+      await appendRealLedger(env,'ENTRY_RECONCILIATION_STILL_UNKNOWN',{
+        seriesId:series.seriesId,attemptId:attempt.attemptId,ticker,clientOrderId,
+        reason:'OPEN_POSITION_WITHOUT_EXACT_PAYNE_ORDER_OR_FILL_IDENTITY',
+        exactOrderCount:exactOrders.length,exactFillCount:exactFills.length,
+      });
+      await saveRealSeriesState(env,series);
+      return {ok:false,classification:'UNKNOWN',reason:'OPEN_POSITION_WITHOUT_EXACT_PAYNE_ORDER_OR_FILL_IDENTITY',series,control:await loadControl(env),providerWrites:0,orders:0,capitalMovedUsd:0};
+    }
+
+    const exactOrder=exactOrders[0]||{};
+    const position={
+      schema:'PAYNE_REAL_POSITION_V1',owner:REAL_OWNER,seriesId:series.seriesId,attemptId:attempt.attemptId,
+      attemptNo:Number(attempt.attemptNo||series.attemptsStarted||1),status:'OPEN',
+      asset:attempt.asset,marketTicker:ticker,outcomeSide:attempt.outcomeSide,direction:attempt.direction,
+      exchangeIndex:2,entryOrderId:orderId,entryClientOrderId:clientOrderId,
+      filledCount:ownedFillCount,remainingExitCount:ownedFillCount,
+      entryAverageFillPrice:exactOrder?.average_fill_price??exactOrder?.avg_fill_price??null,
+      entryAverageFeePaid:exactOrder?.average_fee_paid??exactOrder?.fee_paid??null,
+      entryScore:attempt.score,entryMove:attempt.move,entryEdge:attempt.edge,
+      entryTime:attempt.preSubmitAt||attempt.observedAt||new Date(nowMs).toISOString(),
+      freshLockAt:attempt.freshLockAt||null,preSubmitAt:attempt.preSubmitAt||null,
+      fillState:'RECONCILED_OWNED',exitFilledTotal:0,exitAttempt:0,
+      reconciliationState:'OPEN',reconciliationReason:positionEvidence.reason,
+      reconciledAt:new Date(nowMs).toISOString(),
+    };
+    const providerResult={state:'FILLED',reason:'PROVIDER_RECONCILED_OWNED',orderId,clientOrderId,fillCount:ownedFillCount,remainingCount:null,averageFillPrice:position.entryAverageFillPrice,averageFeePaid:position.entryAverageFeePaid};
+    series.position=position;
+    series.unresolvedEntry=false;
+    series.currentAttempt={...attempt,status:'FILLED',providerResult,reconciledAt:position.reconciledAt};
+    series.status=seriesTerminal(series)?'ATTEMPT_LIMIT_REACHED_MANAGING_POSITION':'MANAGING_POSITION_SERIES_CONTINUES';
+    await persistAttempt(env,{runId:series.seriesId,attemptId:attempt.attemptId,attemptNo:position.attemptNo,result:'FILLED',...series.currentAttempt});
+    await persistPosition(env,{positionId:attempt.attemptId,...position});
+    await appendRealLedger(env,'ENTRY_RECONCILED_OWNED',{
+      seriesId:series.seriesId,attemptId:attempt.attemptId,attemptNo:position.attemptNo,ticker,clientOrderId,
+      entryOrderId:orderId,filledCount:ownedFillCount,providerPositionReason:positionEvidence.reason,
+      exactOrderCount:exactOrders.length,exactFillCount:exactFills.length,
+    });
+    await saveRealSeriesState(env,series);
+    await settleSeriesControl(env,series,1);
+    return {ok:true,classification:'OWNED',reason:'PROVIDER_RECONCILED_OWNED',ticker,clientOrderId,orderId,exactOrderCount:exactOrders.length,exactFillCount:exactFills.length,exactSettlementCount:exactSettlements.length,providerPositionClassification:positionEvidence.classification,series:await loadRealSeriesState(env),control:await loadControl(env),providerWrites:0,orders:0,capitalMovedUsd:0};
   }
 
-  const providerHttpStatus=Number(attempt?.providerHttpStatus);
-  if(!(providerHttpStatus>=400 && providerHttpStatus<500)) {
-    throw new Error('PAYNE_UNRESOLVED_ENTRY_REJECTION_NOT_PROVEN');
+  if(positionEvidence.classification==='UNKNOWN'){
+    series.status='ENTRY_RECONCILIATION_REQUIRED';
+    await appendRealLedger(env,'ENTRY_RECONCILIATION_STILL_UNKNOWN',{
+      seriesId:series.seriesId,attemptId:attempt.attemptId,ticker,clientOrderId,
+      reason:positionEvidence.reason||'PROVIDER_POSITION_UNKNOWN',
+      exactOrderCount:exactOrders.length,exactFillCount:exactFills.length,exactSettlementCount:exactSettlements.length,
+    });
+    await saveRealSeriesState(env,series);
+    return {ok:false,classification:'UNKNOWN',reason:positionEvidence.reason||'PROVIDER_POSITION_UNKNOWN',series,control:await loadControl(env),providerWrites:0,orders:0,capitalMovedUsd:0};
   }
 
-  const reconciledAt=new Date(nowMs).toISOString();
-  const providerResult={
-    state:'NO_FILL',
-    reason:'PROVIDER_REJECTED_NO_EXECUTION_CONFIRMED',
-    providerHttpStatus,
-    exactTickerFillCount:0,
-    exactTickerSettlementCount:0,
+  if(exactSettlements.length>0 && exactIdentityEvidence){
+    const reconciledAt=new Date(nowMs).toISOString();
+    const providerResult={state:'FILLED',reason:'PROVIDER_RECONCILED_SETTLED_FLAT',orderId,clientOrderId,fillCount:ownedFillCount||null,remainingCount:0};
+    series.unresolvedEntry=false; series.position=null;
+    series.currentAttempt={...attempt,status:'FILLED',providerResult,reconciledAt};
+    if(seriesTerminal(series)){series.status='COMPLETE_FLAT';series.completedAt=reconciledAt;}
+    else {series.status=(await loadControl(env)).armed?'ARMED_FISHING':'SERIES_PAUSED_DISARMED_CLEAN';}
+    await persistAttempt(env,{runId:series.seriesId,attemptId:attempt.attemptId,attemptNo:Number(attempt.attemptNo||series.attemptsStarted||1),result:'FILLED',...series.currentAttempt});
+    await appendRealLedger(env,'ENTRY_RECONCILED_SETTLED_FLAT',{
+      seriesId:series.seriesId,attemptId:attempt.attemptId,attemptNo:Number(attempt.attemptNo||series.attemptsStarted||1),
+      ticker,clientOrderId,entryOrderId:orderId,exactOrderCount:exactOrders.length,exactFillCount:exactFills.length,exactSettlementCount:exactSettlements.length,
+    });
+    await saveRealSeriesState(env,series);
+    await settleSeriesControl(env,series,0);
+    return {ok:true,classification:'FLAT',reason:'PROVIDER_RECONCILED_SETTLED_FLAT',ticker,clientOrderId,orderId,exactOrderCount:exactOrders.length,exactFillCount:exactFills.length,exactSettlementCount:exactSettlements.length,providerPositionClassification:positionEvidence.classification,series:await loadRealSeriesState(env),control:await loadControl(env),providerWrites:0,orders:0,capitalMovedUsd:0};
+  }
+
+  if((positionEvidence.classification==='ABSENT'||positionEvidence.classification==='FLAT') && exactOrders.length===0 && exactFills.length===0 && exactSettlements.length===0){
+    const reconciledAt=new Date(nowMs).toISOString();
+    const providerResult={state:'NO_FILL',reason:'PROVIDER_RECONCILED_NO_EXECUTION',clientOrderId,fillCount:0,remainingCount:0};
+    series.unresolvedEntry=false; series.position=null;
+    series.currentAttempt={...attempt,status:'NO_FILL',providerResult,reconciledAt};
+    if(seriesTerminal(series)){series.status='COMPLETE_NO_FILL_RECONCILED';series.completedAt=reconciledAt;}
+    else {series.status=(await loadControl(env)).armed?'ARMED_FISHING':'SERIES_PAUSED_DISARMED_CLEAN';}
+    await persistAttempt(env,{runId:series.seriesId,attemptId:attempt.attemptId,attemptNo:Number(attempt.attemptNo||series.attemptsStarted||1),result:'NO_FILL',...series.currentAttempt});
+    await appendRealLedger(env,'ENTRY_RECONCILED_NO_EXECUTION',{
+      seriesId:series.seriesId,attemptId:attempt.attemptId,attemptNo:Number(attempt.attemptNo||series.attemptsStarted||1),
+      asset:attempt.asset||null,ticker,outcomeSide:attempt.outcomeSide||null,direction:attempt.direction||null,clientOrderId,
+      providerPositionClassification:positionEvidence.classification,exactOrderCount:0,exactFillCount:0,exactSettlementCount:0,
+      reconciliation:'PROVIDER_RECONCILED_NO_EXECUTION',
+    });
+    await saveRealSeriesState(env,series);
+    await settleSeriesControl(env,series,0);
+    return {ok:true,classification:'FLAT',reason:'PROVIDER_RECONCILED_NO_EXECUTION',ticker,clientOrderId,orderId:null,exactOrderCount:0,exactFillCount:0,exactSettlementCount:0,providerPositionClassification:positionEvidence.classification,series:await loadRealSeriesState(env),control:await loadControl(env),providerWrites:0,orders:0,capitalMovedUsd:0};
+  }
+
+  if((positionEvidence.classification==='ABSENT'||positionEvidence.classification==='FLAT') && exactOrders.length>0){
+    const zeroFillOrders=exactOrders.every(x=>{
+      const n=Number(x?.fill_count??x?.filled_count??x?.count_filled??0);
+      return Number.isFinite(n)&&n===0;
+    });
+    if(zeroFillOrders && exactFills.length===0 && exactSettlements.length===0){
+      const reconciledAt=new Date(nowMs).toISOString();
+      const providerResult={state:'NO_FILL',reason:'PROVIDER_ORDER_ZERO_FILL_RECONCILED',orderId,clientOrderId,fillCount:0,remainingCount:0};
+      series.unresolvedEntry=false; series.position=null;
+      series.currentAttempt={...attempt,status:'NO_FILL',providerResult,reconciledAt};
+      if(seriesTerminal(series)){series.status='COMPLETE_NO_FILL_RECONCILED';series.completedAt=reconciledAt;}
+      else {series.status=(await loadControl(env)).armed?'ARMED_FISHING':'SERIES_PAUSED_DISARMED_CLEAN';}
+      await persistAttempt(env,{runId:series.seriesId,attemptId:attempt.attemptId,attemptNo:Number(attempt.attemptNo||series.attemptsStarted||1),result:'NO_FILL',...series.currentAttempt});
+      await appendRealLedger(env,'ENTRY_RECONCILED_NO_EXECUTION',{
+        seriesId:series.seriesId,attemptId:attempt.attemptId,attemptNo:Number(attempt.attemptNo||series.attemptsStarted||1),
+        asset:attempt.asset||null,ticker,outcomeSide:attempt.outcomeSide||null,direction:attempt.direction||null,clientOrderId,
+        providerOrderId:orderId,providerPositionClassification:positionEvidence.classification,
+        exactOrderCount:exactOrders.length,exactFillCount:0,exactSettlementCount:0,reconciliation:'PROVIDER_ORDER_ZERO_FILL_RECONCILED',
+      });
+      await saveRealSeriesState(env,series);
+      await settleSeriesControl(env,series,0);
+      return {ok:true,classification:'FLAT',reason:'PROVIDER_ORDER_ZERO_FILL_RECONCILED',ticker,clientOrderId,orderId,exactOrderCount:exactOrders.length,exactFillCount:0,exactSettlementCount:0,providerPositionClassification:positionEvidence.classification,series:await loadRealSeriesState(env),control:await loadControl(env),providerWrites:0,orders:0,capitalMovedUsd:0};
+    }
+  }
+
+  series.status='ENTRY_RECONCILIATION_REQUIRED';
+  await appendRealLedger(env,'ENTRY_RECONCILIATION_STILL_UNKNOWN',{
+    seriesId:series.seriesId,attemptId:attempt.attemptId,ticker,clientOrderId,
+    reason:'PROVIDER_EVIDENCE_NOT_TERMINAL',
     positionClassification:positionEvidence.classification,
-  };
-  series.unresolvedEntry=false;
-  series.position=null;
-  if(seriesTerminal(series)){series.status='COMPLETE_NO_FILL_RECONCILED';series.completedAt=reconciledAt;}
-  else {series.status='SERIES_PAUSED_RECONCILED_CLEAN';}
-  series.currentAttempt={...attempt,status:'NO_FILL',providerResult,reconciledAt};
-  await persistAttempt(env,{
-    runId:series.seriesId,
-    attemptId:attempt.attemptId,
-    attemptNo:Number(attempt.attemptNo||series.attemptsStarted||1),
-    result:'NO_FILL',
-    ...series.currentAttempt,
-  });
-  await appendRealLedger(env,'ENTRY_RECONCILED_NO_EXECUTION',{
-    seriesId:series.seriesId,
-    attemptId:attempt.attemptId,
-    attemptNo:Number(attempt.attemptNo||series.attemptsStarted||1),
-    asset:attempt.asset||null,
-    ticker,
-    outcomeSide:attempt.outcomeSide||null,
-    direction:attempt.direction||null,
-    providerHttpStatus,
-    providerPositionClassification:positionEvidence.classification,
-    exactTickerFillCount:0,
-    exactTickerSettlementCount:0,
-    reconciliation:'PROVIDER_REJECTED_NO_EXECUTION_CONFIRMED',
+    exactOrderCount:exactOrders.length,exactFillCount:exactFills.length,exactSettlementCount:exactSettlements.length,
   });
   await saveRealSeriesState(env,series);
-  await closeRealSeriesControl(env,Number(series.attemptsStarted||1),0); // stays fail-closed DISARMED; founder re-ARM resumes the frozen series
-  return {
-    ok:true,
-    classification:'NO_FILL',
-    reason:'PROVIDER_REJECTED_NO_EXECUTION_CONFIRMED',
-    ticker,
-    providerHttpStatus,
-    exactTickerFillCount:0,
-    exactTickerSettlementCount:0,
-    providerPositionClassification:positionEvidence.classification,
-    series:await loadRealSeriesState(env),
-    control:await loadControl(env),
-    providerWrites:0,
-    orders:0,
-    capitalMovedUsd:0,
-  };
+  return {ok:false,classification:'UNKNOWN',reason:'PROVIDER_EVIDENCE_NOT_TERMINAL',ticker,clientOrderId,orderId,exactOrderCount:exactOrders.length,exactFillCount:exactFills.length,exactSettlementCount:exactSettlements.length,providerPositionClassification:positionEvidence.classification,series,control:await loadControl(env),providerWrites:0,orders:0,capitalMovedUsd:0};
 }
-
 async function baselineAutoTickerConflict(env,ticker) {
   try{
     const read=await baselineReadOnlyPath(env,'/execution-test-state');
@@ -2596,6 +2709,7 @@ function payneRealScope(control,series,kind,position=null,entryContext={}) {
     maxEntryDebitUsd:Number(series?.maxEntryDebitUsd),
     seriesConfigFrozen:series?.configFrozen===true,
     priorAttemptClean:entryContext?.priorAttemptClean===true,
+    entryDebitUsd:Number.isFinite(Number(entryContext?.entryDebitUsd))?Number(entryContext.entryDebitUsd):null,
     ownedByPayne:Boolean(position?.owner===REAL_OWNER),
     ownedTicker:position?.marketTicker||null,
   };
@@ -2755,6 +2869,15 @@ export async function runPayneRealExecutionCycle(env,{postImpl=kalshiPayneOrderP
   let control=await loadControl(env);
   let series=await loadRealSeriesState(env);
 
+  if(series?.unresolvedEntry===true){
+    const reconciliation=await reconcileUnresolvedEntryFromProvider(env,nowMs);
+    series=reconciliation?.series||await loadRealSeriesState(env);
+    if(series?.position && ['OPEN','EXIT_RETRY','EXIT_RECONCILIATION_REQUIRED','RECONCILIATION_UNKNOWN'].includes(String(series.position.status||''))) {
+      return saveRealSeriesState(env,series);
+    }
+    return saveRealSeriesState(env,series);
+  }
+
   if(series?.position && ['OPEN','EXIT_RETRY','EXIT_RECONCILIATION_REQUIRED','RECONCILIATION_UNKNOWN'].includes(String(series.position.status||''))) {
     return managePayneRealPosition(env,control,series,postImpl,nowMs);
   }
@@ -2878,14 +3001,29 @@ export async function runPayneRealExecutionCycle(env,{postImpl=kalshiPayneOrderP
 
   let response,proof;
   try{
-    const out=await postImpl(env,'ENTRY',payload,payneRealScope(control,series,'ENTRY',null,{attemptsBefore:attemptNo-1,priorAttemptClean:interlock.clear}));
+    const out=await postImpl(env,'ENTRY',payload,payneRealScope(control,series,'ENTRY',null,{attemptsBefore:attemptNo-1,priorAttemptClean:interlock.clear,entryDebitUsd:sizing.totalDebitUsd}));
     response=out.response; proof=out.proof;
   }catch(error){
+    const providerPostStarted=error?.payneProviderPostStarted===true;
+    if(!providerPostStarted){
+      const reconciledAt=new Date(nowMs).toISOString();
+      const providerResult={state:'NO_FILL',reason:'LOCAL_PRE_PROVIDER_REJECTED',clientOrderId,fillCount:0,remainingCount:0,error:String(error?.message||error)};
+      series.unresolvedEntry=false;
+      series.position=null;
+      series.currentAttempt={...attempt,status:'NO_FILL',providerResult,reconciledAt};
+      if(seriesTerminal(series)){series.status='COMPLETE_NO_FILL_LOCAL_REJECT';series.completedAt=reconciledAt;}
+      else {series.status='ARMED_FISHING';}
+      await persistAttempt(env,{runId:seriesId,attemptId,attemptNo,result:'NO_FILL',...series.currentAttempt});
+      await appendRealLedger(env,'ENTRY_LOCAL_PRE_PROVIDER_REJECTED',{seriesId,attemptId,attemptNo,ticker:candidate.ticker,clientOrderId,error:String(error?.message||error),providerPostStarted:false});
+      await settleSeriesControl(env,series,0);
+      return saveRealSeriesState(env,series);
+    }
     series.status='ENTRY_RECONCILIATION_REQUIRED';
     series.unresolvedEntry=true;
-    series.currentAttempt={...attempt,status:'WRITE_ERROR_UNKNOWN',error:String(error?.message||error)};
-    await appendRealLedger(env,'ENTRY_WRITE_ERROR_UNKNOWN',{seriesId,attemptId,ticker:candidate.ticker,error:String(error?.message||error)});
-    await settleSeriesControl(env,series,0,{failClosed:true});
+    series.currentAttempt={...attempt,status:'WRITE_ERROR_UNKNOWN',error:String(error?.message||error),providerPostStarted:true};
+    await persistAttempt(env,{runId:seriesId,attemptId,attemptNo,result:'UNKNOWN',...series.currentAttempt});
+    await appendRealLedger(env,'ENTRY_WRITE_ERROR_UNKNOWN',{seriesId,attemptId,attemptNo,ticker:candidate.ticker,clientOrderId,error:String(error?.message||error),providerPostStarted:true});
+    await settleSeriesControl(env,series,0);
     return saveRealSeriesState(env,series);
   }
   const body=await response.json().catch(()=>({}));
@@ -2894,7 +3032,7 @@ export async function runPayneRealExecutionCycle(env,{postImpl=kalshiPayneOrderP
     series.unresolvedEntry=true;
     series.currentAttempt={...attempt,status:'PROVIDER_REJECTED_OR_UNKNOWN',providerHttpStatus:response.status};
     await appendRealLedger(env,'ENTRY_PROVIDER_REJECTED_OR_UNKNOWN',{seriesId,attemptId,ticker:candidate.ticker,httpStatus:response.status,proof});
-    await settleSeriesControl(env,series,0,{failClosed:true});
+    await settleSeriesControl(env,series,0);
     return saveRealSeriesState(env,series);
   }
 
@@ -2913,7 +3051,7 @@ export async function runPayneRealExecutionCycle(env,{postImpl=kalshiPayneOrderP
     series.status='ENTRY_RECONCILIATION_REQUIRED';series.unresolvedEntry=true;
     await persistAttempt(env,{runId:seriesId,attemptId,attemptNo,result:'UNKNOWN',...series.currentAttempt});
     await appendRealLedger(env,'ENTRY_RESULT_UNKNOWN',{seriesId,attemptId,attemptNo,ticker:candidate.ticker,result,proof});
-    await settleSeriesControl(env,series,0,{failClosed:true});
+    await settleSeriesControl(env,series,0);
     return saveRealSeriesState(env,series);
   }
 
