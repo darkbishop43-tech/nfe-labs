@@ -4806,6 +4806,19 @@ document.getElementById('export')?.addEventListener('click',async()=>{const r=aw
       return json({ok:false,state:"FOUNDER_FUNDING_REVIEW_REQUIRED",next:"/founder-funding",providerWrites:0,capitalMovedUsd:0},409);
     }
 
+    if (request.method === "GET" && url.pathname === "/founder-funding-zero-money-proof") {
+      const reviewOk=founderFundingReturnReviewGate({sourceIndex:3,destinationIndex:2,amountUsd:9.8,sourceBalanceUsd:9.8,payneArmed:false,payneOpenPositions:0});
+      const reviewWrongSource=founderFundingReturnReviewGate({sourceIndex:2,destinationIndex:3,amountUsd:9.8,sourceBalanceUsd:9.8,payneArmed:false,payneOpenPositions:0});
+      const reviewWrongDestination=founderFundingReturnReviewGate({sourceIndex:3,destinationIndex:3,amountUsd:9.8,sourceBalanceUsd:9.8,payneArmed:false,payneOpenPositions:0});
+      const reviewArmed=founderFundingReturnReviewGate({sourceIndex:3,destinationIndex:2,amountUsd:9.8,sourceBalanceUsd:9.8,payneArmed:true,payneOpenPositions:0});
+      const reviewOpen=founderFundingReturnReviewGate({sourceIndex:3,destinationIndex:2,amountUsd:9.8,sourceBalanceUsd:9.8,payneArmed:false,payneOpenPositions:1});
+      const confirmOk=founderFundingReturnConfirmGate({reviewPresent:true,reviewAgeMs:1000,balancesUnchanged:true,payneArmed:false,payneOpenPositions:0,sourceIndex:3,destinationIndex:2});
+      const confirmStale=founderFundingReturnConfirmGate({reviewPresent:true,reviewAgeMs:600001,balancesUnchanged:true,payneArmed:false,payneOpenPositions:0,sourceIndex:3,destinationIndex:2});
+      const confirmChanged=founderFundingReturnConfirmGate({reviewPresent:true,reviewAgeMs:1000,balancesUnchanged:false,payneArmed:false,payneOpenPositions:0,sourceIndex:3,destinationIndex:2});
+      const confirmReplay=founderFundingReturnConfirmGate({reviewPresent:false,reviewAgeMs:1000,balancesUnchanged:true,payneArmed:false,payneOpenPositions:0,sourceIndex:3,destinationIndex:2});
+      return json({ok:Boolean(reviewOk.ok&&confirmOk.ok&&!reviewWrongSource.ok&&!reviewWrongDestination.ok&&!reviewArmed.ok&&!reviewOpen.ok&&!confirmStale.ok&&!confirmChanged.ok&&!confirmReplay.ok),state:"FOUNDER_FUNDING_3_TO_2_ZERO_MONEY_PROOF",reviewOk,reviewWrongSource,reviewWrongDestination,reviewArmed,reviewOpen,confirmOk,confirmStale,confirmChanged,confirmReplay,providerTransferPosts:0,orders:0,capitalMovedUsd:0});
+    }
+
     if (request.method === "GET" && url.pathname === "/founder-funding") {
       const state=await loadExecutionTestState(env);
       const balanceProof=await kalshiExecutionBalanceSnapshot(env);
