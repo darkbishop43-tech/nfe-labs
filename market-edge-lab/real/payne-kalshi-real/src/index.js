@@ -145,8 +145,20 @@ export async function updateFounderControl(env, action, rawValue = null) {
   const before=await loadControl(env);
   const next={...before};
   const name=String(action||'').toUpperCase();
-  if (name==='ARM') next.armed=true;
-  else if (name==='DISARM') next.armed=false;
+
+  if (before.armed && !['DISARM','SET_SCAN_ENABLED'].includes(name)) throw new Error('PAYNE_REAL_CONFIG_LOCKED_WHILE_ARMED');
+
+  if (name==='ARM') {
+    const series=await loadRealSeriesState(env);
+    if (Number(before.activeThreshold)!==.70) throw new Error('PAYNE_REAL_ARM_THRESHOLD_MUST_BE_0_70');
+    if (Number(before.maxEntryDebitUsd)!==1) throw new Error('PAYNE_REAL_ARM_MAX_DEBIT_MUST_BE_1_USD');
+    if (Number(before.attemptTarget)!==1) throw new Error('PAYNE_REAL_ARM_ATTEMPT_TARGET_MUST_BE_1');
+    if (Number(before.requiredExchangeIndex)!==3) throw new Error('PAYNE_REAL_ARM_INDEX3_REQUIRED');
+    if (Number(series?.attemptsStarted||0)>=1) throw new Error('PAYNE_REAL_1X1_ALREADY_CONSUMED');
+    if (series?.unresolvedEntry===true) throw new Error('PAYNE_REAL_ENTRY_RECONCILIATION_REQUIRED');
+    if (series?.position && ['OPEN','EXIT_RETRY','EXIT_RECONCILIATION_REQUIRED'].includes(String(series.position.status||''))) throw new Error('PAYNE_REAL_OPEN_POSITION_EXISTS');
+    next.armed=true;
+  } else if (name==='DISARM') next.armed=false;
   else if (name==='SET_THRESHOLD') {
     const value=Number(rawValue);
     if (!CONTROL_THRESHOLD_OPTIONS.includes(value)) throw new Error('PAYNE_CONTROL_THRESHOLD_NOT_ALLOWED');
@@ -164,11 +176,14 @@ export async function updateFounderControl(env, action, rawValue = null) {
   } else {
     throw new Error('PAYNE_CONTROL_ACTION_NOT_ALLOWED');
   }
-  next.providerWriteAuthority='DISABLED';
-  next.providerPostAuthority='HELD';
-  next.realExecution='DISABLED';
-  next.fundingAuthority='DISABLED';
-  next.requiredExchangeIndex=null;
+
+  next.realControlSchema=REAL_CONTROL_SCHEMA;
+  next.requiredExchangeIndex=3;
+  next.providerWriteAuthority=next.armed?'ENABLED_GOVERNED_PAYNE_ONLY':'BUILT_INACTIVE_DISARMED';
+  next.providerPostAuthority=next.armed?'ENABLED_GOVERNED_PAYNE_ONLY':'BUILT_INACTIVE_DISARMED';
+  next.realExecution=next.armed?'ENABLED_GOVERNED_PAYNE_ONLY':'BUILT_INACTIVE_DISARMED';
+  next.fundingAuthority=next.armed?'INDEX3_ONLY':'INDEX3_ONLY_INACTIVE_DISARMED';
+
   await kvPutJson(env,CONTROL_KEY,next);
   await appendEvent(env,'FOUNDER_CONTROL_CHANGED',{
     action:name,
@@ -177,10 +192,11 @@ export async function updateFounderControl(env, action, rawValue = null) {
     maxEntryDebitUsd:next.maxEntryDebitUsd,
     attemptTarget:next.attemptTarget,
     scanEnabled:next.scanEnabled,
-    providerWriteAuthority:'DISABLED',
-    providerPostAuthority:'HELD',
-    realExecution:'DISABLED',
-    fundingAuthority:'DISABLED',
+    requiredExchangeIndex:3,
+    providerWriteAuthority:next.providerWriteAuthority,
+    providerPostAuthority:next.providerPostAuthority,
+    realExecution:next.realExecution,
+    fundingAuthority:next.fundingAuthority,
   });
   return next;
 }
