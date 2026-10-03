@@ -73,6 +73,32 @@ jobs:
           test "$code" = "200"
 
           curl -fsS "$base/real-state" -o /tmp/real-state.json
+          curl -fsS "$base/ui-state" -o /tmp/ui-state.json
+          curl -fsS "$base/" -o /tmp/cockpit.html
+
+          jq -e '
+            .schema == "PAYNE_FAST_UI_STATE_V1" and
+            .uiPollAuthority == "PERSISTED_STATE_ONLY" and
+            .providerGets == 0 and
+            .providerWrites == 0 and
+            .orders == 0 and
+            .capitalMovedUsd == 0 and
+            .control.armed == false and
+            .realExecution.schema == "PAYNE_REAL_OBSERVABILITY_V1"
+          ' /tmp/ui-state.json >/dev/null
+
+          grep -q 'CURRENT RUN' /tmp/cockpit.html
+          grep -q 'LAST ATTEMPT' /tmp/cockpit.html
+          grep -q 'BASELINE AGE' /tmp/cockpit.html
+          grep -q 'LAST UI UPDATE' /tmp/cockpit.html
+          grep -q 'setInterval(loadFastState,5000)' /tmp/cockpit.html
+          grep -q 'setInterval(load,60000)' /tmp/cockpit.html
+          grep -q 'ENTRY SENT' /tmp/cockpit.html
+          grep -q 'FILLED / MANAGING' /tmp/cockpit.html
+          grep -q 'NO_PROVIDER_ATTEMPT' /tmp/cockpit.html
+          grep -q "BTC:'<svg" /tmp/cockpit.html
+          grep -q "NEAR:'<svg" /tmp/cockpit.html
+
           jq -e '
             .schema == "PAYNE_REAL_STATE_V1" and
             .control.armed == false and
@@ -172,6 +198,13 @@ jobs:
           echo "PAYNE_REAL_ARMED=$(jq -r '.control.armed' /tmp/real-state.json)"
           echo "PAYNE_ATTEMPTS=$(jq -r '.control.attempts|tostring + "/" + (.control.attemptTarget|tostring)' /tmp/real-state.json)"
           echo "PAYNE_INDEX=$(jq -r '.control.requiredExchangeIndex' /tmp/real-state.json)"
+          echo "FAST_UI_AUTHORITY=$(jq -r '.uiPollAuthority' /tmp/ui-state.json)"
+          echo "FAST_UI_PROVIDER_GETS=$(jq -r '.providerGets' /tmp/ui-state.json)"
+          echo "CURRENT_RUN_STATUS=$(jq -r '.realExecution.status' /tmp/ui-state.json)"
+          echo "CURRENT_RUN_ATTEMPTED=$(jq -r '.realExecution.attempted' /tmp/ui-state.json)"
+          echo "CURRENT_RUN_NO_FILL=$(jq -r '.realExecution.noFill' /tmp/ui-state.json)"
+          echo "CURRENT_RUN_FILLED=$(jq -r '.realExecution.filled' /tmp/ui-state.json)"
+          echo "CURRENT_RUN_UNKNOWN=$(jq -r '.realExecution.unknown' /tmp/ui-state.json)"
           echo "providerWrites=0"
           echo "orders=0"
           echo "capitalMovedUsd=0"
