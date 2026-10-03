@@ -1,0 +1,21 @@
+name: PAYNE self-reconciliation exact-head zero-money validation 2
+on:
+  push:
+    branches: [payne-self-reconcile-validation-2]
+    paths:
+      - '.github/workflows/payne-self-reconcile-validation-2.yml'
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: market-edge-lab/real/payne-kalshi-real
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Run complete PAYNE zero-money suite
+        run: npm test
