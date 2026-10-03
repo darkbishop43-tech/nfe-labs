@@ -49,8 +49,12 @@ function assertPayload(kind,payload,scope) {
 
   if(kind==='ENTRY'){
     if(scope?.armed!==true) throw new Error('PAYNE_ENTRY_ARM_REQUIRED');
-    if(Number(scope?.attemptTarget)!==1 || Number(scope?.attemptsBefore)!==0) throw new Error('PAYNE_ENTRY_1X1_SCOPE_REQUIRED');
-    if(Number(scope?.maxEntryDebitUsd)!==1) throw new Error('PAYNE_ENTRY_ONE_DOLLAR_CAP_REQUIRED');
+    const target=Number(scope?.attemptTarget), before=Number(scope?.attemptsBefore), cap=Number(scope?.maxEntryDebitUsd);
+    if(scope?.seriesConfigFrozen!==true) throw new Error('PAYNE_ENTRY_SERIES_CONFIG_NOT_FROZEN');
+    if(!Number.isInteger(target)||target<1||!Number.isInteger(before)||before<0||before>=target) throw new Error('PAYNE_ENTRY_SERIES_ATTEMPT_NOT_AUTHORIZED');
+    if(scope?.priorAttemptClean!==true) throw new Error('PAYNE_ENTRY_PRIOR_ATTEMPT_NOT_CLEAN');
+    if(!Number.isFinite(cap)||!(cap>0)) throw new Error('PAYNE_ENTRY_SERIES_STAKE_CAP_INVALID');
+    if(count*price>cap+1e-9) throw new Error('PAYNE_ENTRY_EXCEEDS_SERIES_STAKE_CAP');
     if(payload.reduce_only!==false) throw new Error('PAYNE_ENTRY_REDUCE_ONLY_FALSE_REQUIRED');
   } else {
     if(scope?.ownedByPayne!==true) throw new Error('PAYNE_EXIT_OWNERSHIP_REQUIRED');
