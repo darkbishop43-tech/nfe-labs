@@ -5,10 +5,14 @@ workers_dev = true
 
 [vars]
 EXPERIMENT_NAME = "MARKET EDGE — PAYNE-KALSHI REAL"
-EXECUTION_MODE = "PRELIVE_REAL_COCKPIT_ZERO_MONEY"
-LIVE_ORDER_SUBMISSION = "DISABLED"
-FUNDING_AUTHORITY = "DISABLED"
+EXECUTION_MODE = "PAYNE_REAL_CAPABILITY_DISARMED"
+LIVE_ORDER_SUBMISSION = "GOVERNED_PAYNE_ONLY_DISARMED"
+FUNDING_AUTHORITY = "INDEX3_ONLY_DISARMED"
 PAYNE_THRESHOLD = "0.70"
+PAYNE_REAL_DEFAULT_ARMED = "FALSE"
+PAYNE_REAL_ATTEMPT_TARGET = "1"
+PAYNE_REAL_MAX_ENTRY_DEBIT_USD = "1"
+PAYNE_REAL_REQUIRED_EXCHANGE_INDEX = "3"
 MARKET_SCOPE = "BTC_ETH_SOL_XRP_HYPE_ZEC_DOGE_BNB_NEAR_AUTO_SELECT"
 
 # SECURITY:
@@ -28,7 +32,7 @@ service = "market-edge-baseline-real"
 [triggers]
 crons = ["* * * * *"]
 
-# PRE-LIVE AUTHORITY:
-# Cron performs read-only observation / evidence collection only.
-# Provider order submission, funding authority, and real execution remain disabled.
+# PAYNE REAL CAPABILITY:
+# Deployment defaults DISARMED. Cron always observes read-only; real entry writes are reachable only after explicit bounded PAYNE ARM.
+# Management may continue for durable PAYNE-owned positions after DISARM. Index 3 is the only permitted funding shard.
 # This Worker MUST NOT bind BASELINE_REAL_SHADOW_STATE or any Payne Paper namespace.
