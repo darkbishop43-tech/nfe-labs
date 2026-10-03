@@ -13,6 +13,7 @@ import {
   runReadOnlyScan,
   loadControl,
   normalizeBaselineEconomicEntryPrice,
+  buildAccountFinancialSummary,
 } from '../src/index.js';
 import payneWorker from '../src/index.js';
 import { cockpitHtml } from '../src/cockpit-html.js';
@@ -136,6 +137,40 @@ test('Baseline forensic price normalization preserves YES and complements NO',()
   assert.equal(unknown.economicOutcomePrice,null);
 });
 
+test('account financial summary separates provider account truth, PAYNE scope, missing fields, and stale state',()=>{
+  const now=Date.parse('2026-10-02T06:05:00Z');
+  const summary=buildAccountFinancialSummary({
+    balanceBody:{balance_breakdown:[
+      {exchange_index:0,balance:1.00},
+      {exchange_index:2,balance:11.41},
+      {exchange_index:3,balance:7.25},
+    ]},
+    series:{seriesId:'PAYNE-S1',attemptsStarted:1,position:{entryAverageFeePaid:.03,exitAverageFeePaid:.02}},
+    ledger:[
+      {owner:'PAYNE_KALSHI_REAL',seriesId:'PAYNE-S1',at:'2026-10-02T06:04:00Z',realizedPnlUsd:.40},
+      {owner:'PAYNE_KALSHI_REAL',seriesId:'OLD',at:'2026-10-02T05:00:00Z',realizedPnlUsd:-.10},
+      {owner:'AUTO',seriesId:'AUTO-S1',at:'2026-10-02T06:03:00Z',realizedPnlUsd:99},
+      {owner:'FOUNDER_MANUAL',seriesId:'MANUAL-S1',at:'2026-10-02T06:02:00Z',realizedPnlUsd:99},
+    ],
+    providerSyncedAt:'2026-10-02T06:00:00Z',
+    nowMs:now,
+    staleAfterMs:120000,
+  });
+  assert.equal(summary.account.cashUsd,19.66);
+  assert.match(summary.account.cashStatus,/SUM OF PROVIDER BALANCE_BREAKDOWN/);
+  assert.equal(summary.account.openPositionValueUsd,null);
+  assert.equal(summary.account.openPositionValueStatus,'NOT EXPOSED');
+  assert.equal(summary.account.totalAccountValueStatus,'NOT EXPOSED');
+  assert.equal(summary.account.realizedPnlStatus,'NOT EXPOSED');
+  assert.equal(summary.account.unrealizedPnlStatus,'NOT EXPOSED');
+  assert.equal(summary.payne.currentRunPnlUsd,.4);
+  assert.equal(summary.payne.utcDayPnlUsd,.3);
+  assert.equal(summary.payne.feesUsd,.05);
+  assert.deepEqual(summary.payne.excludes,['AUTO','FOUNDER_MANUAL']);
+  assert.equal(summary.providerFinancialStatus,'STALE');
+  assert.match(summary.scopeNotice,/SEPARATE FROM FUNDING AUTHORITY \/ INDEX 3/);
+});
+
 test('provider snapshot preserves authentic live contract timing and price evidence',()=>{
   const now=Date.parse('2026-10-02T06:00:00Z');
   const snap=providerMarketSnapshot(providerMarket('BTC','KXBTC15M-TEST','KXBTC15M'),now,'BTC','2026-10-02T06:00:01Z');
@@ -211,6 +246,15 @@ test('cockpit calculates authentic Payne fields, decisions, clocks, exact reread
     assert.equal(out.orders,0);
     assert.equal(out.capitalMovedUsd,0);
     assert.equal(out.index3.status,'READ-PROVEN AVAILABLE');
+    assert.equal(out.financials.account.cashUsd,18.66);
+    assert.match(out.financials.account.cashStatus,/SUM OF PROVIDER BALANCE_BREAKDOWN/);
+    assert.equal(out.financials.account.totalAccountValueStatus,'NOT EXPOSED');
+    assert.equal(out.financials.account.realizedPnlStatus,'NOT EXPOSED');
+    assert.equal(out.financials.account.unrealizedPnlStatus,'NOT EXPOSED');
+    assert.equal(out.financials.payne.currentRunPnlStatus,'UNKNOWN');
+    assert.equal(out.financials.payne.utcDayPnlUsd,0);
+    assert.deepEqual(out.financials.payne.excludes,['AUTO','FOUNDER_MANUAL']);
+    assert.equal(out.financials.providerFinancialStatus,'FRESH');
     assert.equal(out.selected.ticker,'KXBTC15M-TEST');
     assert.equal(out.selected.direction,'UP');
     assert.equal(out.payne.source,'BASELINE_REAL_SERVICE_BINDING_READ_ONLY');
@@ -492,6 +536,18 @@ test('would-fire forensic route reconstructs persisted FIRE_READY evidence read-
 test('cockpit HTML exposes clocks, decision evidence, automatic refresh, and no order-submit control',()=>{
   const html=cockpitHtml();
   assert.equal(COCKPIT_REFRESH_MS,60_000);
+  assert.match(html,/ACCOUNT \/ P&L/);
+  assert.match(html,/ACCOUNT CASH/);
+  assert.match(html,/OPEN POSITION VALUE/);
+  assert.match(html,/TOTAL ACCOUNT VALUE/);
+  assert.match(html,/PROVIDER ACCOUNT REALIZED P\/L/);
+  assert.match(html,/PROVIDER ACCOUNT UNREALIZED P\/L/);
+  assert.match(html,/PAYNE CURRENT RUN P\/L/);
+  assert.match(html,/UTC DAY P\/L/);
+  assert.match(html,/PAYNE RUN FEES/);
+  assert.match(html,/LAST PROVIDER FINANCIAL SYNC/);
+  assert.match(html,/separate from FUNDING AUTHORITY \/ INDEX 3/i);
+  assert.match(html,/excludes AUTO and FOUNDER MANUAL/i);
   assert.match(html,/FOUNDER CONTROLS/);
   assert.match(html,/DATA EXPORT/);
   assert.match(html,/CURRENT SNAPSHOT/);
