@@ -142,7 +142,7 @@ test('account financial summary separates provider account truth, PAYNE scope, m
   const summary=buildAccountFinancialSummary({
     balanceBody:{balance_breakdown:[
       {exchange_index:0,balance:1.00},
-      {exchange_index:2,balance:index2Balance},
+      {exchange_index:2,balance:11.41},
       {exchange_index:3,balance:7.25},
     ]},
     series:{seriesId:'PAYNE-S1',attemptsStarted:1,position:{entryAverageFeePaid:.03,exitAverageFeePaid:.02}},
@@ -245,8 +245,8 @@ test('cockpit calculates authentic Payne fields, decisions, clocks, exact reread
     assert.equal(out.providerWrites,0);
     assert.equal(out.orders,0);
     assert.equal(out.capitalMovedUsd,0);
-    assert.equal(out.index3.status,'READ-PROVEN AVAILABLE');
-    assert.equal(out.financials.account.cashUsd,18.66);
+    assert.equal(out.index2.status,'READ-PROVEN AVAILABLE');
+    assert.equal(out.financials.account.cashUsd,15.91);
     assert.match(out.financials.account.cashStatus,/SUM OF PROVIDER BALANCE_BREAKDOWN/);
     assert.equal(out.financials.account.totalAccountValueStatus,'NOT EXPOSED');
     assert.equal(out.financials.account.realizedPnlStatus,'NOT EXPOSED');
@@ -311,7 +311,7 @@ test('zero-money preview permits matching Index 2, blocks mismatch, and reports 
   const mismatchIo=installKalshiFetch({btcExchangeIndex:3,index2Balance:15.91,index3Balance:0});
   try{
     const out=await buildCockpitData(mismatchEnv,Date.parse('2026-10-02T06:05:00Z'));
-    assert.equal(out.selected.exchangeIndex,2);
+    assert.equal(out.selected.exchangeIndex,3);
     assert.equal(out.index2.balance,15.91);
     assert.equal(out.zeroMoneyPreview.status,'BLOCKED');
     assert.equal(out.zeroMoneyPreview.reason,'HOLD_REQUIRED_EXCHANGE_INDEX_2');
@@ -347,7 +347,8 @@ test('zero-money preview blocks when matching Index 2 funding is insufficient',a
     const out=await buildCockpitData(env,Date.parse('2026-10-02T06:05:00Z'));
     assert.equal(out.selected.exchangeIndex,2);
     assert.equal(out.index2.balance,0.25);
-    assert.notEqual(out.zeroMoneyPreview.status,'FIRE_READY');
+    assert.equal(out.zeroMoneyPreview.status,'BLOCKED');
+    assert.equal(out.zeroMoneyPreview.reason,'HOLD_INDEX2_FUNDING_INSUFFICIENT');
     assert.equal(out.providerWrites,0);
     assert.equal(out.orders,0);
     assert.equal(out.capitalMovedUsd,0);
