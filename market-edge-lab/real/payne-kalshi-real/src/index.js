@@ -2426,6 +2426,100 @@ async function providerTickerPositionEvidence(env,ticker) {
   }
 }
 
+export async function reconcileUnresolvedEntryFromProvider(env,nowMs=Date.now()) {
+  const series=await loadRealSeriesState(env);
+  if(series?.unresolvedEntry!==true) throw new Error('PAYNE_NO_UNRESOLVED_ENTRY');
+  const attempt=series?.currentAttempt||null;
+  const ticker=String(attempt?.marketTicker||'').trim();
+  if(!ticker || !attempt?.attemptId) throw new Error('PAYNE_UNRESOLVED_ENTRY_IDENTITY_INCOMPLETE');
+
+  const positionEvidence=await providerTickerPositionEvidence(env,ticker);
+  if(!positionEvidence.ok || ['OPEN','UNKNOWN'].includes(String(positionEvidence.classification||''))) {
+    throw new Error('PAYNE_UNRESOLVED_ENTRY_POSITION_NOT_PROVEN_FLAT');
+  }
+
+  const readRows=async path=>{
+    const response=await kalshiGetOnly(env,path);
+    const body=await response.json().catch(()=>null);
+    if(!response.ok || !body) throw new Error('PAYNE_RECONCILIATION_PROVIDER_READ_FAILED_'+String(response.status));
+    return body;
+  };
+  const q='?limit=200&subaccount=0&ticker='+encodeURIComponent(ticker);
+  const [fillsNow,historicalFills,settlements]=await Promise.all([
+    readRows('/trade-api/v2/portfolio/fills'+q),
+    readRows('/trade-api/v2/historical/fills'+q),
+    readRows('/trade-api/v2/portfolio/settlements'+q),
+  ]);
+  const exactFills=[
+    ...(Array.isArray(fillsNow?.fills)?fillsNow.fills:[]),
+    ...(Array.isArray(historicalFills?.fills)?historicalFills.fills:[]),
+  ].filter(x=>String(x?.ticker||x?.market_ticker||'')===ticker);
+  const exactSettlements=(Array.isArray(settlements?.settlements)?settlements.settlements:[])
+    .filter(x=>String(x?.ticker||'')===ticker);
+
+  if(exactFills.length>0 || exactSettlements.length>0) {
+    throw new Error('PAYNE_UNRESOLVED_ENTRY_PROVIDER_EXECUTION_EVIDENCE_REQUIRES_DEEP_RECONCILIATION');
+  }
+
+  const providerHttpStatus=Number(attempt?.providerHttpStatus);
+  if(!(providerHttpStatus>=400 && providerHttpStatus<500)) {
+    throw new Error('PAYNE_UNRESOLVED_ENTRY_REJECTION_NOT_PROVEN');
+  }
+
+  const reconciledAt=new Date(nowMs).toISOString();
+  const providerResult={
+    state:'NO_FILL',
+    reason:'PROVIDER_REJECTED_NO_EXECUTION_CONFIRMED',
+    providerHttpStatus,
+    exactTickerFillCount:0,
+    exactTickerSettlementCount:0,
+    positionClassification:positionEvidence.classification,
+  };
+  series.unresolvedEntry=false;
+  series.position=null;
+  series.status='COMPLETE_NO_FILL_RECONCILED';
+  series.completedAt=reconciledAt;
+  series.currentAttempt={...attempt,status:'NO_FILL',providerResult,reconciledAt};
+  await persistAttempt(env,{
+    runId:series.seriesId,
+    attemptId:attempt.attemptId,
+    attemptNo:Number(attempt.attemptNo||series.attemptsStarted||1),
+    result:'NO_FILL',
+    ...series.currentAttempt,
+  });
+  await appendRealLedger(env,'ENTRY_RECONCILED_NO_EXECUTION',{
+    seriesId:series.seriesId,
+    attemptId:attempt.attemptId,
+    attemptNo:Number(attempt.attemptNo||series.attemptsStarted||1),
+    asset:attempt.asset||null,
+    ticker,
+    outcomeSide:attempt.outcomeSide||null,
+    direction:attempt.direction||null,
+    providerHttpStatus,
+    providerPositionClassification:positionEvidence.classification,
+    exactTickerFillCount:0,
+    exactTickerSettlementCount:0,
+    reconciliation:'PROVIDER_REJECTED_NO_EXECUTION_CONFIRMED',
+  });
+  await saveRealSeriesState(env,series);
+  await closeRealSeriesControl(env,Number(series.attemptsStarted||1),0);
+  return {
+    ok:true,
+    classification:'NO_FILL',
+    reason:'PROVIDER_REJECTED_NO_EXECUTION_CONFIRMED',
+    ticker,
+    providerHttpStatus,
+    exactTickerFillCount:0,
+    exactTickerSettlementCount:0,
+    providerPositionClassification:positionEvidence.classification,
+    series:await loadRealSeriesState(env),
+    control:await loadControl(env),
+    providerWrites:0,
+    orders:0,
+    capitalMovedUsd:0,
+  };
+}
+
 async function baselineAutoTickerConflict(env,ticker) {
   try{
     const read=await baselineReadOnlyPath(env,'/execution-test-state');
@@ -2776,6 +2870,10 @@ export default {
     if (request.method === 'POST' && url.pathname === '/control') {
       let body={}; try { body=await request.json(); } catch {}
       try {
+        if(String(body?.action||'').toUpperCase()==='RECONCILE_UNRESOLVED_ENTRY'){
+          const reconciliation=await reconcileUnresolvedEntryFromProvider(env);
+          return Response.json(reconciliation,{headers:{'cache-control':'no-store'}});
+        }
         const control=await updateFounderControl(env,body?.action,body?.value);
         return Response.json({
           ok:true,
