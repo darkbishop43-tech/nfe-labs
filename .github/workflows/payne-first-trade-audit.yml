@@ -24,11 +24,11 @@ jobs:
           jq '{control:{armed,attempts,attemptTarget,openPositions,maxEntryDebitUsd,activeThreshold,fundingAuthority,requiredExchangeIndex},series}' /tmp/state.json
           echo 'PAYNE_REAL_LEDGER_NEAR_OR_UNKNOWN='
           jq '[.rows[]|select((.asset=="NEAR") or (.ticker|tostring|contains("NEAR")) or (.marketTicker|tostring|contains("NEAR")) or (.type|tostring|contains("UNKNOWN")) or (.result|tostring|contains("UNKNOWN")))]' /tmp/ledger.json
-          echo 'PROVIDER_NEAR_FILLS='
-          jq '[((.fills//[])+(.historicalFills//[]))[]|select((.ticker|tostring|contains("NEAR")))]' /tmp/provider.json
-          echo 'PROVIDER_NEAR_SETTLEMENTS='
-          jq '[.settlements[]?|select((.ticker|tostring|contains("NEAR")))]' /tmp/provider.json
-          echo 'PROVIDER_NEAR_POSITIONS='
-          jq '[.positions[]?|select((.ticker|tostring|contains("NEAR")))]' /tmp/provider.json
+          echo 'PROVIDER_EXACT_FILLS='
+          jq '[((.fills//[])+(.historicalFills//[]))[]|select((.ticker=="KXNEAR15M-26OCT031515-15") or (.marketTicker=="KXNEAR15M-26OCT031515-15"))]' /tmp/provider.json
+          echo 'PROVIDER_EXACT_SETTLEMENTS='
+          jq '[.settlements[]?|select(.ticker=="KXNEAR15M-26OCT031515-15")]' /tmp/provider.json
+          echo 'PROVIDER_EXACT_POSITIONS='
+          jq '[.positions[]?|select(.ticker=="KXNEAR15M-26OCT031515-15")]' /tmp/provider.json
           echo 'CAPITAL='
           jq '{provider:.provider,safety:.safety}' /tmp/capital.json
