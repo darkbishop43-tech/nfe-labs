@@ -2024,6 +2024,430 @@ export async function buildCockpitData(env, nowMs=Date.now()) {
   };
 }
 
+
+export function defaultRealSeriesState() {
+  return {
+    schema:'PAYNE_REAL_SERIES_V1',
+    owner:REAL_OWNER,
+    seriesId:null,
+    status:'READY_DISARMED',
+    attemptsStarted:0,
+    attemptTarget:1,
+    threshold:.70,
+    maxEntryDebitUsd:1,
+    requiredExchangeIndex:3,
+    unresolvedEntry:false,
+    currentAttempt:null,
+    position:null,
+    completedAt:null,
+    updatedAt:new Date().toISOString(),
+  };
+}
+
+export async function loadRealSeriesState(env) {
+  const saved=await kvGetJson(env,REAL_SERIES_KEY);
+  const base=defaultRealSeriesState();
+  if(!saved || saved?.schema!=='PAYNE_REAL_SERIES_V1' || saved?.owner!==REAL_OWNER) return base;
+  return {
+    ...base,
+    ...saved,
+    owner:REAL_OWNER,
+    attemptTarget:1,
+    threshold:.70,
+    maxEntryDebitUsd:1,
+    requiredExchangeIndex:3,
+    attemptsStarted:Number.isFinite(Number(saved?.attemptsStarted))?Math.max(0,Math.trunc(Number(saved.attemptsStarted))):0,
+  };
+}
+
+export async function saveRealSeriesState(env,state) {
+  const next={...defaultRealSeriesState(),...state,owner:REAL_OWNER,attemptTarget:1,threshold:.70,maxEntryDebitUsd:1,requiredExchangeIndex:3,updatedAt:new Date().toISOString()};
+  await kvPutJson(env,REAL_SERIES_KEY,next);
+  return next;
+}
+
+export async function appendRealLedger(env,type,payload={}) {
+  const at=new Date().toISOString(), id=crypto.randomUUID();
+  const row={schema:'PAYNE_REAL_LEDGER_V1',recordId:id,at,owner:REAL_OWNER,type,...payload};
+  await kvPutJson(env,REAL_LEDGER_PREFIX+at+':'+id,row);
+  return row;
+}
+
+export async function listRealLedger(env,limit=200) {
+  const kv=binding(env);
+  if(typeof kv.list!=='function') return [];
+  const page=await kv.list({prefix:REAL_LEDGER_PREFIX,limit:Math.max(1,Math.min(1000,Number(limit)||200))});
+  const rows=[];
+  for(const item of page?.keys||[]){const x=await kvGetJson(env,item.name);if(x)rows.push(x);}
+  return rows.sort((a,b)=>String(a.at).localeCompare(String(b.at))).slice(-Math.max(1,Math.min(1000,Number(limit)||200)));
+}
+
+export function interpretPayneOrderResponse(body) {
+  const orderId=body?.order_id||body?.order?.order_id||null;
+  const clientOrderId=body?.client_order_id||body?.order?.client_order_id||null;
+  const fillRaw=body?.fill_count??body?.filled_count??body?.order?.fill_count;
+  const remainRaw=body?.remaining_count??body?.order?.remaining_count;
+  const fillCount=Number(fillRaw), remainingCount=Number(remainRaw);
+  const averageFillPrice=body?.average_fill_price??body?.order?.average_fill_price??null;
+  const averageFeePaid=body?.average_fee_paid??body?.order?.average_fee_paid??null;
+  if(!orderId || !Number.isFinite(fillCount) || fillCount<0 || !Number.isFinite(remainingCount) || remainingCount<0) {
+    return {state:'UNKNOWN',orderId,clientOrderId,fillCount:Number.isFinite(fillCount)?fillCount:null,remainingCount:Number.isFinite(remainingCount)?remainingCount:null,averageFillPrice,averageFeePaid,reason:'AMBIGUOUS_PROVIDER_ORDER_RESPONSE'};
+  }
+  if(fillCount<=0) return {state:'NO_FILL',orderId,clientOrderId,fillCount:0,remainingCount,averageFillPrice,averageFeePaid,reason:'AUTHORITATIVE_ZERO_FILL'};
+  if(remainingCount>0) return {state:'PARTIAL',orderId,clientOrderId,fillCount,remainingCount,averageFillPrice,averageFeePaid,reason:'AUTHORITATIVE_PARTIAL_FILL'};
+  return {state:'FILLED',orderId,clientOrderId,fillCount,remainingCount:0,averageFillPrice,averageFeePaid,reason:'AUTHORITATIVE_FILL'};
+}
+
+async function providerTickerPositionEvidence(env,ticker) {
+  const rows=[]; let cursor='', pages=0, lastStatus=null;
+  try{
+    do{
+      const path='/trade-api/v2/portfolio/positions?limit=1000&subaccount=0'+(cursor?'&cursor='+encodeURIComponent(cursor):'');
+      const response=await kalshiGetOnly(env,path); lastStatus=response.status;
+      if(!response.ok) return {ok:false,classification:'UNKNOWN',reason:'HTTP_'+response.status,httpStatus:response.status,paginationComplete:false,matched:null};
+      const body=await response.json().catch(()=>null);
+      if(!body || !Array.isArray(body.market_positions)) return {ok:false,classification:'UNKNOWN',reason:'UNKNOWN_SCHEMA',httpStatus:response.status,paginationComplete:false,matched:null};
+      rows.push(...body.market_positions); cursor=typeof body.cursor==='string'?body.cursor:''; pages++;
+      if(pages>=100 && cursor) return {ok:false,classification:'UNKNOWN',reason:'PAGINATION_SAFETY_LIMIT',httpStatus:response.status,paginationComplete:false,matched:null};
+    }while(cursor);
+    const matches=rows.filter(x=>String(x?.ticker||x?.market_ticker||'')===String(ticker||''));
+    if(matches.length>1) return {ok:true,classification:'UNKNOWN',reason:'TICKER_AMBIGUOUS',httpStatus:lastStatus,paginationComplete:true,matched:null};
+    if(matches.length===0) return {ok:true,classification:'ABSENT',reason:'NO_EXACT_TICKER_POSITION_OBSERVED',httpStatus:lastStatus,paginationComplete:true,matched:null};
+    const exact=matches[0];
+    const raw=exact?.position_fp??exact?.position??exact?.quantity;
+    const qty=Number(raw);
+    if(!Number.isFinite(qty)) return {ok:true,classification:'UNKNOWN',reason:'QUANTITY_INVALID',httpStatus:lastStatus,paginationComplete:true,matched:exact};
+    return {ok:true,classification:Math.abs(qty)<=1e-9?'FLAT':'OPEN',reason:Math.abs(qty)<=1e-9?'MATCHED_TICKER_ZERO':'MATCHED_TICKER_NONZERO',httpStatus:lastStatus,paginationComplete:true,matched:exact,quantity:qty};
+  }catch(error){
+    return {ok:false,classification:'UNKNOWN',reason:String(error?.message||error),httpStatus:lastStatus,paginationComplete:false,matched:null};
+  }
+}
+
+async function baselineAutoTickerConflict(env,ticker) {
+  try{
+    const read=await baselineReadOnlyPath(env,'/execution-test-state');
+    if(!read?.ok) return {ok:false,conflict:null,reason:'BASELINE_EXECUTION_STATE_UNAVAILABLE'};
+    const body=read.body||{};
+    const positions=Array.isArray(body?.positions)?body.positions:Array.isArray(body?.state?.positions)?body.state.positions:[];
+    const conflict=positions.some(p=>['OPEN','EXIT_RETRY','POSITION_OPEN_WAITING_FOR_EXIT','POSITION_OPEN_EXIT_RETRY_REQUIRED'].includes(String(p?.status||''))&&String(p?.marketTicker||p?.ticker||'')===String(ticker||''));
+    return {ok:true,conflict,reason:conflict?'AUTO_EXACT_TICKER_POSITION_CONFLICT':'NO_AUTO_EXACT_TICKER_POSITION'};
+  }catch(error){return {ok:false,conflict:null,reason:String(error?.message||error)};}
+}
+
+function payneRealScope(control,series,kind,position=null) {
+  return {
+    owner:REAL_OWNER,
+    exchangeIndex:3,
+    authorized:kind==='ENTRY'?Boolean(control?.armed):Boolean(position?.owner===REAL_OWNER),
+    armed:Boolean(control?.armed),
+    attemptTarget:1,
+    attemptsBefore:Number(series?.attemptsStarted||0),
+    maxEntryDebitUsd:1,
+    ownedByPayne:Boolean(position?.owner===REAL_OWNER),
+    ownedTicker:position?.marketTicker||null,
+  };
+}
+
+function realizedPnlFromPosition(position) {
+  const qty=Number(position?.filledCount), entry=Number(position?.entryAverageFillPrice), exit=Number(position?.exitAverageFillPrice);
+  const entryFee=Number(position?.entryAverageFeePaid||0),exitFee=Number(position?.exitAverageFeePaid||0);
+  if(!Number.isFinite(qty)||!Number.isFinite(entry)||!Number.isFinite(exit)) return null;
+  return Number((((exit-entry)*qty)-entryFee-exitFee).toFixed(4));
+}
+
+async function closeRealSeriesControl(env,attempts=1,openPositions=0) {
+  const control=await loadControl(env);
+  const next={...control,armed:false,attempts,openPositions,providerWriteAuthority:'BUILT_INACTIVE_DISARMED',providerPostAuthority:'BUILT_INACTIVE_DISARMED',realExecution:'BUILT_INACTIVE_DISARMED',fundingAuthority:'INDEX3_ONLY_INACTIVE_DISARMED',requiredExchangeIndex:3,realControlSchema:REAL_CONTROL_SCHEMA};
+  await kvPutJson(env,CONTROL_KEY,next);
+  return next;
+}
+
+async function reconcileOwnedPaynePosition(env,position) {
+  if(!position || position.owner!==REAL_OWNER || Number(position.exchangeIndex)!==3 || !position.entryOrderId || !position.entryClientOrderId) {
+    return {classification:'UNKNOWN',reason:'PAYNE_OWNERSHIP_IDENTITY_INCOMPLETE'};
+  }
+  const evidence=await providerTickerPositionEvidence(env,position.marketTicker);
+  if(evidence.classification!=='ABSENT') return evidence;
+  try{
+    const path='/trade-api/v2/portfolio/settlements?limit=200&subaccount=0&ticker='+encodeURIComponent(position.marketTicker);
+    const response=await kalshiGetOnly(env,path);
+    if(!response.ok) return {classification:'UNKNOWN',reason:'SETTLEMENT_HTTP_'+response.status};
+    const body=await response.json().catch(()=>null);
+    const rows=Array.isArray(body?.settlements)?body.settlements:[];
+    const exact=rows.find(x=>String(x?.ticker||'')===String(position.marketTicker));
+    if(exact) return {classification:'FLAT',reason:'EXACT_TICKER_SETTLEMENT_CONFIRMED',settlement:exact};
+  }catch{}
+  return {classification:'UNKNOWN',reason:'TICKER_ABSENT_SETTLEMENT_NOT_PROVEN'};
+}
+
+async function managePayneRealPosition(env,control,series,postImpl=kalshiPayneOrderPost,nowMs=Date.now()) {
+  const position=series?.position;
+  if(!position) return series;
+  if(position.owner!==REAL_OWNER || Number(position.exchangeIndex)!==3) {
+    series.status='HOLD_WRONG_OR_UNKNOWN_OWNERSHIP';
+    await appendRealLedger(env,'MANAGEMENT_BLOCKED',{seriesId:series.seriesId,attemptId:position.attemptId||null,ticker:position.marketTicker||null,reason:series.status});
+    return saveRealSeriesState(env,series);
+  }
+
+  const rec=await reconcileOwnedPaynePosition(env,position);
+  position.reconciliationState=rec.classification;
+  position.reconciliationReason=rec.reason;
+  position.reconciledAt=new Date(nowMs).toISOString();
+  if(rec.classification==='FLAT'){
+    position.status='CLOSED';
+    position.closedAt=position.closedAt||new Date(nowMs).toISOString();
+    series.status='COMPLETE_FLAT';
+    series.completedAt=series.completedAt||position.closedAt;
+    await appendRealLedger(env,'PROVIDER_RECONCILED_FLAT',{seriesId:series.seriesId,attemptId:position.attemptId,ticker:position.marketTicker,reason:rec.reason,realizedPnlUsd:realizedPnlFromPosition(position)});
+    await closeRealSeriesControl(env,1,0);
+    return saveRealSeriesState(env,series);
+  }
+  if(rec.classification!=='OPEN'){
+    position.status='RECONCILIATION_UNKNOWN';
+    series.status='MANAGEMENT_RECONCILIATION_UNKNOWN';
+    await appendRealLedger(env,'MANAGEMENT_RECONCILIATION_UNKNOWN',{seriesId:series.seriesId,attemptId:position.attemptId,ticker:position.marketTicker,reason:rec.reason});
+    await closeRealSeriesControl(env,1,1);
+    return saveRealSeriesState(env,series);
+  }
+
+  const quote=await exactMarketRead(env,position.marketTicker,position.asset);
+  const featureState=await readAuthoritativePayneFeatures(env,nowMs);
+  const feature=featureForCandidate(featureState,position.marketTicker,position.outcomeSide,position.asset,.70);
+  const bid=position.outcomeSide==='YES'?Number(quote?.market?.yesBid):Number(quote?.market?.noBid);
+  const ageMs=nowMs-Date.parse(position.entryTime||position.filledAt||'');
+  const decision=managementDecision({score:feature?.score,heldMs:ageMs,owned:true});
+  position.currentScore=feature?.available?feature.score:null;
+  position.currentMarketPrice=Number.isFinite(bid)?bid:null;
+  position.holdDurationMs:Number.isFinite(ageMs)?ageMs:null;
+  if(decision.action!=='EXIT'){
+    position.status='OPEN';
+    series.status='ATTEMPT_LIMIT_REACHED_MANAGING_POSITION';
+    await closeRealSeriesControl(env,1,1);
+    return saveRealSeriesState(env,series);
+  }
+  if(!quote?.ok || !(bid>0&&bid<1)){
+    position.status='EXIT_RETRY';
+    position.exitReason=decision.reason;
+    series.status='EXIT_REQUIRED_WAITING_FOR_LIVE_BID';
+    await closeRealSeriesControl(env,1,1);
+    return saveRealSeriesState(env,series);
+  }
+
+  const remaining=Math.max(0,Number(position.filledCount||0)-Number(position.exitFilledTotal||0));
+  if(!(remaining>0)){
+    position.status='EXIT_RECONCILIATION_REQUIRED';
+    series.status='EXIT_RECONCILIATION_REQUIRED';
+    await closeRealSeriesControl(env,1,1);
+    return saveRealSeriesState(env,series);
+  }
+  position.remainingExitCount=remaining;
+  position.exitAttempt=Number(position.exitAttempt||0)+1;
+  const exitClientOrderId=payneClientOrderId(series.seriesId,1,'exit'+position.exitAttempt);
+  const payload=kalshiV2ExitPayload(position,bid,exitClientOrderId);
+  if(!payload || payload.reduce_only!==true){
+    position.status='EXIT_RETRY';series.status='EXIT_REQUEST_BUILD_FAILED';await closeRealSeriesControl(env,1,1);return saveRealSeriesState(env,series);
+  }
+  await appendRealLedger(env,'EXIT_PRE_SUBMIT_LATCHED',{seriesId:series.seriesId,attemptId:position.attemptId,ticker:position.marketTicker,reason:decision.reason,clientOrderId:exitClientOrderId,payload:{...payload},exchangeIndex:3});
+  let response,proof;
+  try{
+    const out=await postImpl(env,'EXIT',payload,payneRealScope(control,series,'EXIT',position));
+    response=out.response; proof=out.proof;
+  }catch(error){
+    position.status='EXIT_RETRY';position.exitWriteError=String(error?.message||error);series.status='EXIT_WRITE_ERROR_RETRY_PENDING';
+    await appendRealLedger(env,'EXIT_WRITE_ERROR',{seriesId:series.seriesId,attemptId:position.attemptId,ticker:position.marketTicker,error:position.exitWriteError});
+    await closeRealSeriesControl(env,1,1);
+    return saveRealSeriesState(env,series);
+  }
+  const body=await response.json().catch(()=>({}));
+  if(!response.ok){
+    position.status='EXIT_RETRY';position.exitProviderStatus=response.status;series.status='EXIT_PROVIDER_REJECTED_RETRY_PENDING';
+    await appendRealLedger(env,'EXIT_PROVIDER_REJECTED',{seriesId:series.seriesId,attemptId:position.attemptId,ticker:position.marketTicker,httpStatus:response.status,proof});
+    await closeRealSeriesControl(env,1,1);
+    return saveRealSeriesState(env,series);
+  }
+  const result=interpretPayneOrderResponse(body);
+  position.exitOrderId=result.orderId;
+  position.exitClientOrderId=result.clientOrderId||exitClientOrderId;
+  position.exitReason=decision.reason;
+  position.exitAverageFillPrice=result.averageFillPrice;
+  position.exitAverageFeePaid=result.averageFeePaid;
+  position.exitFilledTotal=Number((Number(position.exitFilledTotal||0)+Number(result.fillCount||0)).toFixed(4));
+  position.exitTime=new Date(nowMs).toISOString();
+  if(result.state==='UNKNOWN'){
+    position.status='EXIT_RECONCILIATION_REQUIRED';series.status='EXIT_RECONCILIATION_REQUIRED';
+  }else if(result.state==='NO_FILL' || result.state==='PARTIAL'){
+    position.status='EXIT_RETRY';series.status='EXIT_RETRY_REQUIRED';
+  }else{
+    position.status='EXIT_RECONCILIATION_REQUIRED';series.status='EXIT_RECONCILIATION_REQUIRED';
+  }
+  await appendRealLedger(env,'EXIT_PROVIDER_RESULT',{seriesId:series.seriesId,attemptId:position.attemptId,ticker:position.marketTicker,result,proof,exitReason:decision.reason,realizedPnlUsd:realizedPnlFromPosition(position)});
+  await closeRealSeriesControl(env,1,1);
+  return saveRealSeriesState(env,series);
+}
+
+export async function runPayneRealExecutionCycle(env,{postImpl=kalshiPayneOrderPost,nowMs=Date.now()}={}) {
+  let control=await loadControl(env);
+  let series=await loadRealSeriesState(env);
+
+  if(series?.position && ['OPEN','EXIT_RETRY','EXIT_RECONCILIATION_REQUIRED','RECONCILIATION_UNKNOWN'].includes(String(series.position.status||''))) {
+    return managePayneRealPosition(env,control,series,postImpl,nowMs);
+  }
+
+  if(!control.armed){
+    series.status=Number(series.attemptsStarted||0)>=1?'COMPLETE_ENTRY_AUTHORITY':'READY_DISARMED';
+    return saveRealSeriesState(env,series);
+  }
+  if(Number(control.activeThreshold)!==.70 || Number(control.maxEntryDebitUsd)!==1 || Number(control.attemptTarget)!==1 || Number(control.requiredExchangeIndex)!==3){
+    series.status='ARMED_CONFIGURATION_INVALID_FAIL_CLOSED';
+    await closeRealSeriesControl(env,Number(series.attemptsStarted||0),series.position?1:0);
+    return saveRealSeriesState(env,series);
+  }
+  if(Number(series.attemptsStarted||0)>=1 || series.unresolvedEntry===true){
+    series.status=series.unresolvedEntry?'ENTRY_RECONCILIATION_REQUIRED':'COMPLETE_ENTRY_AUTHORITY';
+    await closeRealSeriesControl(env,1,series.position?1:0);
+    return saveRealSeriesState(env,series);
+  }
+
+  const data=await buildCockpitData(env,nowMs);
+  const candidate=data.selected;
+  if(!candidate || !candidate.payne?.available || candidate.payne?.state!=='PULL_TRIGGER'){
+    series.status='ARMED_FISHING'; return saveRealSeriesState(env,series);
+  }
+  if(data?.clocks?.consistency?.windowConsistency!==true){
+    series.status='HOLD_WINDOW_MISMATCH'; return saveRealSeriesState(env,series);
+  }
+  if(Number(candidate.exchangeIndex)!==3){
+    series.status='HOLD_REQUIRED_EXCHANGE_INDEX_3'; return saveRealSeriesState(env,series);
+  }
+  if(data?.pipeline?.freshLock!=='PROVEN' || data?.pipeline?.preSubmit!=='PROVEN' || data?.pipeline?.tickerConsistent!==true || data?.pipeline?.sideConsistent!==true || data?.pipeline?.timeGate6_5m!=='PASS'){
+    series.status='HOLD_PREFIRE_EVIDENCE_INCOMPLETE'; return saveRealSeriesState(env,series);
+  }
+
+  const auto=await baselineAutoTickerConflict(env,candidate.ticker);
+  if(!auto.ok || auto.conflict!==false){
+    series.status=auto.conflict?'HOLD_AUTO_TICKER_CONFLICT':'HOLD_AUTO_OWNERSHIP_UNKNOWN'; return saveRealSeriesState(env,series);
+  }
+  const providerConflict=await providerTickerPositionEvidence(env,candidate.ticker);
+  if(!providerConflict.ok || ['OPEN','UNKNOWN'].includes(providerConflict.classification)){
+    series.status=providerConflict.classification==='OPEN'?'HOLD_PROVIDER_TICKER_POSITION_CONFLICT':'HOLD_PROVIDER_POSITION_UNKNOWN'; return saveRealSeriesState(env,series);
+  }
+
+  const freshLock=await exactMarketRead(env,candidate.ticker,candidate.asset);
+  if(!freshLock?.ok || freshLock?.market?.ticker!==candidate.ticker){
+    series.status='HOLD_FRESH_LOCK_INVALIDATED'; return saveRealSeriesState(env,series);
+  }
+  const preSubmit=await exactMarketRead(env,candidate.ticker,candidate.asset);
+  if(!preSubmit?.ok || preSubmit?.market?.ticker!==candidate.ticker){
+    series.status='HOLD_PRE_SUBMIT_INVALIDATED'; return saveRealSeriesState(env,series);
+  }
+  if(String(preSubmit?.market?.closeTime||'')!==String(candidate.closeTime||'')){
+    series.status='HOLD_WINDOW_CHANGED_PRE_SUBMIT'; return saveRealSeriesState(env,series);
+  }
+
+  const features=await readAuthoritativePayneFeatures(env,Date.now());
+  const finalFeature=featureForCandidate(features,candidate.ticker,candidate.outcomeSide,candidate.asset,.70);
+  const finalGate=payneStage(finalFeature,.70);
+  if(!finalFeature.available || !finalGate.pullTrigger){
+    series.status='HOLD_PRE_SUBMIT_REQUALIFICATION_FAILED'; return saveRealSeriesState(env,series);
+  }
+
+  const ask=candidate.outcomeSide==='YES'?Number(preSubmit.market.yesAsk):Number(preSubmit.market.noAsk);
+  const sizing=estimateKalshiFeeSafeSize(ask,1);
+  if(!sizing.ok || Number(sizing.totalDebitUsd)>1 || Number(sizing.count)<1){
+    series.status='HOLD_ONE_DOLLAR_SIZING_FAILED'; return saveRealSeriesState(env,series);
+  }
+  const balanceResponse=await kalshiGetOnly(env,'/trade-api/v2/portfolio/balance');
+  const balanceBody=await balanceResponse.json().catch(()=>({}));
+  const index3=index3FundingEvidence(balanceBody,sizing.totalDebitUsd);
+  if(!balanceResponse.ok || !index3.available || !index3.sufficient){
+    series.status='HOLD_INDEX3_FUNDING_INSUFFICIENT'; return saveRealSeriesState(env,series);
+  }
+
+  const attemptNo=1;
+  const seriesId=series.seriesId||crypto.randomUUID();
+  const attemptId=seriesId+'-1';
+  const clientOrderId=payneClientOrderId(seriesId,attemptNo,'entry');
+  const payload=kalshiV2EntryPayload({marketTicker:candidate.ticker,outcomeSide:candidate.outcomeSide,yes:ask},sizing,clientOrderId);
+  if(!payload){series.status='HOLD_ENTRY_PAYLOAD_INVALID';return saveRealSeriesState(env,series);}
+
+  const attempt={
+    schema:'PAYNE_REAL_ATTEMPT_V1',owner:REAL_OWNER,seriesId,attemptId,attemptNo:1,status:'SUBMITTING',
+    wouldFireEventId:data?.zeroMoneyPreview?.eventId||null,
+    asset:candidate.asset,marketTicker:candidate.ticker,outcomeSide:candidate.outcomeSide,direction:candidate.direction,
+    exchangeIndex:3,score:finalFeature.score,move:finalFeature.move,edge:finalFeature.edge,
+    observedAt:data.updatedAt||new Date(nowMs).toISOString(),freshLockAt:freshLock.readAt,preSubmitAt:preSubmit.readAt,
+    freshLockPrice:candidate.outcomeSide==='YES'?freshLock.market.yesAsk:freshLock.market.noAsk,
+    preSubmitPrice:ask,maxEntryDebitUsd:1,count:sizing.count,estimatedEntryFeeUsd:sizing.feeUsd,
+    estimatedEntryDebitUsd:sizing.totalDebitUsd,clientOrderId,payload:{...payload},
+  };
+  series={...series,seriesId,status:'ENTRY_SUBMITTING',attemptsStarted:1,unresolvedEntry:true,currentAttempt:attempt};
+  await persistAttempt(env,{runId:seriesId,attemptId,attemptNo:1,result:'SUBMITTING',...attempt});
+  await appendRealLedger(env,'ENTRY_PRE_SUBMIT_LATCHED',{...attempt,providerWritePlanned:true});
+  await saveRealSeriesState(env,series);
+
+  control=await loadControl(env);
+  if(!control.armed || Number(control.attemptTarget)!==1 || Number(control.maxEntryDebitUsd)!==1 || Number(control.activeThreshold)!==.70 || Number(control.requiredExchangeIndex)!==3){
+    series.status='ENTRY_AUTHORITY_REVOKED_AFTER_LATCH';
+    await closeRealSeriesControl(env,1,0);
+    return saveRealSeriesState(env,series);
+  }
+
+  let response,proof;
+  try{
+    const out=await postImpl(env,'ENTRY',payload,payneRealScope(control,{...series,attemptsStarted:0},'ENTRY'));
+    response=out.response; proof=out.proof;
+  }catch(error){
+    series.status='ENTRY_RECONCILIATION_REQUIRED';
+    series.unresolvedEntry=true;
+    series.currentAttempt={...attempt,status:'WRITE_ERROR_UNKNOWN',error:String(error?.message||error)};
+    await appendRealLedger(env,'ENTRY_WRITE_ERROR_UNKNOWN',{seriesId,attemptId,ticker:candidate.ticker,error:String(error?.message||error)});
+    await closeRealSeriesControl(env,1,0);
+    return saveRealSeriesState(env,series);
+  }
+  const body=await response.json().catch(()=>({}));
+  if(!response.ok){
+    series.status='ENTRY_RECONCILIATION_REQUIRED';
+    series.unresolvedEntry=true;
+    series.currentAttempt={...attempt,status:'PROVIDER_REJECTED_OR_UNKNOWN',providerHttpStatus:response.status};
+    await appendRealLedger(env,'ENTRY_PROVIDER_REJECTED_OR_UNKNOWN',{seriesId,attemptId,ticker:candidate.ticker,httpStatus:response.status,proof});
+    await closeRealSeriesControl(env,1,0);
+    return saveRealSeriesState(env,series);
+  }
+
+  const result=interpretPayneOrderResponse(body);
+  series.currentAttempt={...attempt,status:result.state,providerResult:result,providerProof:proof};
+  if(result.state==='NO_FILL'){
+    series.status='COMPLETE_NO_FILL';series.unresolvedEntry=false;series.completedAt=new Date().toISOString();
+    await persistAttempt(env,{runId:seriesId,attemptId,attemptNo:1,result:'NO_FILL',...series.currentAttempt});
+    await appendRealLedger(env,'ENTRY_NO_FILL',{seriesId,attemptId,ticker:candidate.ticker,result,proof});
+    await closeRealSeriesControl(env,1,0);
+    return saveRealSeriesState(env,series);
+  }
+  if(result.state==='UNKNOWN'){
+    series.status='ENTRY_RECONCILIATION_REQUIRED';series.unresolvedEntry=true;
+    await persistAttempt(env,{runId:seriesId,attemptId,attemptNo:1,result:'UNKNOWN',...series.currentAttempt});
+    await appendRealLedger(env,'ENTRY_RESULT_UNKNOWN',{seriesId,attemptId,ticker:candidate.ticker,result,proof});
+    await closeRealSeriesControl(env,1,0);
+    return saveRealSeriesState(env,series);
+  }
+
+  const position={
+    schema:'PAYNE_REAL_POSITION_V1',owner:REAL_OWNER,seriesId,attemptId,attemptNo:1,status:'OPEN',
+    asset:candidate.asset,marketTicker:candidate.ticker,outcomeSide:candidate.outcomeSide,direction:candidate.direction,
+    exchangeIndex:3,entryOrderId:result.orderId,entryClientOrderId:result.clientOrderId||clientOrderId,
+    filledCount:Number(result.fillCount),remainingExitCount:Number(result.fillCount),entryAverageFillPrice:result.averageFillPrice,
+    entryAverageFeePaid:result.averageFeePaid,entryScore:finalFeature.score,entryMove:finalFeature.move,entryEdge:finalFeature.edge,
+    entryTime:new Date(nowMs).toISOString(),freshLockAt:freshLock.readAt,preSubmitAt:preSubmit.readAt,
+    fillState:result.state,exitFilledTotal:0,exitAttempt:0,reconciliationState:'OPEN_PENDING_PROVIDER_RECONCILIATION',
+  };
+  series.position=position;series.unresolvedEntry=false;series.status='ATTEMPT_LIMIT_REACHED_MANAGING_POSITION';
+  await persistAttempt(env,{runId:seriesId,attemptId,attemptNo:1,result:result.state,...series.currentAttempt});
+  await persistPosition(env,{positionId:attemptId,...position});
+  await appendRealLedger(env,'POSITION_OWNERSHIP_ESTABLISHED',{seriesId,attemptId,ticker:candidate.ticker,entryOrderId:position.entryOrderId,clientOrderId:position.entryClientOrderId,exchangeIndex:3,filledCount:position.filledCount,fillState:result.state});
+  await closeRealSeriesControl(env,1,1);
+  return saveRealSeriesState(env,series);
+}
+
 export function step1Status() {
   return {
     service:SERVICE_ID,
