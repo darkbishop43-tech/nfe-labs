@@ -1211,6 +1211,14 @@ function zeroMoneyPreviewFor(selected, preSubmit, index2, control, nowMs) {
   const ask=selected.outcomeSide==='YES'?Number(preSubmit.market.yesAsk):Number(preSubmit.market.noAsk);
   const sizing=estimateKalshiFeeSafeSize(ask,control.maxEntryDebitUsd);
   if (!sizing.ok) return {status:'BLOCKED',reason:'FEE_SAFE_SIZING_FAILED',gate,eligibility,sizing};
+  if (!Number.isFinite(Number(index2?.balance)) || Number(index2.balance)+1e-9<Number(sizing.totalDebitUsd)) {
+    return {
+      status:'BLOCKED',
+      reason:'HOLD_INDEX2_FUNDING_INSUFFICIENT',
+      gate,eligibility,sizing,shardEvidence,
+      providerWrites:0,orders:0,capitalMovedUsd:0,
+    };
+  }
   const clientOrderId=payneClientOrderId('cockpit-zero-money',1,'entry');
   const payload=kalshiV2EntryPayload({
     marketTicker:selected.ticker,
