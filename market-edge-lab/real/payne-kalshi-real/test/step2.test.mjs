@@ -284,6 +284,6 @@ test('27 integrated Step2 proof reports zero capital movement and stays disarmed
   const state=await loadControl(e);
   assert.equal(out.capitalMovedUsd,0);
   assert.equal(state.armed,false);
-  assert.equal(state.fundingAuthority,'DISABLED');
+  assert.equal(state.fundingAuthority,'INDEX3_ONLY_INACTIVE_DISARMED');
   assert.ok(payneClientOrderId('step2-isolated',1,'entry').startsWith('payne-real-'));
 });
