@@ -86,11 +86,11 @@ async function authEnv(body=baselineShadow(),status=200){
   };
 }
 
-function providerMarket(asset,ticker,series,yesBid='0.47',yesAsk='0.49'){
+function providerMarket(asset,ticker,series,yesBid='0.47',yesAsk='0.49',exchangeIndex=3){
   return {
     ticker,
     series_ticker:series,
-    exchange_index:3,
+    exchange_index:exchangeIndex,
     title:asset+' up in next 15 minutes?',
     status:'open',
     open_time:'2026-10-02T06:00:00Z',
@@ -102,7 +102,7 @@ function providerMarket(asset,ticker,series,yesBid='0.47',yesAsk='0.49'){
   };
 }
 
-function installKalshiFetch(){
+function installKalshiFetch({btcExchangeIndex=3,index3Balance=7.25}={}){
   const original=globalThis.fetch;
   const urls=[];
   globalThis.fetch=async (url,options={})=>{
@@ -111,12 +111,12 @@ function installKalshiFetch(){
     if(u.includes('/portfolio/balance')) return jsonResponse({balance_breakdown:[
       {exchange_index:0,balance:0},
       {exchange_index:2,balance:11.41},
-      {exchange_index:3,balance:7.25},
+      {exchange_index:3,balance:index3Balance},
     ]});
-    if(u.includes('series_ticker=KXBTC15M')) return jsonResponse({markets:[providerMarket('BTC','KXBTC15M-TEST','KXBTC15M')]});
+    if(u.includes('series_ticker=KXBTC15M')) return jsonResponse({markets:[providerMarket('BTC','KXBTC15M-TEST','KXBTC15M','0.47','0.49',btcExchangeIndex)]});
     if(u.includes('series_ticker=KXETH15M')) return jsonResponse({markets:[providerMarket('ETH','KXETH15M-TEST','KXETH15M','0.45','0.47')]});
     if(u.includes('/trade-api/v2/markets?series_ticker=')) return jsonResponse({markets:[]});
-    if(u.includes('/markets/KXBTC15M-TEST')) return jsonResponse({market:{...providerMarket('BTC','KXBTC15M-TEST','KXBTC15M','0.48','0.50'),status:'settled',result:'yes',settlement_value_dollars:'1.0000',settlement_ts:'2026-10-02T06:15:10Z'}});
+    if(u.includes('/markets/KXBTC15M-TEST')) return jsonResponse({market:{...providerMarket('BTC','KXBTC15M-TEST','KXBTC15M','0.48','0.50',btcExchangeIndex),status:'settled',result:'yes',settlement_value_dollars:'1.0000',settlement_ts:'2026-10-02T06:15:10Z'}});
     throw new Error('unexpected URL '+u);
   };
   return {urls,restore:()=>{globalThis.fetch=original;}};
@@ -304,6 +304,40 @@ test('cockpit calculates authentic Payne fields, decisions, clocks, exact reread
     assert.equal(out.zeroMoneyPreview.providerPost,'STEP1_PROVIDER_POST_HARD_DISABLED');
     assert.equal(io.urls.filter(x=>x.includes('/markets/KXBTC15M-TEST')).length,2);
   } finally { io.restore(); }
+});
+
+test('zero-money preview blocks shard mismatch with sufficient Index 3 and permits matching shard only',async()=>{
+  const mismatchEnv=await authEnv();
+  const mismatchIo=installKalshiFetch({btcExchangeIndex:2,index3Balance:9.80});
+  try{
+    const out=await buildCockpitData(mismatchEnv,Date.parse('2026-10-02T06:05:00Z'));
+    assert.equal(out.selected.exchangeIndex,2);
+    assert.equal(out.index3.balance,9.80);
+    assert.equal(out.zeroMoneyPreview.status,'BLOCKED');
+    assert.equal(out.zeroMoneyPreview.reason,'HOLD_REQUIRED_EXCHANGE_INDEX_3');
+    assert.equal(out.zeroMoneyPreview.shardEvidence.marketExchangeIndex,2);
+    assert.equal(out.zeroMoneyPreview.shardEvidence.requiredFundingIndex,3);
+    assert.equal(out.zeroMoneyPreview.shardEvidence.fundingBalanceUsd,9.80);
+    assert.equal(out.zeroMoneyPreview.shardEvidence.match,false);
+    assert.equal(out.pipeline.shardMatch,false);
+    assert.equal(out.providerWrites,0);
+    assert.equal(out.orders,0);
+    assert.equal(out.capitalMovedUsd,0);
+  } finally { mismatchIo.restore(); }
+
+  const matchEnv=await authEnv();
+  const matchIo=installKalshiFetch({btcExchangeIndex:3,index3Balance:9.80});
+  try{
+    const out=await buildCockpitData(matchEnv,Date.parse('2026-10-02T06:05:00Z'));
+    assert.equal(out.selected.exchangeIndex,3);
+    assert.equal(out.zeroMoneyPreview.status,'FIRE_READY');
+    assert.equal(out.zeroMoneyPreview.shardMatch,true);
+    assert.equal(out.zeroMoneyPreview.requiredFundingIndex,3);
+    assert.equal(out.zeroMoneyPreview.fundingBalanceUsd,9.80);
+    assert.equal(out.providerWrites,0);
+    assert.equal(out.orders,0);
+    assert.equal(out.capitalMovedUsd,0);
+  } finally { matchIo.restore(); }
 });
 
 test('stale Baseline feature observation stays UNKNOWN and cannot produce FIRE plan',async()=>{
@@ -536,6 +570,10 @@ test('would-fire forensic route reconstructs persisted FIRE_READY evidence read-
 test('cockpit HTML exposes clocks, decision evidence, automatic refresh, and no order-submit control',()=>{
   const html=cockpitHtml();
   assert.equal(COCKPIT_REFRESH_MS,60_000);
+  assert.match(html,/Market exchange index/);
+  assert.match(html,/Funding index/);
+  assert.match(html,/Funding balance/);
+  assert.match(html,/Shard match/);
   assert.match(html,/ACCOUNT \/ P&L/);
   assert.match(html,/ACCOUNT CASH/);
   assert.match(html,/OPEN POSITION VALUE/);
