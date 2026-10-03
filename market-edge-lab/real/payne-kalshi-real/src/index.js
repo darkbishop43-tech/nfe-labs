@@ -132,7 +132,7 @@ export async function loadControl(env) {
 export async function initializeDisarmed(env) {
   const existing = await kvGetJson(env, CONTROL_KEY);
   const state=normalizeControlState(existing);
-  if (!existing || existing?.realControlSchema!==REAL_CONTROL_SCHEMA || existing?.armed===true) {
+  if (!existing || existing?.realControlSchema!==REAL_CONTROL_SCHEMA) {
     const disarmed={...state,armed:false,attempts:0,openPositions:0,attemptTarget:1,maxEntryDebitUsd:1,activeThreshold:.70,providerWriteAuthority:'BUILT_INACTIVE_DISARMED',providerPostAuthority:'BUILT_INACTIVE_DISARMED',realExecution:'BUILT_INACTIVE_DISARMED',fundingAuthority:'INDEX3_ONLY_INACTIVE_DISARMED',requiredExchangeIndex:3};
     await kvPutJson(env, CONTROL_KEY, disarmed);
     await appendEvent(env, 'REAL_CONTROL_INITIALIZED_DISARMED', { armed:false, attempts:0, attemptTarget:1, maxEntryDebitUsd:1, activeThreshold:.70, requiredExchangeIndex:3 });
