@@ -1,0 +1,34 @@
+name: PAYNE first trade read-only reconciliation audit
+on:
+  push:
+    branches: [market-edge-payne-kalshi-real-step1]
+    paths:
+      - '.github/workflows/payne-first-trade-audit.yml'
+permissions:
+  contents: read
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Read PAYNE and provider forensic truth only
+        shell: bash
+        run: |
+          set -euo pipefail
+          P='https://market-edge-payne-kalshi-real.darkbishop43.workers.dev'
+          B='https://market-edge-baseline-real.darkbishop43.workers.dev'
+          curl -fsS "$P/real-state" -o /tmp/state.json
+          curl -fsS "$P/real-ledger?limit=500" -o /tmp/ledger.json
+          curl -fsS "$B/forensic-provider-history" -o /tmp/provider.json
+          curl -fsS "$B/founder-capital-ledger" -o /tmp/capital.json
+          echo 'PAYNE_STATE='
+          jq '{control:{armed,attempts,attemptTarget,openPositions,maxEntryDebitUsd,activeThreshold,fundingAuthority,requiredExchangeIndex},series}' /tmp/state.json
+          echo 'PAYNE_REAL_LEDGER_NEAR_OR_UNKNOWN='
+          jq '[.rows[]|select((.asset=="NEAR") or (.ticker|tostring|contains("NEAR")) or (.marketTicker|tostring|contains("NEAR")) or (.type|tostring|contains("UNKNOWN")) or (.result|tostring|contains("UNKNOWN")))]' /tmp/ledger.json
+          echo 'PROVIDER_NEAR_FILLS='
+          jq '[((.fills//[])+(.historicalFills//[]))[]|select((.ticker|tostring|contains("NEAR")))]' /tmp/provider.json
+          echo 'PROVIDER_NEAR_SETTLEMENTS='
+          jq '[.settlements[]?|select((.ticker|tostring|contains("NEAR")))]' /tmp/provider.json
+          echo 'PROVIDER_NEAR_POSITIONS='
+          jq '[.positions[]?|select((.ticker|tostring|contains("NEAR")))]' /tmp/provider.json
+          echo 'CAPITAL='
+          jq '{provider:.provider,safety:.safety}' /tmp/capital.json
