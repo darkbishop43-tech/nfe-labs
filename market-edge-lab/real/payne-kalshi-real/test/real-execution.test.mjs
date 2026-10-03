@@ -72,7 +72,7 @@ function providerMarket({status='open',close='2026-10-02T06:15:00Z',exchangeInde
   };
 }
 
-function installProvider({index3=0,index2=15.91,position='ABSENT',exactSequence=[],settled=false}={}){
+function installProvider({index3=0,index2=15.91,position='ABSENT',exactSequence=[],settled=false,orders=[],fills=[],historicalFills=[],settlements=null}={}){
   const original=globalThis.fetch,calls=[]; let exactNo=0;
   globalThis.fetch=async (url,options={})=>{
     calls.push({url:String(url),method:options.method||'GET',body:options.body||null});
@@ -80,15 +80,16 @@ function installProvider({index3=0,index2=15.91,position='ABSENT',exactSequence=
     if(u.includes('/portfolio/balance')) return jsonResponse({balance_breakdown:[{exchange_index:0,balance:0},{exchange_index:2,balance:index2},{exchange_index:3,balance:index3}]});
     if(u.includes('series_ticker=KXBTC15M')) return jsonResponse({markets:[providerMarket()]});
     if(u.includes('/trade-api/v2/markets?series_ticker=')) return jsonResponse({markets:[]});
-    if(u.includes('/portfolio/fills?')) return jsonResponse({fills:[]});
-    if(u.includes('/historical/fills?')) return jsonResponse({fills:[]});
+    if(u.includes('/portfolio/orders?')) return jsonResponse({orders});
+    if(u.includes('/portfolio/fills?')) return jsonResponse({fills});
+    if(u.includes('/historical/fills?')) return jsonResponse({fills:historicalFills});
     if(u.includes('/portfolio/positions?')){
       if(position==='HTTP_FAIL') return jsonResponse({error:'x'},500);
       if(position==='OPEN') return jsonResponse({market_positions:[{ticker:'KXBTC15M-REALTEST',position_fp:'1'}],cursor:''});
       if(position==='FLAT') return jsonResponse({market_positions:[{ticker:'KXBTC15M-REALTEST',position_fp:'0'}],cursor:''});
       return jsonResponse({market_positions:[],cursor:''});
     }
-    if(u.includes('/portfolio/settlements?')) return jsonResponse({settlements:settled?[{ticker:'KXBTC15M-REALTEST',market_result:'yes',settled_time:'2026-10-02T06:16:00Z'}]:[]});
+    if(u.includes('/portfolio/settlements?')) return jsonResponse({settlements:Array.isArray(settlements)?settlements:(settled?[{ticker:'KXBTC15M-REALTEST',market_result:'yes',settled_time:'2026-10-02T06:16:00Z'}]:[])});
     if(u.includes('/markets/KXBTC15M-REALTEST')){
       const x=exactSequence.length?exactSequence[Math.min(exactNo++,exactSequence.length-1)]:{status:200,market:providerMarket({yesBid:.49,yesAsk:.50})};
       return jsonResponse(x.market||{},x.status??200);
@@ -113,56 +114,95 @@ async function arm(e){
   return c;
 }
 
-test('provider-gated unresolved entry reconciliation clears only proven no-execution 4xx attempt',async()=>{
-  const e=await env(),io=installProvider({position:'ABSENT',settled:false});
+test('UNKNOWN entry self-reconciliation: authenticated provider proves FLAT/no execution and clears unresolvedEntry',async()=>{
+  const e=await env(),io=installProvider({position:'ABSENT',orders:[],fills:[],historicalFills:[],settlements:[]});
   try{
     const series={
       ...defaultRealSeriesState(),
-      seriesId:'RECON-S1',
-      status:'ENTRY_RECONCILIATION_REQUIRED',
-      attemptsStarted:1,
-      attemptTarget:1,
-      unresolvedEntry:true,
+      seriesId:'RECON-FLAT',status:'ENTRY_RECONCILIATION_REQUIRED',attemptsStarted:1,attemptTarget:1,
+      configFrozen:true,unresolvedEntry:true,
       currentAttempt:{
-        schema:'PAYNE_REAL_ATTEMPT_V1',
-        owner:'PAYNE_KALSHI_REAL',
-        seriesId:'RECON-S1',
-        attemptId:'RECON-S1-1',
-        attemptNo:1,
-        status:'PROVIDER_REJECTED_OR_UNKNOWN',
-        asset:'BTC',
-        marketTicker:'KXBTC15M-REALTEST',
-        outcomeSide:'YES',
-        direction:'UP',
-        providerHttpStatus:403,
+        schema:'PAYNE_REAL_ATTEMPT_V1',owner:'PAYNE_KALSHI_REAL',seriesId:'RECON-FLAT',
+        attemptId:'RECON-FLAT-1',attemptNo:1,status:'WRITE_ERROR_UNKNOWN',
+        asset:'BTC',marketTicker:'KXBTC15M-REALTEST',outcomeSide:'YES',direction:'UP',
+        clientOrderId:'payne-real-reconflat-1-entry',payload:{client_order_id:'payne-real-reconflat-1-entry'},
       },
     };
     await saveRealSeriesState(e,series);
     const out=await reconcileUnresolvedEntryFromProvider(e,Date.parse('2026-10-02T06:16:00Z'));
     assert.equal(out.ok,true);
-    assert.equal(out.classification,'NO_FILL');
-    assert.equal(out.reason,'PROVIDER_REJECTED_NO_EXECUTION_CONFIRMED');
-    assert.equal(out.exactTickerFillCount,0);
-    assert.equal(out.exactTickerSettlementCount,0);
-    assert.equal(out.providerPositionClassification,'ABSENT');
+    assert.equal(out.classification,'FLAT');
+    assert.equal(out.reason,'PROVIDER_RECONCILED_NO_EXECUTION');
+    assert.equal(out.exactOrderCount,0);
+    assert.equal(out.exactFillCount,0);
+    assert.equal(out.exactSettlementCount,0);
     assert.equal(out.series.unresolvedEntry,false);
     assert.equal(out.series.position,null);
     assert.equal(out.series.status,'COMPLETE_NO_FILL_RECONCILED');
     assert.equal(out.control.armed,false);
-    assert.equal(out.control.openPositions,0);
-    assert.equal(out.providerWrites,0);
-    assert.equal(out.orders,0);
-    assert.equal(out.capitalMovedUsd,0);
     const ledger=await listRealLedger(e,100);
-    assert.ok(ledger.some(x=>x.type==='ENTRY_RECONCILED_NO_EXECUTION'&&x.attemptId==='RECON-S1-1'));
+    assert.ok(ledger.some(x=>x.type==='ENTRY_RECONCILED_NO_EXECUTION'&&x.attemptId==='RECON-FLAT-1'));
   }finally{io.restore();}
 });
+
+test('UNKNOWN entry self-reconciliation: exact PAYNE order/fill plus OPEN provider position restores owned management state',async()=>{
+  const client='payne-real-owned-1-entry', order='ORDER-OWNED';
+  const e=await env(),io=installProvider({
+    position:'OPEN',
+    orders:[{ticker:'KXBTC15M-REALTEST',client_order_id:client,order_id:order,fill_count:1,average_fill_price:.50,average_fee_paid:.02}],
+    fills:[{ticker:'KXBTC15M-REALTEST',client_order_id:client,order_id:order,count:1}],
+  });
+  try{
+    await saveRealSeriesState(e,{
+      ...defaultRealSeriesState(),seriesId:'RECON-OWNED',status:'ENTRY_RECONCILIATION_REQUIRED',
+      attemptsStarted:1,attemptTarget:1,configFrozen:true,unresolvedEntry:true,
+      currentAttempt:{
+        schema:'PAYNE_REAL_ATTEMPT_V1',owner:'PAYNE_KALSHI_REAL',seriesId:'RECON-OWNED',
+        attemptId:'RECON-OWNED-1',attemptNo:1,status:'UNKNOWN',asset:'BTC',
+        marketTicker:'KXBTC15M-REALTEST',outcomeSide:'YES',direction:'UP',
+        score:.72,move:.003,edge:.05,preSubmitAt:'2026-10-02T06:05:00Z',
+        clientOrderId:client,payload:{client_order_id:client},
+      }
+    });
+    const out=await reconcileUnresolvedEntryFromProvider(e,Date.parse('2026-10-02T06:05:30Z'));
+    assert.equal(out.ok,true);
+    assert.equal(out.classification,'OWNED');
+    assert.equal(out.series.unresolvedEntry,false);
+    assert.equal(out.series.position.status,'OPEN');
+    assert.equal(out.series.position.owner,'PAYNE_KALSHI_REAL');
+    assert.equal(out.series.position.entryOrderId,order);
+    assert.equal(out.series.position.entryClientOrderId,client);
+    assert.equal(out.series.position.filledCount,1);
+    const ledger=await listRealLedger(e,100);
+    assert.ok(ledger.some(x=>x.type==='ENTRY_RECONCILED_OWNED'));
+  }finally{io.restore();}
+});
+
+test('UNKNOWN entry remains fail-closed when provider ownership is OPEN but PAYNE order/fill identity is absent',async()=>{
+  const e=await env(),io=installProvider({position:'OPEN',orders:[],fills:[],historicalFills:[],settlements:[]});
+  try{
+    await saveRealSeriesState(e,{
+      ...defaultRealSeriesState(),seriesId:'RECON-UNKNOWN',status:'ENTRY_RECONCILIATION_REQUIRED',
+      attemptsStarted:1,attemptTarget:5,configFrozen:true,unresolvedEntry:true,
+      currentAttempt:{schema:'PAYNE_REAL_ATTEMPT_V1',owner:'PAYNE_KALSHI_REAL',seriesId:'RECON-UNKNOWN',
+        attemptId:'RECON-UNKNOWN-1',attemptNo:1,status:'UNKNOWN',asset:'BTC',
+        marketTicker:'KXBTC15M-REALTEST',outcomeSide:'YES',direction:'UP',
+        clientOrderId:'payne-real-unknown-1-entry',payload:{client_order_id:'payne-real-unknown-1-entry'}},
+    });
+    const out=await reconcileUnresolvedEntryFromProvider(e,Date.parse('2026-10-02T06:05:30Z'));
+    assert.equal(out.ok,false);
+    assert.equal(out.classification,'UNKNOWN');
+    assert.equal(out.series.unresolvedEntry,true);
+    assert.equal(out.series.position,null);
+  }finally{io.restore();}
+});
+
 
 test('authenticated Payne write transport is fixed to one order POST and zero-money intercepts ENTRY',async()=>{
   const e=await env();
   const payload={ticker:'KXBTC15M-REALTEST',client_order_id:'payne-real-test-1-entry',side:'bid',count:'1.00',price:'0.5000',time_in_force:'immediate_or_cancel',self_trade_prevention_type:'taker_at_cross',post_only:false,cancel_order_on_pause:true,reduce_only:false};
   let intercepted=null;
-  const out=await kalshiPayneOrderPost(e,'ENTRY',payload,{owner:'PAYNE_KALSHI_REAL',exchangeIndex:2,authorized:true,armed:true,attemptTarget:1,attemptsBefore:0,maxEntryDebitUsd:1,seriesConfigFrozen:true,priorAttemptClean:true},{fetchImpl:async(url,options)=>{intercepted={url,options};return jsonResponse({order_id:'O1',client_order_id:payload.client_order_id,fill_count:0,remaining_count:1});}});
+  const out=await kalshiPayneOrderPost(e,'ENTRY',payload,{owner:'PAYNE_KALSHI_REAL',exchangeIndex:2,authorized:true,armed:true,attemptTarget:1,attemptsBefore:0,maxEntryDebitUsd:1,seriesConfigFrozen:true,priorAttemptClean:true,entryDebitUsd:.5},{fetchImpl:async(url,options)=>{intercepted={url,options};return jsonResponse({order_id:'O1',client_order_id:payload.client_order_id,fill_count:0,remaining_count:1});}});
   assert.equal(intercepted.url,'https://external-api.kalshi.com/trade-api/v2/portfolio/events/orders');
   assert.equal(intercepted.options.method,'POST');
   assert.equal(JSON.parse(intercepted.options.body).time_in_force,'immediate_or_cancel');
