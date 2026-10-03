@@ -162,7 +162,7 @@ test('authenticated Payne write transport is fixed to one order POST and zero-mo
   const e=await env();
   const payload={ticker:'KXBTC15M-REALTEST',client_order_id:'payne-real-test-1-entry',side:'bid',count:'1.00',price:'0.5000',time_in_force:'immediate_or_cancel',self_trade_prevention_type:'taker_at_cross',post_only:false,cancel_order_on_pause:true,reduce_only:false};
   let intercepted=null;
-  const out=await kalshiPayneOrderPost(e,'ENTRY',payload,{owner:'PAYNE_KALSHI_REAL',exchangeIndex:2,authorized:true,armed:true,attemptTarget:1,attemptsBefore:0,maxEntryDebitUsd:1},{fetchImpl:async(url,options)=>{intercepted={url,options};return jsonResponse({order_id:'O1',client_order_id:payload.client_order_id,fill_count:0,remaining_count:1});}});
+  const out=await kalshiPayneOrderPost(e,'ENTRY',payload,{owner:'PAYNE_KALSHI_REAL',exchangeIndex:2,authorized:true,armed:true,attemptTarget:1,attemptsBefore:0,maxEntryDebitUsd:1,seriesConfigFrozen:true,priorAttemptClean:true},{fetchImpl:async(url,options)=>{intercepted={url,options};return jsonResponse({order_id:'O1',client_order_id:payload.client_order_id,fill_count:0,remaining_count:1});}});
   assert.equal(intercepted.url,'https://external-api.kalshi.com/trade-api/v2/portfolio/events/orders');
   assert.equal(intercepted.options.method,'POST');
   assert.equal(JSON.parse(intercepted.options.body).time_in_force,'immediate_or_cancel');
@@ -207,7 +207,7 @@ test('ARMED qualifying opportunity constructs exactly one Index 2 $1 IOC ENTRY a
   }finally{io.restore();}
 });
 
-test('1/1 and Worker restart cannot produce a second entry',async()=>{
+test('terminal 1/1 series and Worker restart cannot produce a second entry',async()=>{
   const e=await env(),io=installProvider(),post=postFixture({order_id:'ENTRY-1',fill_count:0,remaining_count:1});
   try{
     await arm(e);
@@ -216,7 +216,13 @@ test('1/1 and Worker restart cannot produce a second entry',async()=>{
     await runPayneRealExecutionCycle(e,{postImpl:post.fn,nowMs:Date.parse('2026-10-02T06:06:00Z')});
     assert.equal(afterFirst,1);
     assert.equal(post.calls.length,1);
-    await assert.rejects(updateFounderControl(e,'ARM'),/PAYNE_REAL_1X1_ALREADY_CONSUMED/);
+    // Series is terminal: no second entry from restart/cycle. A founder re-ARM begins a NEW governed series (new seriesId, count 0).
+    const terminal=await loadRealSeriesState(e);
+    assert.equal(terminal.attemptsStarted,1);
+    await updateFounderControl(e,'ARM');
+    const next=await loadRealSeriesState(e);
+    assert.notEqual(next.seriesId,terminal.seriesId);
+    assert.equal(next.attemptsStarted,0);
   }finally{io.restore();}
 });
 
