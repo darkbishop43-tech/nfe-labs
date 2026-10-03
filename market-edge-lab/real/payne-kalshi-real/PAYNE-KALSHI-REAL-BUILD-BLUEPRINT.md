@@ -2714,3 +2714,319 @@ Example proven live:
 This normalization is forensic interpretation only.
 
 Baseline source/state is not changed.
+
+
+---
+
+# OCTOBER 3, 2026 — PAYNE RUN OBSERVABILITY + COCKPIT MAINTENANCE STANDARD
+
+## Mission boundary
+
+This maintenance work is presentation / read-only observability only.
+
+It does not change:
+
+- PAYNE classification
+- score / MOVE / FAIR / EDGE formulas
+- .70 threshold
+- $1 max-entry debit
+- attempt-consumption semantics
+- IOC semantics
+- Fresh LOCK
+- pre-submit reread
+- fee-safe sizing
+- Index 3 authority
+- AUTO exact-ticker conflict guard
+- provider reconciliation
+- DISARM semantics
+- .20 score exit
+- 5-minute max hold
+- provider payloads
+- provider POST behavior
+- retry behavior
+- Second IOC HOLD
+
+PAYNE must remain DISARMED after validation.
+
+## Current run authority
+
+The cockpit now renders a durable:
+
+CURRENT RUN
+
+summary from:
+
+- payne-kalshi:real-series:v1
+- payne-kalshi:real-ledger:*
+
+Schema:
+
+PAYNE_REAL_OBSERVABILITY_V1
+
+Fields include:
+
+- seriesId
+- armed
+- attempted
+- target
+- remaining
+- FILLED count
+- NO_FILL count
+- UNKNOWN count
+- run status
+- unresolved-entry state
+- current owned-position count
+- latest current-series ledger event
+
+All ledger aggregation is scoped to the current series ID.
+
+Historical prior-series rows cannot inflate the current-run FILLED / NO_FILL / UNKNOWN counts.
+
+## Attempt truth rule
+
+NO_FILL is never inferred from absence of a fill.
+
+The run summary reports:
+
+NO_PROVIDER_ATTEMPT
+
+when no governed provider entry attempt is durably evidenced.
+
+If a persisted NO_FILL ledger row exists for the current series, that unique attempt ID contributes to the attempted count even if another presentation field is stale.
+
+Therefore a real NO_FILL cannot truthfully display as:
+
+0 attempted / 1 target
+
+when the durable ledger proves the attempt was consumed.
+
+## Last attempt
+
+The cockpit LAST ATTEMPT panel exposes, when authoritative:
+
+- result
+- governed HOLD reason
+- asset
+- ticker
+- outcome side
+- score
+- submitted price
+- Fresh LOCK price
+- pre-submit price
+- provider order ID
+- timestamp
+- latest current-series real-ledger event
+
+Allowed presentation result states:
+
+- FILLED
+- NO_FILL
+- UNKNOWN
+- NO_PROVIDER_ATTEMPT
+
+A HOLD before provider POST remains NO_PROVIDER_ATTEMPT and preserves the exact HOLD_* reason.
+
+## Export execution fields
+
+PAYNE_KALSHI_EXPORT_V1 now includes read-only real-execution context.
+
+JSON includes a top-level:
+
+realExecution
+
+object.
+
+Current observation rows expose:
+
+- realStateAsOf
+- realSeriesId
+- realArmed
+- attemptsStarted
+- attemptTarget
+- attemptsRemaining
+- filledCount
+- noFillCount
+- unknownCount
+- lastAttemptResult
+- lastProviderOrderId
+- realSeriesStatus
+- lastRealLedgerEvent
+
+Persisted observations also retain their contemporaneous realExecution summary going forward.
+
+Existing research / clock / Baseline comparison fields remain unchanged.
+
+## Fast UI-state endpoint
+
+New GET-only route:
+
+GET /ui-state
+
+Schema:
+
+PAYNE_FAST_UI_STATE_V1
+
+Authority:
+
+PERSISTED_STATE_ONLY
+
+It reads PAYNE KV / durable execution state only.
+
+It does not perform Kalshi GETs.
+
+It reports:
+
+providerGets = 0
+providerWrites = 0
+orders = 0
+capitalMovedUsd = 0
+
+The browser polls this route every:
+
+5 seconds
+
+for:
+
+- CURRENT RUN
+- LAST ATTEMPT
+- state accents
+- control active-state styling
+- Baseline observation age
+- PAYNE observation age
+- last UI update time
+
+## Acquisition vs UI refresh
+
+Provider / observation acquisition remains:
+
+60 seconds
+
+via the existing scheduled observation architecture.
+
+Full cockpit authenticated-provider refresh remains:
+
+60 seconds
+
+Persisted-state UI refresh is:
+
+5 seconds
+
+Authoritative clock reconstruction remains:
+
+1 second
+
+Therefore:
+
+UI refresh cadence != provider acquisition cadence
+
+and the faster display does not create duplicate observations, ledger events, provider writes, or order writes.
+
+## Asset-card visual semantics
+
+Persistent card accents:
+
+BELOW RADAR:
+neutral / subdued
+
+RADAR:
+yellow-family accent
+
+LOCK:
+amber-family accent
+
+PULL / FIRE READY:
+green-family accent
+
+ENTRY_PRE_SUBMIT_LATCHED:
+ENTRY SENT / stronger green transition
+
+FILLED:
+FILLED / MANAGING
+
+NO_FILL:
+persistent NO_FILL state after a brief transition
+
+governed HOLD:
+red-family accent only for actual HOLD / rejection semantics
+
+UNKNOWN / unavailable:
+gray / subdued
+
+Low score alone is never rendered as a red failure state.
+
+State changes use a one-shot:
+
+0.9 second
+
+transition flash.
+
+The class is explicitly removed after:
+
+1000 ms
+
+No continuous blinking is used.
+
+## Local asset marks
+
+BTC / ETH / SOL / XRP / HYPE / ZEC / DOGE / BNB / NEAR use inline local SVG marks.
+
+There is:
+
+- no runtime image CDN
+- no external icon dependency
+- no tracking dependency
+
+Ticker / asset text remains present independently of the mark.
+
+## Button affordance
+
+Existing action behavior is unchanged.
+
+Buttons now have consistent:
+
+- default
+- hover
+- pressed
+- disabled
+- active / selected
+
+visual treatment.
+
+## Comparison readiness
+
+AUTO and PAYNE execution remain independent.
+
+No cross-system retries are introduced.
+
+Existing Baseline comparison evidence and new real execution export fields allow later descriptive comparison of naturally occurring:
+
+- AUTO FILLED / PAYNE FILLED
+- AUTO FILLED / PAYNE NO_FILL
+- AUTO NO_FILL / PAYNE FILLED
+- AUTO NO_FILL / PAYNE NO_FILL
+- same contract / different timing
+- same contract / different economic entry
+
+without coupling execution.
+
+## Validation fixtures
+
+Required presentation fixtures cover:
+
+1. untouched fishing 0/1
+2. 1/1 NO_FILL
+3. 1/1 FILLED / MANAGING
+4. UNKNOWN result
+5. HOLD before provider POST
+6. mixed 5/10 summary
+7. remaining-count correctness
+8. restart persistence
+9. NO_FILL cannot remain 0 attempted
+10. stale / unavailable feature display
+11. one-shot transition flash terminates
+12. mobile responsive layout
+13. desktop four-column layout
+14. export execution fields
+15. fast UI refresh creates zero provider activity
+16. historical prior-series ledger events cannot contaminate the current run
+
