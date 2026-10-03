@@ -2938,7 +2938,11 @@ PULL / FIRE READY:
 green-family accent
 
 ENTRY_PRE_SUBMIT_LATCHED:
-ENTRY SENT / stronger green transition
+PRE-SUBMIT LATCHED / stronger green transition
+
+This is explicitly NOT labeled ENTRY SENT because the latch occurs before provider POST.
+
+Actual provider submission is represented only by subsequent durable provider-result evidence.
 
 FILLED:
 FILLED / MANAGING
