@@ -4820,41 +4820,39 @@ document.getElementById('export')?.addEventListener('click',async()=>{const r=aw
       const safe=Boolean(balanceProof?.ok&&disarmed&&open.length===0&&expired.length===0);
       const money=n=>Number.isFinite(Number(n))?'$'+Number(n).toFixed(2):'—';
       const status=safe?'READY FOR REVIEW':(!disarmed?'FOUNDER ACTION REQUIRED — DISARM FIRST':expired.length?'BLOCKED — EXPIRED POSITION SAFETY HOLD':open.length?'BLOCKED — OPEN POSITION EXISTS':'BLOCKED — BALANCE READ FAILED');
-      const form=safe&&index0>0?`<form method="post" action="/founder-funding-review"><label><b>DESTINATION</b></label><select name="destinationIndex" required style="font-size:18px;padding:12px;width:100%;box-sizing:border-box;margin:8px 0;border-radius:10px"><option value="2" selected>INDEX 2 — AUTO</option><option value="3">INDEX 3 — PAYNE</option></select><label><b>TRANSFER AMOUNT</b></label><input name="amountUsd" type="number" inputmode="decimal" min="0.01" step="0.01" max="${index0.toFixed(2)}" required style="font-size:18px;padding:12px;width:100%;box-sizing:border-box;margin:8px 0;border-radius:10px"><button type="submit" style="font-size:17px;font-weight:800;padding:13px 16px;border-radius:10px;border:1px solid #d3a53a;background:#101b29;color:#ffd86a;width:100%">REVIEW TRANSFER</button></form>`:'<p>No transfer action is available.</p>';
-      const page=`<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1"><title>Founder Funding</title><body style="font-family:system-ui;background:#050a11;color:#eef7ff;padding:20px;max-width:720px;margin:auto"><h2>FOUNDER FUNDING</h2><div style="border:1px solid #294764;background:#0d1724;border-radius:14px;padding:18px"><p>TOTAL PREDICTIONS CASH: <b>${money(total)}</b></p><p>INDEX 0 BALANCE: <b>${money(index0)}</b></p><p>INDEX 2 — AUTO BALANCE: <b>${money(index2)}</b></p><p>INDEX 3 — PAYNE BALANCE: <b>${money(index3)}</b></p><p>TRANSFERABLE INDEX 0 CASH: <b>${money(index0)}</b></p><p>SOURCE: <b>INDEX 0</b></p><p>STATUS: <b>${status}</b></p>${form}<p style="color:#91a6be">Opening or refreshing this page performs authenticated reads only. It does not transfer funds, arm, disarm, or place an order.</p></div></body>`;
+      const index0Form=safe&&index0>0?`<form method="post" action="/founder-funding-review"><input type="hidden" name="sourceIndex" value="0"><label><b>DESTINATION</b></label><select name="destinationIndex" required style="font-size:18px;padding:12px;width:100%;box-sizing:border-box;margin:8px 0;border-radius:10px"><option value="2" selected>INDEX 2 — AUTO</option><option value="3">INDEX 3 — PAYNE</option></select><label><b>TRANSFER AMOUNT</b></label><input name="amountUsd" type="number" inputmode="decimal" min="0.01" step="0.01" max="${index0.toFixed(2)}" required style="font-size:18px;padding:12px;width:100%;box-sizing:border-box;margin:8px 0;border-radius:10px"><button type="submit">REVIEW INDEX 0 TRANSFER</button></form>`:'';
+      const returnForm=safe&&index3>0?`<form method="post" action="/founder-funding-review" style="margin-top:16px"><input type="hidden" name="sourceIndex" value="3"><input type="hidden" name="destinationIndex" value="2"><input type="hidden" name="amountUsd" value="${index3.toFixed(4)}"><button type="submit">REVIEW FULL INDEX 3 → INDEX 2 RETURN</button></form>`:'';
+      const page=`<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1"><title>Founder Funding</title><body style="font-family:system-ui;background:#050a11;color:#eef7ff;padding:20px;max-width:720px;margin:auto"><h2>FOUNDER FUNDING</h2><div><p>TOTAL PREDICTIONS CASH: <b>${money(total)}</b></p><p>INDEX 0: <b>${money(index0)}</b></p><p>INDEX 2 — AUTO: <b>${money(index2)}</b></p><p>INDEX 3 — PAYNE: <b>${money(index3)}</b></p><p>STATUS: <b>${status}</b></p>${index0Form+returnForm}<p>Read/review is zero-money. Index 3 → 2 additionally requires PAYNE disarmed and flat.</p></div></body>`;
       return new Response(page,{headers:{"content-type":"text/html;charset=utf-8","cache-control":"no-store"}});
     }
 
     if (request.method === "POST" && url.pathname === "/founder-funding-review") {
       const form=await request.formData().catch(()=>null);
+      const sourceIndex=Number(String(form?.get("sourceIndex")??"0").trim());
       const destinationIndex=Number(String(form?.get("destinationIndex")??"").trim());
-      if(![2,3].includes(destinationIndex)) return json({ok:false,state:"TRANSFER_DESTINATION_INVALID",providerWrites:0,capitalMovedUsd:0},400);
-      const destinationLabel=destinationIndex===2?"INDEX 2 — AUTO":"INDEX 3 — PAYNE";
-      const amountRaw=String(form?.get("amountUsd")??"").trim();
-      const amountMatch=/^(?:0|[1-9]\d*)(?:\.(\d{1,2}))?$/.exec(amountRaw);
-      const amountCents=amountMatch?(Number(amountRaw.split(".")[0])*100+Number((amountMatch[1]||"").padEnd(2,"0"))):NaN;
-      const amount=Number.isInteger(amountCents)?amountCents/100:NaN;
+      if(!founderFundingPairAllowed(sourceIndex,destinationIndex)) return json({ok:false,state:"TRANSFER_PAIR_NOT_AUTHORIZED",sourceIndex,destinationIndex,providerWrites:0,capitalMovedUsd:0},400);
+      const amount=Number(String(form?.get("amountUsd")??"").trim());
       const state=await loadExecutionTestState(env);
       if(state?.armed||executionTestQueueActive(state)) return json({ok:false,state:"FOUNDER_ACTION_REQUIRED_DISARM_FIRST",providerWrites:0,capitalMovedUsd:0},409);
       const open=executionTestOpenPositions(state);
-      const expired=open.filter(p=>{const started=Number(p?.filledAt||p?.submittedAt);return Number.isFinite(started)&&Date.now()-started>=EXECUTION_TEST_CONFIG.maxHoldMs;});
-      if(expired.length) return json({ok:false,state:"EXPIRED_POSITION_SAFETY_HOLD",providerWrites:0,capitalMovedUsd:0},409);
       if(open.length) return json({ok:false,state:"OPEN_POSITION_TRANSFER_BLOCKED",providerWrites:0,capitalMovedUsd:0},409);
+      const payneSafety=sourceIndex===3&&destinationIndex===2?await payneFundingSafetyRead():null;
+      if(payneSafety && !payneSafety.ok) return json({ok:false,state:"PAYNE_STATE_READ_FAILED",providerWrites:0,capitalMovedUsd:0},502);
       const balanceProof=await kalshiExecutionBalanceSnapshot(env);
       if(!balanceProof?.ok) return json({ok:false,state:"BALANCE_READ_FAILED",providerWrites:0,capitalMovedUsd:0},502);
       const rows=Array.isArray(balanceProof?.body?.balance_breakdown)?balanceProof.body.balance_breakdown:[];
-      const index0=Number(rows.find(x=>Number(x?.exchange_index)===0)?.balance||0);
+      const sourceBalance=Number(rows.find(x=>Number(x?.exchange_index)===sourceIndex)?.balance||0);
       const destinationBalance=Number(rows.find(x=>Number(x?.exchange_index)===destinationIndex)?.balance||0);
       const total=rows.reduce((sum,x)=>sum+(Number(x?.balance)||0),0);
-      if(!Number.isInteger(amountCents)||amountCents<=0) return json({ok:false,state:"TRANSFER_AMOUNT_INVALID",providerWrites:0,capitalMovedUsd:0},400);
-      if(amount>index0+1e-9) return json({ok:false,state:"TRANSFER_EXCEEDS_FRESH_INDEX0",requestedUsd:amount,index0Usd:index0,providerWrites:0,capitalMovedUsd:0},409);
-      if(!env?.BASELINE_REAL_SHADOW_STATE) return json({ok:false,state:"REVIEW_STORE_UNAVAILABLE",providerWrites:0,capitalMovedUsd:0},503);
+      if(!Number.isFinite(amount)||amount<=0||amount>sourceBalance+1e-9) return json({ok:false,state:"TRANSFER_AMOUNT_INVALID_OR_EXCEEDS_SOURCE",providerWrites:0,capitalMovedUsd:0},409);
+      if(sourceIndex===3&&destinationIndex===2){
+        const gate=founderFundingReturnReviewGate({sourceIndex,destinationIndex,amountUsd:amount,sourceBalanceUsd:sourceBalance,payneArmed:payneSafety?.armed,payneOpenPositions:payneSafety?.openPositions});
+        if(!gate.ok) return json({ok:false,state:gate.state,payneSafety,providerWrites:0,capitalMovedUsd:0},409);
+      }
       const reviewId=crypto.randomUUID();
-      await env.BASELINE_REAL_SHADOW_STATE.put("founder-funding-review-v2:"+reviewId,JSON.stringify({schema:"FOUNDER_FUNDING_REVIEW_V2",amountUsd:amount,destinationIndex,reviewedAt:Date.now(),index0Usd:index0,destinationUsd:destinationBalance,totalUsd:total}),{expirationTtl:600});
-      const expected0=index0-amount,expectedDestination=destinationBalance+amount;
-      const authorization=destinationIndex===2?"CONFIRM_FOUNDER_INDEX0_TO_INDEX2_TRANSFER":"CONFIRM_FOUNDER_INDEX0_TO_INDEX3_TRANSFER";
-      const page=`<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1"><title>Review Founder Funding</title><body style="font-family:system-ui;background:#050a11;color:#eef7ff;padding:20px;max-width:720px;margin:auto"><h2>REVIEW INDEX 0 → ${destinationLabel}</h2><div style="border:1px solid #d3a53a;background:#0d1724;border-radius:14px;padding:18px"><p>SOURCE: <b>INDEX 0</b></p><p>DESTINATION: <b>${destinationLabel}</b></p><p>TRANSFER: <b>$${amount.toFixed(2)}</b></p><p>CURRENT SOURCE BALANCE: <b>$${index0.toFixed(2)}</b></p><p>CURRENT DESTINATION BALANCE: <b>$${destinationBalance.toFixed(2)}</b></p><p>EXPECTED POST-TRANSFER SOURCE: <b>$${expected0.toFixed(2)}</b></p><p>EXPECTED POST-TRANSFER DESTINATION: <b>$${expectedDestination.toFixed(2)}</b></p><p>TOTAL PREDICTIONS CASH: <b>$${total.toFixed(2)}</b></p><form method="post" action="/founder-funding-confirm"><input type="hidden" name="reviewId" value="${reviewId}"><input type="hidden" name="authorization" value="${authorization}"><button type="submit" style="font-size:17px;font-weight:800;padding:13px 16px;border-radius:10px;border:1px solid #d3a53a;background:#101b29;color:#ffd86a;width:100%">CONFIRM INDEX 0 → ${destinationLabel}</button></form><p style="color:#91a6be">No provider write has occurred. Confirmation performs a new safety and balance read and rejects stale or changed balance evidence before any transfer.</p></div></body>`;
-      return new Response(page,{headers:{"content-type":"text/html;charset=utf-8","cache-control":"no-store"}});
+      await env.BASELINE_REAL_SHADOW_STATE.put("founder-funding-review-v2:"+reviewId,JSON.stringify({schema:"FOUNDER_FUNDING_REVIEW_V2",amountUsd:amount,sourceIndex,destinationIndex,reviewedAt:Date.now(),sourceUsd:sourceBalance,destinationUsd:destinationBalance,totalUsd:total,payneSafety}),{expirationTtl:600});
+      const auth=founderFundingAuthorizationForPair(sourceIndex,destinationIndex);
+      return json({ok:true,state:"FOUNDER_FUNDING_REVIEW_READY",reviewId,authorization:auth,sourceIndex,destinationIndex,amountUsd:amount,pre:{sourceUsd:sourceBalance,destinationUsd:destinationBalance,totalUsd:total},expected:{sourceUsd:sourceBalance-amount,destinationUsd:destinationBalance+amount,totalUsd:total},payneSafety,providerWrites:0,capitalMovedUsd:0});
     }
 
     if (request.method === "POST" && url.pathname === "/founder-funding-confirm") {
@@ -4865,67 +4863,40 @@ document.getElementById('export')?.addEventListener('click',async()=>{const r=aw
       const raw=await env.BASELINE_REAL_SHADOW_STATE.get(key);
       if(!raw) return json({ok:false,state:"REVIEW_MISSING_OR_EXPIRED",providerWrites:0,capitalMovedUsd:0},409);
       let review=null; try{review=JSON.parse(raw);}catch{}
-      const destinationIndex=Number(review?.destinationIndex);
-      if(![2,3].includes(destinationIndex)) return json({ok:false,state:"REVIEW_DESTINATION_INVALID",providerWrites:0,capitalMovedUsd:0},409);
-      const expectedAuthorization=destinationIndex===2?"CONFIRM_FOUNDER_INDEX0_TO_INDEX2_TRANSFER":"CONFIRM_FOUNDER_INDEX0_TO_INDEX3_TRANSFER";
-      if(String(form?.get("authorization")||"")!==expectedAuthorization) return json({ok:false,state:"EXPLICIT_FOUNDER_CONFIRM_REQUIRED",providerWrites:0,capitalMovedUsd:0},400);
-      const reviewedAt=Number(review?.reviewedAt);
-      if(!Number.isFinite(reviewedAt)||Date.now()-reviewedAt>600000) {
-        await env.BASELINE_REAL_SHADOW_STATE.delete(key);
-        return json({ok:false,state:"REVIEW_STALE_REVIEW_AGAIN",providerWrites:0,capitalMovedUsd:0},409);
-      }
-      const amount=Number(review?.amountUsd);
-      if(!Number.isFinite(amount)||amount<=0) {
-        await env.BASELINE_REAL_SHADOW_STATE.delete(key);
-        return json({ok:false,state:"REVIEW_INVALID",providerWrites:0,capitalMovedUsd:0},409);
-      }
+      const sourceIndex=Number(review?.sourceIndex??0),destinationIndex=Number(review?.destinationIndex);
+      if(!founderFundingPairAllowed(sourceIndex,destinationIndex)) return json({ok:false,state:"REVIEW_TRANSFER_PAIR_INVALID",providerWrites:0,capitalMovedUsd:0},409);
+      if(String(form?.get("authorization")||"")!==founderFundingAuthorizationForPair(sourceIndex,destinationIndex)) return json({ok:false,state:"EXPLICIT_FOUNDER_CONFIRM_REQUIRED",providerWrites:0,capitalMovedUsd:0},400);
+      const reviewedAt=Number(review?.reviewedAt),amount=Number(review?.amountUsd);
+      if(!Number.isFinite(reviewedAt)||Date.now()-reviewedAt>600000){await env.BASELINE_REAL_SHADOW_STATE.delete(key);return json({ok:false,state:"REVIEW_STALE_REVIEW_AGAIN",providerWrites:0,capitalMovedUsd:0},409);}
       const state=await loadExecutionTestState(env);
-      if(state?.armed||executionTestQueueActive(state)) return json({ok:false,state:"FOUNDER_ACTION_REQUIRED_DISARM_FIRST",providerWrites:0,capitalMovedUsd:0},409);
-      const open=executionTestOpenPositions(state);
-      const expired=open.filter(p=>{const started=Number(p?.filledAt||p?.submittedAt);return Number.isFinite(started)&&Date.now()-started>=EXECUTION_TEST_CONFIG.maxHoldMs;});
-      if(expired.length) return json({ok:false,state:"EXPIRED_POSITION_SAFETY_HOLD",providerWrites:0,capitalMovedUsd:0},409);
-      if(open.length) return json({ok:false,state:"OPEN_POSITION_TRANSFER_BLOCKED",providerWrites:0,capitalMovedUsd:0},409);
+      if(state?.armed||executionTestQueueActive(state)||executionTestOpenPositions(state).length) return json({ok:false,state:"FOUNDER_ACTION_REQUIRED_DISARM_FIRST",providerWrites:0,capitalMovedUsd:0},409);
+      const payneSafety=sourceIndex===3&&destinationIndex===2?await payneFundingSafetyRead():null;
+      if(payneSafety && !payneSafety.ok) return json({ok:false,state:"PAYNE_STATE_READ_FAILED",providerWrites:0,capitalMovedUsd:0},502);
       const balanceProof=await kalshiExecutionBalanceSnapshot(env);
       if(!balanceProof?.ok) return json({ok:false,state:"BALANCE_READ_FAILED",providerWrites:0,capitalMovedUsd:0},502);
       const rows=Array.isArray(balanceProof?.body?.balance_breakdown)?balanceProof.body.balance_breakdown:[];
-      const index0=Number(rows.find(x=>Number(x?.exchange_index)===0)?.balance||0);
+      const sourceBalance=Number(rows.find(x=>Number(x?.exchange_index)===sourceIndex)?.balance||0);
       const destinationBalance=Number(rows.find(x=>Number(x?.exchange_index)===destinationIndex)?.balance||0);
       const total=rows.reduce((sum,x)=>sum+(Number(x?.balance)||0),0);
-      const reviewedIndex0=Number(review?.index0Usd);
-      const reviewedDestination=Number(review?.destinationUsd);
-      const reviewedTotal=Number(review?.totalUsd);
-      const balancesUnchanged=Number.isFinite(reviewedIndex0)&&Number.isFinite(reviewedDestination)&&Number.isFinite(reviewedTotal)&&Math.abs(index0-reviewedIndex0)<0.011&&Math.abs(destinationBalance-reviewedDestination)<0.011&&Math.abs(total-reviewedTotal)<0.011;
-      if(!balancesUnchanged) {
-        await env.BASELINE_REAL_SHADOW_STATE.delete(key);
-        return json({ok:false,state:"BALANCE_CHANGED_REVIEW_AGAIN",destinationExchangeIndex:destinationIndex,providerWrites:0,capitalMovedUsd:0},409);
-      }
-      if(amount>index0+1e-9) {
-        await env.BASELINE_REAL_SHADOW_STATE.delete(key);
-        return json({ok:false,state:"TRANSFER_EXCEEDS_FRESH_INDEX0",requestedUsd:amount,index0Usd:index0,providerWrites:0,capitalMovedUsd:0},409);
-      }
+      const balancesUnchanged=Math.abs(sourceBalance-Number(review?.sourceUsd))<0.0001&&Math.abs(destinationBalance-Number(review?.destinationUsd))<0.0001&&Math.abs(total-Number(review?.totalUsd))<0.0001;
+      if(sourceIndex===3&&destinationIndex===2){
+        const gate=founderFundingReturnConfirmGate({reviewPresent:true,reviewAgeMs:Date.now()-reviewedAt,balancesUnchanged,payneArmed:payneSafety?.armed,payneOpenPositions:payneSafety?.openPositions,sourceIndex,destinationIndex});
+        if(!gate.ok){await env.BASELINE_REAL_SHADOW_STATE.delete(key);return json({ok:false,state:gate.state,providerWrites:0,capitalMovedUsd:0},409);}
+        if(Math.abs(amount-sourceBalance)>=0.0001){await env.BASELINE_REAL_SHADOW_STATE.delete(key);return json({ok:false,state:"INDEX3_RETURN_MUST_USE_FULL_CURRENT_BALANCE",providerWrites:0,capitalMovedUsd:0},409);}
+      } else if(!balancesUnchanged){await env.BASELINE_REAL_SHADOW_STATE.delete(key);return json({ok:false,state:"BALANCE_CHANGED_REVIEW_AGAIN",providerWrites:0,capitalMovedUsd:0},409);}
       const amountCenticents=Math.round(amount*10000);
-      if(!(amountCenticents>0)) {
-        await env.BASELINE_REAL_SHADOW_STATE.delete(key);
-        return json({ok:false,state:"TRANSFER_AMOUNT_INVALID",providerWrites:0,capitalMovedUsd:0},400);
-      }
       await env.BASELINE_REAL_SHADOW_STATE.delete(key);
-      const payload={source:"event_contract",destination:"event_contract",amount:amountCenticents,source_exchange_shard:0,destination_exchange_shard:destinationIndex,source_subaccount:0,destination_subaccount:0};
+      const payload={source:"event_contract",destination:"event_contract",amount:amountCenticents,source_exchange_shard:sourceIndex,destination_exchange_shard:destinationIndex,source_subaccount:0,destination_subaccount:0};
       const r=await kalshiApprovedShardTransfer(env,payload);
       const providerResponse=await r.json().catch(()=>({}));
-      const destinationLabel=destinationIndex===2?"INDEX 2 — AUTO":"INDEX 3 — PAYNE";
-      if(!r.ok) return json({ok:false,state:"FOUNDER_FUNDING_TRANSFER_PROVIDER_REJECTED",destinationExchangeIndex:destinationIndex,httpStatus:r.status,providerResponse,providerWrites:1,capitalMoveAttemptedUsd:amount},502);
+      if(!r.ok) return json({ok:false,state:"FOUNDER_FUNDING_TRANSFER_PROVIDER_REJECTED",sourceExchangeIndex:sourceIndex,destinationExchangeIndex:destinationIndex,httpStatus:r.status,providerResponse,providerWrites:1,capitalMoveAttemptedUsd:amount},502);
       const after=await kalshiExecutionBalanceSnapshot(env);
       const afterRows=Array.isArray(after?.body?.balance_breakdown)?after.body.balance_breakdown:[];
-      const post0=Number(afterRows.find(x=>Number(x?.exchange_index)===0)?.balance||0);
+      const postSource=Number(afterRows.find(x=>Number(x?.exchange_index)===sourceIndex)?.balance||0);
       const postDestination=Number(afterRows.find(x=>Number(x?.exchange_index)===destinationIndex)?.balance||0);
       const postTotal=afterRows.reduce((sum,x)=>sum+(Number(x?.balance)||0),0);
-      const reconciled=Boolean(after?.ok&&Math.abs(post0-(index0-amount))<0.011&&Math.abs(postDestination-(destinationBalance+amount))<0.011&&Math.abs(postTotal-total)<0.011);
-      const diagnostic={ok:true,state:reconciled?"FOUNDER_FUNDING_TRANSFER_RECONCILED":"FOUNDER_FUNDING_TRANSFER_ACCEPTED_AWAITING_BALANCE_RECONCILIATION",transfer:{amountUsd:amount,sourceExchangeIndex:0,destinationExchangeIndex:destinationIndex,destinationLabel,pre:{index0Usd:index0,destinationUsd:destinationBalance,totalUsd:total},post:{index0Usd:post0,destinationUsd:postDestination,totalUsd:postTotal},reconciled},providerWrites:1,ordersSubmitted:0,armChanged:false,disarmChanged:false};
-      const diagnosticHtml=JSON.stringify(diagnostic,null,2).replace(/[&<>]/g,ch=>({"&":"&amp;","<":"&lt;",">":"&gt;"}[ch]));
-      const resultTitle=reconciled?"TRANSFER COMPLETE":"TRANSFER ACCEPTED — RECONCILIATION PENDING";
-      const resultNote=reconciled?"Balances have been freshly re-read and reconciled.":"Provider accepted the transfer, but the fresh balance read has not yet reconciled to the expected values. Do not submit another transfer.";
-      const resultPage=`<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1"><title>Founder Funding Result</title><body style="font-family:system-ui;background:#050a11;color:#eef7ff;padding:20px;max-width:720px;margin:auto"><h2>${resultTitle}</h2><div style="border:1px solid ${reconciled?'#2ca36b':'#d3a53a'};background:#0d1724;border-radius:14px;padding:18px"><p>TRANSFERRED: <b>$${amount.toFixed(2)}</b></p><p>SOURCE INDEX 0: <b>$${post0.toFixed(2)}</b></p><p>DESTINATION ${destinationLabel}: <b>$${postDestination.toFixed(2)}</b></p><p>TOTAL PREDICTIONS CASH: <b>$${postTotal.toFixed(2)}</b></p><p style="color:#91a6be">${resultNote}</p><a href="/founder-terminal" style="display:block;text-align:center;text-decoration:none;font-size:17px;font-weight:800;padding:13px 16px;border-radius:10px;border:1px solid #2c8ed6;background:#101b29;color:#8fd3ff">RETURN TO MARKET EDGE</a><details style="margin-top:18px;color:#91a6be"><summary>Diagnostic evidence</summary><pre style="white-space:pre-wrap;overflow-wrap:anywhere;background:#050a11;padding:12px;border-radius:10px;border:1px solid #26384d;color:#b9cbe0">${diagnosticHtml}</pre></details></div></body>`;
-      return new Response(resultPage,{headers:{"content-type":"text/html;charset=utf-8","cache-control":"no-store"}});
+      const reconciled=Boolean(after?.ok&&Math.abs(postSource-(sourceBalance-amount))<0.0001&&Math.abs(postDestination-(destinationBalance+amount))<0.0001&&Math.abs(postTotal-total)<0.0001);
+      return json({ok:true,state:reconciled?"FOUNDER_FUNDING_TRANSFER_RECONCILED":"FOUNDER_FUNDING_TRANSFER_ACCEPTED_AWAITING_BALANCE_RECONCILIATION",transfer:{amountUsd:amount,sourceExchangeIndex:sourceIndex,destinationExchangeIndex:destinationIndex,pre:{sourceUsd:sourceBalance,destinationUsd:destinationBalance,totalUsd:total},post:{sourceUsd:postSource,destinationUsd:postDestination,totalUsd:postTotal},reconciled},payneSafety,providerWrites:1,ordersSubmitted:0,armChanged:false,disarmChanged:false});
     }
 
     if (request.method === "POST" && url.pathname === "/execution-test-disarm") {
