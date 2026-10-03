@@ -150,14 +150,36 @@ export async function updateFounderControl(env, action, rawValue = null) {
 
   if (name==='ARM') {
     const series=await loadRealSeriesState(env);
-    if (Number(before.activeThreshold)!==.70) throw new Error('PAYNE_REAL_ARM_THRESHOLD_MUST_BE_0_70');
-    if (Number(before.maxEntryDebitUsd)!==1) throw new Error('PAYNE_REAL_ARM_MAX_DEBIT_MUST_BE_1_USD');
-    if (Number(before.attemptTarget)!==1) throw new Error('PAYNE_REAL_ARM_ATTEMPT_TARGET_MUST_BE_1');
+    const cfgThreshold=Number(before.activeThreshold), cfgStake=Number(before.maxEntryDebitUsd), cfgTarget=Number(before.attemptTarget);
+    if (!CONTROL_THRESHOLD_OPTIONS.includes(cfgThreshold)) throw new Error('PAYNE_REAL_ARM_THRESHOLD_NOT_ALLOWED');
+    if (!CONTROL_STAKE_OPTIONS.includes(cfgStake)) throw new Error('PAYNE_REAL_ARM_STAKE_NOT_ALLOWED');
+    if (!CONTROL_ATTEMPT_OPTIONS.includes(cfgTarget)) throw new Error('PAYNE_REAL_ARM_ATTEMPT_TARGET_NOT_ALLOWED');
     if (Number(before.requiredExchangeIndex)!==2) throw new Error('PAYNE_REAL_ARM_INDEX2_REQUIRED');
-    if (Number(series?.attemptsStarted||0)>=1) throw new Error('PAYNE_REAL_1X1_ALREADY_CONSUMED');
     if (series?.unresolvedEntry===true) throw new Error('PAYNE_REAL_ENTRY_RECONCILIATION_REQUIRED');
-    if (series?.position && ['OPEN','EXIT_RETRY','EXIT_RECONCILIATION_REQUIRED','RECONCILIATION_UNKNOWN'].includes(String(series.position.status||''))) throw new Error('PAYNE_REAL_OPEN_POSITION_EXISTS');
-    const armedSeries={...series,seriesId:series.seriesId||crypto.randomUUID(),status:'ARMED_WAITING',attemptsStarted:0,attemptTarget:1,threshold:.70,maxEntryDebitUsd:1,requiredExchangeIndex:2,completedAt:null};
+    if (series?.position && SERIES_BLOCKING_POSITION_STATUSES.includes(String(series.position.status||''))) throw new Error('PAYNE_REAL_OPEN_POSITION_EXISTS');
+    const started=Number(series?.attemptsStarted||0);
+    const priorTarget=Number(series?.attemptTarget||1);
+    let armedSeries;
+    if (started>0 && started<priorTarget) {
+      // An unfinished governed series: ARM resumes it with its FROZEN config. It never re-snapshots or resets the count.
+      const frozen=frozenSeriesConfig(series);
+      if (!frozen.ok) throw new Error('PAYNE_REAL_SERIES_IN_PROGRESS_NOT_FROZEN');
+      if (frozen.attemptTarget!==cfgTarget || frozen.threshold!==cfgThreshold || frozen.maxEntryDebitUsd!==cfgStake) throw new Error('PAYNE_REAL_SERIES_IN_PROGRESS_CONFIG_MISMATCH');
+      const gate=seriesInterlock(series);
+      if (!gate.clear) throw new Error('PAYNE_REAL_SERIES_PRIOR_ATTEMPT_NOT_CLEAN_'+gate.reason);
+      armedSeries={...series,status:'ARMED_WAITING',requiredExchangeIndex:2,completedAt:null};
+      next.attempts=started; next.openPositions=0;
+    } else {
+      // New governed series: snapshot the validated founder config into the series.
+      armedSeries={
+        ...defaultRealSeriesState(),
+        seriesId:(started===0&&series?.seriesId)?series.seriesId:crypto.randomUUID(),
+        status:'ARMED_WAITING',attemptsStarted:0,
+        attemptTarget:cfgTarget,threshold:cfgThreshold,maxEntryDebitUsd:cfgStake,requiredExchangeIndex:2,
+        configFrozen:true,frozenAt:new Date().toISOString(),completedAt:null,
+      };
+      next.attempts=0; next.openPositions=0;
+    }
     await saveRealSeriesState(env,armedSeries);
     next.armed=true;
   } else if (name==='DISARM') next.armed=false;
@@ -2184,6 +2206,39 @@ export async function buildCockpitData(env, nowMs=Date.now()) {
 }
 
 
+const SERIES_BLOCKING_POSITION_STATUSES = Object.freeze(['OPEN','EXIT_RETRY','EXIT_RECONCILIATION_REQUIRED','RECONCILIATION_UNKNOWN']);
+
+// The ACTIVE series' own frozen config. The execution engine reads run config ONLY from here.
+export function frozenSeriesConfig(series) {
+  const attemptTarget=Number(series?.attemptTarget), threshold=Number(series?.threshold);
+  const maxEntryDebitUsd=Number(series?.maxEntryDebitUsd), requiredExchangeIndex=Number(series?.requiredExchangeIndex);
+  const ok=series?.configFrozen===true
+    && Number.isInteger(attemptTarget) && attemptTarget>=1
+    && Number.isFinite(threshold) && threshold>0
+    && Number.isFinite(maxEntryDebitUsd) && maxEntryDebitUsd>0
+    && requiredExchangeIndex===2;
+  return {ok,attemptTarget,threshold,maxEntryDebitUsd,requiredExchangeIndex};
+}
+
+export function seriesTerminal(series) {
+  return Number(series?.attemptsStarted||0)>=Number(series?.attemptTarget||1);
+}
+
+// Attempt N+1 may begin only if attempt N is authoritatively clean.
+export function seriesInterlock(series) {
+  const pos=series?.position||null;
+  const posStatus=String(pos?.status||'');
+  const attemptStatus=String(series?.currentAttempt?.status||'').toUpperCase();
+  const seriesStatus=String(series?.status||'');
+  if (series?.unresolvedEntry===true) return {clear:false,reason:'UNRESOLVED_ENTRY'};
+  if (pos && (pos.owner!==REAL_OWNER || Number(pos.exchangeIndex)!==2)) return {clear:false,reason:'POSITION_OWNERSHIP_UNKNOWN'};
+  if (pos && SERIES_BLOCKING_POSITION_STATUSES.includes(posStatus)) return {clear:false,reason:'POSITION_'+posStatus};
+  if (pos && (posStatus!=='CLOSED' || String(pos.reconciliationState||'')!=='FLAT')) return {clear:false,reason:'POSITION_NOT_PROVEN_FLAT'};
+  if (['SUBMITTING','WRITE_ERROR_UNKNOWN','PROVIDER_REJECTED_OR_UNKNOWN','UNKNOWN'].includes(attemptStatus)) return {clear:false,reason:'ATTEMPT_RESULT_UNKNOWN'};
+  if (/^(ENTRY_SUBMITTING|ENTRY_RECONCILIATION_REQUIRED|ENTRY_AUTHORITY_REVOKED_AFTER_LATCH|MANAGEMENT_|EXIT_|HOLD_WRONG_OR_UNKNOWN_OWNERSHIP)/.test(seriesStatus)) return {clear:false,reason:'MANAGEMENT_REQUIRED_STATE'};
+  return {clear:true,reason:'CLEAN'};
+}
+
 export function defaultRealSeriesState() {
   return {
     schema:'PAYNE_REAL_SERIES_V1',
@@ -2195,6 +2250,8 @@ export function defaultRealSeriesState() {
     threshold:.70,
     maxEntryDebitUsd:1,
     requiredExchangeIndex:2,
+    configFrozen:false,
+    frozenAt:null,
     unresolvedEntry:false,
     currentAttempt:null,
     position:null,
@@ -2211,16 +2268,13 @@ export async function loadRealSeriesState(env) {
     ...base,
     ...saved,
     owner:REAL_OWNER,
-    attemptTarget:1,
-    threshold:.70,
-    maxEntryDebitUsd:1,
     requiredExchangeIndex:2,
     attemptsStarted:Number.isFinite(Number(saved?.attemptsStarted))?Math.max(0,Math.trunc(Number(saved.attemptsStarted))):0,
   };
 }
 
 export async function saveRealSeriesState(env,state) {
-  const next={...defaultRealSeriesState(),...state,owner:REAL_OWNER,attemptTarget:1,threshold:.70,maxEntryDebitUsd:1,requiredExchangeIndex:2,updatedAt:new Date().toISOString()};
+  const next={...defaultRealSeriesState(),...state,owner:REAL_OWNER,requiredExchangeIndex:2,updatedAt:new Date().toISOString()};
   await kvPutJson(env,REAL_SERIES_KEY,next);
   return next;
 }
@@ -2332,8 +2386,8 @@ export function summarizeRealExecutionState({control={},series={},ledger=[],asOf
     lastAttempt,
     safeguards:{
       owner:REAL_OWNER,
-      threshold:.70,
-      maxEntryDebitUsd:1,
+      threshold:Number(series?.threshold),
+      maxEntryDebitUsd:Number(series?.maxEntryDebitUsd),
       requiredExchangeIndex:2,
       timeInForce:'immediate_or_cancel',
       scoreExit:PAYNE_CONFIG.exitScore,
@@ -2477,8 +2531,8 @@ export async function reconcileUnresolvedEntryFromProvider(env,nowMs=Date.now())
   };
   series.unresolvedEntry=false;
   series.position=null;
-  series.status='COMPLETE_NO_FILL_RECONCILED';
-  series.completedAt=reconciledAt;
+  if(seriesTerminal(series)){series.status='COMPLETE_NO_FILL_RECONCILED';series.completedAt=reconciledAt;}
+  else {series.status='SERIES_PAUSED_RECONCILED_CLEAN';}
   series.currentAttempt={...attempt,status:'NO_FILL',providerResult,reconciledAt};
   await persistAttempt(env,{
     runId:series.seriesId,
@@ -2502,7 +2556,7 @@ export async function reconcileUnresolvedEntryFromProvider(env,nowMs=Date.now())
     reconciliation:'PROVIDER_REJECTED_NO_EXECUTION_CONFIRMED',
   });
   await saveRealSeriesState(env,series);
-  await closeRealSeriesControl(env,Number(series.attemptsStarted||1),0);
+  await closeRealSeriesControl(env,Number(series.attemptsStarted||1),0); // stays fail-closed DISARMED; founder re-ARM resumes the frozen series
   return {
     ok:true,
     classification:'NO_FILL',
@@ -2531,15 +2585,17 @@ async function baselineAutoTickerConflict(env,ticker) {
   }catch(error){return {ok:false,conflict:null,reason:String(error?.message||error)};}
 }
 
-function payneRealScope(control,series,kind,position=null) {
+function payneRealScope(control,series,kind,position=null,entryContext={}) {
   return {
     owner:REAL_OWNER,
     exchangeIndex:2,
     authorized:kind==='ENTRY'?Boolean(control?.armed):Boolean(position?.owner===REAL_OWNER),
     armed:Boolean(control?.armed),
-    attemptTarget:1,
-    attemptsBefore:Number(series?.attemptsStarted||0),
-    maxEntryDebitUsd:1,
+    attemptTarget:Number(series?.attemptTarget),
+    attemptsBefore:Number.isFinite(Number(entryContext?.attemptsBefore))?Number(entryContext.attemptsBefore):Number(series?.attemptsStarted||0),
+    maxEntryDebitUsd:Number(series?.maxEntryDebitUsd),
+    seriesConfigFrozen:series?.configFrozen===true,
+    priorAttemptClean:entryContext?.priorAttemptClean===true,
     ownedByPayne:Boolean(position?.owner===REAL_OWNER),
     ownedTicker:position?.marketTicker||null,
   };
@@ -2555,6 +2611,19 @@ function realizedPnlFromPosition(position) {
 async function closeRealSeriesControl(env,attempts=1,openPositions=0) {
   const control=await loadControl(env);
   const next={...control,armed:false,attempts,openPositions,providerWriteAuthority:'BUILT_INACTIVE_DISARMED',providerPostAuthority:'BUILT_INACTIVE_DISARMED',realExecution:'BUILT_INACTIVE_DISARMED',fundingAuthority:'INDEX2_ONLY_INACTIVE_DISARMED',requiredExchangeIndex:2,realControlSchema:REAL_CONTROL_SCHEMA};
+  await kvPutJson(env,CONTROL_KEY,next);
+  return next;
+}
+
+function seriesDisarmsOnStep(series,failClosed){return failClosed===true||seriesTerminal(series);}
+
+// Sequential-series control settle: fail-closed DISARM on any abnormal state or when the series is terminal;
+// otherwise stay armed (counters only) so the next attempt may proceed once the prior attempt is clean.
+async function settleSeriesControl(env,series,openPositions,{failClosed=false}={}) {
+  const attempts=Number(series?.attemptsStarted||0);
+  if(seriesDisarmsOnStep(series,failClosed)) return closeRealSeriesControl(env,attempts,openPositions);
+  const control=await loadControl(env);
+  const next={...control,attempts,openPositions,requiredExchangeIndex:2,realControlSchema:REAL_CONTROL_SCHEMA};
   await kvPutJson(env,CONTROL_KEY,next);
   return next;
 }
@@ -2593,23 +2662,23 @@ async function managePayneRealPosition(env,control,series,postImpl=kalshiPayneOr
   if(rec.classification==='FLAT'){
     position.status='CLOSED';
     position.closedAt=position.closedAt||new Date(nowMs).toISOString();
-    series.status='COMPLETE_FLAT';
-    series.completedAt=series.completedAt||position.closedAt;
+    if(seriesTerminal(series)){series.status='COMPLETE_FLAT';series.completedAt=series.completedAt||position.closedAt;}
+    else {series.status=(await loadControl(env)).armed?'ARMED_FISHING':'SERIES_PAUSED_DISARMED_CLEAN';}
     await appendRealLedger(env,'PROVIDER_RECONCILED_FLAT',{seriesId:series.seriesId,attemptId:position.attemptId,ticker:position.marketTicker,reason:rec.reason,realizedPnlUsd:realizedPnlFromPosition(position)});
-    await closeRealSeriesControl(env,1,0);
+    await settleSeriesControl(env,series,0);
     return saveRealSeriesState(env,series);
   }
   if(rec.classification!=='OPEN'){
     position.status='RECONCILIATION_UNKNOWN';
     series.status='MANAGEMENT_RECONCILIATION_UNKNOWN';
     await appendRealLedger(env,'MANAGEMENT_RECONCILIATION_UNKNOWN',{seriesId:series.seriesId,attemptId:position.attemptId,ticker:position.marketTicker,reason:rec.reason});
-    await closeRealSeriesControl(env,1,1);
+    await settleSeriesControl(env,series,1,{failClosed:true});
     return saveRealSeriesState(env,series);
   }
 
   const quote=await exactMarketRead(env,position.marketTicker,position.asset);
   const featureState=await readAuthoritativePayneFeatures(env,nowMs);
-  const feature=featureForCandidate(featureState,position.marketTicker,position.outcomeSide,position.asset,.70);
+  const feature=featureForCandidate(featureState,position.marketTicker,position.outcomeSide,position.asset,Number(series.threshold));
   const bid=position.outcomeSide==='YES'?Number(quote?.market?.yesBid):Number(quote?.market?.noBid);
   const ageMs=nowMs-Date.parse(position.entryTime||position.filledAt||'');
   const decision=managementDecision({score:feature?.score,heldMs:ageMs,owned:true});
@@ -2618,15 +2687,15 @@ async function managePayneRealPosition(env,control,series,postImpl=kalshiPayneOr
   position.holdDurationMs=Number.isFinite(ageMs)?ageMs:null;
   if(decision.action!=='EXIT'){
     position.status='OPEN';
-    series.status='ATTEMPT_LIMIT_REACHED_MANAGING_POSITION';
-    await closeRealSeriesControl(env,1,1);
+    series.status=seriesTerminal(series)?'ATTEMPT_LIMIT_REACHED_MANAGING_POSITION':'MANAGING_POSITION_SERIES_CONTINUES';
+    await settleSeriesControl(env,series,1);
     return saveRealSeriesState(env,series);
   }
   if(!quote?.ok || !(bid>0&&bid<1)){
     position.status='EXIT_RETRY';
     position.exitReason=decision.reason;
     series.status='EXIT_REQUIRED_WAITING_FOR_LIVE_BID';
-    await closeRealSeriesControl(env,1,1);
+    await settleSeriesControl(env,series,1);
     return saveRealSeriesState(env,series);
   }
 
@@ -2634,15 +2703,15 @@ async function managePayneRealPosition(env,control,series,postImpl=kalshiPayneOr
   if(!(remaining>0)){
     position.status='EXIT_RECONCILIATION_REQUIRED';
     series.status='EXIT_RECONCILIATION_REQUIRED';
-    await closeRealSeriesControl(env,1,1);
+    await settleSeriesControl(env,series,1,{failClosed:true});
     return saveRealSeriesState(env,series);
   }
   position.remainingExitCount=remaining;
   position.exitAttempt=Number(position.exitAttempt||0)+1;
-  const exitClientOrderId=payneClientOrderId(series.seriesId,1,'exit'+position.exitAttempt);
+  const exitClientOrderId=payneClientOrderId(series.seriesId,Number(position.attemptNo||1),'exit'+position.exitAttempt);
   const payload=kalshiV2ExitPayload(position,bid,exitClientOrderId);
   if(!payload || payload.reduce_only!==true){
-    position.status='EXIT_RETRY';series.status='EXIT_REQUEST_BUILD_FAILED';await closeRealSeriesControl(env,1,1);return saveRealSeriesState(env,series);
+    position.status='EXIT_RETRY';series.status='EXIT_REQUEST_BUILD_FAILED';await settleSeriesControl(env,series,1,{failClosed:true});return saveRealSeriesState(env,series);
   }
   await appendRealLedger(env,'EXIT_PRE_SUBMIT_LATCHED',{seriesId:series.seriesId,attemptId:position.attemptId,ticker:position.marketTicker,reason:decision.reason,clientOrderId:exitClientOrderId,payload:{...payload},exchangeIndex:3});
   let response,proof;
@@ -2652,14 +2721,14 @@ async function managePayneRealPosition(env,control,series,postImpl=kalshiPayneOr
   }catch(error){
     position.status='EXIT_RETRY';position.exitWriteError=String(error?.message||error);series.status='EXIT_WRITE_ERROR_RETRY_PENDING';
     await appendRealLedger(env,'EXIT_WRITE_ERROR',{seriesId:series.seriesId,attemptId:position.attemptId,ticker:position.marketTicker,error:position.exitWriteError});
-    await closeRealSeriesControl(env,1,1);
+    await settleSeriesControl(env,series,1,{failClosed:true});
     return saveRealSeriesState(env,series);
   }
   const body=await response.json().catch(()=>({}));
   if(!response.ok){
     position.status='EXIT_RETRY';position.exitProviderStatus=response.status;series.status='EXIT_PROVIDER_REJECTED_RETRY_PENDING';
     await appendRealLedger(env,'EXIT_PROVIDER_REJECTED',{seriesId:series.seriesId,attemptId:position.attemptId,ticker:position.marketTicker,httpStatus:response.status,proof});
-    await closeRealSeriesControl(env,1,1);
+    await settleSeriesControl(env,series,1,{failClosed:true});
     return saveRealSeriesState(env,series);
   }
   const result=interpretPayneOrderResponse(body);
@@ -2678,7 +2747,7 @@ async function managePayneRealPosition(env,control,series,postImpl=kalshiPayneOr
     position.status='EXIT_RECONCILIATION_REQUIRED';series.status='EXIT_RECONCILIATION_REQUIRED';
   }
   await appendRealLedger(env,'EXIT_PROVIDER_RESULT',{seriesId:series.seriesId,attemptId:position.attemptId,ticker:position.marketTicker,result,proof,exitReason:decision.reason,realizedPnlUsd:realizedPnlFromPosition(position)});
-  await closeRealSeriesControl(env,1,1);
+  await settleSeriesControl(env,series,1,{failClosed:result.state==='UNKNOWN'});
   return saveRealSeriesState(env,series);
 }
 
@@ -2690,18 +2759,36 @@ export async function runPayneRealExecutionCycle(env,{postImpl=kalshiPayneOrderP
     return managePayneRealPosition(env,control,series,postImpl,nowMs);
   }
 
+  const started=Number(series.attemptsStarted||0);
   if(!control.armed){
-    series.status=Number(series.attemptsStarted||0)>=1?'COMPLETE_ENTRY_AUTHORITY':'READY_DISARMED';
+    series.status=started>=Number(series.attemptTarget||1)?'COMPLETE_ENTRY_AUTHORITY':started>=1?'SERIES_PAUSED_DISARMED':'READY_DISARMED';
     return saveRealSeriesState(env,series);
   }
-  if(Number(control.activeThreshold)!==.70 || Number(control.maxEntryDebitUsd)!==1 || Number(control.attemptTarget)!==1 || Number(control.requiredExchangeIndex)!==2){
+  // Run config is consumed ONLY from the series' frozen snapshot.
+  const cfg=frozenSeriesConfig(series);
+  if(!cfg.ok){
+    series.status='ARMED_SERIES_CONFIG_NOT_FROZEN_FAIL_CLOSED';
+    await closeRealSeriesControl(env,started,series.position?1:0);
+    return saveRealSeriesState(env,series);
+  }
+  if(Number(control.activeThreshold)!==cfg.threshold || Number(control.maxEntryDebitUsd)!==cfg.maxEntryDebitUsd || Number(control.attemptTarget)!==cfg.attemptTarget || Number(control.requiredExchangeIndex)!==2){
     series.status='ARMED_CONFIGURATION_INVALID_FAIL_CLOSED';
-    await closeRealSeriesControl(env,Number(series.attemptsStarted||0),series.position?1:0);
+    await closeRealSeriesControl(env,started,series.position?1:0);
     return saveRealSeriesState(env,series);
   }
-  if(Number(series.attemptsStarted||0)>=1 || series.unresolvedEntry===true){
-    series.status=series.unresolvedEntry?'ENTRY_RECONCILIATION_REQUIRED':'COMPLETE_ENTRY_AUTHORITY';
-    await closeRealSeriesControl(env,1,series.position?1:0);
+  if(series.unresolvedEntry===true){
+    series.status='ENTRY_RECONCILIATION_REQUIRED';
+    await closeRealSeriesControl(env,started,series.position?1:0);
+    return saveRealSeriesState(env,series);
+  }
+  if(started>=cfg.attemptTarget){
+    series.status='COMPLETE_ENTRY_AUTHORITY';
+    await closeRealSeriesControl(env,started,series.position?1:0);
+    return saveRealSeriesState(env,series);
+  }
+  const interlock=seriesInterlock(series);
+  if(!interlock.clear){
+    series.status='HOLD_PRIOR_ATTEMPT_NOT_CLEAN';
     return saveRealSeriesState(env,series);
   }
 
@@ -2742,16 +2829,16 @@ export async function runPayneRealExecutionCycle(env,{postImpl=kalshiPayneOrderP
   }
 
   const features=await readAuthoritativePayneFeatures(env,nowMs);
-  const finalFeature=featureForCandidate(features,candidate.ticker,candidate.outcomeSide,candidate.asset,.70);
-  const finalGate=payneStage(finalFeature,.70);
+  const finalFeature=featureForCandidate(features,candidate.ticker,candidate.outcomeSide,candidate.asset,cfg.threshold);
+  const finalGate=payneStage(finalFeature,cfg.threshold);
   if(!finalFeature.available || !finalGate.pullTrigger){
     series.status='HOLD_PRE_SUBMIT_REQUALIFICATION_FAILED'; return saveRealSeriesState(env,series);
   }
 
   const ask=candidate.outcomeSide==='YES'?Number(preSubmit.market.yesAsk):Number(preSubmit.market.noAsk);
-  const sizing=estimateKalshiFeeSafeSize(ask,1);
-  if(!sizing.ok || Number(sizing.totalDebitUsd)>1 || Number(sizing.count)<1){
-    series.status='HOLD_ONE_DOLLAR_SIZING_FAILED'; return saveRealSeriesState(env,series);
+  const sizing=estimateKalshiFeeSafeSize(ask,cfg.maxEntryDebitUsd);
+  if(!sizing.ok || Number(sizing.totalDebitUsd)>cfg.maxEntryDebitUsd || Number(sizing.count)<1){
+    series.status='HOLD_STAKE_CAP_SIZING_FAILED'; return saveRealSeriesState(env,series);
   }
   const balanceResponse=await kalshiGetOnly(env,'/trade-api/v2/portfolio/balance');
   const balanceBody=await balanceResponse.json().catch(()=>({}));
@@ -2760,45 +2847,45 @@ export async function runPayneRealExecutionCycle(env,{postImpl=kalshiPayneOrderP
     series.status='HOLD_INDEX2_FUNDING_INSUFFICIENT'; return saveRealSeriesState(env,series);
   }
 
-  const attemptNo=1;
+  const attemptNo=started+1;
   const seriesId=series.seriesId||crypto.randomUUID();
-  const attemptId=seriesId+'-1';
+  const attemptId=seriesId+'-'+attemptNo;
   const clientOrderId=payneClientOrderId(seriesId,attemptNo,'entry');
   const payload=kalshiV2EntryPayload({marketTicker:candidate.ticker,outcomeSide:candidate.outcomeSide,yes:ask},sizing,clientOrderId);
   if(!payload){series.status='HOLD_ENTRY_PAYLOAD_INVALID';return saveRealSeriesState(env,series);}
 
   const attempt={
-    schema:'PAYNE_REAL_ATTEMPT_V1',owner:REAL_OWNER,seriesId,attemptId,attemptNo:1,status:'SUBMITTING',
+    schema:'PAYNE_REAL_ATTEMPT_V1',owner:REAL_OWNER,seriesId,attemptId,attemptNo,status:'SUBMITTING',
     wouldFireEventId:data?.zeroMoneyPreview?.eventId||null,
     asset:candidate.asset,marketTicker:candidate.ticker,outcomeSide:candidate.outcomeSide,direction:candidate.direction,
     exchangeIndex:2,score:finalFeature.score,move:finalFeature.move,edge:finalFeature.edge,
     observedAt:data.updatedAt||new Date(nowMs).toISOString(),freshLockAt:freshLock.readAt,preSubmitAt:preSubmit.readAt,
     freshLockPrice:candidate.outcomeSide==='YES'?freshLock.market.yesAsk:freshLock.market.noAsk,
-    preSubmitPrice:ask,maxEntryDebitUsd:1,count:sizing.count,estimatedEntryFeeUsd:sizing.feeUsd,
+    preSubmitPrice:ask,maxEntryDebitUsd:cfg.maxEntryDebitUsd,count:sizing.count,estimatedEntryFeeUsd:sizing.feeUsd,
     estimatedEntryDebitUsd:sizing.totalDebitUsd,clientOrderId,payload:{...payload},
   };
-  series={...series,seriesId,status:'ENTRY_SUBMITTING',attemptsStarted:1,unresolvedEntry:true,currentAttempt:attempt};
-  await persistAttempt(env,{runId:seriesId,attemptId,attemptNo:1,result:'SUBMITTING',...attempt});
+  series={...series,seriesId,status:'ENTRY_SUBMITTING',attemptsStarted:attemptNo,unresolvedEntry:true,currentAttempt:attempt};
+  await persistAttempt(env,{runId:seriesId,attemptId,attemptNo,result:'SUBMITTING',...attempt});
   await appendRealLedger(env,'ENTRY_PRE_SUBMIT_LATCHED',{...attempt,providerWritePlanned:true});
   await saveRealSeriesState(env,series);
 
   control=await loadControl(env);
-  if(!control.armed || Number(control.attemptTarget)!==1 || Number(control.maxEntryDebitUsd)!==1 || Number(control.activeThreshold)!==.70 || Number(control.requiredExchangeIndex)!==2){
+  if(!control.armed || Number(control.attemptTarget)!==cfg.attemptTarget || Number(control.maxEntryDebitUsd)!==cfg.maxEntryDebitUsd || Number(control.activeThreshold)!==cfg.threshold || Number(control.requiredExchangeIndex)!==2){
     series.status='ENTRY_AUTHORITY_REVOKED_AFTER_LATCH';
-    await closeRealSeriesControl(env,1,0);
+    await closeRealSeriesControl(env,attemptNo,0);
     return saveRealSeriesState(env,series);
   }
 
   let response,proof;
   try{
-    const out=await postImpl(env,'ENTRY',payload,payneRealScope(control,{...series,attemptsStarted:0},'ENTRY'));
+    const out=await postImpl(env,'ENTRY',payload,payneRealScope(control,series,'ENTRY',null,{attemptsBefore:attemptNo-1,priorAttemptClean:interlock.clear}));
     response=out.response; proof=out.proof;
   }catch(error){
     series.status='ENTRY_RECONCILIATION_REQUIRED';
     series.unresolvedEntry=true;
     series.currentAttempt={...attempt,status:'WRITE_ERROR_UNKNOWN',error:String(error?.message||error)};
     await appendRealLedger(env,'ENTRY_WRITE_ERROR_UNKNOWN',{seriesId,attemptId,ticker:candidate.ticker,error:String(error?.message||error)});
-    await closeRealSeriesControl(env,1,0);
+    await settleSeriesControl(env,series,0,{failClosed:true});
     return saveRealSeriesState(env,series);
   }
   const body=await response.json().catch(()=>({}));
@@ -2807,29 +2894,31 @@ export async function runPayneRealExecutionCycle(env,{postImpl=kalshiPayneOrderP
     series.unresolvedEntry=true;
     series.currentAttempt={...attempt,status:'PROVIDER_REJECTED_OR_UNKNOWN',providerHttpStatus:response.status};
     await appendRealLedger(env,'ENTRY_PROVIDER_REJECTED_OR_UNKNOWN',{seriesId,attemptId,ticker:candidate.ticker,httpStatus:response.status,proof});
-    await closeRealSeriesControl(env,1,0);
+    await settleSeriesControl(env,series,0,{failClosed:true});
     return saveRealSeriesState(env,series);
   }
 
   const result=interpretPayneOrderResponse(body);
   series.currentAttempt={...attempt,status:result.state,providerResult:result,providerProof:proof};
   if(result.state==='NO_FILL'){
-    series.status='COMPLETE_NO_FILL';series.unresolvedEntry=false;series.completedAt=new Date().toISOString();
-    await persistAttempt(env,{runId:seriesId,attemptId,attemptNo:1,result:'NO_FILL',...series.currentAttempt});
-    await appendRealLedger(env,'ENTRY_NO_FILL',{seriesId,attemptId,ticker:candidate.ticker,result,proof});
-    await closeRealSeriesControl(env,1,0);
+    series.unresolvedEntry=false;
+    if(seriesTerminal(series)){series.status='COMPLETE_NO_FILL';series.completedAt=new Date().toISOString();}
+    else {series.status='ARMED_FISHING';}
+    await persistAttempt(env,{runId:seriesId,attemptId,attemptNo,result:'NO_FILL',...series.currentAttempt});
+    await appendRealLedger(env,'ENTRY_NO_FILL',{seriesId,attemptId,attemptNo,ticker:candidate.ticker,result,proof});
+    await settleSeriesControl(env,series,0);
     return saveRealSeriesState(env,series);
   }
   if(result.state==='UNKNOWN'){
     series.status='ENTRY_RECONCILIATION_REQUIRED';series.unresolvedEntry=true;
-    await persistAttempt(env,{runId:seriesId,attemptId,attemptNo:1,result:'UNKNOWN',...series.currentAttempt});
-    await appendRealLedger(env,'ENTRY_RESULT_UNKNOWN',{seriesId,attemptId,ticker:candidate.ticker,result,proof});
-    await closeRealSeriesControl(env,1,0);
+    await persistAttempt(env,{runId:seriesId,attemptId,attemptNo,result:'UNKNOWN',...series.currentAttempt});
+    await appendRealLedger(env,'ENTRY_RESULT_UNKNOWN',{seriesId,attemptId,attemptNo,ticker:candidate.ticker,result,proof});
+    await settleSeriesControl(env,series,0,{failClosed:true});
     return saveRealSeriesState(env,series);
   }
 
   const position={
-    schema:'PAYNE_REAL_POSITION_V1',owner:REAL_OWNER,seriesId,attemptId,attemptNo:1,status:'OPEN',
+    schema:'PAYNE_REAL_POSITION_V1',owner:REAL_OWNER,seriesId,attemptId,attemptNo,status:'OPEN',
     asset:candidate.asset,marketTicker:candidate.ticker,outcomeSide:candidate.outcomeSide,direction:candidate.direction,
     exchangeIndex:2,entryOrderId:result.orderId,entryClientOrderId:result.clientOrderId||clientOrderId,
     filledCount:Number(result.fillCount),remainingExitCount:Number(result.fillCount),entryAverageFillPrice:result.averageFillPrice,
@@ -2837,11 +2926,11 @@ export async function runPayneRealExecutionCycle(env,{postImpl=kalshiPayneOrderP
     entryTime:new Date(nowMs).toISOString(),freshLockAt:freshLock.readAt,preSubmitAt:preSubmit.readAt,
     fillState:result.state,exitFilledTotal:0,exitAttempt:0,reconciliationState:'OPEN_PENDING_PROVIDER_RECONCILIATION',
   };
-  series.position=position;series.unresolvedEntry=false;series.status='ATTEMPT_LIMIT_REACHED_MANAGING_POSITION';
-  await persistAttempt(env,{runId:seriesId,attemptId,attemptNo:1,result:result.state,...series.currentAttempt});
+  series.position=position;series.unresolvedEntry=false;series.status=seriesTerminal(series)?'ATTEMPT_LIMIT_REACHED_MANAGING_POSITION':'MANAGING_POSITION_SERIES_CONTINUES';
+  await persistAttempt(env,{runId:seriesId,attemptId,attemptNo,result:result.state,...series.currentAttempt});
   await persistPosition(env,{positionId:attemptId,...position});
-  await appendRealLedger(env,'POSITION_OWNERSHIP_ESTABLISHED',{seriesId,attemptId,ticker:candidate.ticker,entryOrderId:position.entryOrderId,clientOrderId:position.entryClientOrderId,exchangeIndex:2,filledCount:position.filledCount,fillState:result.state});
-  await closeRealSeriesControl(env,1,1);
+  await appendRealLedger(env,'POSITION_OWNERSHIP_ESTABLISHED',{seriesId,attemptId,attemptNo,ticker:candidate.ticker,entryOrderId:position.entryOrderId,clientOrderId:position.entryClientOrderId,exchangeIndex:2,filledCount:position.filledCount,fillState:result.state});
+  await settleSeriesControl(env,series,1);
   return saveRealSeriesState(env,series);
 }
 
