@@ -85,6 +85,7 @@ function installProvider({index3=0,index2=15.91,position='ABSENT',exactSequence=
     if(u.includes('/portfolio/balance')) return jsonResponse({balance_breakdown:[{exchange_index:0,balance:0},{exchange_index:2,balance:index2},{exchange_index:3,balance:index3}]});
     if(u.includes('series_ticker=KXBTC15M')) return jsonResponse({markets:[providerMarket({exchangeIndex:marketIndex})]});
     if(u.includes('/trade-api/v2/markets?series_ticker=')) return jsonResponse({markets:[]});
+    if(u.includes('/portfolio/orders?')) return jsonResponse({orders:[]});
     if(u.includes('/portfolio/fills?')) return jsonResponse({fills:[]});
     if(u.includes('/historical/fills?')) return jsonResponse({fills:[]});
     if(u.includes('/portfolio/positions?')){
@@ -178,7 +179,7 @@ test('GOV 2/4/13/14/15: target 5 progresses sequentially on resolved NO_FILL, st
     assert.equal(out6.status,'COMPLETE_ENTRY_AUTHORITY'); assert.equal(entries(post).length,5);
     // write contract refuses target+1 independently of the engine
     const payload={ticker:'T',client_order_id:'c',side:'bid',count:'1',price:'0.5',time_in_force:'immediate_or_cancel',post_only:false,cancel_order_on_pause:true,reduce_only:false};
-    const sc={owner:'PAYNE_KALSHI_REAL',exchangeIndex:2,authorized:true,armed:true,attemptTarget:5,attemptsBefore:5,maxEntryDebitUsd:1,seriesConfigFrozen:true,priorAttemptClean:true};
+    const sc={owner:'PAYNE_KALSHI_REAL',exchangeIndex:2,authorized:true,armed:true,attemptTarget:5,attemptsBefore:5,maxEntryDebitUsd:1,seriesConfigFrozen:true,priorAttemptClean:true,entryDebitUsd:.5};
     assert.throws(()=>payneOrderWriteProof('ENTRY',payload,sc),/PAYNE_ENTRY_SERIES_ATTEMPT_NOT_AUTHORIZED/);
     assert.doesNotThrow(()=>payneOrderWriteProof('ENTRY',payload,{...sc,attemptsBefore:4}));
     assert.equal(providerPosts(io),0);
@@ -210,14 +211,15 @@ test('GOV 5: resolved FILLED + provider-FLAT CLOSED permits the next attempt (at
 });
 
 // ---------- 6-10,12 interlocks ----------
-test('GOV 6: unresolvedEntry blocks next attempt and fails closed',async()=>{
+test('GOV 6: unresolvedEntry blocks next attempt while provider evidence remains UNKNOWN',async()=>{
   const e=await env(),io=installProvider(),post=postFixture(NOFILL);
   try{
     await frozenSeries(e,{unresolvedEntry:true,status:'ENTRY_RECONCILIATION_REQUIRED',currentAttempt:{attemptId:'GOV-S-1',status:'UNKNOWN'}}); await armedControl(e);
     const out=await cycle(e,post);
-    assert.equal(entries(post).length,0); assert.equal(out.status,'ENTRY_RECONCILIATION_REQUIRED');
-    assert.equal((await loadControl(e)).armed,false);
-    await assert.rejects(updateFounderControl(e,'ARM'),/PAYNE_REAL_ENTRY_RECONCILIATION_REQUIRED/);
+    assert.equal(entries(post).length,0);
+    assert.equal(out.status,'ENTRY_RECONCILIATION_REQUIRED');
+    assert.equal(out.unresolvedEntry,true);
+    assert.equal((await loadControl(e)).armed,true);
   }finally{io.restore();}
 });
 
@@ -266,13 +268,23 @@ test('GOV 12: management-required series state blocks next attempt',async()=>{
   }finally{io.restore();}
 });
 
-test('GOV 10b: unknown provider result on an attempt fails closed mid-series and blocks the next attempt',async()=>{
+test('GOV 10b: unknown provider result self-reconciles before any next attempt',async()=>{
   const e=await env(),io=installProvider(),post=postFixture({}, 200); // unparseable/unknown result
   try{
     await configure(e,{target:5}); await arm(e);
-    const out=await cycle(e,post);
-    assert.equal(out.unresolvedEntry,true); assert.equal((await loadControl(e)).armed,false);
-    await cycle(e,post); assert.equal(entries(post).length,1);
+    const first=await cycle(e,post);
+    assert.equal(first.unresolvedEntry,true);
+    assert.equal((await loadControl(e)).armed,true);
+    assert.equal(entries(post).length,1);
+
+    const reconciled=await cycle(e,post);
+    assert.equal(entries(post).length,1); // reconciliation tick can never also FIRE attempt 2
+    assert.equal(reconciled.unresolvedEntry,false);
+    assert.equal(reconciled.status,'ARMED_FISHING');
+
+    const second=await cycle(e,post);
+    assert.equal(second.attemptsStarted,2);
+    assert.equal(entries(post).length,2);
   }finally{io.restore();}
 });
 
@@ -290,9 +302,9 @@ test('GOV 17/18/19: different threshold / stake / attemptTarget freeze into sepa
     await cycle(e,post);
     const sc=entries(post)[1].scope;
     assert.equal(sc.maxEntryDebitUsd,2); assert.equal(sc.attemptTarget,5);
-    const p=entries(post)[1].payload; assert.ok(Number(p.count)*Number(p.price)<=2); assert.ok(Number(p.count)*Number(p.price)>1);
-    // stake-cap enforced by the write contract itself
-    assert.throws(()=>payneOrderWriteProof('ENTRY',{...p},{...sc,maxEntryDebitUsd:1,seriesConfigFrozen:true,priorAttemptClean:true}),/PAYNE_ENTRY_EXCEEDS_SERIES_STAKE_CAP/);
+    const p=entries(post)[1].payload; assert.ok(Number(sc.entryDebitUsd)<=2); assert.ok(Number(sc.entryDebitUsd)>1);
+    // stake-cap enforced against the already-computed fee-safe debit, not complementary provider book price
+    assert.throws(()=>payneOrderWriteProof('ENTRY',{...p},{...sc,maxEntryDebitUsd:1,seriesConfigFrozen:true,priorAttemptClean:true,entryDebitUsd:.5}),/PAYNE_ENTRY_EXCEEDS_SERIES_STAKE_CAP/);
     // series C: .85 frozen -> shadow score .80 must NOT fire (threshold really comes from the frozen series)
     await frozenSeries(e,{seriesId:'C',attemptsStarted:0,attemptTarget:10,threshold:.85,maxEntryDebitUsd:1,position:null,status:'ARMED_WAITING'});
     await e.PAYNE_KALSHI_STATE.put('payne-kalshi:control:v1',JSON.stringify({...(await loadControl(e)),armed:true,activeThreshold:.85,maxEntryDebitUsd:1,attemptTarget:10}));
@@ -347,7 +359,7 @@ test('GOV 22: shard-match (exchange index 2) check still operates; wrong shard n
     await configure(e,{target:5}); await arm(e);
     const out=await cycle(e,post);
     assert.equal(entries(post).length,0); assert.notEqual(out.attemptsStarted,1);
-    assert.throws(()=>payneOrderWriteProof('ENTRY',{ticker:'T',client_order_id:'c',side:'bid',count:'1',price:'0.5',time_in_force:'immediate_or_cancel',post_only:false,cancel_order_on_pause:true,reduce_only:false},{owner:'PAYNE_KALSHI_REAL',exchangeIndex:3,authorized:true,armed:true,attemptTarget:5,attemptsBefore:0,maxEntryDebitUsd:1,seriesConfigFrozen:true,priorAttemptClean:true}),/PAYNE_WRITE_INDEX2_REQUIRED/);
+    assert.throws(()=>payneOrderWriteProof('ENTRY',{ticker:'T',client_order_id:'c',side:'bid',count:'1',price:'0.5',time_in_force:'immediate_or_cancel',post_only:false,cancel_order_on_pause:true,reduce_only:false},{owner:'PAYNE_KALSHI_REAL',exchangeIndex:3,authorized:true,armed:true,attemptTarget:5,attemptsBefore:0,maxEntryDebitUsd:1,seriesConfigFrozen:true,priorAttemptClean:true,entryDebitUsd:.5}),/PAYNE_WRITE_INDEX2_REQUIRED/);
   }finally{io.restore();}
 });
 
@@ -358,7 +370,7 @@ test('GOV 23: IOC semantics unchanged on every attempt; write contract rejects n
     await cycle(e,post); await cycle(e,post);
     for(const c of entries(post)){ assert.equal(c.payload.time_in_force,'immediate_or_cancel'); assert.equal(c.payload.post_only,false); assert.equal(c.payload.reduce_only,false); assert.equal(c.payload.cancel_order_on_pause,true); }
     const base={ticker:'T',client_order_id:'c',side:'bid',count:'1',price:'0.5',time_in_force:'immediate_or_cancel',post_only:false,cancel_order_on_pause:true,reduce_only:false};
-    const sc={owner:'PAYNE_KALSHI_REAL',exchangeIndex:2,authorized:true,armed:true,attemptTarget:5,attemptsBefore:0,maxEntryDebitUsd:1,seriesConfigFrozen:true,priorAttemptClean:true};
+    const sc={owner:'PAYNE_KALSHI_REAL',exchangeIndex:2,authorized:true,armed:true,attemptTarget:5,attemptsBefore:0,maxEntryDebitUsd:1,seriesConfigFrozen:true,priorAttemptClean:true,entryDebitUsd:.5};
     assert.throws(()=>payneOrderWriteProof('ENTRY',{...base,time_in_force:'good_till_canceled'},sc),/PAYNE_WRITE_IOC_REQUIRED/);
     assert.throws(()=>payneOrderWriteProof('ENTRY',{...base,post_only:true},sc),/PAYNE_WRITE_POST_ONLY_FALSE_REQUIRED/);
     assert.throws(()=>payneOrderWriteProof('ENTRY',base,{...sc,seriesConfigFrozen:false}),/PAYNE_ENTRY_SERIES_CONFIG_NOT_FROZEN/);
