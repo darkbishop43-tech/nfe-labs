@@ -1,4 +1,5 @@
 import { kalshiReadOnlyProof, kalshiGetOnly } from './kalshi-get-only.js';
+import { kalshiPayneOrderPost, PAYNE_WRITE_CONTRACT } from './kalshi-real-write.js';
 import { cockpitHtml } from './cockpit-html.js';
 
 const SERVICE_ID = 'market-edge-payne-kalshi-real';
@@ -10,6 +11,10 @@ const RUN_PREFIX = 'payne-kalshi:run:';
 const ATTEMPT_PREFIX = 'payne-kalshi:attempt:';
 const POSITION_PREFIX = 'payne-kalshi:position:';
 const SCAN_HISTORY_PREFIX = 'payne-kalshi:scan-history:';
+const REAL_SERIES_KEY = 'payne-kalshi:real-series:v1';
+const REAL_LEDGER_PREFIX = 'payne-kalshi:real-ledger:';
+const REAL_CONTROL_SCHEMA = 'PAYNE_REAL_CONTROL_V1';
+const REAL_OWNER = 'PAYNE_KALSHI_REAL';
 const SCAN_PERSIST_INTERVAL_MS = 60 * 1000;
 const SCAN_HISTORY_INTERVAL_MS = 15 * 60 * 1000;
 const CONTROL_THRESHOLD_OPTIONS = Object.freeze([0.70,0.75,0.80,0.85]);
@@ -32,49 +37,55 @@ export const PAYNE_CONFIG = Object.freeze({
   providerWritesEnabled: false,
   realExecutionEnabled: false,
   fundingAuthorityEnabled: false,
+  realCapabilityBuilt: true,
+  requiredExchangeIndex: 3,
 });
 
 export function defaultControlState() {
   return {
     service: SERVICE_ID,
+    realControlSchema: REAL_CONTROL_SCHEMA,
     armed: false,
     attempts: 0,
     openPositions: 0,
     maxPositions: 3,
-    attemptTarget: 10,
+    attemptTarget: 1,
     maxEntryDebitUsd: 1,
     activeThreshold: PAYNE_CONFIG.defaultThreshold,
     scanEnabled: true,
     scanCadenceMs: 60_000,
-    providerWriteAuthority: 'DISABLED',
-    providerPostAuthority: 'HELD',
-    realExecution: 'DISABLED',
-    fundingAuthority: 'DISABLED',
-    requiredExchangeIndex: null,
-    index3: 'UNKNOWN_UNPROVEN_DISABLED_UNFUNDED',
+    providerWriteAuthority: 'BUILT_INACTIVE_DISARMED',
+    providerPostAuthority: 'BUILT_INACTIVE_DISARMED',
+    realExecution: 'BUILT_INACTIVE_DISARMED',
+    fundingAuthority: 'INDEX3_ONLY_INACTIVE_DISARMED',
+    requiredExchangeIndex: 3,
+    index3: 'READ_REQUIRED_BEFORE_ENTRY',
   };
 }
 
 function normalizeControlState(saved) {
   const base=defaultControlState();
   const src=saved&&typeof saved==='object'?saved:{};
+  const migrated=src?.realControlSchema!==REAL_CONTROL_SCHEMA;
+  const armed=!migrated && src.armed===true;
   return {
     ...base,
     service:SERVICE_ID,
-    armed:src.armed===true,
-    attempts:Number.isFinite(Number(src.attempts))?Number(src.attempts):0,
-    openPositions:Number.isFinite(Number(src.openPositions))?Number(src.openPositions):0,
+    realControlSchema:REAL_CONTROL_SCHEMA,
+    armed,
+    attempts:!migrated&&Number.isFinite(Number(src.attempts))?Number(src.attempts):0,
+    openPositions:!migrated&&Number.isFinite(Number(src.openPositions))?Number(src.openPositions):0,
     maxPositions:3,
-    attemptTarget:CONTROL_ATTEMPT_OPTIONS.includes(Number(src.attemptTarget))?Number(src.attemptTarget):base.attemptTarget,
-    maxEntryDebitUsd:CONTROL_STAKE_OPTIONS.includes(Number(src.maxEntryDebitUsd))?Number(src.maxEntryDebitUsd):base.maxEntryDebitUsd,
-    activeThreshold:CONTROL_THRESHOLD_OPTIONS.includes(Number(src.activeThreshold))?Number(src.activeThreshold):base.activeThreshold,
+    attemptTarget:!migrated&&CONTROL_ATTEMPT_OPTIONS.includes(Number(src.attemptTarget))?Number(src.attemptTarget):1,
+    maxEntryDebitUsd:!migrated&&CONTROL_STAKE_OPTIONS.includes(Number(src.maxEntryDebitUsd))?Number(src.maxEntryDebitUsd):1,
+    activeThreshold:!migrated&&CONTROL_THRESHOLD_OPTIONS.includes(Number(src.activeThreshold))?Number(src.activeThreshold):PAYNE_CONFIG.defaultThreshold,
     scanEnabled:src.scanEnabled!==false,
     scanCadenceMs:60_000,
-    providerWriteAuthority:'DISABLED',
-    providerPostAuthority:'HELD',
-    realExecution:'DISABLED',
-    fundingAuthority:'DISABLED',
-    requiredExchangeIndex:null,
+    providerWriteAuthority:armed?'ENABLED_GOVERNED_PAYNE_ONLY':'BUILT_INACTIVE_DISARMED',
+    providerPostAuthority:armed?'ENABLED_GOVERNED_PAYNE_ONLY':'BUILT_INACTIVE_DISARMED',
+    realExecution:armed?'ENABLED_GOVERNED_PAYNE_ONLY':'BUILT_INACTIVE_DISARMED',
+    fundingAuthority:armed?'INDEX3_ONLY':'INDEX3_ONLY_INACTIVE_DISARMED',
+    requiredExchangeIndex:3,
     index3:src.index3||base.index3,
   };
 }
@@ -120,10 +131,13 @@ export async function loadControl(env) {
 
 export async function initializeDisarmed(env) {
   const existing = await kvGetJson(env, CONTROL_KEY);
-  if (existing) return normalizeControlState(existing);
-  const state = defaultControlState();
-  await kvPutJson(env, CONTROL_KEY, state);
-  await appendEvent(env, 'CONTROL_INITIALIZED', { armed:false, attempts:0, openPositions:0 });
+  const state=normalizeControlState(existing);
+  if (!existing || existing?.realControlSchema!==REAL_CONTROL_SCHEMA || existing?.armed===true) {
+    const disarmed={...state,armed:false,attempts:0,openPositions:0,attemptTarget:1,maxEntryDebitUsd:1,activeThreshold:.70,providerWriteAuthority:'BUILT_INACTIVE_DISARMED',providerPostAuthority:'BUILT_INACTIVE_DISARMED',realExecution:'BUILT_INACTIVE_DISARMED',fundingAuthority:'INDEX3_ONLY_INACTIVE_DISARMED',requiredExchangeIndex:3};
+    await kvPutJson(env, CONTROL_KEY, disarmed);
+    await appendEvent(env, 'REAL_CONTROL_INITIALIZED_DISARMED', { armed:false, attempts:0, attemptTarget:1, maxEntryDebitUsd:1, activeThreshold:.70, requiredExchangeIndex:3 });
+    return disarmed;
+  }
   return state;
 }
 
@@ -630,6 +644,7 @@ export function providerMarketSnapshot(market, nowMs = Date.now(), assetHint = n
     outcomeSide:null,
     ticker,
     seriesTicker:market?.series_ticker||market?.seriesTicker||null,
+    exchangeIndex:Number.isInteger(Number(market?.exchange_index))?Number(market.exchange_index):null,
     title:market?.title||market?.subtitle||ticker||'UNKNOWN',
     subtitle:market?.subtitle||null,
     status:market?.status||null,
