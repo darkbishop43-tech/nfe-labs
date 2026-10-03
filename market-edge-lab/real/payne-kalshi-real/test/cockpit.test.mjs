@@ -542,7 +542,8 @@ test('cockpit HTML exposes clocks, decision evidence, automatic refresh, and no 
   assert.match(html,/NO_PROVIDER_ATTEMPT/);
   assert.match(html,/ENTRY SENT/);
   assert.match(html,/FILLED \/ MANAGING/);
-  assert.match(html,/HOLD_AUTO_TICKER_CONFLICT/);
+  assert.match(html,/last\.holdReason/);
+  assert.match(html,/state-hold/);
   assert.match(html,/FRESH LOCK/);
   assert.match(html,/ZERO-MONEY FIRE/);
   assert.match(html,/PROVIDER POST AUTHORITY/);
