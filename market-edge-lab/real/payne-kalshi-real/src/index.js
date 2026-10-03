@@ -2347,7 +2347,7 @@ export async function runPayneRealExecutionCycle(env,{postImpl=kalshiPayneOrderP
     series.status='HOLD_WINDOW_CHANGED_PRE_SUBMIT'; return saveRealSeriesState(env,series);
   }
 
-  const features=await readAuthoritativePayneFeatures(env,Date.now());
+  const features=await readAuthoritativePayneFeatures(env,nowMs);
   const finalFeature=featureForCandidate(features,candidate.ticker,candidate.outcomeSide,candidate.asset,.70);
   const finalGate=payneStage(finalFeature,.70);
   if(!finalFeature.available || !finalGate.pullTrigger){
