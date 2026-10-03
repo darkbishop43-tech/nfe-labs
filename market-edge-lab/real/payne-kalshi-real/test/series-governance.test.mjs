@@ -304,7 +304,7 @@ test('GOV 17/18/19: different threshold / stake / attemptTarget freeze into sepa
     assert.equal(sc.maxEntryDebitUsd,2); assert.equal(sc.attemptTarget,5);
     const p=entries(post)[1].payload; assert.ok(Number(sc.entryDebitUsd)<=2); assert.ok(Number(sc.entryDebitUsd)>1);
     // stake-cap enforced against the already-computed fee-safe debit, not complementary provider book price
-    assert.throws(()=>payneOrderWriteProof('ENTRY',{...p},{...sc,maxEntryDebitUsd:1,seriesConfigFrozen:true,priorAttemptClean:true,entryDebitUsd:.5}),/PAYNE_ENTRY_EXCEEDS_SERIES_STAKE_CAP/);
+    assert.throws(()=>payneOrderWriteProof('ENTRY',{...p},{...sc,maxEntryDebitUsd:1,seriesConfigFrozen:true,priorAttemptClean:true,entryDebitUsd:sc.entryDebitUsd}),/PAYNE_ENTRY_EXCEEDS_SERIES_STAKE_CAP/);
     // series C: .85 frozen -> shadow score .80 must NOT fire (threshold really comes from the frozen series)
     await frozenSeries(e,{seriesId:'C',attemptsStarted:0,attemptTarget:10,threshold:.85,maxEntryDebitUsd:1,position:null,status:'ARMED_WAITING'});
     await e.PAYNE_KALSHI_STATE.put('payne-kalshi:control:v1',JSON.stringify({...(await loadControl(e)),armed:true,activeThreshold:.85,maxEntryDebitUsd:1,attemptTarget:10}));
