@@ -89,6 +89,7 @@ function providerMarket(asset,ticker,series,yesBid='0.47',yesAsk='0.49'){
   return {
     ticker,
     series_ticker:series,
+    exchange_index:3,
     title:asset+' up in next 15 minutes?',
     status:'open',
     open_time:'2026-10-02T06:00:00Z',
@@ -300,22 +301,31 @@ test('window mismatch is recorded truthfully and blocks zero-money FIRE preview'
   } finally { io.restore(); }
 });
 
-test('Founder controls remain isolated and cannot enable provider authority',async()=>{
+test('Founder real controls default disarmed and ARM is bounded to .70 / $1 / 1 attempt / Index 3',async()=>{
   const env=await authEnv();
   let c=await loadControl(env);
   assert.equal(c.armed,false);
+  assert.equal(c.attemptTarget,1);
+  assert.equal(c.maxEntryDebitUsd,1);
+  assert.equal(c.activeThreshold,.70);
+  assert.equal(c.requiredExchangeIndex,3);
+  assert.equal(c.providerWriteAuthority,'BUILT_INACTIVE_DISARMED');
+
   c=await updateFounderControl(env,'ARM');
   assert.equal(c.armed,true);
-  assert.equal(c.providerWriteAuthority,'DISABLED');
-  assert.equal(c.providerPostAuthority,'HELD');
-  assert.equal(c.realExecution,'DISABLED');
-  assert.equal(c.fundingAuthority,'DISABLED');
+  assert.equal(c.providerWriteAuthority,'ENABLED_GOVERNED_PAYNE_ONLY');
+  assert.equal(c.providerPostAuthority,'ENABLED_GOVERNED_PAYNE_ONLY');
+  assert.equal(c.realExecution,'ENABLED_GOVERNED_PAYNE_ONLY');
+  assert.equal(c.fundingAuthority,'INDEX3_ONLY');
+  await assert.rejects(updateFounderControl(env,'SET_THRESHOLD',.75),/PAYNE_REAL_CONFIG_LOCKED_WHILE_ARMED/);
+
+  c=await updateFounderControl(env,'DISARM');
+  assert.equal(c.armed,false);
+  assert.equal(c.providerWriteAuthority,'BUILT_INACTIVE_DISARMED');
   c=await updateFounderControl(env,'SET_THRESHOLD',.75);
   assert.equal(c.activeThreshold,.75);
-  c=await updateFounderControl(env,'SET_STAKE',5);
-  assert.equal(c.maxEntryDebitUsd,5);
-  c=await updateFounderControl(env,'SET_ATTEMPT_TARGET',30);
-  assert.equal(c.attemptTarget,30);
+  await assert.rejects(updateFounderControl(env,'ARM'),/PAYNE_REAL_ARM_THRESHOLD_MUST_BE_0_70/);
+  c=await updateFounderControl(env,'SET_THRESHOLD',.70);
   await assert.rejects(updateFounderControl(env,'SET_THRESHOLD',.65),/PAYNE_CONTROL_THRESHOLD_NOT_ALLOWED/);
 });
 
