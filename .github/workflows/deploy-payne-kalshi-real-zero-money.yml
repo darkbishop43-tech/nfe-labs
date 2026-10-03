@@ -1,4 +1,4 @@
-name: Deploy PAYNE-KALSHI REAL zero-money observer
+name: Deploy PAYNE-KALSHI REAL disarmed execution capability
 
 # Baseline economic fill price normalization redeploy trigger
 
@@ -14,6 +14,10 @@ on:
       - market-edge-payne-kalshi-real-step1
     paths:
       - ".github/workflows/deploy-payne-kalshi-real-zero-money.yml"
+      - "market-edge-lab/real/payne-kalshi-real/src/**"
+      - "market-edge-lab/real/payne-kalshi-real/test/**"
+      - "market-edge-lab/real/payne-kalshi-real/wrangler.toml"
+      - "market-edge-lab/real/payne-kalshi-real/package.json"
   workflow_dispatch:
 
 permissions:
@@ -54,7 +58,7 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: npx --yes wrangler@4 deploy | tee /tmp/payne-deploy.txt
 
-      - name: Verify live zero-money observatory
+      - name: Verify live disarmed Payne real capability
         shell: bash
         working-directory: .
         run: |
@@ -68,14 +72,38 @@ jobs:
           done
           test "$code" = "200"
 
+          curl -fsS "$base/real-state" -o /tmp/real-state.json
+          jq -e '
+            .schema == "PAYNE_REAL_STATE_V1" and
+            .control.armed == false and
+            .control.attempts == 0 and
+            .control.attemptTarget == 1 and
+            .control.maxEntryDebitUsd == 1 and
+            .control.activeThreshold == 0.70 and
+            .control.requiredExchangeIndex == 3 and
+            .control.providerWriteAuthority == "BUILT_INACTIVE_DISARMED" and
+            .control.realExecution == "BUILT_INACTIVE_DISARMED" and
+            .series.attemptsStarted == 0 and
+            .series.attemptTarget == 1 and
+            .series.maxEntryDebitUsd == 1 and
+            .series.threshold == 0.70 and
+            .series.requiredExchangeIndex == 3 and
+            .writeContract.requiredExchangeIndex == 3 and
+            .providerWrites == 0 and
+            .ordersSubmittedByThisRead == 0 and
+            .capitalMovedUsd == 0
+          ' /tmp/real-state.json >/dev/null
+
           curl -fsS "$base/cockpit-data" -o /tmp/cockpit.json
           jq -e '
             .providerWrites == 0 and
             .orders == 0 and
             .capitalMovedUsd == 0 and
-            .safety.realExecution == "DISABLED" and
-            .safety.fundingAuthority == "DISABLED" and
-            .safety.providerPost == "HELD / HARD DISABLED" and
+            .safety.payneArmed == false and
+            .safety.realExecution == "BUILT_INACTIVE_DISARMED" and
+            .safety.fundingAuthority == "INDEX3_ONLY_INACTIVE_DISARMED" and
+            .safety.providerPost == "BUILT_INACTIVE_DISARMED" and
+            .safety.zeroMoneyProviderPost == "HARD_DISABLED" and
             .safety.secondIoc == "HOLD" and
             .featureProvenance.transport == "SERVICE_BINDING" and
             .featureProvenance.binding == "BASELINE_REAL_READ" and
@@ -134,13 +162,16 @@ jobs:
             (.events | type == "array")
           ' /tmp/events.json >/dev/null
 
-          echo "LIVE_STATUS=GREEN_ZERO_MONEY"
+          echo "LIVE_STATUS=GREEN_REAL_CAPABILITY_DISARMED"
           echo "FEATURE_HTTP=$(jq -r '.featureProvenance.httpStatus' /tmp/cockpit.json)"
           echo "PAYNE_STATE=$(jq -r '.payne.state' /tmp/cockpit.json)"
           echo "WINDOW_CONSISTENCY=$(jq -r '.clocks.consistency.windowConsistency' /tmp/cockpit.json)"
           echo "BASELINE_ACTUAL_LANE=$(jq -r '.comparison.baselineReal.lane' /tmp/cockpit.json)"
           echo "PAYNE_PAPER_STATUS=$(jq -r '.comparison.paynePaper.reason' /tmp/cockpit.json)"
           echo "SCHEDULED_SOURCE=$(jq -r '.source' /tmp/latest.json)"
+          echo "PAYNE_REAL_ARMED=$(jq -r '.control.armed' /tmp/real-state.json)"
+          echo "PAYNE_ATTEMPTS=$(jq -r '.control.attempts|tostring + "/" + (.control.attemptTarget|tostring)' /tmp/real-state.json)"
+          echo "PAYNE_INDEX=$(jq -r '.control.requiredExchangeIndex' /tmp/real-state.json)"
           echo "providerWrites=0"
           echo "orders=0"
           echo "capitalMovedUsd=0"
