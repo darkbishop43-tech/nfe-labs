@@ -1176,6 +1176,26 @@ function zeroMoneyPreviewFor(selected, preSubmit, index3, control, nowMs) {
   }
   const gate=payneStage(selected.payne,control.activeThreshold);
   if (!gate.pullTrigger) return {status:'NOT_REACHED',reason:'PAYNE_NOT_PULL_TRIGGER',gate};
+  const requiredFundingIndex=Number(control?.requiredExchangeIndex);
+  const marketExchangeIndex=Number.isInteger(Number(selected?.exchangeIndex))?Number(selected.exchangeIndex):null;
+  const shardMatch=Number.isInteger(requiredFundingIndex) && marketExchangeIndex===requiredFundingIndex;
+  const shardEvidence={
+    marketExchangeIndex,
+    requiredFundingIndex:Number.isInteger(requiredFundingIndex)?requiredFundingIndex:null,
+    fundingBalanceUsd:index3?.balance??null,
+    match:shardMatch,
+  };
+  if (!shardMatch) {
+    return {
+      status:'BLOCKED',
+      reason:'HOLD_REQUIRED_EXCHANGE_INDEX_'+String(Number.isInteger(requiredFundingIndex)?requiredFundingIndex:'UNKNOWN'),
+      gate,
+      shardEvidence,
+      providerWrites:0,
+      orders:0,
+      capitalMovedUsd:0,
+    };
+  }
   const eligibility=realEligibility({
     asset:selected.asset,
     executionEligible:selected.executionEligible,
@@ -1230,6 +1250,11 @@ function zeroMoneyPreviewFor(selected, preSubmit, index3, control, nowMs) {
     postOnly:payload.post_only,
     reduceOnly:payload.reduce_only,
     clientOrderId,
+    shardEvidence,
+    marketExchangeIndex,
+    requiredFundingIndex,
+    fundingBalanceUsd:index3?.balance??null,
+    shardMatch,
     fundingEvidence:index3,
     fundingGate:funding.failClosed?'AUTHORITY_HELD':'PASS',
     providerPost:stop.reason,
@@ -2110,6 +2135,10 @@ export async function buildCockpitData(env, nowMs=Date.now()) {
       preSubmit:preSubmit?.ok?'PROVEN':selected?'NOT_PROVEN':'NOT_AVAILABLE',
       tickerConsistent:selected?tickerConsistent:null,
       sideConsistent:selected?sideConsistent:null,
+      marketExchangeIndex:selected?.exchangeIndex??null,
+      requiredFundingIndex:Number(control.requiredExchangeIndex),
+      shardMatch:selected?Number(selected.exchangeIndex)===Number(control.requiredExchangeIndex):null,
+      fundingBalanceUsd:index3?.balance??null,
       feeSafeSizing:zeroMoneyPreview?.sizing?.ok===false?'FAIL':zeroMoneyPreview?.status==='FIRE_READY'?'PASS':'NOT_REACHED',
       iocPayload:zeroMoneyPreview?.status==='FIRE_READY'?'PASS':'NOT_REACHED',
       fundingGate:{
