@@ -156,7 +156,9 @@ export async function updateFounderControl(env, action, rawValue = null) {
     if (Number(before.requiredExchangeIndex)!==3) throw new Error('PAYNE_REAL_ARM_INDEX3_REQUIRED');
     if (Number(series?.attemptsStarted||0)>=1) throw new Error('PAYNE_REAL_1X1_ALREADY_CONSUMED');
     if (series?.unresolvedEntry===true) throw new Error('PAYNE_REAL_ENTRY_RECONCILIATION_REQUIRED');
-    if (series?.position && ['OPEN','EXIT_RETRY','EXIT_RECONCILIATION_REQUIRED'].includes(String(series.position.status||''))) throw new Error('PAYNE_REAL_OPEN_POSITION_EXISTS');
+    if (series?.position && ['OPEN','EXIT_RETRY','EXIT_RECONCILIATION_REQUIRED','RECONCILIATION_UNKNOWN'].includes(String(series.position.status||''))) throw new Error('PAYNE_REAL_OPEN_POSITION_EXISTS');
+    const armedSeries={...series,seriesId:series.seriesId||crypto.randomUUID(),status:'ARMED_WAITING',attemptsStarted:0,attemptTarget:1,threshold:.70,maxEntryDebitUsd:1,requiredExchangeIndex:3,completedAt:null};
+    await saveRealSeriesState(env,armedSeries);
     next.armed=true;
   } else if (name==='DISARM') next.armed=false;
   else if (name==='SET_THRESHOLD') {
