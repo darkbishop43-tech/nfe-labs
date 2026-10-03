@@ -2220,7 +2220,7 @@ async function managePayneRealPosition(env,control,series,postImpl=kalshiPayneOr
   const decision=managementDecision({score:feature?.score,heldMs:ageMs,owned:true});
   position.currentScore=feature?.available?feature.score:null;
   position.currentMarketPrice=Number.isFinite(bid)?bid:null;
-  position.holdDurationMs:Number.isFinite(ageMs)?ageMs:null;
+  position.holdDurationMs=Number.isFinite(ageMs)?ageMs:null;
   if(decision.action!=='EXIT'){
     position.status='OPEN';
     series.status='ATTEMPT_LIMIT_REACHED_MANAGING_POSITION';
