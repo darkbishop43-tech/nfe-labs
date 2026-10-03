@@ -1953,10 +1953,11 @@ export async function buildCockpitData(env, nowMs=Date.now()) {
       stakeOptions:CONTROL_STAKE_OPTIONS,
       attemptOptions:CONTROL_ATTEMPT_OPTIONS,
       scanEnabled:control.scanEnabled,
-      realExecution:'DISABLED',
-      fundingAuthority:'DISABLED',
-      providerWriteAuthority:'DISABLED',
-      providerPostAuthority:'HELD',
+      realExecution:control.realExecution,
+      fundingAuthority:control.fundingAuthority,
+      providerWriteAuthority:control.providerWriteAuthority,
+      providerPostAuthority:control.providerPostAuthority,
+      requiredExchangeIndex:3,
     },
     markets:discovery.markets||[],
     candidates,
@@ -1995,10 +1996,10 @@ export async function buildCockpitData(env, nowMs=Date.now()) {
       iocPayload:zeroMoneyPreview?.status==='FIRE_READY'?'PASS':'NOT_REACHED',
       fundingGate:{
         index3:index3.status,
-        fundingAuthority:'DISABLED',
+        fundingAuthority:control.fundingAuthority,
         result:zeroMoneyPreview?.fundingGate||'AUTHORITY_HELD',
       },
-      providerPost:'HELD / HARD DISABLED',
+      providerPost:control.providerPostAuthority,
     },
     observations:{initial:selected,freshLock,preSubmit},
     clocks,
@@ -2018,10 +2019,10 @@ export async function buildCockpitData(env, nowMs=Date.now()) {
     },
     safety:{
       payneArmed:Boolean(control.armed),
-      realExecution:'DISABLED',
-      fundingAuthority:'DISABLED',
+      realExecution:control.realExecution,
+      fundingAuthority:control.fundingAuthority,
       providerWrites:0,orders:0,capitalMovedUsd:0,getOnly:'ACTIVE',
-      providerPost:'HELD / HARD DISABLED',secondIoc:'HOLD',
+      providerPost:control.providerPostAuthority,zeroMoneyProviderPost:'HARD_DISABLED',secondIoc:'HOLD',
     },
   };
 }
@@ -2453,14 +2454,17 @@ export async function runPayneRealExecutionCycle(env,{postImpl=kalshiPayneOrderP
 export function step1Status() {
   return {
     service:SERVICE_ID,
-    mode:'ZERO-MONEY / GET-ONLY',
+    mode:'PAYNE_REAL_CAPABILITY_BUILT / DEPLOY_DISARMED',
     stateBinding:STATE_BINDING,
     defaultState:defaultControlState(),
+    realCapabilityBuilt:true,
+    writeContract:PAYNE_WRITE_CONTRACT,
     providerWrites:0,
-    providerWriteAuthority:'DISABLED',
-    realExecution:'DISABLED',
-    fundingAuthority:'DISABLED',
-    index3:'UNKNOWN',
+    providerWriteAuthority:'BUILT_INACTIVE_DISARMED',
+    realExecution:'BUILT_INACTIVE_DISARMED',
+    fundingAuthority:'INDEX3_ONLY_INACTIVE_DISARMED',
+    requiredExchangeIndex:3,
+    index3:'READ_REQUIRED_BEFORE_ENTRY',
     secondIoc:'HOLD_UNCHANGED',
   };
 }
@@ -2481,10 +2485,11 @@ export default {
             maxEntryDebitUsd:control.maxEntryDebitUsd,
             attemptTarget:control.attemptTarget,
             scanEnabled:control.scanEnabled,
-            providerWriteAuthority:'DISABLED',
-            providerPostAuthority:'HELD',
-            realExecution:'DISABLED',
-            fundingAuthority:'DISABLED',
+            providerWriteAuthority:control.providerWriteAuthority,
+            providerPostAuthority:control.providerPostAuthority,
+            realExecution:control.realExecution,
+            fundingAuthority:control.fundingAuthority,
+            requiredExchangeIndex:3,
           },
           providerWrites:0,
           orders:0,
@@ -2516,15 +2521,26 @@ export default {
           maxEntryDebitUsd:control.maxEntryDebitUsd,
           activeThreshold:control.activeThreshold,
           scanEnabled:control.scanEnabled,
-          providerWriteAuthority:'DISABLED',
-          providerPostAuthority:'HELD',
-          realExecution:'DISABLED',
-          fundingAuthority:'DISABLED',
+          providerWriteAuthority:control.providerWriteAuthority,
+          providerPostAuthority:control.providerPostAuthority,
+          realExecution:control.realExecution,
+          fundingAuthority:control.fundingAuthority,
+          requiredExchangeIndex:3,
         },
         providerWrites:0,
         orders:0,
         capitalMovedUsd:0,
       });
+    }
+    if (url.pathname === '/real-state') {
+      const control=await loadControl(env);
+      const series=await loadRealSeriesState(env);
+      return Response.json({ok:true,schema:'PAYNE_REAL_STATE_V1',control,series,writeContract:PAYNE_WRITE_CONTRACT,providerWrites:0,ordersSubmittedByThisRead:0,capitalMovedUsd:0},{headers:{'cache-control':'no-store'}});
+    }
+    if (url.pathname === '/real-ledger') {
+      const requested=Number(url.searchParams.get('limit')||200);
+      const rows=await listRealLedger(env,requested);
+      return Response.json({ok:true,schema:'PAYNE_REAL_LEDGER_EXPORT_V1',count:rows.length,rows,providerWrites:0,ordersSubmittedByThisRead:0,capitalMovedUsd:0},{headers:{'cache-control':'no-store'}});
     }
     if (url.pathname === '/cockpit-data') return Response.json(await buildCockpitData(env), { headers:{'cache-control':'no-store'} });
     if (url.pathname === '/export') {
@@ -2570,5 +2586,10 @@ export default {
     if (control.scanEnabled) {
       try { await runReadOnlyScan(env,'SCHEDULED_CRON'); } catch {}
     }
+    try {
+      const series=await loadRealSeriesState(env);
+      const managementPending=Boolean(series?.position && ['OPEN','EXIT_RETRY','EXIT_RECONCILIATION_REQUIRED','RECONCILIATION_UNKNOWN'].includes(String(series.position.status||'')));
+      if (control.armed || managementPending) await runPayneRealExecutionCycle(env);
+    } catch {}
   },
 };
