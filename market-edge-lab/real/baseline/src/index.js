@@ -497,6 +497,55 @@ async function kalshiApprovedShardTransfer(env,payload) {
   return fetch("https://external-api.kalshi.com"+path,{method:"POST",headers,body:JSON.stringify(payload)});
 }
 
+export function founderFundingPairAllowed(sourceIndex,destinationIndex) {
+  const s=Number(sourceIndex),d=Number(destinationIndex);
+  return (s===0&&(d===2||d===3)) || (s===3&&d===2);
+}
+export function founderFundingAuthorizationForPair(sourceIndex,destinationIndex) {
+  const s=Number(sourceIndex),d=Number(destinationIndex);
+  if(s===0&&d===2) return "CONFIRM_FOUNDER_INDEX0_TO_INDEX2_TRANSFER";
+  if(s===0&&d===3) return "CONFIRM_FOUNDER_INDEX0_TO_INDEX3_TRANSFER";
+  if(s===3&&d===2) return "CONFIRM_FOUNDER_INDEX3_TO_INDEX2_TRANSFER";
+  return null;
+}
+export function founderFundingReturnReviewGate({sourceIndex,destinationIndex,amountUsd,sourceBalanceUsd,payneArmed,payneOpenPositions}) {
+  if(Number(sourceIndex)!==3||Number(destinationIndex)!==2) return {ok:false,state:"TRANSFER_PAIR_NOT_AUTHORIZED"};
+  const amount=Number(amountUsd),source=Number(sourceBalanceUsd);
+  if(!Number.isFinite(amount)||amount<=0) return {ok:false,state:"TRANSFER_AMOUNT_INVALID"};
+  if(!Number.isFinite(source)||source<=0) return {ok:false,state:"INDEX3_SOURCE_EMPTY"};
+  if(Math.abs(amount-source)>=0.0001) return {ok:false,state:"INDEX3_RETURN_MUST_USE_FULL_CURRENT_BALANCE"};
+  if(payneArmed===true) return {ok:false,state:"PAYNE_MUST_BE_DISARMED"};
+  if(Number(payneOpenPositions||0)!==0) return {ok:false,state:"PAYNE_OPEN_POSITION_TRANSFER_BLOCKED"};
+  return {ok:true,state:"INDEX3_TO_INDEX2_REVIEW_ALLOWED"};
+}
+export function founderFundingReturnConfirmGate({reviewPresent,reviewAgeMs,balancesUnchanged,payneArmed,payneOpenPositions,sourceIndex,destinationIndex}) {
+  if(reviewPresent!==true) return {ok:false,state:"REVIEW_MISSING_OR_EXPIRED"};
+  if(Number(sourceIndex)!==3||Number(destinationIndex)!==2) return {ok:false,state:"TRANSFER_PAIR_NOT_AUTHORIZED"};
+  if(!Number.isFinite(Number(reviewAgeMs))||Number(reviewAgeMs)>600000) return {ok:false,state:"REVIEW_STALE_REVIEW_AGAIN"};
+  if(balancesUnchanged!==true) return {ok:false,state:"BALANCE_CHANGED_REVIEW_AGAIN"};
+  if(payneArmed===true) return {ok:false,state:"PAYNE_MUST_BE_DISARMED"};
+  if(Number(payneOpenPositions||0)!==0) return {ok:false,state:"PAYNE_OPEN_POSITION_TRANSFER_BLOCKED"};
+  return {ok:true,state:"INDEX3_TO_INDEX2_CONFIRM_ALLOWED"};
+}
+async function payneFundingSafetyRead() {
+  try {
+    const r=await fetch("https://market-edge-payne-kalshi-real.darkbishop43.workers.dev/real-state",{method:"GET",headers:{"accept":"application/json"}});
+    const body=await r.json().catch(()=>({}));
+    const positionStatus=String(body?.series?.position?.status||body?.series?.positionStatus||"").toUpperCase();
+    const openPosition=['OPEN','EXIT_RETRY','EXIT_RECONCILIATION_REQUIRED','RECONCILIATION_UNKNOWN'].includes(positionStatus);
+    return {
+      ok:r.ok,
+      armed:body?.control?.armed===true,
+      openPositions:openPosition?1:0,
+      positionStatus:positionStatus||null,
+      requiredExchangeIndex:Number(body?.control?.requiredExchangeIndex),
+      httpStatus:r.status
+    };
+  } catch(error) {
+    return {ok:false,armed:null,openPositions:null,positionStatus:null,requiredExchangeIndex:null,httpStatus:null,error:String(error?.message||error||"PAYNE_STATE_READ_FAILED").slice(0,120)};
+  }
+}
+
 function kalshiControllerSwitchEnabled(env) {
   return env?.KALSHI_ONE_TRADE_CONTROLLER_ENABLED === "ENABLED";
 }
