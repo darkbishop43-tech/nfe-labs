@@ -2,7 +2,7 @@ const KALSHI_ORIGIN = 'https://external-api.kalshi.com';
 const ORDER_PATH = '/trade-api/v2/portfolio/events/orders';
 const ALLOWED_METHOD = 'POST';
 const PAYNE_OWNER = 'PAYNE_KALSHI_REAL';
-const REQUIRED_EXCHANGE_INDEX = 3;
+const REQUIRED_EXCHANGE_INDEX = 2;
 
 function derLength(n) {
   if (n < 0x80) return new Uint8Array([n]);
@@ -36,7 +36,7 @@ function decodePem(pem) {
 function assertPayload(kind,payload,scope) {
   if(!['ENTRY','EXIT'].includes(kind)) throw new Error('PAYNE_WRITE_KIND_REJECTED');
   if(scope?.owner!==PAYNE_OWNER) throw new Error('PAYNE_WRITE_OWNER_REJECTED');
-  if(Number(scope?.exchangeIndex)!==REQUIRED_EXCHANGE_INDEX) throw new Error('PAYNE_WRITE_INDEX3_REQUIRED');
+  if(Number(scope?.exchangeIndex)!==REQUIRED_EXCHANGE_INDEX) throw new Error('PAYNE_WRITE_INDEX2_REQUIRED');
   if(scope?.authorized!==true) throw new Error('PAYNE_WRITE_AUTHORIZATION_REQUIRED');
   if(!payload || typeof payload!=='object') throw new Error('PAYNE_WRITE_PAYLOAD_REQUIRED');
   if(!payload.ticker || !payload.client_order_id) throw new Error('PAYNE_WRITE_IDENTITY_REQUIRED');
