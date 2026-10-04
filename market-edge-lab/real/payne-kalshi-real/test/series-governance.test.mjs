@@ -22,6 +22,9 @@ import {
   payneStage,
   fireSpecimenFromSnapshot,
   fireSpecimenFingerprint,
+  payneFeatureFailureReasons,
+  payneFeatureBoundaryEvidence,
+  payneBookEvidence,
 } from '../src/index.js';
 import { kalshiPayneOrderPost, payneOrderWriteProof } from '../src/kalshi-real-write.js';
 import { assertKalshiMechanicalOrderPayload } from '../../shared/kalshi-execution-write.js';
@@ -209,6 +212,22 @@ function mutableBaseline(initial){
   };
 }
 
+function sequentialBaseline(...snapshots){
+  let i=0;
+  return {async fetch(request){
+    baselineMethods.push(request.method||'GET');
+    const url=new URL(request.url);
+    if(url.pathname==='/shadow-state'){
+      const body=snapshots[Math.min(i,snapshots.length-1)]; i++;
+      return jsonResponse(body);
+    }
+    if(url.pathname==='/execution-test-state') return jsonResponse({ok:true,readOnly:true,state:{status:'COMPLETE',positions:[],attempts:[]}});
+    if(url.pathname==='/execution-test-nofill-forensic') return jsonResponse({ok:true,audited:[]});
+    if(url.pathname==='/forensic-provider-history') return jsonResponse({ok:true,fills:[],settlements:[],positions:[]});
+    return jsonResponse({ok:false,error:'NOT_FOUND'},404);
+  }};
+}
+
 function shadowWithCompetingLeader({btcScore=.83,btcMove=.004,btcEdge=.08,zecScore=.95,zecMove=.006,zecEdge=.10}={}){
   const base=baselineShadow({score:btcScore,move:btcMove,edge:btcEdge});
   return {...base,opportunities:[
@@ -216,6 +235,120 @@ function shadowWithCompetingLeader({btcScore=.83,btcMove=.004,btcEdge=.08,zecSco
     {marketTicker:'KXZEC15M-LEADER',outcomeSide:'YES',direction:'UP',asset:'ZEC',move:zecMove,fair:.61,edge:zecEdge,score:zecScore,openTime:'2026-10-02T06:00:00Z',closeTime:'2026-10-02T06:15:00Z',durationMs:900000,horizon:'15m'},
   ]};
 }
+
+test('FEATURE EPOCH 1: epoch A qualifies but newer epoch B invalidates before FIRE latch with no attempt consumed',async()=>{
+  const A={...baselineShadow({score:.716,move:.003,edge:.054}),lastRunAt:'2026-10-02T06:04:00Z'};
+  const B={...baselineShadow({score:.50,move:0,edge:0}),lastRunAt:'2026-10-02T06:05:00Z'};
+  const e=await env(); e.BASELINE_REAL_READ=sequentialBaseline(A,B);
+  const io=installProvider();
+  try{
+    await configure(e,{threshold:.70,stake:1,target:5}); await arm(e);
+    await runReadOnlyScan(e,'FEATURE_EPOCH_TEST',T0);
+    const out=await loadRealSeriesState(e);
+    assert.equal(out.attemptsStarted,0);
+    assert.equal(out.fireLatch,null);
+    assert.equal(out.status,'ARMED_FISHING');
+    assert.equal(out.fireRefreshEvidence.sourceLastRunAt,'2026-10-02T06:05:00Z');
+    assert.ok(out.fireRefreshEvidence.failureReasons.includes('FIRE_SCORE_BELOW_THRESHOLD'));
+    assert.ok(out.fireRefreshEvidence.failureReasons.includes('FIRE_SCORE_BELOW_EFFECTIVE_LOCK'));
+    assert.ok(out.fireRefreshEvidence.failureReasons.includes('FIRE_EDGE_NOT_POSITIVE'));
+    assert.ok(out.fireRefreshEvidence.failureReasons.includes('FIRE_MOVE_BELOW_MINIMUM'));
+    const ledger=await listRealLedger(e);
+    assert.equal(ledger.at(-1).type,'FIRE_INVALIDATED_FEATURE_REFRESH');
+    assert.equal(providerPosts(io),0);
+  }finally{io.restore();}
+});
+
+test('FEATURE EPOCH 2: newer same-specimen epoch that still qualifies becomes the latched FIRE evidence',async()=>{
+  const A={...baselineShadow({score:.716,move:.003,edge:.054}),lastRunAt:'2026-10-02T06:04:00Z'};
+  const B={...baselineShadow({score:.74,move:.004,edge:.06}),lastRunAt:'2026-10-02T06:05:00Z'};
+  const e=await env(); e.BASELINE_REAL_READ=sequentialBaseline(A,B);
+  const io=installProvider();
+  try{
+    await configure(e,{threshold:.70,target:1}); await arm(e);
+    await runReadOnlyScan(e,'FEATURE_EPOCH_TEST',T0);
+    const out=await loadRealSeriesState(e);
+    assert.equal(out.fireLatch.state,'LATCHED');
+    assert.equal(out.fireLatch.ticker,'KXBTC15M-REALTEST');
+    assert.equal(out.fireLatch.fireFeatureEvidence.sourceLastRunAt,'2026-10-02T06:05:00Z');
+    assert.equal(out.fireLatch.fireFeatureEvidence.score,.74);
+    assert.deepEqual(out.fireLatch.fireFeatureEvidence.failureReasons,[]);
+  }finally{io.restore();}
+});
+
+test('FEATURE EPOCH 3/9/10: valid FIRE refresh + valid final refresh reaches shared-writer boundary and persists full books',async()=>{
+  const A={...baselineShadow({score:.716,move:.003,edge:.054}),lastRunAt:'2026-10-02T06:04:00Z'};
+  const B={...baselineShadow({score:.74,move:.004,edge:.06}),lastRunAt:'2026-10-02T06:05:00Z'};
+  const C={...baselineShadow({score:.75,move:.0045,edge:.065}),lastRunAt:'2026-10-02T06:05:01Z'};
+  const e=await env(); e.BASELINE_REAL_READ=sequentialBaseline(A,B,C);
+  const io=installProvider({exactSequence:[
+    {status:200,market:providerMarket({yesBid:.90,yesAsk:.91})},
+    {status:200,market:providerMarket({yesBid:.95,yesAsk:.957})},
+    {status:200,market:providerMarket({yesBid:.95,yesAsk:.957})},
+    {status:200,market:providerMarket({yesBid:.95,yesAsk:.957})},
+  ]});
+  const zeroWriterCalls=[];
+  const zeroWriter=async(env,kind,payload,scope)=>{
+    zeroWriterCalls.push({kind,payload,scope});
+    return kalshiPayneOrderPost(env,kind,payload,scope,{fetchImpl:async()=>jsonResponse(NOFILL)});
+  };
+  try{
+    await configure(e,{threshold:.70,target:1}); await arm(e);
+    await runReadOnlyScan(e,'FEATURE_EPOCH_TEST',T0);
+    const latched=await loadRealSeriesState(e);
+    assert.equal(latched.fireLatch.state,'LATCHED');
+    const out=await runPayneRealExecutionCycle(e,{postImpl:zeroWriter,nowMs:T0});
+    assert.equal(zeroWriterCalls.length,1);
+    assert.equal(out.fireLatch.finalFeature,'PASS');
+    assert.equal(out.fireLatch.finalFeatureEvidence.sourceLastRunAt,'2026-10-02T06:05:01Z');
+    for(const key of ['fireBookEvidence','freshLockBookEvidence','preSubmitBookEvidence']){
+      assert.ok(Number.isFinite(Number(out.fireLatch[key].bid)),key+' bid');
+      assert.ok(Number.isFinite(Number(out.fireLatch[key].ask)),key+' ask');
+      assert.ok(Number.isFinite(Number(out.fireLatch[key].spread)),key+' spread');
+      assert.ok(out.fireLatch[key].providerTimestamp,key+' timestamp');
+    }
+    assert.equal(out.fireLatch.providerPost,'YES');
+    assert.equal(providerPosts(io),0);
+  }finally{io.restore();}
+});
+
+test('FEATURE EPOCH 4-8: exact final feature failure labels use existing PAYNE predicates only',()=>{
+  const threshold=.70, lock=.65;
+  assert.ok(payneFeatureFailureReasons({available:true,score:.69,edge:.05,move:.003},threshold,lock,'FINAL').includes('FINAL_SCORE_BELOW_THRESHOLD'));
+  assert.ok(payneFeatureFailureReasons({available:true,score:.64,edge:.05,move:.003},threshold,lock,'FINAL').includes('FINAL_SCORE_BELOW_EFFECTIVE_LOCK'));
+  assert.ok(payneFeatureFailureReasons({available:true,score:.72,edge:0,move:.003},threshold,lock,'FINAL').includes('FINAL_EDGE_NOT_POSITIVE'));
+  assert.ok(payneFeatureFailureReasons({available:true,score:.72,edge:.05,move:.001},threshold,lock,'FINAL').includes('FINAL_MOVE_BELOW_MINIMUM'));
+  assert.deepEqual(payneFeatureFailureReasons({available:false},threshold,lock,'FINAL'),['FINAL_FEATURE_NOT_AVAILABLE']);
+});
+
+test('FEATURE EPOCH 9: Fresh LOCK and pre-submit may pass while final same-specimen feature requalification fails distinctly',async()=>{
+  const A={...baselineShadow({score:.716,move:.003,edge:.054}),lastRunAt:'2026-10-02T06:04:00Z'};
+  const B={...baselineShadow({score:.74,move:.004,edge:.06}),lastRunAt:'2026-10-02T06:05:00Z'};
+  const C={...baselineShadow({score:.69,move:.004,edge:.06}),lastRunAt:'2026-10-02T06:05:01Z'};
+  const e=await env(); e.BASELINE_REAL_READ=sequentialBaseline(A,B,C);
+  const io=installProvider(),post=postFixture(NOFILL);
+  try{
+    await configure(e,{threshold:.70,target:1}); await arm(e);
+    await runReadOnlyScan(e,'FEATURE_EPOCH_TEST',T0);
+    const out=await cycleNoScan(e,post,T0);
+    assert.equal(entries(post).length,0);
+    assert.equal(out.fireLatch.freshLock,'PASS');
+    assert.equal(out.fireLatch.preSubmit,'PASS');
+    assert.equal(out.fireLatch.finalFeature,'FAIL');
+    assert.equal(out.fireLatch.invalidationReason,'FINAL_FEATURE_REQUALIFICATION_FAILED');
+    assert.ok(out.fireLatch.finalFeatureEvidence.failureReasons.includes('FINAL_SCORE_BELOW_THRESHOLD'));
+    assert.equal(out.attemptsStarted,0);
+  }finally{io.restore();}
+});
+
+test('FEATURE EPOCH 11: known PAYNE rejection states are explicit NOT_REACHED rather than fabricated UNKNOWN',()=>{
+  const d=payneFeatureBoundaryEvidence({available:true,score:.49,edge:.05,move:.003},.70,.65,'FIRE');
+  assert.equal(d.radar,'FAIL');
+  assert.equal(d.lock,'NOT_REACHED');
+  assert.equal(d.pull,'NOT_REACHED');
+  const book=payneBookEvidence({yesBid:.909,yesAsk:.910,providerReadAt:'2026-10-04T22:02:19Z'},'YES',.910);
+  assert.equal(book.bid,.909); assert.equal(book.ask,.91); assert.equal(book.spread,.001); assert.equal(book.selectedPrice,.91);
+});
 
 test('FIRE LATCH 1/6: FIRE-ready BTC remains execution specimen even after a different global feature leader appears; no second discovery occurs',async()=>{
   const e=await env({shadow:baselineShadow({score:.83,move:.004,edge:.08})});
