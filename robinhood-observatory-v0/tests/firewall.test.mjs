@@ -17,3 +17,15 @@ console.log('PASS read-only firewall');
 console.log('PASS no order/preview/cancel/transfer/exercise mutation tokens');
 console.log('PASS safe account masking');
 console.log('PASS snapshot labeling');
+
+const si=data.siCryptoV0;
+if(!si)throw new Error('SI Crypto V0 state missing');
+const expected={M:0.30,T:0.20,V:0.15,Q:0.10,F:0.15,N:0.10};
+for(const [k,v] of Object.entries(expected)){if(si.weights[k]!==v)throw new Error('SI weight mismatch '+k)}
+if(si.composite.score!==null)throw new Error('Composite score must remain null while component inputs/rules are incomplete');
+if(si.qualificationThreshold!==null)throw new Error('Unapproved SI qualification threshold found');
+if(si.firstTest.proposedEntry.dollarAmount!=='FOUNDER SELECTS')throw new Error('Unapproved fixed stake found');
+if(si.live.state!=='DISARMED / FIRE BLOCKED')throw new Error('Live lane unexpectedly executable');
+console.log('PASS SI Crypto V0 authorized weights');
+console.log('PASS no unapproved stake or qualification threshold');
+console.log('PASS incomplete SI score blocks FIRE');
