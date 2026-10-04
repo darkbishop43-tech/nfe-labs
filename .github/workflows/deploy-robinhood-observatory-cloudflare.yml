@@ -95,13 +95,13 @@ jobs:
           grep -q '"credential": "NONE"' /tmp/v0a-ping && echo "VERIFY Binance.US no credential PASS"
           curl --fail --silent --show-error --location "$LIVE_URL/api/v0a/mapping" --output /tmp/v0a-mapping
           grep -q '"mappingStatus": "MAPPED"' /tmp/v0a-mapping && echo "VERIFY symbol mapping PASS"
-          RESEARCH_HTTP="$(curl --silent --show-error --location --write-out '%{http_code}' "$LIVE_URL/api/v0a/research?symbol=BTC-USD&featureInterval=1h&lookbackDays=30" --output /tmp/v0a-research)"
-          echo "V0A_RESEARCH_HTTP $RESEARCH_HTTP"
-          cat /tmp/v0a-research
-          test "$RESEARCH_HTTP" = "200"
-          grep -q '"source": "Binance.US"' /tmp/v0a-research && echo "VERIFY V0-A Binance component provenance PASS"
-          grep -q '"M": {' /tmp/v0a-research && grep -q '"T": {' /tmp/v0a-research && grep -q '"V": {' /tmp/v0a-research && grep -q '"F": {' /tmp/v0a-research && echo "VERIFY M/T/V/F component payload PASS"
-          grep -q '"qSpread": null' /tmp/v0a-research && echo "VERIFY Q spread-history blocker PASS"
-          grep -q '"fireAuthority": "ZERO"' /tmp/v0a-research && echo "VERIFY zero FIRE authority PASS"
+          curl --fail --silent --show-error --location "$LIVE_URL/api/v0a/momentum?symbol=BTC-USD&bars=1000" --output /tmp/v0a-momentum
+          grep -q '"researchSource": "Binance.US"' /tmp/v0a-momentum && echo "VERIFY momentum provenance PASS"
+          grep -q '"M": ' /tmp/v0a-momentum && echo "VERIFY M payload PASS"
+          curl --fail --silent --show-error --location "$LIVE_URL/api/v0a/features?symbol=BTC-USD&featureInterval=1h&lookbackDays=30" --output /tmp/v0a-features
+          grep -q '"T": ' /tmp/v0a-features && grep -q '"V": ' /tmp/v0a-features && grep -q '"F": ' /tmp/v0a-features && echo "VERIFY T/V/F payload PASS"
+          curl --fail --silent --show-error --location "$LIVE_URL/api/v0a/book?symbol=BTC-USD" --output /tmp/v0a-book
+          grep -q '"qSpread": null' /tmp/v0a-book && echo "VERIFY Q spread-history blocker PASS"
+          grep -q '"fireAuthority": "ZERO"' /tmp/v0a-momentum && grep -q '"fireAuthority": "ZERO"' /tmp/v0a-features && grep -q '"fireAuthority": "ZERO"' /tmp/v0a-book && echo "VERIFY zero FIRE authority PASS"
           echo "V0A_MAPPING_SUMMARY"
-          node -e "const fs=require('fs');const m=JSON.parse(fs.readFileSync('/tmp/v0a-mapping'));console.log(JSON.stringify({robinhoodPairs:m.robinhoodPairs,mapped:m.mapped,unmapped:m.unmapped}));const r=JSON.parse(fs.readFileSync('/tmp/v0a-research'));console.log(JSON.stringify({status:r.status,mapping:r.mapping,configuration:r.configuration,components:Object.fromEntries(Object.entries(r.components||{}).map(([k,v])=>[k,v.value])),scores:r.scores,raw:{ema9:r.raw?.ema9,ema20:r.raw?.ema20,ema50:r.raw?.ema50,atr14:r.raw?.atr14,atrPercentile:r.raw?.atrPercentile,volume:r.raw?.volume,relativeVolume:r.raw?.relativeVolume,quoteVolume:r.raw?.quoteVolume,tradeCount:r.raw?.tradeCount,researchBook:r.raw?.researchBook,depthSummary:r.raw?.depthSummary}}))"
+          node -e "const fs=require('fs');const m=JSON.parse(fs.readFileSync('/tmp/v0a-mapping'));const mo=JSON.parse(fs.readFileSync('/tmp/v0a-momentum'));const f=JSON.parse(fs.readFileSync('/tmp/v0a-features'));const b=JSON.parse(fs.readFileSync('/tmp/v0a-book'));console.log(JSON.stringify({robinhoodPairs:m.robinhoodPairs,mapped:m.mapped,unmapped:m.unmapped}));console.log(JSON.stringify({mapping:mo.mapping,M:mo.M,T:f.T,V:f.V,F:f.F,qLiquidity:f.qLiquidity,Q:b.Q,researchBook:b.researchBook,depthSummary:b.depthSummary,featureConfig:f.configuration,momentumConfig:mo.configuration}))"
