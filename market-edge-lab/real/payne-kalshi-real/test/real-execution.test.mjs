@@ -116,6 +116,11 @@ async function arm(e){
   return c;
 }
 
+async function scanThenExecute(e,post,ms=Date.parse('2026-10-02T06:05:00Z')){
+  await runReadOnlyScan(e,'ZERO_MONEY_EXECUTION_TEST',ms);
+  return runPayneRealExecutionCycle(e,{postImpl:post.fn,nowMs:ms});
+}
+
 test('UNKNOWN entry self-reconciliation: authenticated provider proves FLAT/no execution and clears unresolvedEntry',async()=>{
   const e=await env(),io=installProvider({position:'ABSENT',orders:[],fills:[],historicalFills:[],settlements:[]});
   try{
@@ -238,9 +243,10 @@ test('historical UNKNOWN is removed when a later authoritative no-execution even
   });
   assert.equal(out.attempted,1);
   assert.equal(out.filled,0);
-  assert.equal(out.noFill,1);
+  assert.equal(out.noFill,0);
+  assert.equal(out.providerReconciledNoExecution,1);
   assert.equal(out.unknown,0);
-  assert.equal(out.lastAttempt.result,'NO_FILL');
+  assert.equal(out.lastAttempt.result,'PROVIDER_RECONCILED_NO_EXECUTION');
 });
 
 test('read-only historical series report returns current terminal truth and P&L without provider writes',async()=>{
@@ -300,8 +306,9 @@ test('historical NO_FILL reports zero P&L when no actual provider fee is recorde
   const row={schema:'PAYNE_REAL_LEDGER_V1',recordId:'nf',at:'2026-10-04T00:02:00Z',owner:'PAYNE_KALSHI_REAL',type:'ENTRY_RECONCILED_NO_EXECUTION',seriesId,attemptId,attemptNo:1,ticker:'KXZEC15M-HIST',reconciliation:'PROVIDER_RECONCILED_NO_EXECUTION'};
   await e.PAYNE_KALSHI_STATE.put('payne-kalshi:real-ledger:'+row.at+':'+row.recordId,JSON.stringify(row));
   const report=await buildHistoricalSeriesReport(e,seriesId);
-  assert.equal(report.noFill,1);
+  assert.equal(report.noFill,0);
   assert.equal(report.unknownUnresolved,0);
+  assert.equal(report.attempts[0].finalResult,'PROVIDER_RECONCILED_NO_EXECUTION');
   assert.equal(report.netRealizedPnlUsd,0);
   assert.equal(report.totalFeesUsd,0);
   assert.equal(report.attempts[0].netRealizedPnlUsd,0);
@@ -340,7 +347,7 @@ test('ARMED qualifying opportunity constructs exactly one Index 2 $1 IOC ENTRY a
   const e=await env(),io=installProvider(),post=postFixture({order_id:'ENTRY-1',client_order_id:'payne-real-fixture-1-entry',fill_count:0,remaining_count:1,average_fill_price:null,average_fee_paid:0});
   try{
     await arm(e);
-    const out=await runPayneRealExecutionCycle(e,{postImpl:post.fn,nowMs:Date.parse('2026-10-02T06:05:00Z')});
+    const out=await scanThenExecute(e,post);
     assert.equal(post.calls.length,1);
     assert.equal(post.calls[0].kind,'ENTRY');
     assert.equal(post.calls[0].scope.exchangeIndex,2);
@@ -360,7 +367,7 @@ test('terminal 1/1 series and Worker restart cannot produce a second entry',asyn
   const e=await env(),io=installProvider(),post=postFixture({order_id:'ENTRY-1',fill_count:0,remaining_count:1});
   try{
     await arm(e);
-    await runPayneRealExecutionCycle(e,{postImpl:post.fn,nowMs:Date.parse('2026-10-02T06:05:00Z')});
+    await scanThenExecute(e,post);
     const afterFirst=post.calls.length;
     await runPayneRealExecutionCycle(e,{postImpl:post.fn,nowMs:Date.parse('2026-10-02T06:06:00Z')});
     assert.equal(afterFirst,1);
@@ -379,7 +386,7 @@ test('FILLED establishes durable PAYNE ownership and disarms new entry authority
   const e=await env(),io=installProvider(),post=postFixture({order_id:'ENTRY-FILL',client_order_id:'CID',fill_count:1,remaining_count:0,average_fill_price:.50,average_fee_paid:.02});
   try{
     await arm(e);
-    const out=await runPayneRealExecutionCycle(e,{postImpl:post.fn,nowMs:Date.parse('2026-10-02T06:05:00Z')});
+    const out=await scanThenExecute(e,post);
     assert.equal(out.position.owner,'PAYNE_KALSHI_REAL');
     assert.equal(out.position.exchangeIndex,2);
     assert.equal(out.position.entryOrderId,'ENTRY-FILL');
@@ -421,20 +428,27 @@ test('score <= .20 produces governed SCORE_EXIT while wrong ownership produces n
   }finally{io.restore();}
 });
 
-test('insufficient Index 2 funding blocks entry even if Index 3 has cash',async()=>{
-  const e=await env(),io=installProvider({index2:0,index3:99}),post=postFixture({order_id:'BAD',fill_count:1,remaining_count:0});
+test('insufficient Index 2 funding blocks a latched FIRE even if Index 3 has cash',async()=>{
+  const e=await env(),post=postFixture({order_id:'BAD',fill_count:1,remaining_count:0});
+  let io=installProvider({index2:15.91,index3:0});
   try{
     await arm(e);
+    await runReadOnlyScan(e,'FUNDING_LATCH_TEST',Date.parse('2026-10-02T06:05:00Z'));
+    assert.equal((await loadRealSeriesState(e)).fireLatch.state,'LATCHED');
+    io.restore(); io=installProvider({index2:0,index3:99});
     const out=await runPayneRealExecutionCycle(e,{postImpl:post.fn,nowMs:Date.parse('2026-10-02T06:05:00Z')});
     assert.equal(out.status,'HOLD_INDEX2_FUNDING_INSUFFICIENT');
+    assert.equal(out.fireLatch.finalResult,'INVALIDATED_BEFORE_POST');
     assert.equal(post.calls.length,0);
   }finally{io.restore();}
 });
 
-test('unknown provider reconciliation and AUTO exact-ticker ownership both block new entry',async()=>{
-  const e=await env(),io=installProvider({position:'HTTP_FAIL'}),post=postFixture({order_id:'BAD',fill_count:1,remaining_count:0});
+test('unknown provider reconciliation and AUTO exact-ticker ownership both block a latched FIRE',async()=>{
+  const e=await env(),post=postFixture({order_id:'BAD',fill_count:1,remaining_count:0});
+  let io=installProvider();
   try{
-    await arm(e);
+    await arm(e); await runReadOnlyScan(e,'OWNERSHIP_LATCH_TEST',Date.parse('2026-10-02T06:05:00Z'));
+    io.restore(); io=installProvider({position:'HTTP_FAIL'});
     const out=await runPayneRealExecutionCycle(e,{postImpl:post.fn,nowMs:Date.parse('2026-10-02T06:05:00Z')});
     assert.equal(out.status,'HOLD_PROVIDER_POSITION_UNKNOWN');
     assert.equal(post.calls.length,0);
@@ -442,24 +456,29 @@ test('unknown provider reconciliation and AUTO exact-ticker ownership both block
 
   const e2=await env({autoPositions:[{status:'OPEN',marketTicker:'KXBTC15M-REALTEST'}]}),io2=installProvider(),post2=postFixture({order_id:'BAD',fill_count:1,remaining_count:0});
   try{
-    await arm(e2);
+    await arm(e2); await runReadOnlyScan(e2,'AUTO_CONFLICT_LATCH_TEST',Date.parse('2026-10-02T06:05:00Z'));
     const out2=await runPayneRealExecutionCycle(e2,{postImpl:post2.fn,nowMs:Date.parse('2026-10-02T06:05:00Z')});
     assert.equal(out2.status,'HOLD_AUTO_TICKER_CONFLICT');
     assert.equal(post2.calls.length,0);
   }finally{io2.restore();}
 });
 
-test('Fresh LOCK invalidation, pre-submit invalidation, and window mismatch all block POST',async()=>{
-  for(const [name,providerOptions,shadow,expected] of [
-    ['fresh',{exactSequence:[{status:500,market:{error:'x'}}]},baselineShadow(),'HOLD_PREFIRE_EVIDENCE_INCOMPLETE'],
-    ['presubmit',{exactSequence:[{status:200,market:providerMarket()},{status:500,market:{error:'x'}}]},baselineShadow(),'HOLD_PREFIRE_EVIDENCE_INCOMPLETE'],
-    ['window',{},baselineShadow({close:'2026-10-02T06:30:00Z'}),'HOLD_WINDOW_MISMATCH'],
-  ]){
-    const e=await env({shadow}),io=installProvider(providerOptions),post=postFixture({order_id:'BAD',fill_count:1,remaining_count:0});
+test('Fresh LOCK invalidation, pre-submit invalidation, and window change all invalidate the latched specimen before POST',async()=>{
+  const scenarios=[
+    ['fresh',{exactSequence:[{status:500,market:{error:'x'}}]},'HOLD_FRESH_LOCK_INVALIDATED'],
+    ['presubmit',{exactSequence:[{status:200,market:providerMarket()},{status:500,market:{error:'x'}}]},'HOLD_PRE_SUBMIT_INVALIDATED'],
+    ['window',{exactSequence:[{status:200,market:providerMarket({close:'2026-10-02T06:30:00Z'})}]},'HOLD_FRESH_LOCK_INVALIDATED'],
+  ];
+  for(const [name,execOptions,expected] of scenarios){
+    const e=await env(),post=postFixture({order_id:'BAD',fill_count:1,remaining_count:0});
+    let io=installProvider();
     try{
-      await arm(e);
+      await arm(e); await runReadOnlyScan(e,'INVALIDATION_LATCH_TEST',Date.parse('2026-10-02T06:05:00Z'));
+      assert.equal((await loadRealSeriesState(e)).fireLatch.state,'LATCHED',name);
+      io.restore(); io=installProvider(execOptions);
       const out=await runPayneRealExecutionCycle(e,{postImpl:post.fn,nowMs:Date.parse('2026-10-02T06:05:00Z')});
       assert.equal(out.status,expected,name);
+      assert.equal(out.fireLatch.finalResult,'INVALIDATED_BEFORE_POST',name);
       assert.equal(post.calls.length,0,name);
     }finally{io.restore();}
   }
