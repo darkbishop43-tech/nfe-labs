@@ -373,18 +373,66 @@ test('GOV 20: mid-run control changes cannot mutate the active series snapshot',
     assert.equal(out.status,'ARMED_CONFIGURATION_INVALID_FAIL_CLOSED'); assert.equal(entries(post).length,0);
     const after=await loadRealSeriesState(e);
     for(const k of ['threshold','maxEntryDebitUsd','attemptTarget','seriesId','configFrozen']) assert.equal(after[k],snap[k]);
-    // re-ARM of an unfinished series with a different config is refused (never silently re-snapshots)
-    await frozenSeries(e,{seriesId:snap.seriesId,attemptsStarted:2,attemptTarget:5,threshold:.75,maxEntryDebitUsd:2,position:null});
+    // Clean + disarmed + changed next-run config explicitly terminalizes the old frozen series before a new ARM.
+    await frozenSeries(e,{seriesId:snap.seriesId,attemptsStarted:2,attemptTarget:5,threshold:.75,maxEntryDebitUsd:2,position:null,currentAttempt:{status:'NO_FILL'}});
     await e.PAYNE_KALSHI_STATE.put('payne-kalshi:control:v1',JSON.stringify({...c,armed:false,activeThreshold:.80,maxEntryDebitUsd:2,attemptTarget:5}));
-    await assert.rejects(updateFounderControl(e,'ARM'),/PAYNE_REAL_SERIES_IN_PROGRESS_CONFIG_MISMATCH/);
-    await e.PAYNE_KALSHI_STATE.put('payne-kalshi:control:v1',JSON.stringify({...c,armed:false,activeThreshold:.75,maxEntryDebitUsd:2,attemptTarget:5}));
+    const reconciled=await cycle(e,post);
+    assert.equal(reconciled.status,'TERMINAL_DISARMED_CONFIG_SUPERSEDED');
+    assert.ok(reconciled.completedAt);
+    assert.equal(entries(post).length,0);
+    await updateFounderControl(e,'ARM');
+    const fresh=await loadRealSeriesState(e);
+    assert.notEqual(fresh.seriesId,snap.seriesId);
+    assert.equal(fresh.attemptsStarted,0);
+    assert.equal(fresh.threshold,.80);
+    assert.equal(fresh.attemptTarget,5);
+
+    // Same-config clean disarmed series remains resumable; count and identity are preserved.
+    await updateFounderControl(e,'DISARM');
+    await frozenSeries(e,{seriesId:'RESUME-SAME',attemptsStarted:2,attemptTarget:5,threshold:.80,maxEntryDebitUsd:2,position:null,currentAttempt:{status:'NO_FILL'}});
+    await e.PAYNE_KALSHI_STATE.put('payne-kalshi:control:v1',JSON.stringify({...c,armed:false,activeThreshold:.80,maxEntryDebitUsd:2,attemptTarget:5}));
     await updateFounderControl(e,'ARM');
     const resumed=await loadRealSeriesState(e);
-    assert.equal(resumed.attemptsStarted,2); assert.equal(resumed.seriesId,snap.seriesId); // resumed, count preserved
+    assert.equal(resumed.attemptsStarted,2); assert.equal(resumed.seriesId,'RESUME-SAME');
   }finally{io.restore();}
 });
 
 // ---------- 21,22,23 existing checks preserved ----------
+test('ARM blocker regression: clean disarmed 1/5 @ .70 is superseded for Founder .60 x1 without provider writes',async()=>{
+  const e=await env(),io=installProvider(),post=postFixture(NOFILL);
+  try{
+    await frozenSeries(e,{seriesId:'LIVE-STALE',status:'ARMED_FISHING',attemptsStarted:1,attemptTarget:5,threshold:.70,maxEntryDebitUsd:1,position:null,currentAttempt:{status:'NO_FILL'},unresolvedEntry:false});
+    const c=await loadControl(e);
+    await e.PAYNE_KALSHI_STATE.put('payne-kalshi:control:v1',JSON.stringify({...c,armed:false,activeThreshold:.60,maxEntryDebitUsd:1,attemptTarget:1,requiredExchangeIndex:2}));
+
+    const before=await loadRealSeriesState(e);
+    assert.equal(before.status,'ARMED_FISHING');
+    assert.equal(before.attemptsStarted,1);
+    assert.equal(before.attemptTarget,5);
+    assert.equal(before.threshold,.70);
+
+    const repaired=await cycle(e,post);
+    assert.equal(repaired.status,'TERMINAL_DISARMED_CONFIG_SUPERSEDED');
+    assert.equal(repaired.unresolvedEntry,false);
+    assert.equal(repaired.position,null);
+    assert.ok(repaired.completedAt);
+    assert.equal(entries(post).length,0);
+    assert.equal(providerPosts(io),0);
+
+    const armed=await updateFounderControl(e,'ARM');
+    assert.equal(armed.armed,true);
+    const fresh=await loadRealSeriesState(e);
+    assert.notEqual(fresh.seriesId,'LIVE-STALE');
+    assert.equal(fresh.attemptsStarted,0);
+    assert.equal(fresh.attemptTarget,1);
+    assert.equal(fresh.threshold,.60);
+    assert.equal(fresh.effectiveLockThreshold,.60);
+    assert.equal(fresh.configFrozen,true);
+    assert.equal(entries(post).length,0);
+    assert.equal(providerPosts(io),0);
+  }finally{io.restore();}
+});
+
 test('GOV 21: Index-2 funding check still operates on every attempt of a series',async()=>{
   const e=await env(),post=postFixture(NOFILL);
   let io=installProvider();
