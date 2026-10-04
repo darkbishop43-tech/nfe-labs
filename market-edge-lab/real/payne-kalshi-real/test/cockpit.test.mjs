@@ -385,7 +385,7 @@ test('stale Baseline feature observation stays UNKNOWN and cannot produce FIRE p
     const out=await buildCockpitData(env,Date.parse('2026-10-02T06:05:00Z'));
     assert.equal(out.payne.available,false);
     assert.equal(out.payne.state,'UNKNOWN');
-    assert.equal(out.pipeline.pullTrigger,'UNKNOWN');
+    assert.equal(out.pipeline.pullTrigger,'NOT_REACHED');
     assert.equal(out.pipeline.finalDecision,'FEATURES_UNAVAILABLE');
     assert.equal(out.zeroMoneyPreview.status,'NOT_REACHED');
     assert.equal(out.providerWrites,0);
