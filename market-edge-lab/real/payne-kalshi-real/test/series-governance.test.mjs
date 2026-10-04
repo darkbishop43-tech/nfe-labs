@@ -20,6 +20,8 @@ import {
   parseFounderThreshold,
   effectiveLockThreshold,
   payneStage,
+  fireSpecimenFromSnapshot,
+  fireSpecimenFingerprint,
 } from '../src/index.js';
 import { kalshiPayneOrderPost, payneOrderWriteProof } from '../src/kalshi-real-write.js';
 
@@ -81,12 +83,15 @@ function providerMarket({status='open',close='2026-10-02T06:15:00Z',exchangeInde
 }
 
 function installProvider({index3=0,index2=15.91,position='ABSENT',exactSequence=[],settled=false,marketIndex=2}={}){
-  const original=globalThis.fetch,calls=[]; let exactNo=0;
+  const original=globalThis.fetch,calls=[]; let exactNo=0,allowDiscovery=true;
   globalThis.fetch=async (url,options={})=>{
     calls.push({url:String(url),method:options.method||'GET',body:options.body||null});
     const u=String(url);
     if(u.includes('/portfolio/balance')) return jsonResponse({balance_breakdown:[{exchange_index:0,balance:0},{exchange_index:2,balance:index2},{exchange_index:3,balance:index3}]});
-    if(u.includes('series_ticker=KXBTC15M')) return jsonResponse({markets:[providerMarket({exchangeIndex:marketIndex})]});
+    if(u.includes('series_ticker=KXBTC15M')) {
+      if(!allowDiscovery) throw new Error('SECOND_DISCOVERY_FORBIDDEN_AFTER_FIRE_LATCH');
+      return jsonResponse({markets:[providerMarket({exchangeIndex:marketIndex})]});
+    }
     if(u.includes('/trade-api/v2/markets?series_ticker=')) return jsonResponse({markets:[]});
     if(u.includes('/portfolio/orders?')) return jsonResponse({orders:[]});
     if(u.includes('/portfolio/fills?')) return jsonResponse({fills:[]});
@@ -104,7 +109,7 @@ function installProvider({index3=0,index2=15.91,position='ABSENT',exactSequence=
     }
     throw new Error('unexpected provider URL '+u);
   };
-  return {calls,restore:()=>{globalThis.fetch=original;}};
+  return {calls,forbidDiscovery:()=>{allowDiscovery=false;},restore:()=>{globalThis.fetch=original;}};
 }
 
 function postFixture(resultBody,status=200){
@@ -134,7 +139,11 @@ async function configure(e,{threshold,stake,target}){
   if(stake!=null) await updateFounderControl(e,'SET_STAKE',stake);
   if(target!=null) await updateFounderControl(e,'SET_ATTEMPT_TARGET',target);
 }
-const cycle=(e,post,ms=T0)=>runPayneRealExecutionCycle(e,{postImpl:post.fn,nowMs:ms});
+const cycle=async(e,post,ms=T0)=>{
+  await runReadOnlyScan(e,'ZERO_MONEY_GOVERNANCE_SCAN',ms);
+  return runPayneRealExecutionCycle(e,{postImpl:post.fn,nowMs:ms});
+};
+const cycleNoScan=(e,post,ms=T0)=>runPayneRealExecutionCycle(e,{postImpl:post.fn,nowMs:ms});
 const frozenSeries=async(e,over={})=>{
   const threshold=over.threshold??.70;
   return saveRealSeriesState(e,{...defaultRealSeriesState(),seriesId:'GOV-S',status:'ARMED_FISHING',attemptsStarted:1,attemptTarget:5,threshold,effectiveLockThreshold:over.effectiveLockThreshold??effectiveLockThreshold(threshold),maxEntryDebitUsd:1,configFrozen:true,...over});
@@ -180,6 +189,149 @@ test('diagnostic lower-lock PULL semantics preserve radar, move and edge gates',
   assert.equal(payneStage({score:.49,edge:.05,move:.003},.50,.50).radar,false);
   assert.equal(payneStage({score:.60,edge:.05,move:.001},.50,.50).pullTrigger,false);
   assert.equal(payneStage({score:.60,edge:0,move:.003},.50,.50).pullTrigger,false);
+});
+
+// ---------- FIRE→EXECUTION exact-specimen latch proof ----------
+function mutableBaseline(initial){
+  let current=initial;
+  return {
+    set(next){current=next;},
+    binding:{async fetch(request){
+      baselineMethods.push(request.method||'GET');
+      const url=new URL(request.url);
+      if(url.pathname==='/shadow-state') return jsonResponse(current);
+      if(url.pathname==='/execution-test-state') return jsonResponse({ok:true,readOnly:true,state:{status:'COMPLETE',positions:[],attempts:[]}});
+      if(url.pathname==='/execution-test-nofill-forensic') return jsonResponse({ok:true,audited:[]});
+      if(url.pathname==='/forensic-provider-history') return jsonResponse({ok:true,fills:[],settlements:[],positions:[]});
+      return jsonResponse({ok:false,error:'NOT_FOUND'},404);
+    }},
+  };
+}
+
+function shadowWithCompetingLeader({btcScore=.83,btcMove=.004,btcEdge=.08,zecScore=.95,zecMove=.006,zecEdge=.10}={}){
+  const base=baselineShadow({score:btcScore,move:btcMove,edge:btcEdge});
+  return {...base,opportunities:[
+    ...base.opportunities,
+    {marketTicker:'KXZEC15M-LEADER',outcomeSide:'YES',direction:'UP',asset:'ZEC',move:zecMove,fair:.61,edge:zecEdge,score:zecScore,openTime:'2026-10-02T06:00:00Z',closeTime:'2026-10-02T06:15:00Z',durationMs:900000,horizon:'15m'},
+  ]};
+}
+
+test('FIRE LATCH 1/6: FIRE-ready BTC remains execution specimen even after a different global feature leader appears; no second discovery occurs',async()=>{
+  const e=await env({shadow:baselineShadow({score:.83,move:.004,edge:.08})});
+  const mutable=mutableBaseline(baselineShadow({score:.83,move:.004,edge:.08}));
+  e.BASELINE_REAL_READ=mutable.binding;
+  const io=installProvider(),post=postFixture(NOFILL);
+  try{
+    await configure(e,{threshold:.60,stake:1,target:1}); await arm(e);
+    await runReadOnlyScan(e,'FIRE_LATCH_TEST',T0);
+    const latched=await loadRealSeriesState(e);
+    assert.equal(latched.fireLatch.state,'LATCHED');
+    assert.equal(latched.fireLatch.ticker,'KXBTC15M-REALTEST');
+    assert.equal(latched.fireLatch.outcomeSide,'YES');
+    assert.equal(latched.fireLatch.threshold,.60);
+    assert.equal(latched.fireLatch.effectiveLockThreshold,.60);
+    assert.equal(latched.fireLatch.identityFingerprint,fireSpecimenFingerprint(latched.fireLatch));
+
+    // Global evidence now has another higher-scoring leader. The execution engine must NOT rediscover/reselect it.
+    mutable.set(shadowWithCompetingLeader({btcScore:.83,zecScore:.99}));
+    io.forbidDiscovery();
+    const out=await cycleNoScan(e,post,T0);
+    assert.equal(entries(post).length,1);
+    assert.equal(entries(post)[0].payload.ticker,'KXBTC15M-REALTEST');
+    assert.equal(out.currentAttempt.marketTicker,'KXBTC15M-REALTEST');
+    assert.equal(out.currentAttempt.fireSpecimenId,latched.fireLatch.specimenId);
+  }finally{io.restore();}
+});
+
+test('FIRE LATCH 2: same latched specimen passing fresh LOCK + pre-submit reaches provider POST path',async()=>{
+  const e=await env({shadow:baselineShadow({score:.83,move:.004,edge:.08})}),io=installProvider(),post=postFixture(NOFILL);
+  try{
+    await configure(e,{threshold:.60,target:1}); await arm(e);
+    await runReadOnlyScan(e,'FIRE_LATCH_TEST',T0);
+    const before=await loadRealSeriesState(e); assert.equal(before.fireLatch.state,'LATCHED');
+    const out=await cycleNoScan(e,post,T0);
+    assert.equal(entries(post).length,1);
+    assert.equal(out.fireLatch.providerPost,'YES');
+    assert.equal(out.fireLatch.providerOrderId,'E-NF');
+    assert.equal(out.fireLatch.finalResult,'NO_FILL');
+  }finally{io.restore();}
+});
+
+test('FIRE LATCH 3: same specimen fresh LOCK failure invalidates before POST without consuming a provider NO_FILL',async()=>{
+  const e=await env({shadow:baselineShadow({score:.83,move:.004,edge:.08})});
+  const io=installProvider({exactSequence:[
+    {status:200,market:providerMarket()}, {status:200,market:providerMarket()}, // scan
+    {status:500,market:{error:'fresh lock failed'}},                          // execution fresh lock
+  ]});
+  const post=postFixture(NOFILL);
+  try{
+    await configure(e,{threshold:.60,target:1}); await arm(e);
+    await runReadOnlyScan(e,'FIRE_LATCH_TEST',T0);
+    const out=await cycleNoScan(e,post,T0);
+    assert.equal(entries(post).length,0);
+    assert.equal(out.attemptsStarted,0);
+    assert.equal(out.fireLatch.state,'INVALIDATED_BEFORE_POST');
+    assert.equal(out.fireLatch.invalidationReason,'FRESH_LOCK_INVALIDATED');
+    assert.equal(out.fireLatch.finalResult,'INVALIDATED_BEFORE_POST');
+    const summary=summarizeRealExecutionState({control:await loadControl(e),series:out,ledger:await listRealLedger(e)});
+    assert.equal(summary.noFill,0);
+  }finally{io.restore();}
+});
+
+test('FIRE LATCH 4: time gate may kill the latched specimen before POST',async()=>{
+  const e=await env({shadow:baselineShadow({score:.83,move:.004,edge:.08})}),io=installProvider(),post=postFixture(NOFILL);
+  try{
+    await configure(e,{threshold:.60,target:1}); await arm(e);
+    await runReadOnlyScan(e,'FIRE_LATCH_TEST',T0); // 10m remains; latch valid
+    const out=await cycleNoScan(e,post,T0+4*60*1000); // 6m remains; 6.5m gate must fail
+    assert.equal(entries(post).length,0);
+    assert.equal(out.fireLatch.state,'INVALIDATED_BEFORE_POST');
+    assert.equal(out.fireLatch.invalidationReason,'TIME_GATE_FAILED');
+  }finally{io.restore();}
+});
+
+test('FIRE LATCH 5: pre-submit exact-market failure invalidates same specimen before provider POST',async()=>{
+  const e=await env({shadow:baselineShadow({score:.83,move:.004,edge:.08})});
+  const io=installProvider({exactSequence:[
+    {status:200,market:providerMarket()}, {status:200,market:providerMarket()}, // scan
+    {status:200,market:providerMarket()},                                      // execution fresh lock
+    {status:500,market:{error:'pre-submit failed'}},                           // execution pre-submit
+  ]});
+  const post=postFixture(NOFILL);
+  try{
+    await configure(e,{threshold:.60,target:1}); await arm(e);
+    await runReadOnlyScan(e,'FIRE_LATCH_TEST',T0);
+    const out=await cycleNoScan(e,post,T0);
+    assert.equal(entries(post).length,0);
+    assert.equal(out.fireLatch.state,'INVALIDATED_BEFORE_POST');
+    assert.equal(out.fireLatch.invalidationReason,'PRE_SUBMIT_INVALIDATED');
+  }finally{io.restore();}
+});
+
+test('FIRE LATCH 6/8: one latched specimen cannot be posted twice without a new FIRE latch',async()=>{
+  const e=await env({shadow:baselineShadow({score:.83,move:.004,edge:.08})}),io=installProvider(),post=postFixture(NOFILL);
+  try{
+    await configure(e,{threshold:.60,target:5}); await arm(e);
+    await runReadOnlyScan(e,'FIRE_LATCH_TEST',T0);
+    const first=await cycleNoScan(e,post,T0);
+    assert.equal(entries(post).length,1);
+    assert.equal(first.fireLatch.state,'PROVIDER_RESULT');
+    const second=await cycleNoScan(e,post,T0);
+    assert.equal(entries(post).length,1);
+    assert.equal(second.status,'ARMED_FISHING');
+  }finally{io.restore();}
+});
+
+test('FIRE LATCH 7: AUTO/Baseline state remains read-only and independent during latch handoff',async()=>{
+  baselineMethods.length=0;
+  const e=await env({shadow:baselineShadow({score:.83,move:.004,edge:.08})}),io=installProvider(),post=postFixture(NOFILL);
+  try{
+    await configure(e,{threshold:.60,target:1}); await arm(e);
+    await runReadOnlyScan(e,'FIRE_LATCH_TEST',T0);
+    await cycleNoScan(e,post,T0);
+    assert.equal(baselineMethods.every(m=>m==='GET'),true);
+    assert.equal(providerPosts(io),0);
+  }finally{io.restore();}
 });
 
 // ---------- 1,3 target 1 + attemptsStarted begins at 0 ----------
