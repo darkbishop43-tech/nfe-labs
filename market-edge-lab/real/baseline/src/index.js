@@ -1,5 +1,6 @@
 import { sendPushNotification, topicFromString } from "@mmmike/web-push/send";
 import { buildPhase1AShadowAttachment, freezePhase1ACheckpointDecision, authorizePhase1BContinuation, recordPhase1BAuthorizedObservation, freezePhase1BEndpointComparison, phase1AShadowFixtureProof, phase1BShadowFixtureProof } from "./phase1a-shadow.js";
+import { kalshiExecutionOrderPost } from "../../shared/kalshi-execution-write.js";
 
 // CLOUDFLARE DEPLOYMENT MARKER 2026-09-20: XRP recovery V2 proof route ce2252b / 7637a6f
 // SHARD_ROUTING_DEPLOYMENT_MARKER_2026_09_20
@@ -1815,19 +1816,13 @@ function executionTestClientOrderId(state,attemptNo,phase){
 }
 async function executionTestEntryWrite(env,state,payload){
   if(!executionTestEntryAuthorized(state))throw new Error("EXECUTION_TEST_ENTRY_NOT_AUTHORIZED");
-  const path="/trade-api/v2/portfolio/events/orders";
-  const headers=await kalshiExecutionHeaders(env,"POST",path);
-  headers["content-type"]="application/json";
-  return fetch("https://external-api.kalshi.com"+path,{method:"POST",headers,body:JSON.stringify(payload)});
+  return kalshiExecutionOrderPost(env,payload);
 }
 async function executionTestExitWrite(env,state,position,payload){
   const live=(Array.isArray(state?.positions)?state.positions:[]).find(p=>p?.id===position?.id);
   if(!live||!(Number(live?.filledCount)>0)||!["OPEN","EXIT_RETRY"].includes(String(live?.status)))throw new Error("EXECUTION_TEST_EXIT_POSITION_INVALID");
   if(payload?.reduce_only!==true||String(payload?.ticker||"")!==String(live.marketTicker||""))throw new Error("EXECUTION_TEST_EXIT_SCOPE_INVALID");
-  const path="/trade-api/v2/portfolio/events/orders";
-  const headers=await kalshiExecutionHeaders(env,"POST",path);
-  headers["content-type"]="application/json";
-  return fetch("https://external-api.kalshi.com"+path,{method:"POST",headers,body:JSON.stringify(payload)});
+  return kalshiExecutionOrderPost(env,payload);
 }
 function executionTestCandidatePool(shadow,now=Date.now(),threshold=EXECUTION_TEST_CONFIG.entryScore){
   const activeThreshold=Number(threshold);
