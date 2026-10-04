@@ -585,15 +585,21 @@ test('ARM blocker regression: clean disarmed 1/5 @ .70 is superseded for Founder
   }finally{io.restore();}
 });
 
-test('GOV 21: Index-2 funding check still operates on every attempt of a series',async()=>{
+test('GOV 21: Index-2 funding check still operates on every latched attempt of a series',async()=>{
   const e=await env(),post=postFixture(NOFILL);
   let io=installProvider();
   try{
     await configure(e,{target:5}); await arm(e);
     await cycle(e,post); assert.equal(entries(post).length,1);
+    // Attempt 2 becomes a governed FIRE specimen while funding is still good.
+    await runReadOnlyScan(e,'FUNDING_ATTEMPT_2_LATCH',T0);
+    assert.equal((await loadRealSeriesState(e)).fireLatch.state,'LATCHED');
+    // Funding then deteriorates before execution. Same latched specimen must fail closed.
     io.restore(); io=installProvider({index2:0.10,index3:50});
-    const out=await cycle(e,post);
-    assert.equal(out.status,'HOLD_INDEX2_FUNDING_INSUFFICIENT'); assert.equal(entries(post).length,1);
+    const out=await cycleNoScan(e,post);
+    assert.equal(out.status,'HOLD_INDEX2_FUNDING_INSUFFICIENT');
+    assert.equal(out.fireLatch.finalResult,'INVALIDATED_BEFORE_POST');
+    assert.equal(entries(post).length,1);
   }finally{io.restore();}
 });
 
