@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - market-edge-payne-kalshi-real-step1
+      - payne-feature-epoch-sync-repair
       - payne-fire-specimen-latch-repair
       - payne-shared-kalshi-writer-refactor
       - payne-numeric-threshold-repair
