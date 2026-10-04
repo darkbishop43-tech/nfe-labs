@@ -156,16 +156,14 @@ async function researchResponse(env, request) {
   if (!mapping.binanceSymbol) return json({mapping, status:"RESEARCH DATA UNAVAILABLE"},404);
 
   const end=Date.now(), start=end-lookbackDays*DAY_MS;
-  const [k5,k15,k60,featureBars,book,depth] = await Promise.all([
+  const [k5,k15,k60,book,depth] = await Promise.all([
     fetchKlinesRange(mapping.binanceSymbol,"5m",start,end),
     fetchKlinesRange(mapping.binanceSymbol,"15m",start,end),
     fetchKlinesRange(mapping.binanceSymbol,"1h",start,end),
-    featureInterval==="5m"?fetchKlinesRange(mapping.binanceSymbol,"5m",start,end):
-      featureInterval==="15m"?fetchKlinesRange(mapping.binanceSymbol,"15m",start,end):
-      fetchKlinesRange(mapping.binanceSymbol,"1h",start,end),
     publicGet("/api/v3/ticker/bookTicker",{symbol:mapping.binanceSymbol}),
     publicGet("/api/v3/depth",{symbol:mapping.binanceSymbol,limit:20})
   ]);
+  const featureBars = featureInterval==="5m" ? k5 : featureInterval==="15m" ? k15 : k60;
 
   const h5=horizonStats(k5), h15=horizonStats(k15), h60=horizonStats(k60);
   const M=[h5?.logistic,h15?.logistic,h60?.logistic].every(Number.isFinite)
