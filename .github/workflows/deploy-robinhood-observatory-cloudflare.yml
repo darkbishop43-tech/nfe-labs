@@ -95,7 +95,10 @@ jobs:
           grep -q '"credential": "NONE"' /tmp/v0a-ping && echo "VERIFY Binance.US no credential PASS"
           curl --fail --silent --show-error --location "$LIVE_URL/api/v0a/mapping" --output /tmp/v0a-mapping
           grep -q '"mappingStatus": "MAPPED"' /tmp/v0a-mapping && echo "VERIFY symbol mapping PASS"
-          curl --fail --silent --show-error --location "$LIVE_URL/api/v0a/research?symbol=BTC-USD&featureInterval=5m&lookbackDays=30" --output /tmp/v0a-research
+          RESEARCH_HTTP="$(curl --silent --show-error --location --write-out '%{http_code}' "$LIVE_URL/api/v0a/research?symbol=BTC-USD&featureInterval=5m&lookbackDays=30" --output /tmp/v0a-research)"
+          echo "V0A_RESEARCH_HTTP $RESEARCH_HTTP"
+          cat /tmp/v0a-research
+          test "$RESEARCH_HTTP" = "200"
           grep -q '"source": "Binance.US"' /tmp/v0a-research && echo "VERIFY V0-A Binance component provenance PASS"
           grep -q '"M": {' /tmp/v0a-research && grep -q '"T": {' /tmp/v0a-research && grep -q '"V": {' /tmp/v0a-research && grep -q '"F": {' /tmp/v0a-research && echo "VERIFY M/T/V/F component payload PASS"
           grep -q '"qSpread": null' /tmp/v0a-research && echo "VERIFY Q spread-history blocker PASS"
