@@ -3,8 +3,8 @@
     "site": "NFE-OS ROBINHOOD OBSERVATORY",
     "mode": "SNAPSHOT",
     "readOnly": true,
-    "capturedAt": "2026-10-04T05:23:56.073-04:00",
-    "notes": "Authentic Robinhood MCP capture. Public Cloudflare shell is snapshot-backed: no direct Robinhood credential or MCP bridge is present. Operational cockpit displays RADAR → LOCK → MANAGE truth from the latest captured state."
+    "capturedAt": "2026-10-04T05:56:20.467-04:00",
+    "notes": "Authentic Robinhood MCP capture. SI Crypto V0 structural engine is wired with Founder-approved composite weights. Component values remain null where current official Robinhood crypto data or Founder-approved normalization rules are missing. Public shell remains snapshot-backed with zero provider execution authority."
   },
   "account": {
     "label": "Agentic",
@@ -63,15 +63,15 @@
       "assetClass": "crypto",
       "provider": "Robinhood MCP",
       "sourceTool": "get_crypto_quotes",
-      "bid": 84421.9731004,
-      "ask": 86009.19918577,
-      "mark": 85215.586143085,
-      "spread": 1587.226085369999,
+      "bid": 84476.8553206,
+      "ask": 86067.86741299,
+      "mark": 85272.361366795,
+      "spread": 1591.01209239,
       "spreadSource": "NFE calculated: ask - bid",
-      "previousClose": null,
-      "changePct": 0.4358390926562798,
+      "previousClose": 84845.795,
+      "changePct": 0.5027548705212784,
       "routing": "Market Maker Routing",
-      "providerTimestamp": "2026-10-04T05:23:56.073-04:00",
+      "providerTimestamp": "2026-10-04T05:56:20.467-04:00",
       "freshness": "RECENT CAPTURE"
     },
     "ETH": {
@@ -481,6 +481,31 @@
       "tool": "get_watchlist_items",
       "status": "SUCCESS — Trending stocks capture",
       "mode": "READ ONLY"
+    },
+    {
+      "tool": "crypto capability audit",
+      "status": "OFFICIAL SURFACE EXHAUSTED — no crypto historical/technical/volume/depth tool found",
+      "mode": "READ ONLY"
+    },
+    {
+      "tool": "get_crypto_orders",
+      "status": "SUCCESS — 0 OPEN CRYPTO ORDERS",
+      "mode": "READ ONLY"
+    },
+    {
+      "tool": "get_crypto_positions",
+      "status": "SUCCESS — 0 OPEN CRYPTO POSITIONS",
+      "mode": "READ ONLY"
+    },
+    {
+      "tool": "get_portfolio",
+      "status": "SUCCESS — CRYPTO BUYING POWER $5.00",
+      "mode": "READ ONLY"
+    },
+    {
+      "tool": "SI Crypto V0 engine",
+      "status": "FORMULA WIRED — SCORE INCOMPLETE / FIRE BLOCKED",
+      "mode": "LOCAL RESEARCH LOGIC"
     }
   ],
   "researchLanes": {
@@ -2030,42 +2055,42 @@
         "providerTradability": "tradable",
         "halted": false,
         "haltedRegions": [],
-        "bid": 84421.9731004,
-        "ask": 86009.19918577,
-        "mark": 85215.586143085,
-        "spread": 1587.226085369999,
-        "spreadPct": 1.8626006781258264,
-        "changePct": 0.4358390926562798,
-        "providerTimestamp": "2026-10-04T05:23:56.073-04:00"
+        "bid": 84476.8553206,
+        "ask": 86067.86741299,
+        "mark": 85272.361366795,
+        "spread": 1591.0120923899958,
+        "spreadPct": 1.8658004386044067,
+        "changePct": 0.5027548705212784,
+        "providerTimestamp": "2026-10-04T05:56:20.467-04:00"
       }
     ]
   },
   "operationalCockpit": {
     "execution": {
-      "state": "DISARMED",
-      "reason": "No public-shell execution bridge and no Founder order submission authorization in this build."
+      "state": "DISARMED / FIRE BLOCKED",
+      "reason": "SI score incomplete; no Founder-approved qualification threshold; no stake/exit plan frozen; no real order authorized."
     },
     "radar": {
-      "state": "CANDIDATE FOUND",
+      "state": "SI SCORE BLOCKED",
       "universeSize": 91,
       "eligibleCount": 58,
       "candidateCount": 58,
-      "leader": "BTC-USD",
-      "leaderBasis": "Prior governed specimen selection; current provider refresh confirms BTC remains tradable and unhalted. No numeric Robinhood scoring model exists yet.",
-      "lastProviderUpdate": "2026-10-04T05:23:56.073-04:00"
+      "leader": "NONE — NO VALID SI SCORE",
+      "leaderBasis": "Dynamic universe is captured, but no candidate can be ranked by SI Crypto V0 until M/T/V/Q/F/N are authentically available under approved component rules.",
+      "lastProviderUpdate": "2026-10-04T05:56:20.467-04:00"
     },
     "lock": {
-      "state": "LOCKED FOR REVIEW",
+      "state": "REQUALIFICATION BLOCKED",
       "symbol": "BTC-USD",
       "side": "BUY",
-      "bid": 84421.9731004,
-      "ask": 86009.19918577,
-      "mark": 85215.586143085,
-      "spread": 1587.226085369999,
-      "spreadPct": 1.8626006781258264,
-      "changePct": 0.4358390926562798,
-      "providerTimestamp": "2026-10-04T05:23:56.073-04:00",
-      "freshness": "RECENT CAPTURE",
+      "bid": 84476.8553206,
+      "ask": 86067.86741299,
+      "mark": 85272.361366795,
+      "spread": 1591.01209239,
+      "spreadPct": 1.8658004386044116,
+      "changePct": 0.5027548705212784,
+      "providerTimestamp": "2026-10-04T05:56:20.467-04:00",
+      "freshness": "RECENT CAPTURE — PROVIDER FACTS PASS / SI SCORE FAIL",
       "previewState": "PREVIEW CAPTURE EXISTS — PREVIEW PRICE OLDER THAN CURRENT LOCK QUOTE",
       "previewCapturedAt": "2026-10-04T04:59:40.076275-04:00",
       "previewAmount": 1,
@@ -2074,7 +2099,7 @@
       "previewPrice": 85909.40655329,
       "previewFee": 0,
       "previewTotal": 1,
-      "founderApproval": "NOT APPROVED FOR SUBMISSION IN THIS BUILD"
+      "founderApproval": "NOT FIRE-ELIGIBLE — SI SCORE / THRESHOLD / CONFIG INCOMPLETE"
     },
     "position": {
       "state": "FLAT",
@@ -2082,23 +2107,23 @@
       "ownedQuantity": 0,
       "entryPrice": null,
       "entryTime": null,
-      "currentBid": 84421.9731004,
-      "currentAsk": 86009.19918577,
-      "currentMark": 85215.586143085,
+      "currentBid": 84476.8553206,
+      "currentAsk": 86067.86741299,
+      "currentMark": 85272.361366795,
       "currentValue": 0,
       "unrealizedPnlUsd": 0,
       "unrealizedPnlPct": null,
       "realizedPnlUsd": null,
       "positionAge": null,
-      "lastProviderReconciliation": "2026-10-04T05:23:56.073-04:00",
-      "nextGovernedAction": "Founder decision on exact BTC specimen",
+      "lastProviderReconciliation": "2026-10-04T05:56:20.467-04:00",
+      "nextGovernedAction": "Founder decision required on missing SI component rules/data path before a score-qualified FIRE can exist.",
       "exitAuthority": "NOT APPLICABLE — NO POSITION",
       "orderState": "NO LIVE ORDER"
     },
     "manage": {
-      "state": "IDLE — FLAT",
+      "state": "WIRED / IDLE — FLAT",
       "reason": "No owned crypto position exists.",
-      "nextAction": "No management action until a Founder-approved buy is actually submitted and filled."
+      "nextAction": "Management engine is prepared; no position exists."
     },
     "lifecycle": [
       "FLAT",
@@ -2115,6 +2140,296 @@
       "FLAT",
       "RECORDED"
     ],
-    "currentLifecycleIndex": 3
+    "currentLifecycleIndex": 2
+  },
+  "siCryptoV0": {
+    "status": "WIRED / SCORE INCOMPLETE",
+    "formula": "S_C = 100 × (0.30M + 0.20T + 0.15V + 0.10Q + 0.15F + 0.10N)",
+    "weights": {
+      "M": 0.3,
+      "T": 0.2,
+      "V": 0.15,
+      "Q": 0.1,
+      "F": 0.15,
+      "N": 0.1
+    },
+    "hypothesis": "V0 TEST HYPOTHESIS — not permanent discovered truth",
+    "scoreValidityRule": "Composite score is valid only when all M/T/V/Q/F/N are numeric under Founder-approved component rules.",
+    "componentRuleStatus": "MISSING — order defines component names and weights but not normalization/calculation rules for M/T/V/Q/F/N.",
+    "qualificationThreshold": null,
+    "qualificationThresholdStatus": "MISSING FOUNDER DECISION — no SI qualification threshold was supplied.",
+    "officialCryptoSurface": {
+      "pairDiscovery": true,
+      "quotes": true,
+      "bidAskMark": true,
+      "tradability": true,
+      "haltState": true,
+      "positions": true,
+      "orders": true,
+      "previewAndPlace": true,
+      "historicalBars": false,
+      "technicalIndicators": false,
+      "volume": false,
+      "orderBookSizes": false,
+      "marketDepth": false
+    },
+    "components": {
+      "M": {
+        "name": "Momentum",
+        "value": null,
+        "status": "MISSING INPUT + COMPONENT RULE",
+        "raw": {
+          "changeVsPreviousClosePct": 0.5027548705212784,
+          "previousClose": 84845.795,
+          "mark": 85272.361366795
+        },
+        "missing": [
+          "Official crypto historical bars / multi-timeframe returns",
+          "Founder-approved M normalization rule"
+        ]
+      },
+      "T": {
+        "name": "Trend Agreement",
+        "value": null,
+        "status": "MISSING INPUT + COMPONENT RULE",
+        "raw": {},
+        "missing": [
+          "Official crypto historical bars / multi-timeframe trend evidence",
+          "Founder-approved T rule"
+        ]
+      },
+      "V": {
+        "name": "Volatility Quality",
+        "value": null,
+        "status": "MISSING INPUT + COMPONENT RULE",
+        "raw": {},
+        "missing": [
+          "Official crypto historical bars / volatility series",
+          "Founder-approved V rule"
+        ]
+      },
+      "Q": {
+        "name": "Execution Quality",
+        "value": null,
+        "status": "MISSING COMPONENT RULE",
+        "raw": {
+          "bid": 84476.8553206,
+          "ask": 86067.86741299,
+          "mark": 85272.361366795,
+          "spread": 1591.01209239,
+          "spreadPct": 1.8658004386044116,
+          "tradable": true,
+          "halted": false,
+          "routing": "Market Maker Routing"
+        },
+        "missing": [
+          "Founder-approved mapping from execution facts to normalized Q"
+        ]
+      },
+      "F": {
+        "name": "Flow / Market Structure",
+        "value": null,
+        "status": "MISSING INPUT + COMPONENT RULE",
+        "raw": {
+          "bid": 84476.8553206,
+          "ask": 86067.86741299
+        },
+        "missing": [
+          "Bid/ask sizes, depth, volume or other official flow evidence",
+          "Founder-approved F rule"
+        ]
+      },
+      "N": {
+        "name": "NFE / UMEO Evidence State",
+        "value": null,
+        "status": "MISSING INPUT + COMPONENT RULE",
+        "raw": {},
+        "missing": [
+          "Approved NFE/UMEO crypto evidence feed/state",
+          "Founder-approved N rule"
+        ]
+      }
+    },
+    "composite": {
+      "score": null,
+      "status": "INCOMPLETE — FIRE BLOCKED",
+      "availableComponents": 0,
+      "totalComponents": 6,
+      "reason": "M/T/V/Q/F/N are not all authentically calculable under approved component rules."
+    },
+    "universeScoring": {
+      "totalProviderPairs": 91,
+      "eligiblePairs": 58,
+      "rankedCandidates": 0,
+      "state": "UNRANKED — SI INPUTS INCOMPLETE",
+      "leader": null,
+      "currentGovernedSpecimen": "BTC-USD",
+      "reason": "No asset can receive a valid SI composite until required inputs and component rules exist."
+    },
+    "shadow": {
+      "authority": "NO REAL MONEY",
+      "state": "RECORDING EVALUATION STATE / WOULD-FIRE BLOCKED",
+      "records": [
+        {
+          "capturedAt": "2026-10-04T05:56:20.467-04:00",
+          "symbol": "BTC-USD",
+          "score": null,
+          "M": null,
+          "T": null,
+          "V": null,
+          "Q": null,
+          "F": null,
+          "N": null,
+          "bid": 84476.8553206,
+          "ask": 86067.86741299,
+          "mark": 85272.361366795,
+          "spread": 1591.01209239,
+          "wouldFire": false,
+          "outcomeState": "NOT STARTED",
+          "reason": "SI score incomplete and no qualification threshold."
+        }
+      ],
+      "horizons": [
+        "1 minute",
+        "5 minutes",
+        "15 minutes",
+        "1 hour"
+      ],
+      "excursionMetrics": [
+        "MFE",
+        "MAE",
+        "spread/cost estimate"
+      ],
+      "automationGap": "Continuous outcome capture requires an approved running read-only market-data/orchestration path; static Cloudflare cannot self-refresh Robinhood MCP."
+    },
+    "live": {
+      "authority": "FOUNDER ONLY",
+      "state": "DISARMED / FIRE BLOCKED",
+      "executionCapability": "Robinhood MCP crypto preview/place surface proven",
+      "fireRequirements": [
+        "Founder ARMED authority",
+        "Valid complete SI score",
+        "Founder-approved SI qualification requirement",
+        "Fresh LOCK requalification",
+        "Provider tradable / not halted",
+        "Fresh bid / ask / mark",
+        "No conflicting position",
+        "No conflicting open crypto order",
+        "Founder-selected frozen stake",
+        "Stake <= current crypto buying power",
+        "Approved exit plan",
+        "Explicit Founder authorization for exact real order"
+      ],
+      "providerReconciliation": {
+        "positions": 0,
+        "openOrders": 0,
+        "cryptoBuyingPower": 5,
+        "lastChecked": "2026-10-04T05:56:20.467-04:00"
+      }
+    },
+    "management": {
+      "state": "WIRED / FLAT",
+      "fields": [
+        "owned quantity",
+        "sellable quantity",
+        "entry price",
+        "cost basis",
+        "current bid",
+        "current ask",
+        "current mark",
+        "position value",
+        "unrealized P&L USD",
+        "unrealized P&L %",
+        "position age",
+        "current SI score",
+        "score deterioration / invalidation",
+        "provider state",
+        "last reconciliation",
+        "exit readiness"
+      ],
+      "current": {
+        "ownedQuantity": 0,
+        "sellableQuantity": 0,
+        "entryPrice": null,
+        "costBasis": null,
+        "currentBid": 84476.8553206,
+        "currentAsk": 86067.86741299,
+        "currentMark": 85272.361366795,
+        "positionValue": 0,
+        "unrealizedPnlUsd": 0,
+        "unrealizedPnlPct": null,
+        "positionAge": null,
+        "currentSiScore": null,
+        "lastReconciliation": "2026-10-04T05:56:20.467-04:00",
+        "exitReadiness": "NO POSITION"
+      }
+    },
+    "exitSupport": {
+      "nativeOrderTypes": [
+        {
+          "name": "Market",
+          "supported": true,
+          "notes": "Immediate market order; GTC tool contract."
+        },
+        {
+          "name": "Limit",
+          "supported": true,
+          "notes": "Limit order; GTC / 90-day behavior under provider contract."
+        },
+        {
+          "name": "Stop order",
+          "supported": true,
+          "notes": "Stop-triggered market order; GFD, 7-day, 30-day, or 90-day durations supported."
+        },
+        {
+          "name": "Stop limit order",
+          "supported": true,
+          "notes": "Stop trigger + limit; GFD, 7-day, 30-day, or 90-day durations supported."
+        }
+      ],
+      "governedConditions": [
+        {
+          "name": "Profit / target exit",
+          "status": "CONFIGURABLE CONDITION — numeric target not set"
+        },
+        {
+          "name": "Loss / invalidation exit",
+          "status": "CONFIGURABLE CONDITION — numeric rule not set"
+        },
+        {
+          "name": "Time / max-hold exit",
+          "status": "CONFIGURABLE CONDITION — duration not set; automatic monitoring requires running controller"
+        },
+        {
+          "name": "Score-deterioration exit",
+          "status": "BLOCKED UNTIL SI SCORE IS VALID; automatic monitoring requires running controller"
+        },
+        {
+          "name": "Manual Founder exit",
+          "status": "SUPPORTED THROUGH GOVERNED MCP SELL AFTER EXPLICIT AUTHORIZATION"
+        }
+      ]
+    },
+    "firstTest": {
+      "status": "NOT READY TO FIRE",
+      "proposedEntry": {
+        "symbol": "BTC-USD",
+        "side": "BUY",
+        "dollarAmount": "FOUNDER SELECTS",
+        "orderType": "FOUNDER SELECTS FROM SUPPORTED TYPES",
+        "freshPreviewRequired": true
+      },
+      "proposedExitPlan": {
+        "conditions": "FOUNDER SELECTS / CONFIGURES BEFORE FIRE",
+        "orderMechanic": "Market / Limit / Stop order / Stop limit order as applicable"
+      },
+      "blockers": [
+        "SI components not defined/calculable",
+        "No SI qualification threshold",
+        "Founder stake not yet frozen",
+        "Exit plan not yet frozen",
+        "Execution remains DISARMED"
+      ]
+    }
   }
 }
