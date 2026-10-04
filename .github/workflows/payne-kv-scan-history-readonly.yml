@@ -30,7 +30,7 @@ jobs:
           : > /tmp/keys.txt
           for prefix in             'payne-kalshi:scan-history:2026-10-04T22:01'             'payne-kalshi:scan-history:2026-10-04T22:02'             'payne-kalshi:scan-history:2026-10-04T22:03'             'payne-kalshi:scan-history:2026-10-04T22:04'
           do
-            npx --yes wrangler@4 kv key list --namespace-id "$ns" --prefix "$prefix"               | jq -r '.[].name' >> /tmp/keys.txt
+            npx --yes wrangler@4 kv key list --namespace-id "$ns" --prefix "$prefix" --remote               | jq -r '.[].name' >> /tmp/keys.txt
           done
           sort -u /tmp/keys.txt -o /tmp/keys.txt
           echo 'KEYS='
