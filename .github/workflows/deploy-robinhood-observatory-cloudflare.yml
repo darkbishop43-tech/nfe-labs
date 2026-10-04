@@ -72,6 +72,11 @@ jobs:
           curl --fail --silent --show-error --location --dump-header /tmp/headers "$LIVE_URL/" --output /tmp/body
           grep -q 'NFE-OS Robinhood Observatory' /tmp/body
           grep -q 'READ ONLY' /tmp/body
+          grep -q 'Three-Lane Research Cockpit' /tmp/body
+          curl --fail --silent --show-error --location "$LIVE_URL/data/snapshot.json" --output /tmp/snapshot
+          grep -q '"researchLanes"' /tmp/snapshot
+          grep -q '"CANDIDATE / FOUNDER APPROVAL REQUIRED"' /tmp/snapshot
+          grep -q '"MCP ACTIVE MARKET SURFACE NOT CURRENTLY EXPOSED"' /tmp/snapshot
           grep -qi '^content-security-policy:.*connect-src '\''self'\''' /tmp/headers
           grep -qi '^x-content-type-options: nosniff' /tmp/headers
           grep -qi '^x-frame-options: DENY' /tmp/headers
