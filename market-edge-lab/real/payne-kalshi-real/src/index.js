@@ -2396,7 +2396,7 @@ export async function buildCockpitData(env, nowMs=Date.now()) {
     zeroMoneyPreview?.status==='FIRE_READY'?'PULL_QUALIFIED_ZERO_MONEY_FIRE_READY':
     zeroMoneyPreview?.reason||'ZERO_MONEY_FIRE_NOT_REACHED';
 
-  const realAuthority=livePayneAuthorityEvidence(control,index2,zeroMoneyPreview?.sizing||null);
+  const realAuthority=livePayneAuthorityEvidence(control,index2,zeroMoneyPreview?.estimatedDebitUsd==null?null:{totalDebitUsd:zeroMoneyPreview.estimatedDebitUsd});
 
   return {
     ok:Boolean(balance.ok && discovery.ok),
