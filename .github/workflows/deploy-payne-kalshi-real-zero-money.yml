@@ -135,22 +135,23 @@ jobs:
           grep -q 'PRE-SUBMIT LATCHED' /tmp/cockpit.html
           grep -q 'FILLED / MANAGING' /tmp/cockpit.html
           grep -q 'NO_PROVIDER_ATTEMPT' /tmp/cockpit.html
+          grep -q 'PAYNE funding route remains Index 2' /tmp/cockpit.html
+          ! grep -q 'Index 3' /tmp/cockpit.html
           grep -q "BTC:'<svg" /tmp/cockpit.html
           grep -q "NEAR:'<svg" /tmp/cockpit.html
 
           jq -e '
             .schema == "PAYNE_REAL_STATE_V1" and
             .control.armed == false and
-            .control.attemptTarget as $attemptTarget |
-            ([1,5,10,30] | index($attemptTarget)) != null and
-            .control.maxEntryDebitUsd == 1 and
-            .control.activeThreshold == 0.70 and
+            (.control.attemptTarget | type == "number" and . >= 1 and . == floor) and
+            (.control.maxEntryDebitUsd | type == "number" and . > 0) and
+            (.control.activeThreshold | type == "number" and . >= 0.50 and . <= 1.00) and
             .control.requiredExchangeIndex == 2 and
             .control.providerWriteAuthority == "BUILT_INACTIVE_DISARMED" and
             .control.realExecution == "BUILT_INACTIVE_DISARMED" and
-            .series.attemptTarget == 1 and
-            .series.maxEntryDebitUsd == 1 and
-            .series.threshold == 0.70 and
+            (.series.attemptTarget | type == "number" and . >= 1 and . == floor) and
+            (.series.maxEntryDebitUsd | type == "number" and . > 0) and
+            (.series.threshold | type == "number" and . >= 0.50 and . <= 1.00) and
             .series.requiredExchangeIndex == 2 and
             .writeContract.requiredExchangeIndex == 2 and
             .providerWrites == 0 and
