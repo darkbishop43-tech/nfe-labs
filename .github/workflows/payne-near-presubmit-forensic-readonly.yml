@@ -1,0 +1,79 @@
+name: PAYNE NEAR pre-submit forensic read-only
+
+on:
+  push:
+    branches:
+      - payne-near-presubmit-forensic-readonly
+    paths:
+      - ".github/workflows/payne-near-presubmit-forensic-readonly.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  forensic:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Read existing PAYNE Cloudflare evidence only
+        shell: bash
+        run: |
+          set -euo pipefail
+          base='https://market-edge-payne-kalshi-real.darkbishop43.workers.dev'
+          curl -fsS "$base/real-state" -o /tmp/real-state.json
+          sid="$(jq -r '.series.seriesId // empty' /tmp/real-state.json)"
+          curl -fsS "$base/real-ledger?limit=1000&seriesId=$sid" -o /tmp/ledger.json
+          curl -fsS "$base/real-history?seriesId=$sid" -o /tmp/history.json || true
+          curl -fsS "$base/evidence/events?limit=1000" -o /tmp/events.json
+          curl -fsS "$base/export?range=current&format=json" -o /tmp/export.json || true
+
+          echo 'LIVE_SERIES='
+          jq '{
+            control:{armed:.control.armed,threshold:.control.activeThreshold,attemptTarget:.control.attemptTarget,maxEntryDebitUsd:.control.maxEntryDebitUsd,requiredExchangeIndex:.control.requiredExchangeIndex},
+            series:{
+              seriesId:.series.seriesId,status:.series.status,attemptsStarted:.series.attemptsStarted,attemptTarget:.series.attemptTarget,
+              unresolvedEntry:.series.unresolvedEntry,position:.series.position,fireLatch:.series.fireLatch,currentAttempt:.series.currentAttempt
+            },
+            providerWrites,ordersSubmittedByThisRead,capitalMovedUsd
+          }' /tmp/real-state.json
+
+          echo 'NEAR_LEDGER_ROWS='
+          jq -c '[.rows[] | select(
+            ((.asset // "") == "NEAR") or
+            (((.ticker // "") | tostring) | test("NEAR";"i")) or
+            (((.marketTicker // "") | tostring) | test("NEAR";"i"))
+          )] | .[]' /tmp/ledger.json || true
+
+          echo 'PRESUBMIT_FAILURE_LEDGER_ROWS='
+          jq -c '[.rows[] | select(
+            ((.reason // "") == "PRE_SUBMIT_REQUALIFICATION_FAILED") or
+            ((.reason // "") == "HOLD_PRE_SUBMIT_REQUALIFICATION_FAILED") or
+            ((.type // "") == "FIRE_SPECIMEN_INVALIDATED_BEFORE_POST") or
+            ((.invalidationReason // "") == "PRE_SUBMIT_REQUALIFICATION_FAILED")
+          )] | .[]' /tmp/ledger.json || true
+
+          echo 'NEAR_RESEARCH_EVENTS='
+          jq -c '[.events[] | select(
+            ((.asset // "") == "NEAR") or
+            (((.ticker // "") | tostring) | test("NEAR";"i")) or
+            (((.marketTicker // "") | tostring) | test("NEAR";"i"))
+          )] | .[-40:][]' /tmp/events.json || true
+
+          echo 'HISTORY='
+          jq '.' /tmp/history.json 2>/dev/null || cat /tmp/history.json
+
+          echo 'EXPORT_MATCH='
+          jq -c '
+            if (.rows|type)=="array" then
+              [.rows[] | select(
+                ((.asset // "") == "NEAR") or
+                (((.ticker // "") | tostring) | test("NEAR";"i")) or
+                ((.decision // "") | test("PULL_QUALIFIED|PRE_SUBMIT";"i"))
+              )] | .[-60:][]
+            else .
+            end
+          ' /tmp/export.json 2>/dev/null || true
+
+          echo "providerWrites=$(jq '.providerWrites' /tmp/real-state.json)"
+          echo "orders=$(jq '.ordersSubmittedByThisRead' /tmp/real-state.json)"
+          echo "capitalMovedUsd=$(jq '.capitalMovedUsd' /tmp/real-state.json)"
