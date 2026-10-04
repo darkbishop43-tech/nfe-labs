@@ -52,12 +52,13 @@ function baselineShadow(overrides={}){
   };
 }
 
-function baselineService(body=baselineShadow(),status=200){
+function baselineService(body=baselineShadow(),status=200,refreshBody=body){
   return {
     async fetch(request){
       assert.equal(request.method,'GET');
       const url=new URL(request.url);
       if(url.pathname==='/shadow-state') return jsonResponse(body,status);
+      if(url.pathname==='/shadow-refresh-proof') return jsonResponse(refreshBody,status);
       if(url.pathname==='/execution-test-state') return jsonResponse({
         ok:true,readOnly:true,mode:'EXECUTION_TEST_NOT_PRODUCTION_BASELINE',
         state:{
@@ -215,6 +216,45 @@ test('authoritative Payne feature read uses exact GET-only Baseline service bind
   assert.equal(out.opportunities[0].fair,.554);
   assert.equal(out.opportunities[0].edge,.054);
   assert.equal(out.opportunities[0].score,.716);
+});
+
+test('stale Baseline shadow self-refreshes through existing GET-only observer before PAYNE declares features unavailable',async()=>{
+  const stale=baselineShadow({lastRunAt:'2026-10-02T06:00:00Z'});
+  const fresh=baselineShadow({lastRunAt:'2026-10-02T06:04:45Z',opportunities:[
+    {marketTicker:'KXBTC15M-TEST',outcomeSide:'YES',direction:'UP',asset:'BTC',move:.004,fair:.558,edge:.058,score:.732,openTime:'2026-10-02T06:00:00Z',closeTime:'2026-10-02T06:15:00Z',durationMs:900000,horizon:'15m'},
+  ]});
+  const env=await authEnv(stale);
+  const paths=[];
+  env.BASELINE_REAL_READ=baselineService(stale,200,fresh);
+  const original=env.BASELINE_REAL_READ.fetch.bind(env.BASELINE_REAL_READ);
+  env.BASELINE_REAL_READ.fetch=async request=>{paths.push(new URL(request.url).pathname);return original(request);};
+  const out=await readAuthoritativePayneFeatures(env,Date.parse('2026-10-02T06:05:00Z'));
+  assert.equal(out.ok,true);
+  assert.equal(out.fresh,true);
+  assert.equal(out.refreshAttempted,true);
+  assert.equal(out.refreshSucceeded,true);
+  assert.equal(out.endpoint,'/shadow-refresh-proof');
+  assert.equal(out.ageMs,15_000);
+  assert.equal(out.opportunities[0].score,.732);
+  assert.deepEqual(paths,['/shadow-state','/shadow-refresh-proof']);
+});
+
+test('failed stale refresh remains fail-closed and never fabricates PAYNE features',async()=>{
+  const stale=baselineShadow({lastRunAt:'2026-10-02T06:00:00Z'});
+  const env=await authEnv(stale);
+  const paths=[];
+  env.BASELINE_REAL_READ={async fetch(request){
+    const path=new URL(request.url).pathname;paths.push(path);
+    if(path==='/shadow-state') return jsonResponse(stale,200);
+    if(path==='/shadow-refresh-proof') return jsonResponse({ok:false,error:'REFRESH_FAILED'},503);
+    return jsonResponse({ok:false,error:'NOT_FOUND'},404);
+  }};
+  const out=await readAuthoritativePayneFeatures(env,Date.parse('2026-10-02T06:05:00Z'));
+  assert.equal(out.fresh,false);
+  assert.equal(out.refreshAttempted,true);
+  assert.equal(out.refreshSucceeded,false);
+  assert.equal(out.error,'BASELINE_SHADOW_NOT_FRESH');
+  assert.deepEqual(paths,['/shadow-state','/shadow-refresh-proof']);
 });
 
 test('missing Baseline service binding fails closed without fabricating Payne fields',async()=>{
