@@ -78,7 +78,7 @@ jobs:
           grep -q '"operationalCockpit"' /tmp/snapshot
           grep -q '"cryptoUniverse"' /tmp/snapshot
           grep -q '"researchLanes"' /tmp/snapshot
-          grep -q '"CANDIDATE / FOUNDER APPROVAL REQUIRED"' /tmp/snapshot
+          grep -q '"LOCK / FOUNDER APPROVAL REQUIRED"' /tmp/snapshot
           grep -q '"MCP ACTIVE MARKET SURFACE NOT CURRENTLY EXPOSED"' /tmp/snapshot
           grep -qi '^content-security-policy:.*connect-src '\''self'\''' /tmp/headers
           grep -qi '^x-content-type-options: nosniff' /tmp/headers
