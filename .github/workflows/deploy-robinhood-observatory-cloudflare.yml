@@ -101,29 +101,4 @@ jobs:
           grep -q '"qSpread": null' /tmp/v0a-research && echo "VERIFY Q spread-history blocker PASS"
           grep -q '"fireAuthority": "ZERO"' /tmp/v0a-research && echo "VERIFY zero FIRE authority PASS"
           echo "V0A_MAPPING_SUMMARY"
-          python - <<'PY'
-import json
-m=json.load(open('/tmp/v0a-mapping'))
-print(json.dumps({k:m[k] for k in ['robinhoodPairs','mapped','unmapped']},sort_keys=True))
-r=json.load(open('/tmp/v0a-research'))
-print(json.dumps({
- 'status':r.get('status'),
- 'mapping':r.get('mapping'),
- 'configuration':r.get('configuration'),
- 'components':{k:v.get('value') for k,v in r.get('components',{}).items()},
- 'scores':r.get('scores'),
- 'raw':{
-   'ema9':r.get('raw',{}).get('ema9'),
-   'ema20':r.get('raw',{}).get('ema20'),
-   'ema50':r.get('raw',{}).get('ema50'),
-   'atr14':r.get('raw',{}).get('atr14'),
-   'atrPercentile':r.get('raw',{}).get('atrPercentile'),
-   'volume':r.get('raw',{}).get('volume'),
-   'relativeVolume':r.get('raw',{}).get('relativeVolume'),
-   'quoteVolume':r.get('raw',{}).get('quoteVolume'),
-   'tradeCount':r.get('raw',{}).get('tradeCount'),
-   'researchBook':r.get('raw',{}).get('researchBook'),
-   'depthSummary':r.get('raw',{}).get('depthSummary')
- }
-},sort_keys=True))
-PY
+          node -e "const fs=require('fs');const m=JSON.parse(fs.readFileSync('/tmp/v0a-mapping'));console.log(JSON.stringify({robinhoodPairs:m.robinhoodPairs,mapped:m.mapped,unmapped:m.unmapped}));const r=JSON.parse(fs.readFileSync('/tmp/v0a-research'));console.log(JSON.stringify({status:r.status,mapping:r.mapping,configuration:r.configuration,components:Object.fromEntries(Object.entries(r.components||{}).map(([k,v])=>[k,v.value])),scores:r.scores,raw:{ema9:r.raw?.ema9,ema20:r.raw?.ema20,ema50:r.raw?.ema50,atr14:r.raw?.atr14,atrPercentile:r.raw?.atrPercentile,volume:r.raw?.volume,relativeVolume:r.raw?.relativeVolume,quoteVolume:r.raw?.quoteVolume,tradeCount:r.raw?.tradeCount,researchBook:r.raw?.researchBook,depthSummary:r.raw?.depthSummary}}))"
