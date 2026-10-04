@@ -1015,6 +1015,59 @@ function featureForCandidate(featureState, ticker, outcomeSide, asset, activeThr
   };
 }
 
+
+export function payneFeatureFailureReasons(feature, threshold, frozenEffectiveLock=null, prefix='FINAL') {
+  const p=String(prefix||'FINAL').toUpperCase();
+  if(feature?.available!==true) return [p+'_FEATURE_NOT_AVAILABLE'];
+  const reasons=[];
+  const score=Number(feature?.score), edge=Number(feature?.edge), move=Number(feature?.move);
+  const t=Number(threshold);
+  const lock=frozenEffectiveLock!==null&&frozenEffectiveLock!==undefined&&Number.isFinite(Number(frozenEffectiveLock))
+    ? Number(frozenEffectiveLock) : effectiveLockThreshold(t);
+  if(!Number.isFinite(score)) reasons.push(p+'_FEATURE_NOT_AVAILABLE');
+  else {
+    if(score<PAYNE_CONFIG.radarScore) reasons.push(p+'_SCORE_BELOW_RADAR');
+    if(score<lock) reasons.push(p+'_SCORE_BELOW_EFFECTIVE_LOCK');
+    if(score<t) reasons.push(p+'_SCORE_BELOW_THRESHOLD');
+  }
+  if(!Number.isFinite(edge) || edge<=0) reasons.push(p+'_EDGE_NOT_POSITIVE');
+  if(!Number.isFinite(move) || Math.abs(move)<PAYNE_CONFIG.minAbsMove) reasons.push(p+'_MOVE_BELOW_MINIMUM');
+  return [...new Set(reasons)];
+}
+
+export function payneFeatureBoundaryEvidence(feature, threshold, frozenEffectiveLock=null, prefix='FINAL') {
+  const gate=payneStage(feature,threshold,frozenEffectiveLock);
+  const reasons=payneFeatureFailureReasons(feature,threshold,frozenEffectiveLock,prefix);
+  return {
+    sourceLastRunAt:feature?.sourceLastRunAt||null,
+    featureAgeMs:feature?.sourceAgeMs??null,
+    score:feature?.score??null,
+    move:feature?.move??null,
+    edge:feature?.edge??null,
+    fair:feature?.fair??null,
+    available:feature?.available===true,
+    radar:gate.radar?'PASS':feature?.available===true?'FAIL':'NOT_AVAILABLE',
+    lock:gate.radar?(gate.lockIn?'PASS':'FAIL'):'NOT_REACHED',
+    pull:gate.lockIn?(gate.pullTrigger?'PASS':'FAIL'):'NOT_REACHED',
+    failureReasons:reasons,
+  };
+}
+
+export function payneBookEvidence(market, outcomeSide, selectedPrice=null, observedAt=null) {
+  if(!market) return {bid:null,ask:null,spread:null,selectedPrice:selectedPrice??null,providerTimestamp:observedAt||null};
+  const yes=String(outcomeSide||'').toUpperCase()==='YES';
+  const bid=yes?Number(market.yesBid):Number(market.noBid);
+  const ask=yes?Number(market.yesAsk):Number(market.noAsk);
+  const cleanBid=Number.isFinite(bid)?bid:null, cleanAsk=Number.isFinite(ask)?ask:null;
+  return {
+    bid:cleanBid,
+    ask:cleanAsk,
+    spread:cleanBid!==null&&cleanAsk!==null?Number((cleanAsk-cleanBid).toFixed(6)):null,
+    selectedPrice:selectedPrice!==null&&selectedPrice!==undefined?Number(selectedPrice):(cleanAsk!==null?cleanAsk:null),
+    providerTimestamp:observedAt||market.providerReadAt||null,
+  };
+}
+
 function buildCandidateViews(markets, featureState, activeThreshold) {
   const out=[];
   for (const market of markets||[]) {
@@ -1329,8 +1382,16 @@ async function listPositionSnapshots(env) {
   return rows.sort((a,b)=>Date.parse(b?.updatedAt||b?.openedAt||b?.createdAt||0)-Date.parse(a?.updatedAt||a?.openedAt||a?.createdAt||0));
 }
 
-function managementView(control, positions) {
+function managementView(control, positions, selected=null) {
   const current=(positions||[]).find(p=>['OPEN','EXIT_RETRY'].includes(String(p?.status||'').toUpperCase()))||null;
+  const selectedMatches=Boolean(current && selected && String(current.marketTicker||'')===String(selected.ticker||'') && String(current.outcomeSide||'').toUpperCase()===String(selected.outcomeSide||'').toUpperCase());
+  const currentBid=selectedMatches?Number(selected.selectedBid):Number(current?.currentBid);
+  const currentAsk=selectedMatches?Number(selected.selectedAsk):Number(current?.currentAsk);
+  const bid=Number.isFinite(currentBid)?currentBid:null, ask=Number.isFinite(currentAsk)?currentAsk:null;
+  const count=Number(current?.filledCount||0), entry=Number(current?.entryAverageFillPrice);
+  const mark=bid!==null&&ask!==null?(bid+ask)/2:(bid??ask);
+  const positionValue=Number.isFinite(count)&&mark!==null?Number((count*mark).toFixed(4)):null;
+  const unrealized=Number.isFinite(count)&&Number.isFinite(entry)&&mark!==null?Number((count*(mark-entry)).toFixed(4)):null;
   return {
     rules:{scoreExit:PAYNE_CONFIG.exitScore,maxHoldMs:PAYNE_CONFIG.maxHoldMs,maxPositions:control.maxPositions,exitReduceOnly:true},
     activePositions:Number(control.openPositions||0),
@@ -1340,7 +1401,17 @@ function managementView(control, positions) {
       position_fp:current.position_fp??null,
       entryTime:current.openedAt||current.entryTime||null,
       currentScore:current.currentScore??null,
-      currentMarketPrice:current.currentMarketPrice??null,
+      currentMarketPrice:mark??current.currentMarketPrice??null,
+      currentBid:bid,
+      currentAsk:ask,
+      currentSpread:bid!==null&&ask!==null?Number((ask-bid).toFixed(6)):null,
+      currentPositionValueUsd:positionValue,
+      unrealizedPnlUsd:unrealized,
+      entryPrice:current.entryAverageFillPrice??null,
+      positionAgeMs:Number.isFinite(Date.parse(current.entryTime||current.openedAt||''))?Math.max(0,Date.now()-Date.parse(current.entryTime||current.openedAt)):null,
+      exitSubmittedPrice:current.exitSubmittedPrice??current.exitLimitPrice??null,
+      exitFillPrice:current.exitAverageFillPrice??null,
+      realizedPnlUsd:current.realizedPnlUsd??null,
       exitReason:current.exitReason??null,
       reconciliationState:current.reconciliationState||current.reconciliationClassification||'UNKNOWN',
       marketTicker:current.marketTicker||null,
@@ -1379,6 +1450,7 @@ function compactObservation(data, source, atMs) {
       outcomeSide:data.selected.outcomeSide,
       selectedBid:data.selected.selectedBid,
       selectedAsk:data.selected.selectedAsk,
+      providerReadAt:data.selected.providerReadAt||null,
       openTime:data.selected.openTime||null,
       closeTime:data.selected.closeTime,
       payne:data.payne,
@@ -1398,6 +1470,15 @@ function compactObservation(data, source, atMs) {
       state:c.payne?.state||'UNKNOWN',decision:c.decision||null,
     })),
     pipeline:data.pipeline,
+    observations:data.selected?{
+      fireBook:payneBookEvidence(data.selected,data.selected.outcomeSide,data.selected.selectedAsk,data.selected.providerReadAt||data.updatedAt),
+      freshLockBook:payneBookEvidence(data.observations?.freshLock?.market,data.selected.outcomeSide,
+        data.selected.outcomeSide==='YES'?data.observations?.freshLock?.market?.yesAsk:data.observations?.freshLock?.market?.noAsk,
+        data.observations?.freshLock?.readAt||null),
+      preSubmitBook:payneBookEvidence(data.observations?.preSubmit?.market,data.selected.outcomeSide,
+        data.selected.outcomeSide==='YES'?data.observations?.preSubmit?.market?.yesAsk:data.observations?.preSubmit?.market?.noAsk,
+        data.observations?.preSubmit?.readAt||null),
+    }:null,
     clocks:data.clocks,
     comparison:data.comparison||null,
     realExecution:data.realExecution||null,
@@ -1452,6 +1533,11 @@ export function fireSpecimenFromSnapshot(series,snapshot) {
     observedScore:selected?.payne?.score??preview?.score??null,
     observedMove:selected?.payne?.move??null,
     observedEdge:selected?.payne?.edge??null,
+    observedFair:selected?.payne?.fair??null,
+    fireFeatureEvidence:snapshot?.fireFeatureEvidence||null,
+    fireBookEvidence:snapshot?.observations?.fireBook||null,
+    freshLockBookEvidence:snapshot?.observations?.freshLockBook||null,
+    preSubmitBookEvidence:snapshot?.observations?.preSubmitBook||null,
     threshold:cfg.threshold,
     effectiveLockThreshold:cfg.effectiveLockThreshold,
     fireObservedAt,
@@ -1493,6 +1579,10 @@ async function latchFireReadySpecimen(env,series,snapshot,nowMs=Date.now()) {
     marketOpenTime:specimen.marketOpenTime,
     marketCloseTime:specimen.marketCloseTime,
     identityFingerprint:specimen.identityFingerprint,
+    fireFeatureEvidence:specimen.fireFeatureEvidence,
+    fireBookEvidence:specimen.fireBookEvidence,
+    freshLockBookEvidence:specimen.freshLockBookEvidence,
+    preSubmitBookEvidence:specimen.preSubmitBookEvidence,
     providerPost:false,
     providerWrites:0,
     capitalMovedUsd:0,
@@ -1510,6 +1600,10 @@ async function invalidateFireSpecimen(env,series,reason,details={},nowMs=Date.no
     identityMatch:details.identityMatch??latch?.identityMatch??'UNKNOWN',
     freshLock:details.freshLock??latch?.freshLock??'NOT_REACHED',
     preSubmit:details.preSubmit??latch?.preSubmit??'NOT_REACHED',
+    finalFeature:details.finalFeature??latch?.finalFeature??'NOT_REACHED',
+    finalFeatureEvidence:details.finalFeatureEvidence??latch?.finalFeatureEvidence??null,
+    freshLockBookEvidence:details.freshLockBookEvidence??latch?.freshLockBookEvidence??null,
+    preSubmitBookEvidence:details.preSubmitBookEvidence??latch?.preSubmitBookEvidence??null,
     providerPost:'NO',
     providerOrderId:null,
     finalResult:'INVALIDATED_BEFORE_POST',
@@ -1524,6 +1618,10 @@ async function invalidateFireSpecimen(env,series,reason,details={},nowMs=Date.no
     identityMatch:invalidated.identityMatch,
     freshLock:invalidated.freshLock,
     preSubmit:invalidated.preSubmit,
+    finalFeature:invalidated.finalFeature,
+    finalFeatureEvidence:invalidated.finalFeatureEvidence,
+    freshLockBookEvidence:invalidated.freshLockBookEvidence,
+    preSubmitBookEvidence:invalidated.preSubmitBookEvidence,
     providerPost:false,
     providerOrderId:null,
     providerWrites:0,
@@ -1531,6 +1629,38 @@ async function invalidateFireSpecimen(env,series,reason,details={},nowMs=Date.no
   });
   const holdStatus=String(reason||'PRE_POST_INVALIDATION').startsWith('HOLD_')?String(reason):'HOLD_'+String(reason||'PRE_POST_INVALIDATION');
   return saveRealSeriesState(env,{...series,fireLatch:invalidated,status:holdStatus});
+}
+
+
+async function synchronizeFireFeatureEpoch(env,series,snapshot,nowMs=Date.now()) {
+  const cfg=frozenSeriesConfig(series);
+  const selected=snapshot?.selected||null;
+  if(!cfg.ok || !selected?.ticker) return {ok:false,reason:'FIRE_REFRESH_IDENTITY_UNAVAILABLE',series};
+  const state=await readAuthoritativePayneFeatures(env,nowMs);
+  const feature=featureForCandidate(state,selected.ticker,selected.outcomeSide,selected.asset,cfg.threshold);
+  const evidence=payneFeatureBoundaryEvidence(feature,cfg.threshold,cfg.effectiveLockThreshold,'FIRE');
+  const windowMatch=String(feature?.baselineOpenTime||'')===String(selected?.openTime||'')
+    && String(feature?.baselineCloseTime||'')===String(selected?.closeTime||'');
+  const reasons=[...evidence.failureReasons];
+  if(!windowMatch) reasons.push('FIRE_WINDOW_MISMATCH');
+  const qualified=feature?.available===true && payneStage(feature,cfg.threshold,cfg.effectiveLockThreshold).pullTrigger===true && windowMatch;
+  const fullEvidence={...evidence,failureReasons:[...new Set(reasons)],windowMatch,ticker:selected.ticker,outcomeSide:selected.outcomeSide,asset:selected.asset};
+  if(!qualified){
+    const next={...series,status:'ARMED_FISHING',fireRefreshEvidence:fullEvidence};
+    await appendRealLedger(env,'FIRE_INVALIDATED_FEATURE_REFRESH',{
+      seriesId:series.seriesId,attemptNo:Number(series.attemptsStarted||0)+1,
+      ticker:selected.ticker,asset:selected.asset,outcomeSide:selected.outcomeSide,
+      reason:'FIRE_INVALIDATED_FEATURE_REFRESH',fireFeatureEvidence:fullEvidence,
+      providerPost:false,providerWrites:0,orders:0,capitalMovedUsd:0,
+    });
+    return {ok:false,reason:'FIRE_INVALIDATED_FEATURE_REFRESH',series:await saveRealSeriesState(env,next),feature,evidence:fullEvidence};
+  }
+  const synchronized={
+    ...snapshot,
+    selected:{...selected,payne:feature,decision:payneDecisionEvidence(feature,cfg.threshold)},
+    fireFeatureEvidence:fullEvidence,
+  };
+  return {ok:true,series,feature,evidence:fullEvidence,snapshot:synchronized};
 }
 
 export async function runReadOnlyScan(env, source='SCHEDULED_CRON', nowMs=Date.now()) {
@@ -1550,7 +1680,15 @@ export async function runReadOnlyScan(env, source='SCHEDULED_CRON', nowMs=Date.n
   const previewReady=snapshot?.zeroMoneyPreview?.status==='FIRE_READY';
   if(previewReady && control.armed===true){
     const series=await loadRealSeriesState(env);
-    if(!seriesTerminal(series) && frozenSeriesMatchesControl(series,control)) await latchFireReadySpecimen(env,series,snapshot,nowMs);
+    const prefireMarketPass=snapshot?.pipeline?.freshLock==='PROVEN'
+      && snapshot?.pipeline?.preSubmit==='PROVEN'
+      && snapshot?.pipeline?.tickerConsistent===true
+      && snapshot?.pipeline?.sideConsistent===true
+      && snapshot?.pipeline?.timeGate6_5m==='PASS';
+    if(!seriesTerminal(series) && frozenSeriesMatchesControl(series,control) && prefireMarketPass){
+      const synced=await synchronizeFireFeatureEpoch(env,series,snapshot,nowMs);
+      if(synced.ok) await latchFireReadySpecimen(env,synced.series,synced.snapshot,nowMs);
+    }
   }
   const persistLatest=true;
   const persistHistory=!previous || !Number.isFinite(previousHistoryAt) || nowMs-previousHistoryAt>=SCAN_HISTORY_INTERVAL_MS || transition || previewReady;
@@ -2293,9 +2431,9 @@ export async function buildCockpitData(env, nowMs=Date.now()) {
       error:featureState.error,
     },
     pipeline:{
-      radar:gate ? (gate.radar?'PASS':'FAIL') : 'UNKNOWN',
-      lockIn:gate ? (gate.lockIn?'PASS':'FAIL') : 'UNKNOWN',
-      pullTrigger:gate ? (gate.pullTrigger?'PASS':'FAIL') : 'UNKNOWN',
+      radar:qualificationDecision.radar==='RADAR_PASS'?'PASS':qualificationDecision.radar==='RADAR_REJECT'?'REJECT':'UNKNOWN',
+      lockIn:qualificationDecision.lock==='LOCK_PASS'?'PASS':qualificationDecision.lock==='LOCK_REJECT'?'REJECT':qualificationDecision.lock==='LOCK_NOT_REACHED'?'NOT_REACHED':'UNKNOWN',
+      pullTrigger:qualificationDecision.pull==='PULL_QUALIFIED'?'QUALIFIED':qualificationDecision.pull==='PULL_REJECTED'?'REJECT':qualificationDecision.pull==='PULL_NOT_REACHED'?'NOT_REACHED':'UNKNOWN',
       qualificationDecision,
       finalDecision,
       fireState:zeroMoneyPreview?.status==='FIRE_READY'?'FIRE READY / PROVIDER POST HELD':'NOT READY',
@@ -2332,7 +2470,7 @@ export async function buildCockpitData(env, nowMs=Date.now()) {
       paynePaperMatches:0,unknownPaperComparisons:0,
     },
     zeroMoneyPreview,
-    management:managementView(control,positions),
+    management:managementView(control,positions,selected),
     discovery:{
       ok:discovery.ok,
       source:discovery.source,
@@ -2689,7 +2827,9 @@ export function summarizeRealExecutionState({control={},series={},ledger=[],asOf
     else if(unknownIds.size>0) lastAttemptResult='UNKNOWN';
     else lastAttemptResult='UNKNOWN';
   }
-  const holdReason=attempted===0 && rawSeriesStatus.startsWith('HOLD_')?rawSeriesStatus:null;
+  const holdReason=series?.fireLatch?.invalidationReason
+    || currentAttempt?.providerResult?.reason
+    || (attempted===0 && rawSeriesStatus.startsWith('HOLD_')?rawSeriesStatus:null);
   if(latestLedgerEvent?.type==='ENTRY_RECONCILED_NO_EXECUTION') lastAttemptResult='PROVIDER_RECONCILED_NO_EXECUTION';
   if(latestLedgerEvent?.type==='ENTRY_LOCAL_PRE_PROVIDER_REJECTED' || latestLedgerEvent?.type==='FIRE_SPECIMEN_INVALIDATED_BEFORE_POST') lastAttemptResult='INVALIDATED_BEFORE_POST';
   const lastAttempt={
@@ -2738,6 +2878,21 @@ export function summarizeRealExecutionState({control={},series={},ledger=[],asOf
       providerOrderId:series.fireLatch.providerOrderId||null,
       finalResult:series.fireLatch.finalResult||null,
       invalidationReason:series.fireLatch.invalidationReason||null,
+      fireFeatureEvidence:series.fireLatch.fireFeatureEvidence||series.fireRefreshEvidence||null,
+      finalFeatureEvidence:series.fireLatch.finalFeatureEvidence||null,
+      fireBookEvidence:series.fireLatch.fireBookEvidence||null,
+      freshLockBookEvidence:series.fireLatch.freshLockBookEvidence||null,
+      preSubmitBookEvidence:series.fireLatch.preSubmitBookEvidence||null,
+      providerSubmittedPrice:series.fireLatch.providerSubmittedPrice??null,
+      providerStatus:series.fireLatch.providerStatus||null,
+    }:series?.fireRefreshEvidence?{
+      specimenId:null,ticker:null,side:null,score:null,latchState:'NOT_LATCHED',
+      executionTicker:null,executionSide:null,identityMatch:null,freshLock:null,preSubmit:null,providerPost:'NO',
+      providerOrderId:null,finalResult:'FIRE_INVALIDATED_FEATURE_REFRESH',
+      invalidationReason:'FIRE_INVALIDATED_FEATURE_REFRESH',
+      fireFeatureEvidence:series.fireRefreshEvidence,finalFeatureEvidence:null,
+      fireBookEvidence:null,freshLockBookEvidence:null,preSubmitBookEvidence:null,
+      providerSubmittedPrice:null,providerStatus:null,
     }:null,
     latestLedgerEvent:latestLedgerEvent?{
       type:latestLedgerEvent.type||null,
@@ -3323,20 +3478,29 @@ export async function runPayneRealExecutionCycle(env,{postImpl=kalshiPayneOrderP
   if(!freshLock?.ok || freshLock?.market?.ticker!==candidate.ticker || String(freshLock?.market?.closeTime||'')!==String(candidate.closeTime||'')){
     return invalidateFireSpecimen(env,series,'FRESH_LOCK_INVALIDATED',{identityMatch:'PASS',freshLock:'FAIL'},nowMs);
   }
-  series.fireLatch={...series.fireLatch,freshLock:'PASS',freshLockAt:freshLock.readAt};
+  const freshLockBookEvidence=payneBookEvidence(freshLock.market,candidate.outcomeSide,
+    candidate.outcomeSide==='YES'?freshLock.market.yesAsk:freshLock.market.noAsk,freshLock.readAt);
+  series.fireLatch={...series.fireLatch,freshLock:'PASS',freshLockAt:freshLock.readAt,freshLockBookEvidence};
 
   const preSubmit=await exactMarketRead(env,candidate.ticker,candidate.asset);
   if(!preSubmit?.ok || preSubmit?.market?.ticker!==candidate.ticker || String(preSubmit?.market?.closeTime||'')!==String(candidate.closeTime||'')){
     return invalidateFireSpecimen(env,series,'PRE_SUBMIT_INVALIDATED',{identityMatch:'PASS',freshLock:'PASS',preSubmit:'FAIL'},nowMs);
   }
-  series.fireLatch={...series.fireLatch,preSubmit:'PASS',preSubmitAt:preSubmit.readAt};
+  const preSubmitBookEvidence=payneBookEvidence(preSubmit.market,candidate.outcomeSide,
+    candidate.outcomeSide==='YES'?preSubmit.market.yesAsk:preSubmit.market.noAsk,preSubmit.readAt);
+  series.fireLatch={...series.fireLatch,preSubmit:'PASS',preSubmitAt:preSubmit.readAt,preSubmitBookEvidence};
 
   const features=await readAuthoritativePayneFeatures(env,nowMs);
   const finalFeature=featureForCandidate(features,candidate.ticker,candidate.outcomeSide,candidate.asset,cfg.threshold);
   const finalGate=payneStage(finalFeature,cfg.threshold,cfg.effectiveLockThreshold);
+  const finalFeatureEvidence=payneFeatureBoundaryEvidence(finalFeature,cfg.threshold,cfg.effectiveLockThreshold,'FINAL');
   if(!finalFeature.available || !finalGate.pullTrigger){
-    return invalidateFireSpecimen(env,series,'PRE_SUBMIT_REQUALIFICATION_FAILED',{identityMatch:'PASS',freshLock:'PASS',preSubmit:'FAIL'},nowMs);
+    return invalidateFireSpecimen(env,series,'FINAL_FEATURE_REQUALIFICATION_FAILED',{
+      identityMatch:'PASS',freshLock:'PASS',preSubmit:'PASS',finalFeature:'FAIL',
+      finalFeatureEvidence,freshLockBookEvidence,preSubmitBookEvidence
+    },nowMs);
   }
+  series.fireLatch={...series.fireLatch,finalFeature:'PASS',finalFeatureEvidence};
 
   const ask=candidate.outcomeSide==='YES'?Number(preSubmit.market.yesAsk):Number(preSubmit.market.noAsk);
   const sizing=estimateKalshiFeeSafeSize(ask,cfg.maxEntryDebitUsd);
@@ -3365,8 +3529,15 @@ export async function runPayneRealExecutionCycle(env,{postImpl=kalshiPayneOrderP
     exchangeIndex:2,score:finalFeature.score,move:finalFeature.move,edge:finalFeature.edge,threshold:cfg.threshold,
     observedAt:series.fireLatch?.fireObservedAt||new Date(nowMs).toISOString(),freshLockAt:freshLock.readAt,preSubmitAt:preSubmit.readAt,
     freshLockPrice:candidate.outcomeSide==='YES'?freshLock.market.yesAsk:freshLock.market.noAsk,
-    preSubmitPrice:ask,maxEntryDebitUsd:cfg.maxEntryDebitUsd,count:sizing.count,estimatedEntryFeeUsd:sizing.feeUsd,
-    estimatedEntryDebitUsd:sizing.totalDebitUsd,clientOrderId,payload:{...payload},
+    preSubmitPrice:ask,
+    fireBookEvidence:series.fireLatch?.fireBookEvidence||null,
+    freshLockBookEvidence,
+    preSubmitBookEvidence,
+    fireFeatureEvidence:series.fireLatch?.fireFeatureEvidence||null,
+    finalFeatureEvidence,
+    maxEntryDebitUsd:cfg.maxEntryDebitUsd,count:sizing.count,estimatedEntryFeeUsd:sizing.feeUsd,
+    estimatedEntryPremiumUsd:sizing.premiumUsd,estimatedEntryDebitUsd:sizing.totalDebitUsd,
+    intendedLimitPrice:ask,clientOrderId,payload:{...payload},
   };
   series={...series,seriesId,status:'ENTRY_SUBMITTING',attemptsStarted:attemptNo,unresolvedEntry:true,currentAttempt:attempt,fireLatch:{...series.fireLatch,state:'PROVIDER_POST_PENDING',identityMatch:'PASS',freshLock:'PASS',preSubmit:'PASS',providerPost:'PENDING',providerOrderId:null,finalResult:null}};
   await persistAttempt(env,{runId:seriesId,attemptId,attemptNo,result:'SUBMITTING',...attempt});
@@ -3426,7 +3597,7 @@ export async function runPayneRealExecutionCycle(env,{postImpl=kalshiPayneOrderP
   }
 
   const result=interpretPayneOrderResponse(body);
-  series.fireLatch={...series.fireLatch,state:'PROVIDER_RESULT',providerPost:'YES',providerOrderId:result.orderId||null,finalResult:result.state};
+  series.fireLatch={...series.fireLatch,state:'PROVIDER_RESULT',providerPost:'YES',providerOrderId:result.orderId||null,providerSubmittedPrice:attempt.preSubmitPrice??null,providerStatus:result.state,finalResult:result.state};
   series.currentAttempt={...attempt,status:result.state,providerResult:result,providerProof:proof};
   if(result.state==='NO_FILL'){
     series.unresolvedEntry=false;
