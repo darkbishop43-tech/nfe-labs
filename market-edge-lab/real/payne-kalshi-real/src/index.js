@@ -112,7 +112,7 @@ export function payneStage(candidate, activeThreshold = PAYNE_CONFIG.defaultThre
   const edge = Number(candidate?.edge);
   const move = Number(candidate?.move);
   const threshold = Number(activeThreshold);
-  const effectiveLock = Number.isFinite(Number(frozenEffectiveLock)) ? Number(frozenEffectiveLock) : effectiveLockThreshold(threshold);
+  const effectiveLock = frozenEffectiveLock!==null && frozenEffectiveLock!==undefined && Number.isFinite(Number(frozenEffectiveLock)) ? Number(frozenEffectiveLock) : effectiveLockThreshold(threshold);
   const radar = Number.isFinite(score) && score >= PAYNE_CONFIG.radarScore;
   const lockIn = radar && score >= effectiveLock && Number.isFinite(edge) && edge > 0;
   const pullTrigger = lockIn && score >= threshold && Number.isFinite(move) && Math.abs(move) >= PAYNE_CONFIG.minAbsMove;
@@ -204,9 +204,9 @@ export async function updateFounderControl(env, action, rawValue = null) {
     next.armed=true;
   } else if (name==='DISARM') next.armed=false;
   else if (name==='SET_THRESHOLD') {
-    const value=Number(rawValue);
-    if (!CONTROL_THRESHOLD_OPTIONS.includes(value)) throw new Error('PAYNE_CONTROL_THRESHOLD_NOT_ALLOWED');
-    next.activeThreshold=value;
+    const parsed=parseFounderThreshold(rawValue);
+    if (!parsed.ok) throw new Error(parsed.error);
+    next.activeThreshold=parsed.value;
   } else if (name==='SET_STAKE') {
     const value=Number(rawValue);
     if (!CONTROL_STAKE_OPTIONS.includes(value)) throw new Error('PAYNE_CONTROL_STAKE_NOT_ALLOWED');
@@ -949,7 +949,7 @@ export function payneDecisionEvidence(candidate, activeThreshold = PAYNE_CONFIG.
     return {radar:'UNKNOWN',lock:'UNKNOWN',pull:'UNKNOWN',decision:'FEATURES_UNAVAILABLE'};
   }
   const threshold=Number(activeThreshold);
-  const effectiveLock=Number.isFinite(Number(frozenEffectiveLock))?Number(frozenEffectiveLock):effectiveLockThreshold(threshold);
+  const effectiveLock=frozenEffectiveLock!==null && frozenEffectiveLock!==undefined && Number.isFinite(Number(frozenEffectiveLock))?Number(frozenEffectiveLock):effectiveLockThreshold(threshold);
   const radar=score>=PAYNE_CONFIG.radarScore;
   if (!radar) return {radar:'RADAR_REJECT',lock:'LOCK_NOT_REACHED',pull:'PULL_NOT_REACHED',decision:'RADAR_REJECT_SCORE_BELOW_0_50',effectiveLock};
   const scoreLock=score>=effectiveLock;
