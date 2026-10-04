@@ -1,70 +1,103 @@
-const money=(n,d=2)=>Number(n).toLocaleString('en-US',{style:'currency',currency:'USD',minimumFractionDigits:d,maximumFractionDigits:d});
-const num=(n,d=2)=>Number(n).toLocaleString('en-US',{minimumFractionDigits:d,maximumFractionDigits:d});
-const pct=n=>`${Number(n)>=0?'+':''}${Number(n).toFixed(2)}%`;
-const el=(id)=>document.getElementById(id);
-let D, selected='SPY';
-fetch('./data/snapshot.json',{cache:'no-store'}).then(r=>{if(!r.ok)throw Error(`snapshot ${r.status}`);return r.json()}).then(d=>{D=d;render()}).catch(e=>{document.body.innerHTML=`<main><div class="panel"><h2 class="error">🔴 SNAPSHOT LOAD ERROR</h2><p>No values were fabricated.</p><code>${String(e.message)}</code></div></main>`});
-function render(){el('capturedAt').textContent=new Date(D.meta.capturedAt).toLocaleString();renderAccount();renderMarkets();renderResearchLanes();renderDetail();renderOptions();renderExisting();renderCrypto();renderEvidence();document.querySelectorAll('[data-symbol]').forEach(b=>b.onclick=()=>{selected=b.dataset.symbol;document.querySelectorAll('[data-symbol]').forEach(x=>x.classList.toggle('active',x===b));renderDetail()})}
-function renderAccount(){const a=D.account;const cards=[['Cash',money(a.cash)],['Buying power',money(a.buyingPower)],['Portfolio value',money(a.portfolioValue)],['Positions',`${a.positionCounts.equity+a.positionCounts.crypto+a.positionCounts.option} open`]];el('account').innerHTML=cards.map(([k,v],i)=>`<article class="card"><h3>${k}</h3><div class="value">${v}</div><div class="sub">${i===3?`Equity ${a.positionCounts.equity} · Crypto ${a.positionCounts.crypto} · Options ${a.positionCounts.option}`:`Agentic ${a.maskedId}`}</div></article>`).join('')}
-function marketCard(sym,m){const p=m.assetClass==='crypto'?m.mark:m.price;const ts=m.providerTimestamp;const freshness=m.freshness||'UNKNOWN';return `<article class="card"><h3>${sym}</h3><div class="value">${money(p,p>1000?2:2)}</div><div class="sub">${m.assetClass==='crypto'?'Mark':'Most recent available price'}</div><div class="kv"><span>Bid</span><b>${money(m.bid)}</b><span>Ask</span><b>${money(m.ask)}</b><span>Spread <em class="calc">NFE</em></span><b>${money(m.spread)}</b><span>Change <em class="calc">NFE</em></span><b>${pct(m.changePct)}</b></div><div class="state ${freshness.includes('CURRENT')?'current':'stale'}">${freshness}</div><div class="sub">${new Date(ts).toLocaleString()}</div></article>`}
-function renderMarkets(){el('markets').innerHTML=['SPY','QQQ','BTC','ETH'].map(s=>marketCard(s,D.markets[s])).join('')}
-function renderDetail(){const h=D.historicalSamples[selected]||[];drawChart(h);const b=D.priceBooks[selected];el('book').innerHTML=`<div class="kv"><span>Updated</span><b>${new Date(b.updatedAt).toLocaleTimeString()}</b><span>Bid levels</span><b>${b.bids.length}</b><span>Ask levels</span><b>${b.asks.length}</b></div><p class="state stale">${b.status}</p>`;const t=D.technicals[selected];if(!t){el('technicals').innerHTML='<p>UNKNOWN / NOT EXPOSED IN THIS SNAPSHOT</p>'}else{let rows=`<span>Interval</span><b>${t.interval}</b>`;for(const [k,v] of Object.entries(t)){if(['tool','interval','asOf'].includes(k))continue;rows+=`<span>${k}</span><b>${typeof v==='object'?Object.entries(v).map(([a,b])=>`${a} ${num(b,3)}`).join(' · '):num(v,3)}</b>`}el('technicals').innerHTML=`<div class="kv">${rows}</div><div class="sub">Provider calculation · as of ${new Date(t.asOf).toLocaleString()}</div>`}el('intervals').innerHTML=D.historicalSupport.verifiedSpecimenIntervals.map(x=>`<span class="chip">✓ ${x}</span>`).join('')+`<span class="chip">15m: NOT NATIVE</span>`}
-function drawChart(points){const c=el('chart'),ctx=c.getContext('2d');const w=c.width,h=c.height;ctx.clearRect(0,0,w,h);if(!points.length)return;const vals=points.map(p=>p.c),lo=Math.min(...vals),hi=Math.max(...vals),pad=28,span=hi-lo||1;ctx.strokeStyle='#223038';ctx.lineWidth=1;for(let i=0;i<4;i++){const y=pad+(h-pad*2)*i/3;ctx.beginPath();ctx.moveTo(pad,y);ctx.lineTo(w-pad,y);ctx.stroke()}ctx.strokeStyle='#66e3a4';ctx.lineWidth=3;ctx.beginPath();points.forEach((p,i)=>{const x=pad+(w-pad*2)*(i/(points.length-1||1)),y=h-pad-(p.c-lo)/span*(h-pad*2);i?ctx.lineTo(x,y):ctx.moveTo(x,y)});ctx.stroke();ctx.fillStyle='#8da09a';ctx.font='20px system-ui';ctx.fillText(`${selected} · provider OHLCV sample`,pad,22)}
-function renderOptions(){const rows=D.options.contracts.map(o=>`<tr><td>${o.underlying}</td><td>${o.type.toUpperCase()}</td><td>${o.strike}</td><td>${money(o.bid)}</td><td>${money(o.ask)}</td><td>${money(o.spread)}</td><td>${money(o.mark)}</td><td>${(o.iv*100).toFixed(2)}%</td><td>${o.delta.toFixed(3)}</td><td>${o.gamma.toFixed(3)}</td><td>${o.theta.toFixed(3)}</td><td>${o.vega.toFixed(3)}</td><td>${o.rho.toFixed(3)}</td><td>${o.openInterest.toLocaleString()}</td><td>${o.volume.toLocaleString()}</td><td>${new Date(o.updatedAt).toLocaleString()}</td></tr>`).join('');el('options').innerHTML=`<table><thead><tr><th>Underlying</th><th>Type</th><th>Strike</th><th>Bid</th><th>Ask</th><th>Spread*</th><th>Mark</th><th>IV</th><th>Δ</th><th>Γ</th><th>Θ</th><th>Vega</th><th>Rho</th><th>OI</th><th>Volume</th><th>Provider time</th></tr></thead><tbody>${rows}</tbody></table><div class="sub" style="padding:9px">* Spread is NFE-calculated from provider bid/ask. All Greeks, IV, OI and volume shown are Robinhood provider fields. Snapshot only.</div>`}
-function renderExisting(){const x=D.existingOptions;el('existingOptions').innerHTML=`<p><strong>${x.status}</strong></p><div class="chips">${x.accountsChecked.map(a=>`<span class="chip">${a} checked</span>`).join('')}</div><p class="sub">No exercise, close, roll, preview, order, or cancel action exists in this site.</p>`}
-function renderCrypto(){el('crypto').innerHTML=['BTC','ETH'].map(s=>marketCard(s,D.markets[s])).join('')}
-function renderEvidence(){el('evidence').innerHTML=`<div class="evidence-row"><b>Tool</b><b>Status</b><b>Mode</b></div>`+D.evidence.map(x=>`<div class="evidence-row"><span>${x.tool}</span><span class="ok">${x.status}</span><span>🔒 ${x.mode}</span></div>`).join('')+`<p class="sub">No OAuth tokens, cookies, session material, raw account numbers, or Robinhood write credentials are included in this deployment.</p>`}
+const money=(n,d=2)=>n==null?'N/A':Number(n).toLocaleString('en-US',{style:'currency',currency:'USD',minimumFractionDigits:d,maximumFractionDigits:d});
+const num=(n,d=2)=>n==null?'N/A':Number(n).toLocaleString('en-US',{minimumFractionDigits:d,maximumFractionDigits:d});
+const pct=n=>n==null?'N/A — NO POSITION':`${Number(n)>=0?'+':''}${Number(n).toFixed(2)}%`;
+const el=id=>document.getElementById(id);
+const fmtTime=t=>t?new Date(t).toLocaleString():'N/A — NO PROVIDER TIMESTAMP';
+let D, selected='SPY', inspectedCrypto=null, radarViewPaused=false;
+
+fetch('./data/snapshot.json',{cache:'no-store'})
+.then(r=>{if(!r.ok)throw Error(`snapshot ${r.status}`);return r.json()})
+.then(d=>{D=d;inspectedCrypto=D.operationalCockpit?.lock?.symbol||D.cryptoUniverse?.rows?.[0]?.symbol||null;render()})
+.catch(e=>{document.body.innerHTML=`<main><div class="panel"><h2 class="error">🔴 SNAPSHOT LOAD ERROR</h2><p>No values were fabricated.</p><code>${String(e.message)}</code></div></main>`});
+
+function render(){
+  el('capturedAt').textContent=fmtTime(D.meta.capturedAt);
+  renderAccount();renderOperational();renderCryptoUniverse();renderMarkets();renderResearchLanes();renderDetail();renderOptions();renderExisting();renderCrypto();renderEvidence();
+  document.querySelectorAll('[data-symbol]').forEach(b=>b.onclick=()=>{selected=b.dataset.symbol;document.querySelectorAll('[data-symbol]').forEach(x=>x.classList.toggle('active',x===b));renderDetail()});
+}
+
+function renderAccount(){
+ const a=D.account;
+ const cards=[['Cash',money(a.cash)],['Buying power',money(a.buyingPower)],['Portfolio value',money(a.portfolioValue)],['Positions',`${a.positionCounts.equity+a.positionCounts.crypto+a.positionCounts.option} open`]];
+ el('account').innerHTML=cards.map(([k,v],i)=>`<article class="card"><h3>${k}</h3><div class="value">${v}</div><div class="sub">${i===3?`Equity ${a.positionCounts.equity} · Crypto ${a.positionCounts.crypto} · Options ${a.positionCounts.option}`:`Agentic ${a.maskedId}`}</div></article>`).join('');
+}
+
+function renderOperational(){
+ const o=D.operationalCockpit,r=o.radar,l=o.lock,p=o.position,m=o.manage;
+ el('executionStrip').innerHTML=`
+   <div><span>EXECUTION</span><strong class="stale">${o.execution.state}</strong><small>${o.execution.reason}</small></div>
+   <div><span>RADAR</span><strong class="current">${r.state}</strong><small>${r.eligibleCount} eligible of ${r.universeSize} provider pairs</small></div>
+   <div><span>LOCK</span><strong class="current">${l.state}</strong><small>${l.symbol} · ${l.freshness}</small></div>
+   <div><span>POSITION</span><strong>${p.state}</strong><small>${p.orderState}</small></div>
+   <div><span>MANAGE</span><strong>${m.state}</strong><small>${m.reason}</small></div>`;
+
+ el('radarPanel').innerHTML=`
+   <div class="hero-symbol">${r.leader}</div>
+   <div class="state current">LEADING GOVERNED SPECIMEN</div>
+   <p>${r.leaderBasis}</p>
+   <div class="kv"><span>Universe</span><b>${r.universeSize}</b><span>Eligible now</span><b>${r.eligibleCount}</b><span>Candidate pool</span><b>${r.candidateCount}</b><span>Last provider capture</span><b>${fmtTime(r.lastProviderUpdate)}</b></div>`;
+
+ el('lockPanel').innerHTML=`
+   <div class="hero-symbol">${l.symbol} · ${l.side}</div>
+   <div class="kv"><span>Bid</span><b>${money(l.bid,8)}</b><span>Ask</span><b>${money(l.ask,8)}</b><span>Mark</span><b>${money(l.mark,8)}</b><span>Spread <em class="calc">NFE</em></span><b>${money(l.spread,8)} · ${pct(l.spreadPct)}</b><span>Move vs provider reference <em class="calc">NFE</em></span><b>${pct(l.changePct)}</b><span>Provider capture</span><b>${fmtTime(l.providerTimestamp)}</b><span>Preview</span><b class="stale">${l.previewState}</b><span>Founder approval</span><b class="stale">${l.founderApproval}</b></div>
+   <div class="preview-box"><b>Captured preview</b><span>${money(l.previewAmount)} ${l.previewType} · ${l.previewQuantity} · ${money(l.previewPrice,2)} preview unit price · ${money(l.previewFee)} estimated fee</span><small>Preview captured ${fmtTime(l.previewCapturedAt)}. Fresh LOCK quote is newer.</small></div>`;
+
+ el('managePanel').innerHTML=`
+   <div class="hero-symbol">${p.state}</div>
+   <div class="state">${m.state}</div>
+   <div class="kv"><span>Owned quantity</span><b>0 — NO POSITION</b><span>Entry</span><b>N/A — NO POSITION</b><span>Current bid</span><b>${money(p.currentBid,8)}</b><span>Current ask</span><b>${money(p.currentAsk,8)}</b><span>Current mark</span><b>${money(p.currentMark,8)}</b><span>Position value</span><b>${money(p.currentValue)}</b><span>Unrealized P&L</span><b>${money(p.unrealizedPnlUsd)} · N/A — NO POSITION</b><span>Realized P&L</span><b>N/A — NO COMPLETED LIFECYCLE</b><span>Position age</span><b>N/A — NO POSITION</b><span>Last reconciliation</span><b>${fmtTime(p.lastProviderReconciliation)}</b><span>Next governed action</span><b>${p.nextGovernedAction}</b><span>Exit authority</span><b>${p.exitAuthority}</b></div>`;
+
+ el('lifecycle').innerHTML=o.lifecycle.map((x,i)=>`<span class="life-step ${i<o.currentLifecycleIndex?'done':i===o.currentLifecycleIndex?'active':''}">${x}</span>`).join('<span class="life-arrow">→</span>');
+
+ el('controls').innerHTML=`
+   <button class="control-btn" id="inspectLeader">Inspect ${r.leader}</button>
+   <button class="control-btn" id="pauseRadar">${radarViewPaused?'Resume':'Pause'} radar view</button>
+   <button class="control-btn" id="viewPreview">View captured preview</button>
+   <button class="control-btn disabled" disabled title="Execution is disarmed and the public shell has no approved order-submission bridge.">ARM</button>
+   <button class="control-btn disabled" disabled title="Execution is already disarmed.">DISARM</button>
+   <button class="control-btn disabled" disabled title="The public snapshot shell cannot request a new Robinhood provider scan without a separately approved live bridge.">Start provider scan</button>
+   <button class="control-btn disabled" disabled title="No live provider scan is running in the public snapshot shell.">Pause provider scan</button>
+   <button class="control-btn disabled" disabled title="A fresh order preview requires the governed Robinhood MCP path; it is not wired into the public shell.">Run fresh order preview</button>
+   <button class="control-btn disabled" disabled title="Founder approval is not accepted through this static public shell.">Founder approve order</button>
+   <button class="control-btn disabled" disabled title="No position exists, so there is nothing to manage or exit.">Exit review</button>`;
+ el('inspectLeader').onclick=()=>{inspectedCrypto=r.leader;renderCryptoUniverse(true)};
+ el('pauseRadar').onclick=()=>{radarViewPaused=!radarViewPaused;renderOperational()};
+ el('viewPreview').onclick=()=>{el('lockPanel').scrollIntoView({behavior:'smooth',block:'center'});showControlReason('Captured preview is evidence only. It does not submit an order.')};
+ document.querySelectorAll('.control-btn.disabled').forEach(b=>b.onclick=()=>showControlReason(b.title));
+}
+
+function showControlReason(msg){el('controlReason').textContent=msg||''}
+
+function renderCryptoUniverse(keepPosition=false){
+ const u=D.cryptoUniverse, q=(el('cryptoSearch')?.value||'').trim().toLowerCase(), f=el('cryptoFilter')?.value||'all';
+ let rows=u.rows.filter(x=>(!q||x.symbol.toLowerCase().includes(q)||x.name.toLowerCase().includes(q))&&(f==='all'||(f==='tradable'&&x.tradable)||(f==='halted'&&!x.tradable)));
+ rows.sort((a,b)=>(a.symbol>b.symbol?1:-1));
+ el('cryptoUniverseSummary').innerHTML=`<span class="chip">${u.totalPairs} provider pairs</span><span class="chip">${u.eligiblePairs} tradable now</span><span class="chip">${radarViewPaused?'RADAR VIEW PAUSED':'RADAR VIEW ACTIVE'}</span><span class="chip">CAPTURE ${fmtTime(u.capturedAt)}</span>`;
+ const x=u.rows.find(v=>v.symbol===inspectedCrypto);
+ el('cryptoInspect').innerHTML=x?`<div><strong>${x.symbol}</strong> · ${x.name}</div><div class="kv"><span>State</span><b>${x.tradable?'TRADABLE':'HALTED / RESTRICTED'}</b><span>Bid</span><b>${money(x.bid,8)}</b><span>Ask</span><b>${money(x.ask,8)}</b><span>Mark</span><b>${money(x.mark,8)}</b><span>Spread <em class="calc">NFE</em></span><b>${money(x.spread,8)} · ${pct(x.spreadPct)}</b><span>Change <em class="calc">NFE</em></span><b>${pct(x.changePct)}</b><span>Provider time</span><b>${fmtTime(x.providerTimestamp)}</b></div>`:''; 
+ el('cryptoUniverseTable').innerHTML=`<table><thead><tr><th>Symbol</th><th>State</th><th>Bid</th><th>Ask</th><th>Mark</th><th>Spread</th><th>Rel spread</th><th>Change</th><th>Provider time</th><th>Inspect</th></tr></thead><tbody>${rows.map(x=>`<tr><td>${x.symbol}</td><td>${x.tradable?'TRADABLE':'HALTED / RESTRICTED'}</td><td>${money(x.bid,8)}</td><td>${money(x.ask,8)}</td><td>${money(x.mark,8)}</td><td>${money(x.spread,8)}</td><td>${pct(x.spreadPct)}</td><td>${pct(x.changePct)}</td><td>${fmtTime(x.providerTimestamp)}</td><td><button class="mini-btn" data-inspect="${x.symbol}">Inspect</button></td></tr>`).join('')}</tbody></table>`;
+ el('cryptoSearch').oninput=()=>renderCryptoUniverse();
+ el('cryptoFilter').onchange=()=>renderCryptoUniverse();
+ document.querySelectorAll('[data-inspect]').forEach(b=>b.onclick=()=>{inspectedCrypto=b.dataset.inspect;renderCryptoUniverse(true)});
+}
+
+function marketCard(sym,m){const p=m.assetClass==='crypto'?m.mark:m.price;const freshness=m.freshness||'UNKNOWN — NO FRESH PROVIDER READ';return `<article class="card"><h3>${sym}</h3><div class="value">${money(p,p>1000?2:2)}</div><div class="sub">${m.assetClass==='crypto'?'Mark':'Most recent available price'}</div><div class="kv"><span>Bid</span><b>${money(m.bid)}</b><span>Ask</span><b>${money(m.ask)}</b><span>Spread <em class="calc">NFE</em></span><b>${money(m.spread)}</b><span>Change <em class="calc">NFE</em></span><b>${pct(m.changePct)}</b></div><div class="state ${freshness.includes('RECENT')?'current':'stale'}">${freshness}</div><div class="sub">${fmtTime(m.providerTimestamp)}</div></article>`}
+function renderMarkets(){el('markets').innerHTML=['SPY','QQQ','BTC','ETH'].filter(s=>D.markets[s]).map(s=>marketCard(s,D.markets[s])).join('')}
 
 function renderResearchLanes(){
-  const lanes=D.researchLanes||{};
-  const c=lanes.crypto||{};
-  const cq=c.candidate||{};
-  const p=c.preview||{};
-  el('cryptoLane').innerHTML=`
-    <div class="chips"><span class="chip">${c.state||'UNKNOWN'}</span><span class="chip">Position: ${c.positionState||'UNKNOWN'}</span><span class="chip">${c.lifecycle||'UNKNOWN'}</span></div>
-    <div class="kv">
-      <span>Discovered pairs</span><b>${c.catalogCount??'UNKNOWN'}</b>
-      <span>Currently eligible</span><b>${c.eligibleCount??'UNKNOWN'}</b>
-      <span>Candidate</span><b>${cq.symbol||'UNKNOWN'}</b>
-      <span>Bid</span><b>${cq.bid!=null?money(cq.bid):'UNKNOWN'}</b>
-      <span>Ask</span><b>${cq.ask!=null?money(cq.ask):'UNKNOWN'}</b>
-      <span>Mark</span><b>${cq.mark!=null?money(cq.mark):'UNKNOWN'}</b>
-      <span>Spread <em class="calc">NFE</em></span><b>${cq.spread!=null?money(cq.spread):'UNKNOWN'}</b>
-      <span>Move vs local-day reference <em class="calc">NFE</em></span><b>${cq.changePct!=null?pct(cq.changePct):'UNKNOWN'}</b>
-    </div>
-    <p class="sub">${c.selectionReason||''}</p>
-    <p><strong>PREVIEW ONLY — NO ORDER PLACED</strong></p>
-    <div class="kv">
-      <span>Proposed amount</span><b>${p.dollarAmount!=null?money(p.dollarAmount):'UNKNOWN'}</b>
-      <span>Order type</span><b>${p.orderType||'UNKNOWN'}</b>
-      <span>Estimated BTC amount</span><b>${p.quantity||'UNKNOWN'}</b>
-      <span>Preview unit price</span><b>${p.price!=null?money(p.price,2):'UNKNOWN'}</b>
-      <span>Estimated fee</span><b>${p.estimatedFee!=null?money(p.estimatedFee):'UNKNOWN'}</b>
-      <span>Estimated total</span><b>${p.estimatedTotal!=null?money(p.estimatedTotal):'UNKNOWN'}</b>
-      <span>Routing</span><b>${p.routing||'UNKNOWN'}</b>
-    </div>
-    <p class="sub">${c.management||''}</p>`;
-
-  const e=lanes.equities||{};
-  const rows=(e.specimens||[]).map(x=>`<div class="evidence-row"><span>${x.symbol}</span><span>${x.price!=null?money(x.price):'UNKNOWN'}</span><span>${x.changePct!=null?pct(x.changePct):'UNKNOWN'}</span></div>`).join('');
-  el('equityLane').innerHTML=`
-    <div class="chips"><span class="chip">${e.state||'UNKNOWN'}</span><span class="chip">${e.session||'UNKNOWN'}</span></div>
-    <p class="sub">Discovery source: ${e.discoverySource||'UNKNOWN'}. This is a provider-curated capture, not a fixed strategy watchlist.</p>
-    <div class="evidence-row"><b>Symbol</b><b>Price</b><b>Move*</b></div>${rows}
-    <p class="sub">* NFE-calculated from provider price vs adjusted previous close. No equity order is authorized.</p>`;
-
-  const o=lanes.options||{};
-  el('optionsLane').innerHTML=`
-    <div class="chips"><span class="chip">${o.state||'UNKNOWN'}</span><span class="chip">Execution: ${o.execution||'DISABLED'}</span></div>
-    <div class="kv">
-      <span>Current specimen contracts</span><b>${o.contractCount??'UNKNOWN'}</b>
-      <span>Research states</span><b>${(o.researchStates||[]).join(' → ')||'UNKNOWN'}</b>
-      <span>Fields</span><b>${(o.fields||[]).join(', ')||'UNKNOWN'}</b>
-    </div>
-    <p class="sub">${o.note||''}</p>`;
-
-  const pr=D.predictionMarkets||{};
-  el('predictionLane').innerHTML=`
-    <p><strong>${pr.status||'UNKNOWN'}</strong></p>
-    <p class="sub">${pr.note||''}</p>`;
+ const lanes=D.researchLanes||{}, e=lanes.equities||{}, o=lanes.options||{}, pr=D.predictionMarkets||{};
+ el('cryptoLane').innerHTML=`<div class="chips"><span class="chip">PRIMARY EXECUTION-RESEARCH LANE</span><span class="chip">FLAT</span></div><p>Operational crypto state is shown above in RADAR → LOCK → MANAGE. The full dynamic provider universe is searchable below.</p>`;
+ const erows=(e.specimens||[]).map(x=>`<div class="evidence-row"><span>${x.symbol}</span><span>${money(x.price)}</span><span>${pct(x.changePct)}</span></div>`).join('');
+ el('equityLane').innerHTML=`<div class="chips"><span class="chip">${e.state}</span><span class="chip">${e.session}</span></div><p class="sub">Discovery: ${e.discoverySource}. Provider-curated snapshot, not a fixed strategy list.</p><div class="evidence-row"><b>Symbol</b><b>Price</b><b>Move*</b></div>${erows}<p class="sub">* NFE calculated. Equity execution remains deferred.</p>`;
+ el('optionsLane').innerHTML=`<div class="chips"><span class="chip">${o.state}</span><span class="chip">Execution: ${o.execution}</span></div><div class="kv"><span>Specimen contracts</span><b>${o.contractCount}</b><span>Research flow</span><b>${o.researchStates.join(' → ')}</b></div><p class="sub">${o.note}</p>`;
+ el('predictionLane').innerHTML=`<p><strong>${pr.status}</strong></p><p class="sub">${pr.note}</p>`;
 }
+
+function renderDetail(){const h=D.historicalSamples[selected]||[];drawChart(h);const b=D.priceBooks[selected];el('book').innerHTML=`<div class="kv"><span>Updated</span><b>${fmtTime(b.updatedAt)}</b><span>Bid levels</span><b>${b.bids.length}</b><span>Ask levels</span><b>${b.asks.length}</b></div><p class="state stale">${b.status}</p>`;const t=D.technicals[selected];if(!t){el('technicals').innerHTML='<p>UNKNOWN — NO TECHNICAL SNAPSHOT FOR THIS SYMBOL</p>'}else{let rows=`<span>Interval</span><b>${t.interval}</b>`;for(const [k,v] of Object.entries(t)){if(['tool','interval','asOf'].includes(k))continue;rows+=`<span>${k}</span><b>${typeof v==='object'?Object.entries(v).map(([a,b])=>`${a} ${num(b,3)}`).join(' · '):num(v,3)}</b>`}el('technicals').innerHTML=`<div class="kv">${rows}</div><div class="sub">Provider calculation · as of ${fmtTime(t.asOf)}</div>`}el('intervals').innerHTML=D.historicalSupport.verifiedSpecimenIntervals.map(x=>`<span class="chip">✓ ${x}</span>`).join('')+`<span class="chip">15m: NOT NATIVE</span>`}
+function drawChart(points){const c=el('chart'),ctx=c.getContext('2d');const w=c.width,h=c.height;ctx.clearRect(0,0,w,h);if(!points.length)return;const vals=points.map(p=>p.c),lo=Math.min(...vals),hi=Math.max(...vals),pad=28,span=hi-lo||1;ctx.strokeStyle='#223038';ctx.lineWidth=1;for(let i=0;i<4;i++){const y=pad+(h-pad*2)*i/3;ctx.beginPath();ctx.moveTo(pad,y);ctx.lineTo(w-pad,y);ctx.stroke()}ctx.strokeStyle='#66e3a4';ctx.lineWidth=3;ctx.beginPath();points.forEach((p,i)=>{const x=pad+(w-pad*2)*(i/(points.length-1||1)),y=h-pad-(p.c-lo)/span*(h-pad*2);i?ctx.lineTo(x,y):ctx.moveTo(x,y)});ctx.stroke();ctx.fillStyle='#8da09a';ctx.font='20px system-ui';ctx.fillText(`${selected} · provider OHLCV sample`,pad,22)}
+
+function renderOptions(){const rows=D.options.contracts.map(o=>`<tr><td>${o.underlying}</td><td>${o.type.toUpperCase()}</td><td>${o.strike}</td><td>${money(o.bid)}</td><td>${money(o.ask)}</td><td>${money(o.spread)}</td><td>${money(o.mark)}</td><td>${(o.iv*100).toFixed(2)}%</td><td>${o.delta.toFixed(3)}</td><td>${o.gamma.toFixed(3)}</td><td>${o.theta.toFixed(3)}</td><td>${o.vega.toFixed(3)}</td><td>${o.rho.toFixed(3)}</td><td>${o.openInterest.toLocaleString()}</td><td>${o.volume.toLocaleString()}</td><td>${fmtTime(o.updatedAt)}</td></tr>`).join('');el('options').innerHTML=`<table><thead><tr><th>Underlying</th><th>Type</th><th>Strike</th><th>Bid</th><th>Ask</th><th>Spread*</th><th>Mark</th><th>IV</th><th>Δ</th><th>Γ</th><th>Θ</th><th>Vega</th><th>Rho</th><th>OI</th><th>Volume</th><th>Provider time</th></tr></thead><tbody>${rows}</tbody></table><div class="sub" style="padding:9px">* Spread is NFE-calculated from provider bid/ask. Greeks, IV, OI and volume shown are provider fields. Snapshot only.</div>`}
+function renderExisting(){const x=D.existingOptions;el('existingOptions').innerHTML=`<p><strong>${x.status}</strong></p><div class="chips">${x.accountsChecked.map(a=>`<span class="chip">${a} checked</span>`).join('')}</div><p class="sub">No exercise, close, roll, order, or cancel action exists in this site.</p>`}
+function renderCrypto(){const syms=['BTC','ETH'].filter(s=>D.markets[s]);el('crypto').innerHTML=syms.map(s=>marketCard(s,D.markets[s])).join('')}
+
+function renderEvidence(){el('evidence').innerHTML=`<div class="evidence-row"><b>Tool</b><b>Status</b><b>Mode</b></div>`+D.evidence.map(x=>`<div class="evidence-row"><span>${x.tool}</span><span class="ok">${x.status}</span><span>🔒 ${x.mode}</span></div>`).join('')+`<p class="sub">No OAuth tokens, cookies, session material, raw account numbers, or Robinhood write credentials are included in this deployment. Public shell mode: SNAPSHOT.</p>`}
