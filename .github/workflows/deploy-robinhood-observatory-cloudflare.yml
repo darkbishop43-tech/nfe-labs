@@ -68,14 +68,7 @@ jobs:
         run: |
           set -euo pipefail
           cp wrangler.toml /tmp/wrangler.deploy.toml
-          cat >> /tmp/wrangler.deploy.toml <<EOF
-
-[[d1_databases]]
-binding = "V0A_DB"
-database_name = "nfe-os-robinhood-si-v0a-ledger"
-database_id = "$DB_ID"
-migrations_dir = "migrations"
-EOF
+          printf '\n[[d1_databases]]\nbinding = "V0A_DB"\ndatabase_name = "nfe-os-robinhood-si-v0a-ledger"\ndatabase_id = "%s"\nmigrations_dir = "migrations"\n' "$DB_ID" >> /tmp/wrangler.deploy.toml
           grep -q 'binding = "V0A_DB"' /tmp/wrangler.deploy.toml
           grep -q 'crons = \["\* \* \* \* \*"\]' /tmp/wrangler.deploy.toml
 
