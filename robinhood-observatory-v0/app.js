@@ -12,7 +12,7 @@ fetch('./data/snapshot.json',{cache:'no-store'})
 
 function render(){
   el('capturedAt').textContent=fmtTime(D.meta.capturedAt);
-  renderAccount();renderSiCrypto();renderOperational();renderCryptoUniverse();renderMarkets();renderResearchLanes();renderDetail();renderOptions();renderExisting();renderCrypto();renderEvidence();
+  renderAccount();renderSiCrypto();renderV0A();renderOperational();renderCryptoUniverse();renderMarkets();renderResearchLanes();renderDetail();renderOptions();renderExisting();renderCrypto();renderEvidence();
   document.querySelectorAll('[data-symbol]').forEach(b=>b.onclick=()=>{selected=b.dataset.symbol;document.querySelectorAll('[data-symbol]').forEach(x=>x.classList.toggle('active',x===b));renderDetail()});
 }
 
@@ -80,6 +80,22 @@ function renderSiCrypto(){
 }
 function showConfigStatus(msg){el('configStatus').textContent=msg||''}
 function escapeHtml(s){return String(s).replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]))}
+
+
+function renderV0A(){
+ const v=D.siCryptoV0A;
+ el('v0aState').innerHTML=`
+   <div class="hero-symbol">${v.status}</div>
+   <div class="formula">${v.coreFormula}</div>
+   <div class="chips"><span class="chip">FULL: ${v.formula}</span><span class="chip error">${v.scores.coreState}</span><span class="chip error">${v.scores.fullSIState}</span></div>
+   <p class="sub">Authorized V0-A parameters are visible/versioned research settings, not production trading truth.</p>`;
+ el('v0aComponents').innerHTML=['M','T','V','F','Q','N'].map(k=>{const x=v.components[k];return `<article class="panel si-card"><div class="si-key">${k}</div><h3>${k}</h3><div class="si-value">${x.state}</div><div class="sub">${x.reason||''}</div>${x.subcomponents?`<div class="raw-box"><pre>${escapeHtml(JSON.stringify(x.subcomponents,null,2))}</pre></div>`:''}</article>`}).join('');
+ const a=v.robinhoodOfficialApi;
+ el('v0aOfficial').innerHTML=`<div class="kv"><span>Historical OHLCV</span><b>${a.historicalOHLCV?'YES':'NO'}</b><span>Volume</span><b>${a.volume?'YES':'NO'}</b><span>Depth</span><b>${a.depth?'YES':'NO'}</b><span>Bid/ask size</span><b>${a.bidAskSize?'YES':'NO'}</b><span>Read-only action selection</span><b>${a.readOnlyActionsSelectable?'DOCUMENTED':'NOT PROVEN'}</b><span>Credential created</span><b>NO</b></div><p class="sub">Auth if later approved: ${a.auth}</p><div class="chips">${a.documentedEndpoints.map(x=>`<span class="chip">${x}</span>`).join('')}</div>`;
+ const l=v.instrumentationLedger;
+ el('v0aLedger').innerHTML=`<div class="kv"><span>Observations</span><b>${l.observationsRecorded}</b><span>SI_CORE_V0A</span><b>INCOMPLETE</b><span>Forward outcomes</span><b>${l.forwardOutcomeEngine}</b><span>MFE / MAE</span><b>${l.MFE_MAE}</b></div><p class="sub">Missing: ${l.observation.missing.join(' · ')}</p>`;
+ el('v0aCandidates').innerHTML=v.thirdPartyCandidates.map(x=>`<div class="evidence-row"><span>${x.name}</span><span class="stale">${x.status}</span><span>${x.capabilities}</span></div>`).join('')+`<p class="sub">No third-party source is connected or authorized. Founder selection is required before implementation.</p>`;
+}
 
 function renderAccount(){
  const a=D.account;
