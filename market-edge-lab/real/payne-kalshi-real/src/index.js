@@ -1260,6 +1260,34 @@ function universalClockEvidence(selected, payne, freshLock, preSubmit, observedA
   };
 }
 
+export function livePayneAuthorityEvidence(control,index2,sizing=null) {
+  const armed=control?.armed===true;
+  const writeAuthority=control?.providerWriteAuthority==='ENABLED_GOVERNED_PAYNE_ONLY';
+  const postAuthority=control?.providerPostAuthority==='ENABLED_GOVERNED_PAYNE_ONLY';
+  const executionAuthority=control?.realExecution==='ENABLED_GOVERNED_PAYNE_ONLY';
+  const fundingAuthority=control?.fundingAuthority==='INDEX2_ONLY';
+  const indexAuthority=Number(control?.requiredExchangeIndex)===2;
+  const index2Available=index2?.status==='READ-PROVEN AVAILABLE' && Number.isFinite(Number(index2?.balance));
+  const debit=Number(sizing?.totalDebitUsd);
+  const fundingSufficient=!Number.isFinite(debit) || (index2Available && Number(index2.balance)+1e-9>=debit);
+  const providerWriteAuthorized=armed && writeAuthority && postAuthority && executionAuthority;
+  const fundingAuthorized=fundingAuthority && indexAuthority && index2Available && fundingSufficient;
+  return {
+    providerWriteAuthorized,
+    fundingAuthorized,
+    providerPost:providerWriteAuthorized?'PASS':armed?'AUTHORITY_MISMATCH':'DISARMED',
+    fundingGate:fundingAuthorized?'PASS':!armed?'DISARMED':!fundingAuthority?'FUNDING_AUTHORITY_MISMATCH':!indexAuthority?'INDEX2_AUTHORITY_MISMATCH':!index2Available?'INDEX2_NOT_READ_PROVEN':'INDEX2_FUNDING_INSUFFICIENT',
+    armed,
+    writeAuthority:control?.providerWriteAuthority||null,
+    postAuthority:control?.providerPostAuthority||null,
+    realExecution:control?.realExecution||null,
+    fundingAuthority:control?.fundingAuthority||null,
+    requiredExchangeIndex:Number(control?.requiredExchangeIndex),
+    index2Status:index2?.status||null,
+    index2Balance:index2?.balance??null,
+  };
+}
+
 function zeroMoneyPreviewFor(selected, preSubmit, index2, control, nowMs) {
   if (!selected?.payne?.available) return {status:'NOT_REACHED',reason:'AUTHORITATIVE_PAYNE_FEATURES_UNAVAILABLE'};
   const selectedCloseMs=Date.parse(selected?.closeTime||'');
@@ -1336,7 +1364,7 @@ function zeroMoneyPreviewFor(selected, preSubmit, index2, control, nowMs) {
   });
   return {
     status:'FIRE_READY',
-    authority:'PROVIDER_POST_HELD',
+    authority:'ZERO_MONEY_PROVIDER_POST_HELD',
     gate,
     eligibility,
     ticker:selected.ticker,
@@ -1362,7 +1390,7 @@ function zeroMoneyPreviewFor(selected, preSubmit, index2, control, nowMs) {
     fundingBalanceUsd:index2?.balance??null,
     shardMatch,
     fundingEvidence:index2,
-    fundingGate:funding.failClosed?'AUTHORITY_HELD':'PASS',
+    fundingGate:funding.failClosed?'ZERO_MONEY_AUTHORITY_HELD':'PASS',
     providerPost:stop.reason,
     providerWrites:0,
     orders:0,
@@ -2430,13 +2458,14 @@ export async function buildCockpitData(env, nowMs=Date.now()) {
       fresh:featureState.fresh,
       error:featureState.error,
     },
+    realAuthority:livePayneAuthorityEvidence(control,index2,zeroMoneyPreview?.sizing||null),
     pipeline:{
       radar:qualificationDecision.radar==='RADAR_PASS'?'PASS':qualificationDecision.radar==='RADAR_REJECT'?'REJECT':'UNKNOWN',
       lockIn:qualificationDecision.lock==='LOCK_PASS'?'PASS':qualificationDecision.lock==='LOCK_REJECT'?'REJECT':qualificationDecision.lock==='LOCK_NOT_REACHED'?'NOT_REACHED':'UNKNOWN',
       pullTrigger:qualificationDecision.pull==='PULL_QUALIFIED'?'QUALIFIED':qualificationDecision.pull==='PULL_REJECTED'?'REJECT':qualificationDecision.pull==='PULL_NOT_REACHED'?'NOT_REACHED':'UNKNOWN',
       qualificationDecision,
       finalDecision,
-      fireState:zeroMoneyPreview?.status==='FIRE_READY'?'FIRE READY / PROVIDER POST HELD':'NOT READY',
+      fireState:zeroMoneyPreview?.status==='FIRE_READY'?(realAuthority.providerWriteAuthorized?'FIRE READY / REAL EXECUTION AUTHORIZED':'FIRE READY / REAL EXECUTION '+realAuthority.providerPost):'NOT READY',
       realEligibility:selected ? {
         assetAllowed:PAYNE_CONFIG.executableAssets.includes(selected.asset),
         executionEligible:selected.executionEligible,
@@ -2456,9 +2485,12 @@ export async function buildCockpitData(env, nowMs=Date.now()) {
       fundingGate:{
         index2:index2.status,
         fundingAuthority:control.fundingAuthority,
-        result:zeroMoneyPreview?.fundingGate||'AUTHORITY_HELD',
+        result:realAuthority.fundingGate,
+        zeroMoneyPreviewResult:zeroMoneyPreview?.fundingGate||null,
       },
-      providerPost:control.providerPostAuthority,
+      providerPost:realAuthority.providerPost,
+      providerPostAuthority:control.providerPostAuthority,
+      zeroMoneyProviderPost:zeroMoneyPreview?.providerPost||null,
     },
     observations:{initial:selected,freshLock,preSubmit},
     clocks,
