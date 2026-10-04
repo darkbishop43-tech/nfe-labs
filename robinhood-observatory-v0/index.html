@@ -12,9 +12,9 @@
     <div>
       <div class="eyebrow">NFE-OS</div>
       <h1>ROBINHOOD OBSERVATORY</h1>
-      <p>Read-only market + options reconnaissance</p>
+      <p>Founder operating cockpit · research-first · governed execution</p>
     </div>
-    <div class="badges"><span class="badge lock">🔒 READ ONLY</span><span id="modeBadge" class="badge snapshot">⚪ SNAPSHOT</span></div>
+    <div class="badges"><span class="badge lock">🔒 EXECUTION DISARMED</span><span id="modeBadge" class="badge snapshot">⚪ SNAPSHOT</span></div>
   </header>
   <main>
     <section class="status-strip">
@@ -24,6 +24,36 @@
     </section>
 
     <section><div class="section-head"><h2>Account Snapshot</h2><span class="source">Provider facts</span></div><div id="account" class="grid account-grid"></div></section>
+
+
+    <section id="operatorCockpit">
+      <div class="section-head"><h2>Live Trader Cockpit</h2><span class="source">Operational view · authentic snapshot state</span></div>
+      <div id="executionStrip" class="operator-strip"></div>
+      <div class="layer-grid">
+        <article class="panel layer-card radar-card"><div class="layer-label">LAYER 1 · RADAR</div><div id="radarPanel"></div></article>
+        <article class="panel layer-card lock-card"><div class="layer-label">LAYER 2 · LOCK</div><div id="lockPanel"></div></article>
+        <article class="panel layer-card manage-card"><div class="layer-label">LAYER 3 · ACTIVE TRADE / MANAGE</div><div id="managePanel"></div></article>
+      </div>
+      <article class="panel lifecycle-panel"><h3>Trade Lifecycle</h3><div id="lifecycle"></div></article>
+      <article class="panel controls-panel"><h3>Governed Controls</h3><div id="controls"></div><div id="controlReason" class="control-reason"></div></article>
+    </section>
+
+    <section id="cryptoUniverseSection">
+      <div class="section-head"><h2>Crypto Radar Universe</h2><span class="source">Dynamic provider discovery · snapshot capture</span></div>
+      <article class="panel">
+        <div class="universe-tools">
+          <input id="cryptoSearch" type="search" placeholder="Search symbol or name" aria-label="Search crypto universe" />
+          <select id="cryptoFilter" aria-label="Filter crypto universe">
+            <option value="all">All provider pairs</option>
+            <option value="tradable">Tradable now</option>
+            <option value="halted">Halted / restricted</option>
+          </select>
+        </div>
+        <div id="cryptoUniverseSummary" class="chips"></div>
+        <div id="cryptoInspect" class="inspect-box"></div>
+        <div id="cryptoUniverseTable" class="options-wrap universe-wrap"></div>
+      </article>
+    </section>
 
     <section><div class="section-head"><h2>Market Pulse</h2><span class="source">Robinhood + labeled NFE calculations</span></div><div id="markets" class="grid market-grid"></div></section>
 
