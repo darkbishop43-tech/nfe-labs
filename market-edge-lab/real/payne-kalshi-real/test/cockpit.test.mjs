@@ -18,6 +18,7 @@ import {
   buildAccountFinancialSummary,
   parseFounderThreshold,
   effectiveLockThreshold,
+  livePayneAuthorityEvidence,
 } from '../src/index.js';
 import payneWorker from '../src/index.js';
 import { cockpitHtml } from '../src/cockpit-html.js';
@@ -319,10 +320,51 @@ test('cockpit calculates authentic Payne fields, decisions, clocks, exact reread
     assert.equal(out.comparison.paynePaper.available,false);
     assert.equal(out.comparison.paynePaper.reason,'READ_ONLY_AUTHORITATIVE_EVENT_SOURCE_NOT_EXPOSED_TO_PAYNE_KALSHI_REAL');
     assert.equal(out.zeroMoneyPreview.status,'FIRE_READY');
+    assert.equal(out.zeroMoneyPreview.authority,'ZERO_MONEY_PROVIDER_POST_HELD');
+    assert.equal(out.zeroMoneyPreview.fundingGate,'ZERO_MONEY_AUTHORITY_HELD');
     assert.equal(out.zeroMoneyPreview.timeInForce,'immediate_or_cancel');
     assert.equal(out.zeroMoneyPreview.providerPost,'STEP1_PROVIDER_POST_HARD_DISABLED');
+    assert.equal(out.realAuthority.providerWriteAuthorized,false);
+    assert.equal(out.pipeline.fireState,'FIRE READY / REAL EXECUTION DISARMED');
+    assert.equal(out.pipeline.providerPost,'DISARMED');
+    assert.equal(out.pipeline.providerPostAuthority,'BUILT_INACTIVE_DISARMED');
+    assert.equal(out.pipeline.fundingGate.result,'DISARMED');
+    assert.equal(out.pipeline.fundingGate.zeroMoneyPreviewResult,'ZERO_MONEY_AUTHORITY_HELD');
     assert.equal(io.urls.filter(x=>x.includes('/markets/KXBTC15M-TEST')).length,2);
   } finally { io.restore(); }
+});
+
+test('armed FIRE-ready cockpit routes authority from live PAYNE control while zero-money preview remains hard-disabled',async()=>{
+  const env=await authEnv();
+  const io=installKalshiFetch({btcExchangeIndex:2,index2Balance:15.91,index3Balance:0});
+  try{
+    const armed=await updateFounderControl(env,'ARM');
+    assert.equal(armed.armed,true);
+    const out=await buildCockpitData(env,Date.parse('2026-10-02T06:05:00Z'));
+    assert.equal(out.zeroMoneyPreview.status,'FIRE_READY');
+    assert.equal(out.zeroMoneyPreview.authority,'ZERO_MONEY_PROVIDER_POST_HELD');
+    assert.equal(out.zeroMoneyPreview.fundingGate,'ZERO_MONEY_AUTHORITY_HELD');
+    assert.equal(out.zeroMoneyPreview.providerPost,'STEP1_PROVIDER_POST_HARD_DISABLED');
+    assert.equal(out.realAuthority.providerWriteAuthorized,true);
+    assert.equal(out.realAuthority.fundingAuthorized,true);
+    assert.equal(out.pipeline.fireState,'FIRE READY / REAL EXECUTION AUTHORIZED');
+    assert.equal(out.pipeline.fundingGate.result,'PASS');
+    assert.equal(out.pipeline.providerPost,'PASS');
+    assert.equal(out.pipeline.providerPostAuthority,'ENABLED_GOVERNED_PAYNE_ONLY');
+    assert.equal(out.pipeline.zeroMoneyProviderPost,'STEP1_PROVIDER_POST_HARD_DISABLED');
+    assert.equal(out.providerWrites,0);
+    assert.equal(out.orders,0);
+    assert.equal(out.capitalMovedUsd,0);
+  } finally { io.restore(); }
+});
+
+test('live authority evidence uses current governed PAYNE predicates, not legacy zero-money config flags',()=>{
+  const control={armed:true,providerWriteAuthority:'ENABLED_GOVERNED_PAYNE_ONLY',providerPostAuthority:'ENABLED_GOVERNED_PAYNE_ONLY',realExecution:'ENABLED_GOVERNED_PAYNE_ONLY',fundingAuthority:'INDEX2_ONLY',requiredExchangeIndex:2};
+  const proof=livePayneAuthorityEvidence(control,{status:'READ-PROVEN AVAILABLE',balance:19.07},{totalDebitUsd:1});
+  assert.equal(proof.providerWriteAuthorized,true);
+  assert.equal(proof.fundingAuthorized,true);
+  assert.equal(proof.providerPost,'PASS');
+  assert.equal(proof.fundingGate,'PASS');
 });
 
 test('zero-money preview permits matching Index 2, blocks mismatch, and reports Index 2 balance',async()=>{
