@@ -1,0 +1,38 @@
+name: PAYNE NEAR fast ledger read-only
+
+on:
+  push:
+    branches:
+      - payne-near-presubmit-forensic-readonly
+    paths:
+      - ".github/workflows/payne-near-fast-ledger-readonly.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  forensic:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Read current series and filtered ledger only
+        shell: bash
+        run: |
+          set -euo pipefail
+          base='https://market-edge-payne-kalshi-real.darkbishop43.workers.dev'
+          curl --max-time 30 -fsS "$base/real-state" -o /tmp/state.json
+          sid="$(jq -r '.series.seriesId' /tmp/state.json)"
+          curl --max-time 30 -fsS "$base/real-ledger?limit=400&seriesId=$sid" -o /tmp/ledger.json
+          echo "SERIES_ID=$sid"
+          echo 'STATE='
+          jq '{control:{armed:.control.armed,threshold:.control.activeThreshold,attemptTarget:.control.attemptTarget,maxEntryDebitUsd:.control.maxEntryDebitUsd,requiredExchangeIndex:.control.requiredExchangeIndex},series:{status:.series.status,attemptsStarted:.series.attemptsStarted,attemptTarget:.series.attemptTarget,unresolvedEntry:.series.unresolvedEntry,fireLatch:.series.fireLatch,currentAttempt:.series.currentAttempt,position:.series.position},providerWrites,ordersSubmittedByThisRead,capitalMovedUsd}' /tmp/state.json
+          echo 'MATCHED_ROWS='
+          jq -c '.rows[] | select(
+            (((.ticker // .marketTicker // "")|tostring)|test("NEAR";"i")) or
+            (((.reason // "")|tostring)|test("PRE_SUBMIT_REQUALIFICATION|INVALIDATED";"i")) or
+            (((.type // "")|tostring)|test("FIRE_SPECIMEN|PRE_SUBMIT";"i"))
+          )' /tmp/ledger.json
+          echo 'LAST_80='
+          jq -c '.rows[-80:][]' /tmp/ledger.json
+          echo "providerWrites=$(jq '.providerWrites' /tmp/state.json)"
+          echo "orders=$(jq '.ordersSubmittedByThisRead' /tmp/state.json)"
+          echo "capitalMovedUsd=$(jq '.capitalMovedUsd' /tmp/state.json)"
