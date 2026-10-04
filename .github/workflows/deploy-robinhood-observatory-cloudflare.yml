@@ -39,6 +39,28 @@ jobs:
           test -n "$CLOUDFLARE_API_TOKEN" || { echo "Missing CLOUDFLARE_API_TOKEN"; exit 1; }
           test -n "$CLOUDFLARE_ACCOUNT_ID" || { echo "Missing CLOUDFLARE_ACCOUNT_ID"; exit 1; }
 
+      - name: Ensure dedicated SI V0-A D1 exists
+        id: d1
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          DB_NAME="nfe-os-robinhood-si-v0a-ledger"
+          LIST_JSON="$(npx --yes wrangler@4 d1 list --json)"
+          DB_ID="$(printf '%s' "$LIST_JSON" | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{const a=JSON.parse(s);const x=a.find(v=>v.name==='nfe-os-robinhood-si-v0a-ledger');if(x)process.stdout.write(x.uuid||x.id||'')})")"
+          if [ -z "$DB_ID" ]; then
+            echo "Creating dedicated D1: $DB_NAME"
+            npx --yes wrangler@4 d1 create "$DB_NAME" >/tmp/d1-create.txt
+            cat /tmp/d1-create.txt
+            LIST_JSON="$(npx --yes wrangler@4 d1 list --json)"
+            DB_ID="$(printf '%s' "$LIST_JSON" | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{const a=JSON.parse(s);const x=a.find(v=>v.name==='nfe-os-robinhood-si-v0a-ledger');if(x)process.stdout.write(x.uuid||x.id||'')})")"
+          fi
+          test -n "$DB_ID"
+          echo "D1_DATABASE_ID=$DB_ID"
+          echo "database_id=$DB_ID" >> "$GITHUB_OUTPUT"
+
       - name: V0 read-only firewall
         working-directory: robinhood-observatory-v0
         run: npm test
