@@ -1,0 +1,45 @@
+name: PAYNE NEAR authority forensic read only
+
+on:
+  push:
+    branches:
+      - payne-near-authority-forensic
+    paths:
+      - ".github/workflows/payne-near-authority-forensic.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  read:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Read exact NEAR DOWN authority evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          base='https://market-edge-payne-kalshi-real.darkbishop43.workers.dev'
+          curl -fsS "$base/export?range=daily&format=json" -o /tmp/export.json
+          curl -fsS "$base/real-history" -o /tmp/history.json || true
+          curl -fsS "$base/real-ledger" -o /tmp/ledger.json || true
+
+          echo 'NEAR_DOWN_FIRE_ROWS='
+          jq '[.rows[] | select(.asset=="NEAR" and .direction=="DOWN" and ((.score // 0) >= 0.74) and ((.score // 0) <= 0.76)) | {
+            observationAt,ticker,direction,outcomeSide,score,payneState,radarResult,lockResult,pullResult,decision,
+            initialPrice,freshLockPrice,preSubmitPrice,timeGate,tickerConsistency,sideConsistency,
+            zeroMoneyFireStatus,estimatedSizingUsd,realStateAsOf,realSeriesId,realArmed,attemptsStarted,attemptTarget,
+            lastAttemptResult,lastProviderOrderId,realSeriesStatus,lastRealLedgerEvent
+          }]' /tmp/export.json
+
+          echo 'NEAR_DOWN_FIRE_EVENTS='
+          jq '[.events[]? | select((.asset=="NEAR" or (.ticker // "" | startswith("KXNEAR15M"))) and (.direction=="DOWN" or .outcomeSide=="NO") and (((.score // 0) >= 0.74 and (.score // 0) <= 0.76) or .type=="ZERO_MONEY_FIRE_PLAN_RECORDED"))]' /tmp/export.json
+
+          echo 'REAL_HISTORY_NEAR='
+          jq '[.. | objects | select((.asset?=="NEAR") or ((.ticker? // .marketTicker? // "") | startswith("KXNEAR15M"))) ]' /tmp/history.json 2>/dev/null || cat /tmp/history.json
+
+          echo 'REAL_LEDGER_NEAR='
+          jq '[.. | objects | select(((.ticker? // .marketTicker? // "") | startswith("KXNEAR15M"))) ]' /tmp/ledger.json 2>/dev/null || cat /tmp/ledger.json
+
+          echo 'PROVIDER_WRITES=0'
+          echo 'ORDERS=0'
+          echo 'CAPITAL_MOVED_USD=0'
