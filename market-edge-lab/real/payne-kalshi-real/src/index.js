@@ -3006,7 +3006,7 @@ async function managePayneRealPosition(env,control,series,postImpl=kalshiPayneOr
   if(!payload || payload.reduce_only!==true){
     position.status='EXIT_RETRY';series.status='EXIT_REQUEST_BUILD_FAILED';await settleSeriesControl(env,series,1,{failClosed:true});return saveRealSeriesState(env,series);
   }
-  await appendRealLedger(env,'EXIT_PRE_SUBMIT_LATCHED',{seriesId:series.seriesId,attemptId:position.attemptId,ticker:position.marketTicker,reason:decision.reason,clientOrderId:exitClientOrderId,payload:{...payload},exchangeIndex:3});
+  await appendRealLedger(env,'EXIT_PRE_SUBMIT_LATCHED',{seriesId:series.seriesId,attemptId:position.attemptId,ticker:position.marketTicker,reason:decision.reason,clientOrderId:exitClientOrderId,payload:{...payload},exchangeIndex:2});
   let response,proof;
   try{
     const out=await postImpl(env,'EXIT',payload,payneRealScope(control,series,'EXIT',position));
