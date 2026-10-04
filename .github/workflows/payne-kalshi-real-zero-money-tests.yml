@@ -5,9 +5,11 @@ on:
     branches:
       - market-edge-payne-kalshi-real-step1
       - payne-fire-specimen-latch-repair
+      - payne-shared-kalshi-writer-refactor
       - payne-numeric-threshold-repair
     paths:
       - "market-edge-lab/real/payne-kalshi-real/**"
+      - "market-edge-lab/real/shared/**"
       - ".github/workflows/payne-kalshi-real-zero-money-tests.yml"
   workflow_dispatch:
 
