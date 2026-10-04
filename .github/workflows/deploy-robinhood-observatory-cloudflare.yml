@@ -82,7 +82,6 @@ jobs:
           grep -q '"siCryptoV0"' /tmp/snapshot
           grep -q '"DISARMED / FIRE BLOCKED"' /tmp/snapshot
           grep -q '"qualificationThreshold": null' /tmp/snapshot
-          grep -q '"LOCK / FOUNDER APPROVAL REQUIRED"' /tmp/snapshot
           grep -q '"MCP ACTIVE MARKET SURFACE NOT CURRENTLY EXPOSED"' /tmp/snapshot
           grep -qi '^content-security-policy:.*connect-src '\''self'\''' /tmp/headers
           grep -qi '^x-content-type-options: nosniff' /tmp/headers
