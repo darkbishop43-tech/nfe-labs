@@ -4,7 +4,7 @@
     "mode": "SNAPSHOT",
     "readOnly": true,
     "capturedAt": "2026-10-04T05:56:20.467-04:00",
-    "notes": "Authentic Robinhood MCP capture. SI Crypto V0 structural engine is wired with Founder-approved composite weights. Component values remain null where current official Robinhood crypto data or Founder-approved normalization rules are missing. Public shell remains snapshot-backed with zero provider execution authority."
+    "notes": "Authentic Robinhood MCP execution/lock snapshot plus authorized Binance.US public research sensor. Binance.US has zero account/trading authority. SI V0-A M/T/V/F sample computations are proven; Q remains incomplete until prospective spread history is persisted."
   },
   "account": {
     "label": "Agentic",
@@ -521,6 +521,11 @@
       "tool": "third-party market data",
       "status": "NOT CONNECTED — candidate list only",
       "mode": "NO AUTHORITY"
+    },
+    {
+      "tool": "Binance.US public V0-A sensor",
+      "status": "PASS — NO CREDENTIAL / 66 MAPPED / M,T,V,F COMPUTE / Q HISTORY BLOCKED",
+      "mode": "RESEARCH READ ONLY"
     }
   ],
   "researchLanes": {
@@ -2448,7 +2453,7 @@
     }
   },
   "siCryptoV0A": {
-    "status": "GOVERNED HOLD — OFFICIAL ROBINHOOD DATA INSUFFICIENT FOR M/T/V/F/Q HISTORY",
+    "status": "PARTIAL GREEN / GOVERNED HOLD — BINANCE.US SENSOR LIVE; Q HISTORY + PERSISTENCE PENDING",
     "formula": "S_C = 100 × (0.30M + 0.20T + 0.15V + 0.10Q + 0.15F + 0.10N)",
     "coreFormula": "SI_CORE_V0A = 100 × (0.30M + 0.20T + 0.15V + 0.10Q + 0.15F) / 0.90",
     "logistic": "L(x)=1/(1+e^(-x))",
@@ -2534,24 +2539,34 @@
     },
     "components": {
       "M": {
-        "state": "BLOCKED",
-        "reason": "Needs 5m/15m/1h returns standardized by each horizon's realized-volatility history; no approved official Robinhood historical OHLCV source."
+        "state": "COMPUTING",
+        "sampleValue": 0.5124144577713137,
+        "source": "Binance.US",
+        "reason": "Computed from authorized 5m/15m/1h standardized-return structure; current specimen uses 1000 recent bars per horizon."
       },
       "T": {
-        "state": "BLOCKED",
-        "reason": "Needs EMA9/20/50 and ATR14 from crypto history; no approved official Robinhood historical OHLCV source."
+        "state": "COMPUTING",
+        "sampleValue": 0.6610780350767114,
+        "source": "Binance.US",
+        "reason": "Computed from EMA9/20/50 and ATR14; current specimen feature interval is caller-selected 1h."
       },
       "V": {
-        "state": "BLOCKED",
-        "reason": "Needs ATR14 percentile versus rolling 30-day same-asset distribution; no approved official Robinhood historical OHLCV source."
+        "state": "COMPUTING",
+        "sampleValue": 0.03687943262411353,
+        "source": "Binance.US",
+        "reason": "Computed from ATR14/price percentile across the caller-selected 30-day 1h feature history."
       },
       "F": {
-        "state": "BLOCKED",
-        "reason": "Needs current/comparable-interval volume and authentic normal-volume baseline; official Robinhood surfaces do not document crypto volume history."
+        "state": "COMPUTING",
+        "sampleValue": 0.08461424913377992,
+        "source": "Binance.US",
+        "reason": "Computed from authorized RVOL/2 transform using public candle volume."
       },
       "Q": {
-        "state": "BLOCKED",
-        "reason": "Current spread is available at LOCK, but V0-A Q also requires same-pair spread history and dollar-volume percentile history; official Robinhood surfaces do not document those histories."
+        "state": "PARTIAL / BLOCKED",
+        "sampleValue": null,
+        "source": "Binance.US research history + Robinhood MCP lock truth",
+        "reason": "Q liquidity percentile computes (sample 0.216968), but Q spread percentile requires prospectively collected same-pair spread history. Binance.US current spread/depth never substitutes for Robinhood LOCK spread."
       },
       "N": {
         "state": "RESEARCH_ONLY / NOT FIRE-AUTHORIZING",
@@ -2569,8 +2584,8 @@
     "scores": {
       "SI_CORE_V0A": null,
       "fullSI": null,
-      "fullSIState": "INCOMPLETE — N RESEARCH STATE NOT VALID",
-      "coreState": "INCOMPLETE — M/T/V/F/Q INPUT HISTORY MISSING"
+      "coreState": "INCOMPLETE — Q_SPREAD HISTORY NOT YET AVAILABLE",
+      "fullSIState": "INCOMPLETE — N RESEARCH STATE NOT VALID"
     },
     "instrumentationLedger": {
       "schema": [
@@ -2608,57 +2623,62 @@
         "data freshness",
         "missing input flags"
       ],
-      "observationsRecorded": 1,
+      "observationsRecorded": 2,
       "observation": {
-        "timestamp": "2026-10-04T05:56:20.467-04:00",
+        "timestamp": "2026-10-04T10:46:58Z",
         "symbol": "BTC-USD",
-        "researchDataSource": "Robinhood MCP only",
+        "researchSymbol": "BTCUSD",
+        "researchDataSource": "Binance.US public + Robinhood MCP lock snapshot",
+        "mappingStatus": "MAPPED",
+        "mappingConfidence": "HIGH — exact base + USD quote",
         "robinhoodBid": 84476.8553206,
         "robinhoodAsk": 86067.86741299,
         "robinhoodMark": 85272.361366795,
-        "spreadPct": 1.8658004386044067,
-        "missing": [
-          "5m return",
-          "15m return",
-          "1h return",
-          "EMA9",
-          "EMA20",
-          "EMA50",
-          "ATR14",
-          "ATR percentile",
-          "volume",
-          "relative volume",
-          "dollar volume",
-          "spread history",
-          "dollar-volume history",
-          "N subcomponents"
-        ],
+        "M": 0.5124144577713137,
+        "T": 0.6610780350767114,
+        "V": 0.03687943262411353,
+        "F": 0.08461424913377992,
+        "Q": null,
+        "qLiquidity": 0.21696801112656466,
+        "N_E": null,
+        "N_Fr": null,
+        "N_Tr": null,
+        "N_Tx": null,
+        "N_A": null,
+        "N_C": null,
         "SI_CORE_V0A": null,
-        "fullSI": null
+        "fullSI": null,
+        "missing": [
+          "historical spread distribution for Q_SPREAD",
+          "persistent observation storage",
+          "scheduled forward-outcome reconciliation",
+          "MFE",
+          "MAE"
+        ]
       },
-      "forwardOutcomeEngine": "SCHEMA ACTIVE / AUTOMATIC COLLECTION NOT RUNNING",
-      "MFE_MAE": "SCHEMA ACTIVE / REQUIRES CONTINUOUS APPROVED MARKET-DATA RUNTIME"
+      "forwardOutcomeEngine": "SCHEMA READY / AUTOMATIC COLLECTION BLOCKED BY NO APPROVED PERSISTENCE + CADENCE",
+      "MFE_MAE": "SUPPORTED BY RESEARCH PRICE SOURCE ONCE OBSERVATIONS ARE PERSISTED AND RECONCILED; AUTOMATION NOT ACTIVE"
     },
     "thirdPartyCandidates": [
       {
+        "name": "Binance.US public market data",
+        "status": "APPROVED + CONNECTED / PUBLIC ONLY / NO CREDENTIAL",
+        "capabilities": "Public exchangeInfo, klines, bookTicker, depth; zero account/trading authority"
+      },
+      {
         "name": "Coinbase Advanced Trade public market endpoints",
-        "status": "CANDIDATE ONLY / NOT CONNECTED",
-        "capabilities": "Public product candles, product book, public market trades"
+        "status": "NOT SELECTED / NOT CONNECTED",
+        "capabilities": "No authority"
       },
       {
         "name": "Kraken public Spot market-data API",
-        "status": "CANDIDATE ONLY / NOT CONNECTED",
-        "capabilities": "Public OHLC/live market data/order book/trades"
-      },
-      {
-        "name": "Binance.US public market-data API",
-        "status": "CANDIDATE ONLY / NOT CONNECTED",
-        "capabilities": "Public klines with volume, depth, trades; 5m/15m/1h supported"
+        "status": "NOT SELECTED / NOT CONNECTED",
+        "capabilities": "No authority"
       }
     ],
     "continuousRuntime": {
-      "state": "NOT BUILT",
-      "reason": "Continuous V0-A needs an authorized historical/streaming source plus storage/scheduler design. No new credential, database, binding, retention rule, or scheduler was approved.",
+      "state": "STATELESS SENSOR LIVE / PERSISTENT COLLECTION NOT BUILT",
+      "reason": "Public Binance.US research endpoints run cloud-side without credentials. Durable Q spread history, shadow ledger, forward outcomes and MFE/MAE still require an approved persistent resource and scheduler cadence.",
       "proposalRequired": {
         "what": "Cloud-side read-only instrumentation collector + observation ledger persistence + outcome scheduler",
         "why": "Compute rolling distributions, forward outcomes, MFE/MAE, and spread history continuously",
@@ -2669,6 +2689,156 @@
         "schedulerNeed": "Founder decision required",
         "where": "Existing approved NFE-OS Cloudflare infrastructure if technically suitable",
         "whyExistingInsufficient": "Current Worker is static/snapshot-only and has no approved research feed or persistent instrumentation store"
+      }
+    },
+    "binanceUsPublicData": {
+      "connected": true,
+      "credential": "NONE",
+      "executionAuthority": "NONE",
+      "publicPing": "PASS",
+      "mapping": {
+        "robinhoodPairs": 91,
+        "mapped": 66,
+        "unmapped": 25,
+        "mappedAssets": [
+          "AVNT-USD",
+          "HYPE-USD",
+          "ASTER-USD",
+          "SEI-USD",
+          "WLFI-USD",
+          "SKY-USD",
+          "SUI-USD",
+          "MOODENG-USD",
+          "ORCA-USD",
+          "PNUT-USD",
+          "MEW-USD",
+          "POPCAT-USD",
+          "SNX-USD",
+          "EIGEN-USD",
+          "JTO-USD",
+          "FLOKI-USD",
+          "PENGU-USD",
+          "QNT-USD",
+          "LDO-USD",
+          "INJ-USD",
+          "WLD-USD",
+          "IMX-USD",
+          "VIRTUAL-USD",
+          "ENA-USD",
+          "FET-USD",
+          "ONDO-USD",
+          "TRUMP-USD",
+          "BONK-USD",
+          "OP-USD",
+          "ARB-USD",
+          "GRAM-USD",
+          "WIF-USD",
+          "RENDER-USD",
+          "PEPE-USD",
+          "AXS-USD",
+          "XTZ-USD",
+          "AAVE-USD",
+          "GRT-USD",
+          "PAXG-USD",
+          "CRV-USD",
+          "ZRX-USD",
+          "BAT-USD",
+          "HBAR-USD",
+          "ALGO-USD",
+          "UNI-USD",
+          "LINK-USD",
+          "COMP-USD",
+          "NEAR-USD",
+          "ATOM-USD",
+          "POL-USD",
+          "SHIB-USD",
+          "DOT-USD",
+          "AVAX-USD",
+          "SOL-USD",
+          "ADA-USD",
+          "USDC-USD",
+          "BNB-USD",
+          "XLM-USD",
+          "ZEC-USD",
+          "XRP-USD",
+          "LTC-USD",
+          "ETC-USD",
+          "DOGE-USD",
+          "BCH-USD",
+          "ETH-USD",
+          "BTC-USD"
+        ],
+        "unmappedAssets": [
+          "BILL-USD",
+          "CASHCAT-USD",
+          "RE-USD",
+          "FLR-USD",
+          "CHIP-USD",
+          "CC-USD",
+          "SENT-USD",
+          "USDG-USD",
+          "MEGA-USD",
+          "SKR-USD",
+          "LIT-USD",
+          "SYRUP-USD",
+          "XPL-USD",
+          "ZORA-USD",
+          "XCN-USD",
+          "VVV-USD",
+          "MNT-USD",
+          "BIO-USD",
+          "W-USD",
+          "MORPHO-USD",
+          "AERO-USD",
+          "STRK-USD",
+          "PYTH-USD",
+          "RAY-USD",
+          "ZRO-USD"
+        ]
+      },
+      "sample": {
+        "robinhoodSymbol": "BTC-USD",
+        "binanceSymbol": "BTCUSD",
+        "quoteCurrency": "USD",
+        "mappingConfidence": "HIGH — exact base + USD quote",
+        "featureConfig": {
+          "featureInterval": "1h",
+          "lookbackDays": 30
+        },
+        "momentumConfig": {
+          "bars": 1000,
+          "horizons": [
+            "5m",
+            "15m",
+            "1h"
+          ]
+        },
+        "M": 0.5124144577713137,
+        "T": 0.6610780350767114,
+        "V": 0.03687943262411353,
+        "F": 0.08461424913377992,
+        "qLiquidity": 0.21696801112656466,
+        "Q": null,
+        "researchBook": {
+          "bid": 85329.73,
+          "ask": 85330.91,
+          "mark": 85330.32,
+          "spreadPct": 0.000013828613322996643,
+          "bidQty": 0.00246,
+          "askQty": 0.00246
+        },
+        "depthSummary": {
+          "bidLevels": 20,
+          "askLevels": 20,
+          "bestBid": [
+            "85329.73000000",
+            "0.00246000"
+          ],
+          "bestAsk": [
+            "85330.91000000",
+            "0.00246000"
+          ]
+        }
       }
     }
   }
