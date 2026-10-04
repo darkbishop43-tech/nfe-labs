@@ -243,6 +243,8 @@ test('cockpit exposes Founder numeric threshold input and diagnostic lock observ
   assert.match(html,/step=\"0\.01\"/);
   assert.match(html,/DIAGNOSTIC LOWER-LOCK MODE/);
   assert.match(html,/ARM freezes the Founder-selected PAYNE threshold into the active series for that run/);
+  assert.match(html,/PAYNE funding route remains Index 2/);
+  assert.doesNotMatch(html,/Index 3/);
   assert.doesNotMatch(html,/configuration is exactly \.70 \/ \$1 \/ Index 3/);
   assert.doesNotMatch(html,/select id=\"threshold\"/);
   assert.equal(parseFounderThreshold('.50').value,.50);
