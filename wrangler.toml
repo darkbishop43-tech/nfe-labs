@@ -6,3 +6,6 @@ compatibility_date = "2026-10-04"
 directory = "./robinhood-observatory-v0"
 binding = "ASSETS"
 run_worker_first = true
+
+[triggers]
+crons = ["* * * * *"]
