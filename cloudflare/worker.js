@@ -304,7 +304,195 @@ async function bookResponse(env, request) {
   return json({status:"PASS / Q INCOMPLETE",provenance:{researchSource:"Binance.US",lockAuthority:"Robinhood MCP only",credential:"NONE"},mapping,robinhoodSnapshot:rh,researchBook:{bid,ask,mark,spreadPct,bidQty:Number(book.bidQty),askQty:Number(book.askQty)},depthSummary:{bidLevels:depth.bids?.length||0,askLevels:depth.asks?.length||0,bestBid:depth.bids?.[0]||null,bestAsk:depth.asks?.[0]||null},qSpread:null,Q:null,reason:"Historical same-pair spread distribution must be collected prospectively; current Binance.US spread never substitutes for Robinhood LOCK spread.",fireAuthority:"ZERO"});
 }
 
+
+async function computeShadowFeatureSet(env, robinhoodSymbol, mapping, currentBook) {
+  const [m5raw,m15raw,m60raw,featureRaw] = await Promise.all([
+    publicGet("/api/v3/klines",{symbol:mapping.binanceSymbol,interval:"5m",limit:1000}),
+    publicGet("/api/v3/klines",{symbol:mapping.binanceSymbol,interval:"15m",limit:1000}),
+    publicGet("/api/v3/klines",{symbol:mapping.binanceSymbol,interval:"1h",limit:1000}),
+    publicGet("/api/v3/klines",{symbol:mapping.binanceSymbol,interval:"1h",startTime:Date.now()-30*DAY_MS,endTime:Date.now(),limit:1000})
+  ]);
+  const k5=m5raw.map(parseKline),k15=m15raw.map(parseKline),k60=m60raw.map(parseKline),bars=featureRaw.map(parseKline);
+  const h5=horizonStats(k5),h15=horizonStats(k15),h60=horizonStats(k60);
+  const M=[h5?.logistic,h15?.logistic,h60?.logistic].every(Number.isFinite)?0.50*h5.logistic+0.30*h15.logistic+0.20*h60.logistic:null;
+
+  const closes=bars.map(x=>x.close);
+  const ema9=ema(closes,9),ema20=ema(closes,20),ema50=ema(closes,50);
+  const atrs=atrSeries(bars,14), currentAtr=atrs.length?atrs[atrs.length-1].atr:null, currentClose=bars.at(-1)?.close??null;
+  const D1=(ema9!=null&&ema20!=null&&currentAtr)?(ema9-ema20)/currentAtr:null;
+  const D2=(ema20!=null&&ema50!=null&&currentAtr)?(ema20-ema50)/currentAtr:null;
+  const T=(D1!=null&&D2!=null)?0.5*logistic(D1)+0.5*logistic(D2):null;
+
+  const atrFractions=atrs.map(x=>x.atr/bars[x.index].close).filter(Number.isFinite);
+  const currentAtrFraction=(currentAtr&&currentClose)?currentAtr/currentClose:null;
+  const pAtr=currentAtrFraction==null?null:percentileRank(atrFractions.slice(0,-1),currentAtrFraction);
+  const V=pAtr==null?null:clamp(1-2*Math.abs(pAtr-0.5));
+
+  const latest=bars.at(-1), previous=bars.slice(0,-1);
+  const normalVolume=mean(previous.map(x=>x.volume).filter(Number.isFinite));
+  const rvol=(latest&&normalVolume)?latest.volume/normalVolume:null;
+  const F=rvol==null?null:clamp(rvol/2);
+  const qLiquidity=latest?percentileRank(previous.map(x=>x.quoteVolume).filter(Number.isFinite),latest.quoteVolume):null;
+
+  const prior=await env.V0A_DB.prepare(
+    "SELECT spread_pct FROM v0a_spread_samples WHERE research_symbol = ? ORDER BY sampled_at_ms ASC"
+  ).bind(mapping.binanceSymbol).all();
+  const priorSpreads=(prior.results||[]).map(x=>Number(x.spread_pct)).filter(Number.isFinite);
+  const qSpreadPercentile=priorSpreads.length?percentileRank(priorSpreads,currentBook.spreadPct):null;
+  const qSpread=qSpreadPercentile==null?null:1-qSpreadPercentile;
+  const Q=(qSpread!=null&&qLiquidity!=null)?0.50*qSpread+0.50*qLiquidity:null;
+  const SI_CORE_V0A=[M,T,V,F,Q].every(Number.isFinite)?100*(0.30*M+0.20*T+0.15*V+0.10*Q+0.15*F)/0.90:null;
+
+  return {
+    returns:{r5:h5?.return??null,r15:h15?.return??null,r60:h60?.return??null},
+    ema9,ema20,ema50,atr14:currentAtr,atrPercentile:pAtr,
+    volume:latest?.volume??null,relativeVolume:rvol,quoteVolume:latest?.quoteVolume??null,
+    takerBuyBaseVolume:latest?.takerBuyBaseVolume??null,takerBuyQuoteVolume:latest?.takerBuyQuoteVolume??null,
+    tradeCount:latest?.tradeCount??null,dollarVolume:latest?.quoteVolume??null,
+    M,T,V,F,Q,qSpread,qLiquidity,SI_CORE_V0A,priorSpreadSamples:priorSpreads.length
+  };
+}
+
+async function reconcileOutcomes(env, nowMs) {
+  const pending=await env.V0A_DB.prepare(
+    `SELECT o.id,o.observation_id,o.horizon_minutes,o.due_at_ms,o.start_mark,
+            obs.research_symbol,obs.observed_at_ms
+       FROM v0a_outcomes o
+       JOIN v0a_observations obs ON obs.id=o.observation_id
+      WHERE o.status='PENDING' AND o.due_at_ms <= ?
+      ORDER BY o.due_at_ms ASC
+      LIMIT 200`
+  ).bind(nowMs).all();
+
+  let reconciled=0;
+  for (const row of pending.results||[]) {
+    const end=await env.V0A_DB.prepare(
+      `SELECT mark,sampled_at_ms FROM v0a_spread_samples
+        WHERE research_symbol=? AND sampled_at_ms>=?
+        ORDER BY sampled_at_ms ASC LIMIT 1`
+    ).bind(row.research_symbol,row.due_at_ms).first();
+    if(!end) continue;
+    const extrema=await env.V0A_DB.prepare(
+      `SELECT MIN(mark) AS min_mark,MAX(mark) AS max_mark
+         FROM v0a_spread_samples
+        WHERE research_symbol=? AND sampled_at_ms>=? AND sampled_at_ms<=?`
+    ).bind(row.research_symbol,row.observed_at_ms,end.sampled_at_ms).first();
+    const start=Number(row.start_mark), endMark=Number(end.mark), minMark=Number(extrema?.min_mark), maxMark=Number(extrema?.max_mark);
+    const outcome=start?((endMark-start)/start):null;
+    const mfe=start&&Number.isFinite(maxMark)?((maxMark-start)/start):null;
+    const mae=start&&Number.isFinite(minMark)?((minMark-start)/start):null;
+    await env.V0A_DB.prepare(
+      `UPDATE v0a_outcomes
+          SET reconciled_at=?,reconciled_at_ms=?,end_mark=?,outcome_return=?,mfe=?,mae=?,status='RECONCILED'
+        WHERE id=?`
+    ).bind(new Date(nowMs).toISOString(),nowMs,endMark,outcome,mfe,mae,row.id).run();
+    reconciled++;
+  }
+  return reconciled;
+}
+
+async function runScheduledCollection(env) {
+  if(!env.V0A_DB) throw new Error("V0A_DB binding missing");
+  const nowMs=Date.now(), nowIso=new Date(nowMs).toISOString();
+  const [snapshot, mappingState, allBooks] = await Promise.all([
+    loadSnapshot(env),
+    mappingResponse(env),
+    publicGet("/api/v3/ticker/bookTicker")
+  ]);
+  const bookMap=new Map((Array.isArray(allBooks)?allBooks:[]).map(x=>[x.symbol,x]));
+  const spreadStatements=[];
+  const mappedRows=(mappingState.rows||[]).filter(x=>x.mappingStatus==="MAPPED" && x.robinhoodTradable);
+  for(const m of mappedRows){
+    const b=bookMap.get(m.binanceSymbol);
+    if(!b) continue;
+    const bid=Number(b.bidPrice),ask=Number(b.askPrice),mark=(bid+ask)/2;
+    if(!(bid>0&&ask>0&&mark>0)) continue;
+    const spread=ask-bid,spreadPct=spread/mark;
+    spreadStatements.push(env.V0A_DB.prepare(
+      `INSERT INTO v0a_spread_samples
+       (sampled_at,sampled_at_ms,robinhood_symbol,research_symbol,quote_currency,mapping_confidence,bid,ask,mark,spread,spread_pct,bid_qty,ask_qty,source)
+       VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
+    ).bind(nowIso,nowMs,m.robinhoodSymbol,m.binanceSymbol,m.quoteCurrency,m.mappingConfidence,bid,ask,mark,spread,spreadPct,Number(b.bidQty)||null,Number(b.askQty)||null,"BINANCE.US_PUBLIC"));
+  }
+
+  const governedSymbol=snapshot.operationalCockpit?.lock?.symbol || snapshot.siCryptoV0A?.instrumentationLedger?.observation?.symbol || null;
+  let observationId=null,featureState=null;
+  if(governedSymbol){
+    const mapping=mappedRows.find(x=>x.robinhoodSymbol===governedSymbol);
+    const b=mapping?bookMap.get(mapping.binanceSymbol):null;
+    const rh=(snapshot.cryptoUniverse?.rows||[]).find(x=>x.symbol===governedSymbol)||null;
+    if(mapping&&b){
+      const bid=Number(b.bidPrice),ask=Number(b.askPrice),mark=(bid+ask)/2,spreadPct=(ask-bid)/mark;
+      const currentBook={bid,ask,mark,spreadPct};
+      featureState=await computeShadowFeatureSet(env,governedSymbol,mapping,currentBook);
+      const missing=[];
+      if(featureState.Q==null) missing.push("Q_SPREAD_HISTORY");
+      if(featureState.SI_CORE_V0A==null) missing.push("SI_CORE_INCOMPLETE");
+      missing.push("N_RESEARCH_ONLY");
+      const ins=await env.V0A_DB.prepare(
+        `INSERT INTO v0a_observations (
+          observed_at,observed_at_ms,robinhood_symbol,research_symbol,research_source,mapping_status,mapping_confidence,quote_currency,
+          research_bid,research_ask,research_mark,research_spread_pct,robinhood_bid,robinhood_ask,robinhood_mark,robinhood_provider_timestamp,
+          return_5m,return_15m,return_1h,ema9,ema20,ema50,atr14,atr_percentile,volume,relative_volume,quote_volume,
+          taker_buy_base_volume,taker_buy_quote_volume,trade_count,dollar_volume,q_spread,q_liquidity,m,t,v,f,q,
+          n_e,n_fr,n_tr,n_tx,n_a,n_c,si_core_v0a,full_si,full_si_state,data_freshness,missing_input_flags
+        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
+      ).bind(
+        nowIso,nowMs,governedSymbol,mapping.binanceSymbol,"BINANCE.US_PUBLIC","MAPPED",mapping.mappingConfidence,mapping.quoteCurrency,
+        bid,ask,mark,spreadPct,rh?.bid??null,rh?.ask??null,rh?.mark??null,rh?.providerTimestamp??null,
+        featureState.returns.r5,featureState.returns.r15,featureState.returns.r60,featureState.ema9,featureState.ema20,featureState.ema50,
+        featureState.atr14,featureState.atrPercentile,featureState.volume,featureState.relativeVolume,featureState.quoteVolume,
+        featureState.takerBuyBaseVolume,featureState.takerBuyQuoteVolume,featureState.tradeCount,featureState.dollarVolume,
+        featureState.qSpread,featureState.qLiquidity,featureState.M,featureState.T,featureState.V,featureState.F,featureState.Q,
+        null,null,null,null,null,null,featureState.SI_CORE_V0A,null,"INCOMPLETE — N RESEARCH_ONLY","BINANCE.US_PUBLIC_CURRENT",JSON.stringify(missing)
+      ).run();
+      observationId=Number(ins.meta?.last_row_id||ins.results?.meta?.last_row_id||0)||null;
+      if(observationId){
+        const horizons=[1,5,15,60];
+        await env.V0A_DB.batch(horizons.map(h=>env.V0A_DB.prepare(
+          "INSERT OR IGNORE INTO v0a_outcomes(observation_id,horizon_minutes,due_at_ms,start_mark,status,source) VALUES(?,?,?,?,?,?)"
+        ).bind(observationId,h,nowMs+h*60000,mark,"PENDING","BINANCE.US_RESEARCH")));
+      }
+    }
+  }
+
+  if(spreadStatements.length) await env.V0A_DB.batch(spreadStatements);
+  const reconciled=await reconcileOutcomes(env,nowMs);
+  return {sampledAt:nowIso,spreadSamplesInserted:spreadStatements.length,governedSymbol,observationId,reconciled,featureState};
+}
+
+async function ledgerStatus(env) {
+  if(!env.V0A_DB) return {status:"D1_BINDING_MISSING"};
+  const [obs,spreads,outcomes,pending,reconciled,lastObs,lastSpread]=await Promise.all([
+    env.V0A_DB.prepare("SELECT COUNT(*) AS n FROM v0a_observations").first(),
+    env.V0A_DB.prepare("SELECT COUNT(*) AS n FROM v0a_spread_samples").first(),
+    env.V0A_DB.prepare("SELECT COUNT(*) AS n FROM v0a_outcomes").first(),
+    env.V0A_DB.prepare("SELECT COUNT(*) AS n FROM v0a_outcomes WHERE status='PENDING'").first(),
+    env.V0A_DB.prepare("SELECT COUNT(*) AS n FROM v0a_outcomes WHERE status='RECONCILED'").first(),
+    env.V0A_DB.prepare("SELECT * FROM v0a_observations ORDER BY observed_at_ms DESC LIMIT 1").first(),
+    env.V0A_DB.prepare("SELECT sampled_at,sampled_at_ms,research_symbol,spread_pct FROM v0a_spread_samples ORDER BY sampled_at_ms DESC LIMIT 1").first()
+  ]);
+  const byHorizon=await env.V0A_DB.prepare(
+    "SELECT horizon_minutes,status,COUNT(*) AS n FROM v0a_outcomes GROUP BY horizon_minutes,status ORDER BY horizon_minutes,status"
+  ).all();
+  return {
+    status:"PASS",
+    database:"nfe-os-robinhood-si-v0a-ledger",
+    authority:"RESEARCH_ONLY",
+    counts:{observations:Number(obs?.n||0),spreadSamples:Number(spreads?.n||0),outcomes:Number(outcomes?.n||0),pending:Number(pending?.n||0),reconciled:Number(reconciled?.n||0)},
+    byHorizon:byHorizon.results||[],
+    latestObservation:lastObs||null,
+    latestSpreadSample:lastSpread||null,
+    robinhoodExecution:"DISARMED",
+    binanceExecutionAuthority:"NONE",
+    fireAuthority:"ZERO"
+  };
+}
+
 export default {
+  async scheduled(event, env, ctx) {
+    ctx.waitUntil(runScheduledCollection(env));
+  },
   async fetch(request, env) {
     if (request.method !== "GET" && request.method !== "HEAD") {
       return new Response("Method Not Allowed", {status:405,headers:{"Allow":"GET, HEAD",...SECURITY_HEADERS}});
@@ -316,6 +504,7 @@ export default {
       if (url.pathname === "/api/v0a/momentum") return await momentumResponse(env,request);
       if (url.pathname === "/api/v0a/features") return await featureResponse(env,request);
       if (url.pathname === "/api/v0a/book") return await bookResponse(env,request);
+      if (url.pathname === "/api/v0a/ledger-status") return json(await ledgerStatus(env));
       if (url.pathname === "/api/v0a/ping") {
         const p=await publicGet("/api/v3/ping");
         return json({status:"PASS",source:"Binance.US public market data",credential:"NONE",executionAuthority:"NONE",upstream:p});
