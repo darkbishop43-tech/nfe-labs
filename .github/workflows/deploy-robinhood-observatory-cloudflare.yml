@@ -74,10 +74,14 @@ jobs:
           grep -q 'EXECUTION DISARMED' /tmp/body && echo "VERIFY execution badge PASS"
           grep -q 'Live Trader Cockpit' /tmp/body && echo "VERIFY cockpit PASS"
           grep -q 'Crypto Radar Universe' /tmp/body && echo "VERIFY universe PASS"
+          grep -q 'NFE-OS SI Crypto V0' /tmp/body && echo "VERIFY SI Crypto V0 PASS"
           curl --fail --silent --show-error --location "$LIVE_URL/data/snapshot.json" --output /tmp/snapshot
           grep -q '"operationalCockpit"' /tmp/snapshot
           grep -q '"cryptoUniverse"' /tmp/snapshot
           grep -q '"researchLanes"' /tmp/snapshot
+          grep -q '"siCryptoV0"' /tmp/snapshot
+          grep -q '"DISARMED / FIRE BLOCKED"' /tmp/snapshot
+          grep -q '"qualificationThreshold": null' /tmp/snapshot
           grep -q '"LOCK / FOUNDER APPROVAL REQUIRED"' /tmp/snapshot
           grep -q '"MCP ACTIVE MARKET SURFACE NOT CURRENTLY EXPOSED"' /tmp/snapshot
           grep -qi '^content-security-policy:.*connect-src '\''self'\''' /tmp/headers
