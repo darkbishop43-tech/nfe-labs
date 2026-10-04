@@ -1,0 +1,40 @@
+name: PAYNE NEAR event forensic read-only
+
+on:
+  push:
+    branches:
+      - payne-near-presubmit-forensic-readonly
+    paths:
+      - ".github/workflows/payne-near-event-readonly.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  forensic:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Read persisted NEAR fire evidence only
+        shell: bash
+        run: |
+          set -euo pipefail
+          base='https://market-edge-payne-kalshi-real.darkbishop43.workers.dev'
+          ticker='KXNEAR15M-26OCT041815-15'
+          curl --max-time 40 -fsS "$base/evidence/events?limit=1000" -o /tmp/events.json
+          curl --max-time 40 -fsS "$base/forensic/would-fire?checkpoint=500&format=json" -o /tmp/wf.json
+          curl --max-time 40 -fsS "$base/export?range=daily&format=json" -o /tmp/export.json
+
+          echo 'NEAR_EVENTS='
+          jq -c --arg ticker "$ticker" '.events[] | select(
+            ((.ticker // .marketTicker // .selected.ticker // "") == $ticker) or
+            (((.snapshot.selected.ticker // "") == $ticker))
+          )' /tmp/events.json
+
+          echo 'NEAR_WOULD_FIRE='
+          jq -c --arg ticker "$ticker" '.rows[] | select(.ticker==$ticker)' /tmp/wf.json
+
+          echo 'NEAR_DAILY_EXPORT='
+          jq -c --arg ticker "$ticker" '.rows[] | select(.ticker==$ticker and (.observationAt >= "2026-10-04T22:00:00Z") and (.observationAt <= "2026-10-04T22:05:00Z"))' /tmp/export.json
+
+          echo 'SAFETY='
+          jq '{providerWrites,orders,capitalMovedUsd}' /tmp/wf.json
