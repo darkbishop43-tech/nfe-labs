@@ -17,7 +17,9 @@ const REAL_CONTROL_SCHEMA = 'PAYNE_REAL_CONTROL_V1';
 const REAL_OWNER = 'PAYNE_KALSHI_REAL';
 const SCAN_PERSIST_INTERVAL_MS = 60 * 1000;
 const SCAN_HISTORY_INTERVAL_MS = 15 * 60 * 1000;
-const CONTROL_THRESHOLD_OPTIONS = Object.freeze([0.70,0.75,0.80,0.85]);
+const FOUNDER_THRESHOLD_MIN = 0.50;
+const FOUNDER_THRESHOLD_MAX = 1.00;
+const FOUNDER_THRESHOLD_DECIMALS = 2;
 const CONTROL_STAKE_OPTIONS = Object.freeze([1,2,5,10]);
 const CONTROL_ATTEMPT_OPTIONS = Object.freeze([1,5,10,30]);
 const FORBIDDEN_KEYS = new Set([
@@ -25,6 +27,21 @@ const FORBIDDEN_KEYS = new Set([
   'state:payne_method',
   'control:paper_threshold:payne_method',
 ]);
+
+export function parseFounderThreshold(rawValue) {
+  const text=String(rawValue??'').trim();
+  if(!/^(?:\d+|\d*\.\d{1,2})$/.test(text)) return {ok:false,error:'PAYNE_CONTROL_THRESHOLD_INVALID_PRECISION'};
+  const value=Number(text);
+  if(!Number.isFinite(value)) return {ok:false,error:'PAYNE_CONTROL_THRESHOLD_NOT_FINITE'};
+  if(value<FOUNDER_THRESHOLD_MIN || value>FOUNDER_THRESHOLD_MAX) return {ok:false,error:'PAYNE_CONTROL_THRESHOLD_OUT_OF_RANGE'};
+  return {ok:true,value:Number(value.toFixed(FOUNDER_THRESHOLD_DECIMALS))};
+}
+
+export function effectiveLockThreshold(activeThreshold) {
+  const threshold=Number(activeThreshold);
+  if(!Number.isFinite(threshold)) return PAYNE_CONFIG.lockScore;
+  return threshold<PAYNE_CONFIG.lockScore?threshold:PAYNE_CONFIG.lockScore;
+}
 
 export const PAYNE_CONFIG = Object.freeze({
   radarScore: 0.50,
@@ -78,7 +95,7 @@ function normalizeControlState(saved) {
     maxPositions:3,
     attemptTarget:!migrated&&CONTROL_ATTEMPT_OPTIONS.includes(Number(src.attemptTarget))?Number(src.attemptTarget):1,
     maxEntryDebitUsd:!migrated&&CONTROL_STAKE_OPTIONS.includes(Number(src.maxEntryDebitUsd))?Number(src.maxEntryDebitUsd):1,
-    activeThreshold:!migrated&&CONTROL_THRESHOLD_OPTIONS.includes(Number(src.activeThreshold))?Number(src.activeThreshold):PAYNE_CONFIG.defaultThreshold,
+    activeThreshold:!migrated&&parseFounderThreshold(src.activeThreshold).ok?parseFounderThreshold(src.activeThreshold).value:PAYNE_CONFIG.defaultThreshold,
     scanEnabled:src.scanEnabled!==false,
     scanCadenceMs:60_000,
     providerWriteAuthority:armed?'ENABLED_GOVERNED_PAYNE_ONLY':'BUILT_INACTIVE_DISARMED',
@@ -90,14 +107,16 @@ function normalizeControlState(saved) {
   };
 }
 
-export function payneStage(candidate, activeThreshold = PAYNE_CONFIG.defaultThreshold) {
+export function payneStage(candidate, activeThreshold = PAYNE_CONFIG.defaultThreshold, frozenEffectiveLock = null) {
   const score = Number(candidate?.score);
   const edge = Number(candidate?.edge);
   const move = Number(candidate?.move);
+  const threshold = Number(activeThreshold);
+  const effectiveLock = Number.isFinite(Number(frozenEffectiveLock)) ? Number(frozenEffectiveLock) : effectiveLockThreshold(threshold);
   const radar = Number.isFinite(score) && score >= PAYNE_CONFIG.radarScore;
-  const lockIn = radar && score >= PAYNE_CONFIG.lockScore && Number.isFinite(edge) && edge > 0;
-  const pullTrigger = lockIn && score >= Number(activeThreshold) && Number.isFinite(move) && Math.abs(move) >= PAYNE_CONFIG.minAbsMove;
-  return { radar, lockIn, pullTrigger, stage: pullTrigger ? 'PULL_TRIGGER' : lockIn ? 'LOCK_IN' : radar ? 'RADAR' : 'NO_ACTION' };
+  const lockIn = radar && score >= effectiveLock && Number.isFinite(edge) && edge > 0;
+  const pullTrigger = lockIn && score >= threshold && Number.isFinite(move) && Math.abs(move) >= PAYNE_CONFIG.minAbsMove;
+  return { radar, lockIn, pullTrigger, effectiveLock, diagnosticLowerLockMode:threshold<PAYNE_CONFIG.lockScore, stage: pullTrigger ? 'PULL_TRIGGER' : lockIn ? 'LOCK_IN' : radar ? 'RADAR' : 'NO_ACTION' };
 }
 
 function binding(env) {
@@ -151,7 +170,7 @@ export async function updateFounderControl(env, action, rawValue = null) {
   if (name==='ARM') {
     const series=await loadRealSeriesState(env);
     const cfgThreshold=Number(before.activeThreshold), cfgStake=Number(before.maxEntryDebitUsd), cfgTarget=Number(before.attemptTarget);
-    if (!CONTROL_THRESHOLD_OPTIONS.includes(cfgThreshold)) throw new Error('PAYNE_REAL_ARM_THRESHOLD_NOT_ALLOWED');
+    if (!parseFounderThreshold(String(cfgThreshold)).ok) throw new Error('PAYNE_REAL_ARM_THRESHOLD_NOT_ALLOWED');
     if (!CONTROL_STAKE_OPTIONS.includes(cfgStake)) throw new Error('PAYNE_REAL_ARM_STAKE_NOT_ALLOWED');
     if (!CONTROL_ATTEMPT_OPTIONS.includes(cfgTarget)) throw new Error('PAYNE_REAL_ARM_ATTEMPT_TARGET_NOT_ALLOWED');
     if (Number(before.requiredExchangeIndex)!==2) throw new Error('PAYNE_REAL_ARM_INDEX2_REQUIRED');
@@ -164,7 +183,7 @@ export async function updateFounderControl(env, action, rawValue = null) {
       // An unfinished governed series: ARM resumes it with its FROZEN config. It never re-snapshots or resets the count.
       const frozen=frozenSeriesConfig(series);
       if (!frozen.ok) throw new Error('PAYNE_REAL_SERIES_IN_PROGRESS_NOT_FROZEN');
-      if (frozen.attemptTarget!==cfgTarget || frozen.threshold!==cfgThreshold || frozen.maxEntryDebitUsd!==cfgStake) throw new Error('PAYNE_REAL_SERIES_IN_PROGRESS_CONFIG_MISMATCH');
+      if (frozen.attemptTarget!==cfgTarget || frozen.threshold!==cfgThreshold || frozen.effectiveLockThreshold!==effectiveLockThreshold(cfgThreshold) || frozen.maxEntryDebitUsd!==cfgStake) throw new Error('PAYNE_REAL_SERIES_IN_PROGRESS_CONFIG_MISMATCH');
       const gate=seriesInterlock(series);
       if (!gate.clear) throw new Error('PAYNE_REAL_SERIES_PRIOR_ATTEMPT_NOT_CLEAN_'+gate.reason);
       armedSeries={...series,status:'ARMED_WAITING',requiredExchangeIndex:2,completedAt:null};
@@ -175,13 +194,13 @@ export async function updateFounderControl(env, action, rawValue = null) {
         ...defaultRealSeriesState(),
         seriesId:(started===0&&series?.seriesId)?series.seriesId:crypto.randomUUID(),
         status:'ARMED_WAITING',attemptsStarted:0,
-        attemptTarget:cfgTarget,threshold:cfgThreshold,maxEntryDebitUsd:cfgStake,requiredExchangeIndex:2,
+        attemptTarget:cfgTarget,threshold:cfgThreshold,effectiveLockThreshold:effectiveLockThreshold(cfgThreshold),maxEntryDebitUsd:cfgStake,requiredExchangeIndex:2,
         configFrozen:true,frozenAt:new Date().toISOString(),completedAt:null,
       };
       next.attempts=0; next.openPositions=0;
     }
     await saveRealSeriesState(env,armedSeries);
-    await persistRun(env,{runId:armedSeries.seriesId,threshold:armedSeries.threshold,maxEntryDebitUsd:armedSeries.maxEntryDebitUsd,attemptTarget:armedSeries.attemptTarget,requiredExchangeIndex:2,frozenAt:armedSeries.frozenAt||null});
+    await persistRun(env,{runId:armedSeries.seriesId,threshold:armedSeries.threshold,effectiveLockThreshold:armedSeries.effectiveLockThreshold,maxEntryDebitUsd:armedSeries.maxEntryDebitUsd,attemptTarget:armedSeries.attemptTarget,requiredExchangeIndex:2,frozenAt:armedSeries.frozenAt||null});
     next.armed=true;
   } else if (name==='DISARM') next.armed=false;
   else if (name==='SET_THRESHOLD') {
@@ -924,21 +943,22 @@ export async function readAuthoritativePayneFeatures(env, nowMs = Date.now()) {
   };
 }
 
-export function payneDecisionEvidence(candidate, activeThreshold = PAYNE_CONFIG.defaultThreshold) {
+export function payneDecisionEvidence(candidate, activeThreshold = PAYNE_CONFIG.defaultThreshold, frozenEffectiveLock = null) {
   const score=Number(candidate?.score), edge=Number(candidate?.edge), move=Number(candidate?.move);
   if (![score,edge,move].every(Number.isFinite)) {
     return {radar:'UNKNOWN',lock:'UNKNOWN',pull:'UNKNOWN',decision:'FEATURES_UNAVAILABLE'};
   }
-  const radar=score>=PAYNE_CONFIG.radarScore;
-  if (!radar) return {radar:'RADAR_REJECT',lock:'LOCK_NOT_REACHED',pull:'PULL_NOT_REACHED',decision:'RADAR_REJECT_SCORE_BELOW_0_50'};
-  const scoreLock=score>=PAYNE_CONFIG.lockScore;
-  const edgeLock=edge>0;
-  if (!scoreLock) return {radar:'RADAR_PASS',lock:'LOCK_REJECT',pull:'PULL_NOT_REACHED',decision:'LOCK_REJECT_SCORE_BELOW_0_65'};
-  if (!edgeLock) return {radar:'RADAR_PASS',lock:'LOCK_REJECT',pull:'PULL_NOT_REACHED',decision:'LOCK_REJECT_EDGE_NOT_POSITIVE'};
   const threshold=Number(activeThreshold);
-  if (score<threshold) return {radar:'RADAR_PASS',lock:'LOCK_PASS',pull:'PULL_REJECTED',decision:'PULL_REJECTED_SCORE_BELOW_THRESHOLD'};
-  if (Math.abs(move)<PAYNE_CONFIG.minAbsMove) return {radar:'RADAR_PASS',lock:'LOCK_PASS',pull:'PULL_REJECTED',decision:'PULL_REJECTED_MOVE_BELOW_0_002'};
-  return {radar:'RADAR_PASS',lock:'LOCK_PASS',pull:'PULL_QUALIFIED',decision:'PULL_QUALIFIED'};
+  const effectiveLock=Number.isFinite(Number(frozenEffectiveLock))?Number(frozenEffectiveLock):effectiveLockThreshold(threshold);
+  const radar=score>=PAYNE_CONFIG.radarScore;
+  if (!radar) return {radar:'RADAR_REJECT',lock:'LOCK_NOT_REACHED',pull:'PULL_NOT_REACHED',decision:'RADAR_REJECT_SCORE_BELOW_0_50',effectiveLock};
+  const scoreLock=score>=effectiveLock;
+  const edgeLock=edge>0;
+  if (!scoreLock) return {radar:'RADAR_PASS',lock:'LOCK_REJECT',pull:'PULL_NOT_REACHED',decision:'LOCK_REJECT_SCORE_BELOW_EFFECTIVE_LOCK',effectiveLock};
+  if (!edgeLock) return {radar:'RADAR_PASS',lock:'LOCK_REJECT',pull:'PULL_NOT_REACHED',decision:'LOCK_REJECT_EDGE_NOT_POSITIVE',effectiveLock};
+  if (score<threshold) return {radar:'RADAR_PASS',lock:'LOCK_PASS',pull:'PULL_REJECTED',decision:'PULL_REJECTED_SCORE_BELOW_THRESHOLD',effectiveLock};
+  if (Math.abs(move)<PAYNE_CONFIG.minAbsMove) return {radar:'RADAR_PASS',lock:'LOCK_PASS',pull:'PULL_REJECTED',decision:'PULL_REJECTED_MOVE_BELOW_0_002',effectiveLock};
+  return {radar:'RADAR_PASS',lock:'LOCK_PASS',pull:'PULL_QUALIFIED',decision:'PULL_QUALIFIED',effectiveLock};
 }
 
 function featureForCandidate(featureState, ticker, outcomeSide, asset, activeThreshold) {
@@ -2123,7 +2143,9 @@ export async function buildCockpitData(env, nowMs=Date.now()) {
       maxPositions:control.maxPositions,
       maxEntryDebitUsd:control.maxEntryDebitUsd,
       threshold:control.activeThreshold,
-      thresholdOptions:CONTROL_THRESHOLD_OPTIONS,
+      effectiveLockThreshold:effectiveLockThreshold(control.activeThreshold),
+      diagnosticLowerLockMode:Number(control.activeThreshold)<PAYNE_CONFIG.lockScore,
+      thresholdInput:{min:FOUNDER_THRESHOLD_MIN,max:FOUNDER_THRESHOLD_MAX,decimals:FOUNDER_THRESHOLD_DECIMALS},
       stakeOptions:CONTROL_STAKE_OPTIONS,
       attemptOptions:CONTROL_ATTEMPT_OPTIONS,
       scanEnabled:control.scanEnabled,
@@ -2211,14 +2233,16 @@ const SERIES_BLOCKING_POSITION_STATUSES = Object.freeze(['OPEN','EXIT_RETRY','EX
 
 // The ACTIVE series' own frozen config. The execution engine reads run config ONLY from here.
 export function frozenSeriesConfig(series) {
-  const attemptTarget=Number(series?.attemptTarget), threshold=Number(series?.threshold);
+  const attemptTarget=Number(series?.attemptTarget), threshold=Number(series?.threshold), effectiveLock=Number(series?.effectiveLockThreshold);
   const maxEntryDebitUsd=Number(series?.maxEntryDebitUsd), requiredExchangeIndex=Number(series?.requiredExchangeIndex);
+  const parsed=parseFounderThreshold(String(threshold));
   const ok=series?.configFrozen===true
     && Number.isInteger(attemptTarget) && attemptTarget>=1
-    && Number.isFinite(threshold) && threshold>0
+    && parsed.ok
+    && Number.isFinite(effectiveLock) && effectiveLock===effectiveLockThreshold(threshold)
     && Number.isFinite(maxEntryDebitUsd) && maxEntryDebitUsd>0
     && requiredExchangeIndex===2;
-  return {ok,attemptTarget,threshold,maxEntryDebitUsd,requiredExchangeIndex};
+  return {ok,attemptTarget,threshold,effectiveLockThreshold:effectiveLock,maxEntryDebitUsd,requiredExchangeIndex};
 }
 
 export function seriesTerminal(series) {
@@ -2249,6 +2273,7 @@ export function defaultRealSeriesState() {
     attemptsStarted:0,
     attemptTarget:1,
     threshold:.70,
+    effectiveLockThreshold:.65,
     maxEntryDebitUsd:1,
     requiredExchangeIndex:2,
     configFrozen:false,
@@ -3107,7 +3132,7 @@ export async function runPayneRealExecutionCycle(env,{postImpl=kalshiPayneOrderP
 
   const features=await readAuthoritativePayneFeatures(env,nowMs);
   const finalFeature=featureForCandidate(features,candidate.ticker,candidate.outcomeSide,candidate.asset,cfg.threshold);
-  const finalGate=payneStage(finalFeature,cfg.threshold);
+  const finalGate=payneStage(finalFeature,cfg.threshold,cfg.effectiveLockThreshold);
   if(!finalFeature.available || !finalGate.pullTrigger){
     series.status='HOLD_PRE_SUBMIT_REQUALIFICATION_FAILED'; return saveRealSeriesState(env,series);
   }
