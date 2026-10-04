@@ -61,6 +61,38 @@ jobs:
           echo "D1_DATABASE_ID=$DB_ID"
           echo "database_id=$DB_ID" >> "$GITHUB_OUTPUT"
 
+      - name: Prepare D1-bound deploy config
+        shell: bash
+        env:
+          DB_ID: ${{ steps.d1.outputs.database_id }}
+        run: |
+          set -euo pipefail
+          cp wrangler.toml /tmp/wrangler.deploy.toml
+          cat >> /tmp/wrangler.deploy.toml <<EOF
+
+[[d1_databases]]
+binding = "V0A_DB"
+database_name = "nfe-os-robinhood-si-v0a-ledger"
+database_id = "$DB_ID"
+migrations_dir = "migrations"
+EOF
+          grep -q 'binding = "V0A_DB"' /tmp/wrangler.deploy.toml
+          grep -q 'crons = \["\* \* \* \* \*"\]' /tmp/wrangler.deploy.toml
+
+      - name: Apply dedicated SI V0-A D1 schema
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          npx --yes wrangler@4 d1 execute nfe-os-robinhood-si-v0a-ledger --remote --file=migrations/0001_robinhood_si_v0a_ledger.sql --yes
+          npx --yes wrangler@4 d1 execute nfe-os-robinhood-si-v0a-ledger --remote --command="SELECT name FROM sqlite_schema WHERE type='table' AND name IN ('v0a_observations','v0a_spread_samples','v0a_outcomes') ORDER BY name" --json > /tmp/d1-tables.json
+          cat /tmp/d1-tables.json
+          grep -q 'v0a_observations' /tmp/d1-tables.json
+          grep -q 'v0a_spread_samples' /tmp/d1-tables.json
+          grep -q 'v0a_outcomes' /tmp/d1-tables.json
+
       - name: V0 read-only firewall
         working-directory: robinhood-observatory-v0
         run: npm test
@@ -69,7 +101,7 @@ jobs:
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-        run: npx --yes wrangler@4 deploy --dry-run
+        run: npx --yes wrangler@4 deploy --dry-run --config /tmp/wrangler.deploy.toml
 
       - name: Deploy dedicated Robinhood Observatory Worker
         id: deploy
@@ -79,7 +111,7 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: |
           set -euo pipefail
-          DEPLOY_OUTPUT="$(npx --yes wrangler@4 deploy 2>&1)"
+          DEPLOY_OUTPUT="$(npx --yes wrangler@4 deploy --config /tmp/wrangler.deploy.toml 2>&1)"
           printf '%s\n' "$DEPLOY_OUTPUT"
           LIVE_URL="$(printf '%s\n' "$DEPLOY_OUTPUT" | grep -Eo 'https://[^[:space:]]+\.workers\.dev' | tail -n 1)"
           test -n "$LIVE_URL" || { echo "Cloudflare live URL not found in Wrangler output"; exit 1; }
@@ -115,6 +147,10 @@ jobs:
           grep -qi '^x-content-type-options: nosniff' /tmp/headers
           grep -qi '^x-frame-options: DENY' /tmp/headers
           echo "PUBLIC_LOAD_PASS $LIVE_URL"
+          curl --fail --silent --show-error --location "$LIVE_URL/api/v0a/ledger-status" --output /tmp/v0a-ledger-status
+          grep -q '"database": "nfe-os-robinhood-si-v0a-ledger"' /tmp/v0a-ledger-status && echo "VERIFY dedicated D1 binding PASS"
+          grep -q '"authority": "RESEARCH_ONLY"' /tmp/v0a-ledger-status && echo "VERIFY D1 research-only authority PASS"
+          grep -q '"robinhoodExecution": "DISARMED"' /tmp/v0a-ledger-status && echo "VERIFY Robinhood execution disarmed PASS"
           curl --fail --silent --show-error --location "$LIVE_URL/api/v0a/ping" --output /tmp/v0a-ping
           grep -q '"status": "PASS"' /tmp/v0a-ping && echo "VERIFY Binance.US public ping PASS"
           grep -q '"credential": "NONE"' /tmp/v0a-ping && echo "VERIFY Binance.US no credential PASS"
