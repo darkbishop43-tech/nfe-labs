@@ -240,6 +240,70 @@ async function researchResponse(env, request) {
   };
 }
 
+
+async function resolveMapping(env, robinhoodSymbol) {
+  const [snapshot, info] = await Promise.all([loadSnapshot(env), exchangeInfo()]);
+  const mapping=mapRobinhoodToBinance(robinhoodSymbol,info.symbols||[]);
+  const rh=(snapshot.cryptoUniverse?.rows||[]).find(x=>x.symbol===robinhoodSymbol)||null;
+  return {mapping,rh};
+}
+async function momentumResponse(env, request) {
+  const url=new URL(request.url);
+  const robinhoodSymbol=url.searchParams.get("symbol")||"BTC-USD";
+  const bars=Number(url.searchParams.get("bars")||"0");
+  if (!Number.isInteger(bars)||bars<100||bars>1000) return json({error:"bars is required (100..1000). No default is hard-coded."},400);
+  const {mapping,rh}=await resolveMapping(env,robinhoodSymbol);
+  if(!mapping.binanceSymbol) return json({mapping,status:"RESEARCH DATA UNAVAILABLE"},404);
+  const [a,b,d]=await Promise.all([
+    publicGet("/api/v3/klines",{symbol:mapping.binanceSymbol,interval:"5m",limit:bars}),
+    publicGet("/api/v3/klines",{symbol:mapping.binanceSymbol,interval:"15m",limit:bars}),
+    publicGet("/api/v3/klines",{symbol:mapping.binanceSymbol,interval:"1h",limit:bars})
+  ]);
+  const h5=horizonStats(a.map(parseKline)),h15=horizonStats(b.map(parseKline)),h60=horizonStats(d.map(parseKline));
+  const M=[h5?.logistic,h15?.logistic,h60?.logistic].every(Number.isFinite)?0.50*h5.logistic+0.30*h15.logistic+0.20*h60.logistic:null;
+  return json({status:M==null?"INCOMPLETE":"PASS",provenance:{researchSource:"Binance.US",lockAuthority:"Robinhood MCP only",credential:"NONE"},mapping,robinhoodSnapshot:rh,configuration:{bars,momentumHorizons:["5m","15m","1h"]},raw:{m5:h5,m15:h15,m60:h60},M,fireAuthority:"ZERO"});
+}
+async function featureResponse(env, request) {
+  const url=new URL(request.url);
+  const robinhoodSymbol=url.searchParams.get("symbol")||"BTC-USD";
+  const featureInterval=url.searchParams.get("featureInterval")||null;
+  const lookbackDays=Number(url.searchParams.get("lookbackDays")||"0");
+  if(!featureInterval||!["5m","15m","1h"].includes(featureInterval)) return json({error:"featureInterval is required: 5m, 15m, or 1h."},400);
+  if(!Number.isFinite(lookbackDays)||lookbackDays<=0||lookbackDays>30) return json({error:"lookbackDays is required (1..30)."},400);
+  const {mapping,rh}=await resolveMapping(env,robinhoodSymbol);
+  if(!mapping.binanceSymbol) return json({mapping,status:"RESEARCH DATA UNAVAILABLE"},404);
+  const end=Date.now(),start=end-lookbackDays*DAY_MS;
+  const raw=await publicGet("/api/v3/klines",{symbol:mapping.binanceSymbol,interval:featureInterval,startTime:start,endTime:end,limit:1000});
+  const bars=raw.map(parseKline), closes=bars.map(x=>x.close);
+  const ema9=ema(closes,9),ema20=ema(closes,20),ema50=ema(closes,50);
+  const atrs=atrSeries(bars,14),currentAtr=atrs.length?atrs[atrs.length-1].atr:null,currentClose=bars.length?bars[bars.length-1].close:null;
+  const D1=(ema9!=null&&ema20!=null&&currentAtr)?(ema9-ema20)/currentAtr:null;
+  const D2=(ema20!=null&&ema50!=null&&currentAtr)?(ema20-ema50)/currentAtr:null;
+  const T=(D1!=null&&D2!=null)?0.5*logistic(D1)+0.5*logistic(D2):null;
+  const atrFractions=atrs.map(x=>x.atr/bars[x.index].close).filter(Number.isFinite);
+  const currentAtrFraction=(currentAtr&&currentClose)?currentAtr/currentClose:null;
+  const pAtr=currentAtrFraction==null?null:percentileRank(atrFractions.slice(0,-1),currentAtrFraction);
+  const V=pAtr==null?null:clamp(1-2*Math.abs(pAtr-0.5));
+  const latest=bars.length?bars[bars.length-1]:null, previous=bars.slice(0,-1);
+  const normalVolume=mean(previous.map(x=>x.volume).filter(Number.isFinite));
+  const rvol=(latest&&normalVolume)?latest.volume/normalVolume:null;
+  const F=rvol==null?null:clamp(rvol/2);
+  const dollarVolumes=previous.map(x=>x.quoteVolume).filter(Number.isFinite);
+  const qLiquidity=latest?percentileRank(dollarVolumes,latest.quoteVolume):null;
+  return json({status:[T,V,F].every(Number.isFinite)?"PASS":"INCOMPLETE",provenance:{researchSource:"Binance.US",lockAuthority:"Robinhood MCP only",credential:"NONE"},mapping,robinhoodSnapshot:rh,configuration:{featureInterval,lookbackDays},raw:{ema9,ema20,ema50,atr14:currentAtr,atrFraction:currentAtrFraction,atrPercentile:pAtr,volume:latest?.volume??null,relativeVolume:rvol,quoteVolume:latest?.quoteVolume??null,takerBuyBaseVolume:latest?.takerBuyBaseVolume??null,takerBuyQuoteVolume:latest?.takerBuyQuoteVolume??null,tradeCount:latest?.tradeCount??null,dollarVolume:latest?.quoteVolume??null,qLiquidityPercentile:qLiquidity},T,V,F,qLiquidity,fireAuthority:"ZERO"});
+}
+async function bookResponse(env, request) {
+  const url=new URL(request.url),robinhoodSymbol=url.searchParams.get("symbol")||"BTC-USD";
+  const {mapping,rh}=await resolveMapping(env,robinhoodSymbol);
+  if(!mapping.binanceSymbol) return json({mapping,status:"RESEARCH DATA UNAVAILABLE"},404);
+  const [book,depth]=await Promise.all([
+    publicGet("/api/v3/ticker/bookTicker",{symbol:mapping.binanceSymbol}),
+    publicGet("/api/v3/depth",{symbol:mapping.binanceSymbol,limit:20})
+  ]);
+  const bid=Number(book.bidPrice),ask=Number(book.askPrice),mark=(bid+ask)/2,spreadPct=mark?((ask-bid)/mark):null;
+  return json({status:"PASS / Q INCOMPLETE",provenance:{researchSource:"Binance.US",lockAuthority:"Robinhood MCP only",credential:"NONE"},mapping,robinhoodSnapshot:rh,researchBook:{bid,ask,mark,spreadPct,bidQty:Number(book.bidQty),askQty:Number(book.askQty)},depthSummary:{bidLevels:depth.bids?.length||0,askLevels:depth.asks?.length||0,bestBid:depth.bids?.[0]||null,bestAsk:depth.asks?.[0]||null},qSpread:null,Q:null,reason:"Historical same-pair spread distribution must be collected prospectively; current Binance.US spread never substitutes for Robinhood LOCK spread.",fireAuthority:"ZERO"});
+}
+
 export default {
   async fetch(request, env) {
     if (request.method !== "GET" && request.method !== "HEAD") {
@@ -248,7 +312,10 @@ export default {
     const url=new URL(request.url);
     try {
       if (url.pathname === "/api/v0a/mapping") return json(await mappingResponse(env));
-      if (url.pathname === "/api/v0a/research") return await researchResponse(env,request);
+      if (url.pathname === "/api/v0a/research") return json({status:"SPLIT ROUTES REQUIRED",routes:["/api/v0a/momentum","/api/v0a/features","/api/v0a/book"],reason:"V0-A stateless runtime uses bounded component routes."},409);
+      if (url.pathname === "/api/v0a/momentum") return await momentumResponse(env,request);
+      if (url.pathname === "/api/v0a/features") return await featureResponse(env,request);
+      if (url.pathname === "/api/v0a/book") return await bookResponse(env,request);
       if (url.pathname === "/api/v0a/ping") {
         const p=await publicGet("/api/v3/ping");
         return json({status:"PASS",source:"Binance.US public market data",credential:"NONE",executionAuthority:"NONE",upstream:p});
