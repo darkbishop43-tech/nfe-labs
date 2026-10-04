@@ -59,8 +59,7 @@ export async function kalshiPayneOrderPost(env,kind,payload,scope,{fetchImpl=fet
   let providerPostStarted=false;
   try{
     const proof=payneOrderWriteProof(kind,payload,scope);
-    providerPostStarted=true;
-    const response=await kalshiExecutionOrderPost(env,payload,{fetchImpl});
+    const response=await kalshiExecutionOrderPost(env,payload,{fetchImpl,onProviderPostStart:()=>{providerPostStarted=true;}});
     return {response,proof};
   }catch(error){
     if(error&&typeof error==='object')error.payneProviderPostStarted=providerPostStarted;
