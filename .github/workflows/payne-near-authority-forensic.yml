@@ -20,16 +20,11 @@ jobs:
         run: |
           set -euo pipefail
           base='https://market-edge-payne-kalshi-real.darkbishop43.workers.dev'
-          curl --max-time 30 -fsS "$base/export?range=daily&format=json" -o /tmp/export.json
-          echo 'NEAR_DOWN_075_ROWS='
-          jq '[.rows[] | select(.asset=="NEAR" and .direction=="DOWN" and ((.score // 0) >= 0.745) and ((.score // 0) <= 0.755)) | {
-            observationAt,ticker,direction,outcomeSide,score,payneState,radarResult,lockResult,pullResult,decision,
-            initialPrice,freshLockPrice,preSubmitPrice,timeGate,tickerConsistency,sideConsistency,
-            zeroMoneyFireStatus,estimatedSizingUsd,realStateAsOf,realSeriesId,realArmed,attemptsStarted,attemptTarget,
-            lastAttemptResult,lastProviderOrderId,realSeriesStatus,lastRealLedgerEvent
-          }]' /tmp/export.json
+          curl --max-time 20 -fsS "$base/evidence/events?limit=500" -o /tmp/events.json
           echo 'NEAR_DOWN_075_EVENTS='
-          jq '[.events[]? | select((.asset=="NEAR" or ((.ticker // "")|startswith("KXNEAR15M"))) and (.direction=="DOWN" or .outcomeSide=="NO") and ((.score // 0) >= 0.745) and ((.score // 0) <= 0.755))]' /tmp/export.json
+          jq '[.events[]? | select((.asset=="NEAR" or ((.ticker // "")|startswith("KXNEAR15M"))) and (.direction=="DOWN" or .outcomeSide=="NO") and ((.score // 0) >= 0.745) and ((.score // 0) <= 0.755))]' /tmp/events.json
+          echo 'NEAR_DOWN_FIRE_PLANS='
+          jq '[.events[]? | select(.type=="ZERO_MONEY_FIRE_PLAN_RECORDED" and .asset=="NEAR" and .direction=="DOWN" and ((.score // 0) >= 0.745) and ((.score // 0) <= 0.755))]' /tmp/events.json
           echo 'PROVIDER_WRITES=0'
           echo 'ORDERS=0'
           echo 'CAPITAL_MOVED_USD=0'
