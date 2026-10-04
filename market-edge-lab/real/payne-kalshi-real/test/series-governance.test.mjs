@@ -24,6 +24,7 @@ import {
   fireSpecimenFingerprint,
 } from '../src/index.js';
 import { kalshiPayneOrderPost, payneOrderWriteProof } from '../src/kalshi-real-write.js';
+import { assertKalshiMechanicalOrderPayload } from '../../shared/kalshi-execution-write.js';
 
 if (!globalThis.crypto) globalThis.crypto=webcrypto;
 
@@ -621,8 +622,8 @@ test('GOV 23: IOC semantics unchanged on every attempt; write contract rejects n
     for(const c of entries(post)){ assert.equal(c.payload.time_in_force,'immediate_or_cancel'); assert.equal(c.payload.post_only,false); assert.equal(c.payload.reduce_only,false); assert.equal(c.payload.cancel_order_on_pause,true); }
     const base={ticker:'T',client_order_id:'c',side:'bid',count:'1',price:'0.5',time_in_force:'immediate_or_cancel',post_only:false,cancel_order_on_pause:true,reduce_only:false};
     const sc={owner:'PAYNE_KALSHI_REAL',exchangeIndex:2,authorized:true,armed:true,attemptTarget:5,attemptsBefore:0,maxEntryDebitUsd:1,seriesConfigFrozen:true,priorAttemptClean:true,entryDebitUsd:.5};
-    assert.throws(()=>payneOrderWriteProof('ENTRY',{...base,time_in_force:'good_till_canceled'},sc),/KALSHI_ORDER_IOC_REQUIRED/);
-    assert.throws(()=>payneOrderWriteProof('ENTRY',{...base,post_only:true},sc),/KALSHI_ORDER_POST_ONLY_FALSE_REQUIRED/);
+    assert.throws(()=>assertKalshiMechanicalOrderPayload({...base,time_in_force:'good_till_canceled'}),/KALSHI_ORDER_IOC_REQUIRED/);
+    assert.throws(()=>assertKalshiMechanicalOrderPayload({...base,post_only:true}),/KALSHI_ORDER_POST_ONLY_FALSE_REQUIRED/);
     assert.throws(()=>payneOrderWriteProof('ENTRY',base,{...sc,seriesConfigFrozen:false}),/PAYNE_ENTRY_SERIES_CONFIG_NOT_FROZEN/);
     assert.throws(()=>payneOrderWriteProof('ENTRY',base,{...sc,priorAttemptClean:false}),/PAYNE_ENTRY_PRIOR_ATTEMPT_NOT_CLEAN/);
     assert.throws(()=>payneOrderWriteProof('ENTRY',base,{...sc,armed:false}),/PAYNE_ENTRY_ARM_REQUIRED/);
