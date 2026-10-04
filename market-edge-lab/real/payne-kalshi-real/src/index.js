@@ -3446,6 +3446,7 @@ export default {
       const managementPending=Boolean(series?.position && ['OPEN','EXIT_RETRY','EXIT_RECONCILIATION_REQUIRED','RECONCILIATION_UNKNOWN'].includes(String(series.position.status||'')));
       const entryReconciliationPending=series?.unresolvedEntry===true;
       if (control.armed || managementPending || entryReconciliationPending) await runPayneRealExecutionCycle(env);
+      else await reconcileDisarmedSupersededSeries(env,series,control);
     } catch {}
   },
 };
