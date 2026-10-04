@@ -1418,6 +1418,120 @@ function compactObservation(data, source, atMs) {
   };
 }
 
+
+export function fireSpecimenFingerprint(specimen={}) {
+  return [
+    specimen.seriesId||'',
+    specimen.attemptNo??'',
+    specimen.ticker||'',
+    String(specimen.outcomeSide||'').toUpperCase(),
+    specimen.marketOpenTime||'',
+    specimen.marketCloseTime||'',
+  ].join('|');
+}
+
+export function fireSpecimenFromSnapshot(series,snapshot) {
+  const preview=snapshot?.zeroMoneyPreview||null;
+  const selected=snapshot?.selected||null;
+  if(preview?.status!=='FIRE_READY' || !selected?.ticker || preview?.ticker!==selected.ticker) return null;
+  if(String(preview?.outcomeSide||'').toUpperCase()!==String(selected?.outcomeSide||'').toUpperCase()) return null;
+  const cfg=frozenSeriesConfig(series);
+  if(!cfg.ok || seriesTerminal(series) || series?.unresolvedEntry===true) return null;
+  const attemptNo=Number(series?.attemptsStarted||0)+1;
+  const fireObservedAt=snapshot?.at||new Date().toISOString();
+  const specimen={
+    schema:'PAYNE_FIRE_SPECIMEN_V1',
+    state:'LATCHED',
+    specimenId:[series.seriesId,'fire',attemptNo,selected.ticker,fireObservedAt].join(':'),
+    seriesId:series.seriesId,
+    attemptNo,
+    ticker:selected.ticker,
+    asset:selected.asset,
+    outcomeSide:String(selected.outcomeSide||'').toUpperCase(),
+    direction:selected.direction,
+    observedScore:selected?.payne?.score??preview?.score??null,
+    observedMove:selected?.payne?.move??null,
+    observedEdge:selected?.payne?.edge??null,
+    threshold:cfg.threshold,
+    effectiveLockThreshold:cfg.effectiveLockThreshold,
+    fireObservedAt,
+    marketOpenTime:selected.openTime||null,
+    marketCloseTime:selected.closeTime||null,
+    marketWindowIdentity:selected.ticker,
+    marketExchangeIndex:Number(preview?.marketExchangeIndex??preview?.shardEvidence?.marketExchangeIndex??2),
+    identityMatch:'PENDING',
+    freshLock:'PENDING',
+    preSubmit:'PENDING',
+    providerPost:'NO',
+    providerOrderId:null,
+    finalResult:null,
+    invalidationReason:null,
+  };
+  return {...specimen,identityFingerprint:fireSpecimenFingerprint(specimen)};
+}
+
+async function latchFireReadySpecimen(env,series,snapshot,nowMs=Date.now()) {
+  const existing=series?.fireLatch||null;
+  if(existing?.state==='LATCHED' || existing?.state==='PROVIDER_POST_PENDING') return {series,latched:false,reason:'EXISTING_FIRE_LATCH_ACTIVE'};
+  const gate=seriesInterlock(series);
+  if(!gate.clear) return {series,latched:false,reason:'PRIOR_ATTEMPT_NOT_CLEAN_'+gate.reason};
+  const specimen=fireSpecimenFromSnapshot(series,snapshot);
+  if(!specimen) return {series,latched:false,reason:'FIRE_SPECIMEN_NOT_LATCHABLE'};
+  const next={...series,fireLatch:specimen,status:'FIRE_SPECIMEN_LATCHED'};
+  await appendRealLedger(env,'FIRE_SPECIMEN_LATCHED',{
+    seriesId:specimen.seriesId,
+    specimenId:specimen.specimenId,
+    attemptNo:specimen.attemptNo,
+    ticker:specimen.ticker,
+    asset:specimen.asset,
+    outcomeSide:specimen.outcomeSide,
+    direction:specimen.direction,
+    observedScore:specimen.observedScore,
+    threshold:specimen.threshold,
+    effectiveLockThreshold:specimen.effectiveLockThreshold,
+    fireObservedAt:specimen.fireObservedAt,
+    marketOpenTime:specimen.marketOpenTime,
+    marketCloseTime:specimen.marketCloseTime,
+    identityFingerprint:specimen.identityFingerprint,
+    providerPost:false,
+    providerWrites:0,
+    capitalMovedUsd:0,
+  });
+  return {series:await saveRealSeriesState(env,next),latched:true,reason:'FIRE_SPECIMEN_LATCHED'};
+}
+
+async function invalidateFireSpecimen(env,series,reason,details={},nowMs=Date.now()) {
+  const latch=series?.fireLatch||null;
+  const invalidated={
+    ...(latch||{}),
+    state:'INVALIDATED_BEFORE_POST',
+    invalidationReason:String(reason||'UNKNOWN_PRE_POST_INVALIDATION'),
+    invalidatedAt:new Date(nowMs).toISOString(),
+    identityMatch:details.identityMatch??latch?.identityMatch??'UNKNOWN',
+    freshLock:details.freshLock??latch?.freshLock??'NOT_REACHED',
+    preSubmit:details.preSubmit??latch?.preSubmit??'NOT_REACHED',
+    providerPost:'NO',
+    providerOrderId:null,
+    finalResult:'INVALIDATED_BEFORE_POST',
+  };
+  await appendRealLedger(env,'FIRE_SPECIMEN_INVALIDATED_BEFORE_POST',{
+    seriesId:series?.seriesId||null,
+    specimenId:invalidated.specimenId||null,
+    attemptNo:invalidated.attemptNo??null,
+    ticker:invalidated.ticker||null,
+    outcomeSide:invalidated.outcomeSide||null,
+    reason:invalidated.invalidationReason,
+    identityMatch:invalidated.identityMatch,
+    freshLock:invalidated.freshLock,
+    preSubmit:invalidated.preSubmit,
+    providerPost:false,
+    providerOrderId:null,
+    providerWrites:0,
+    capitalMovedUsd:0,
+  });
+  return saveRealSeriesState(env,{...series,fireLatch:invalidated,status:'ARMED_FISHING'});
+}
+
 export async function runReadOnlyScan(env, source='SCHEDULED_CRON', nowMs=Date.now()) {
   const control=await loadControl(env);
   if (!control.scanEnabled && source==='SCHEDULED_CRON') {
@@ -1433,6 +1547,10 @@ export async function runReadOnlyScan(env, source='SCHEDULED_CRON', nowMs=Date.n
   const nextKey=[snapshot?.selected?.ticker,snapshot?.selected?.outcomeSide,snapshot?.selected?.payne?.state].join('|');
   const transition=Boolean(previous && prevKey!==nextKey);
   const previewReady=snapshot?.zeroMoneyPreview?.status==='FIRE_READY';
+  if(previewReady && control.armed===true){
+    const series=await loadRealSeriesState(env);
+    if(!seriesTerminal(series) && frozenSeriesMatchesControl(series,control)) await latchFireReadySpecimen(env,series,snapshot,nowMs);
+  }
   const persistLatest=true;
   const persistHistory=!previous || !Number.isFinite(previousHistoryAt) || nowMs-previousHistoryAt>=SCAN_HISTORY_INTERVAL_MS || transition || previewReady;
   if (persistHistory) snapshot.lastHistoryAt=snapshot.at;
@@ -2314,6 +2432,7 @@ export function defaultRealSeriesState() {
     configFrozen:false,
     frozenAt:null,
     unresolvedEntry:false,
+    fireLatch:null,
     currentAttempt:null,
     position:null,
     completedAt:null,
@@ -2372,8 +2491,12 @@ function latestAttemptClassification(attempt,rows=[]) {
   let classification=null, terminalReason=null;
   for(const row of ordered){
     const type=String(row?.type||'');
-    if(type==='ENTRY_RECONCILED_NO_EXECUTION' || type==='ENTRY_NO_FILL' || type==='ENTRY_LOCAL_PRE_PROVIDER_REJECTED'){
+    if(type==='ENTRY_NO_FILL'){
       classification='NO_FILL'; terminalReason=type;
+    } else if(type==='ENTRY_LOCAL_PRE_PROVIDER_REJECTED' || type==='FIRE_SPECIMEN_INVALIDATED_BEFORE_POST'){
+      classification='INVALIDATED_BEFORE_POST'; terminalReason=type;
+    } else if(type==='ENTRY_RECONCILED_NO_EXECUTION'){
+      classification='PROVIDER_RECONCILED_NO_EXECUTION'; terminalReason=type;
     } else if(type==='ENTRY_RECONCILED_OWNED' || type==='ENTRY_RECONCILED_SETTLED_FLAT' || type==='POSITION_OWNERSHIP_ESTABLISHED'){
       classification='FILLED'; terminalReason=type;
     } else if(['ENTRY_RESULT_UNKNOWN','ENTRY_PROVIDER_REJECTED_OR_UNKNOWN','ENTRY_WRITE_ERROR_UNKNOWN','ENTRY_RECONCILIATION_STILL_UNKNOWN'].includes(type)){
@@ -2384,6 +2507,8 @@ function latestAttemptClassification(attempt,rows=[]) {
   if(classification===null){
     if(state==='FILLED'||state==='PARTIAL') classification='FILLED';
     else if(state==='NO_FILL') classification='NO_FILL';
+    else if(state==='INVALIDATED_BEFORE_POST') classification='INVALIDATED_BEFORE_POST';
+    else if(state==='PROVIDER_RECONCILED_NO_EXECUTION') classification='PROVIDER_RECONCILED_NO_EXECUTION';
     else if(state==='UNKNOWN'||state.includes('UNKNOWN')) classification='UNKNOWN';
   }
   return {classification:classification||'UNKNOWN',terminalReason};
@@ -2524,6 +2649,8 @@ export function summarizeRealExecutionState({control={},series={},ledger=[],asOf
   for(const [attemptId,attemptRows] of latestByAttempt.entries()) classifications.set(attemptId,latestAttemptClassification({},attemptRows).classification);
   const filledIds=new Set([...classifications.entries()].filter(([,v])=>v==='FILLED').map(([k])=>k));
   const noFillIds=new Set([...classifications.entries()].filter(([,v])=>v==='NO_FILL').map(([k])=>k));
+  const prePostInvalidatedIds=new Set([...classifications.entries()].filter(([,v])=>v==='INVALIDATED_BEFORE_POST').map(([k])=>k));
+  const reconciledNoExecutionIds=new Set([...classifications.entries()].filter(([,v])=>v==='PROVIDER_RECONCILED_NO_EXECUTION').map(([k])=>k));
   const unknownIds=new Set([...classifications.entries()].filter(([,v])=>v==='UNKNOWN').map(([k])=>k));
   const attempted=Math.max(
     Number.isFinite(Number(series?.attemptsStarted))?Math.max(0,Math.trunc(Number(series.attemptsStarted))):0,
@@ -2553,6 +2680,8 @@ export function summarizeRealExecutionState({control={},series={},ledger=[],asOf
     const state=String(providerResult?.state||currentAttempt?.status||'').toUpperCase();
     if(state==='FILLED'||state==='PARTIAL') lastAttemptResult='FILLED';
     else if(state==='NO_FILL') lastAttemptResult='NO_FILL';
+    else if(state==='INVALIDATED_BEFORE_POST') lastAttemptResult='INVALIDATED_BEFORE_POST';
+    else if(state==='PROVIDER_RECONCILED_NO_EXECUTION') lastAttemptResult='PROVIDER_RECONCILED_NO_EXECUTION';
     else if(state==='UNKNOWN'||rawSeriesStatus.includes('UNKNOWN')||series?.unresolvedEntry===true) lastAttemptResult='UNKNOWN';
     else if(filledIds.size>0) lastAttemptResult='FILLED';
     else if(noFillIds.size>0) lastAttemptResult='NO_FILL';
@@ -2584,11 +2713,29 @@ export function summarizeRealExecutionState({control={},series={},ledger=[],asOf
     attempted,target,remaining,
     filled:filledIds.size,
     noFill:noFillIds.size,
+    invalidatedBeforePost:prePostInvalidatedIds.size,
+    providerReconciledNoExecution:reconciledNoExecutionIds.size,
     unknown:unknownIds.size,
     status,
     rawSeriesStatus,
     unresolvedEntry:series?.unresolvedEntry===true,
     ownedPositions:managing?1:0,
+    fireSpecimen:series?.fireLatch?{
+      specimenId:series.fireLatch.specimenId||null,
+      ticker:series.fireLatch.ticker||null,
+      side:series.fireLatch.outcomeSide||null,
+      score:series.fireLatch.observedScore??null,
+      latchState:series.fireLatch.state||'NOT_LATCHED',
+      executionTicker:series.currentAttempt?.marketTicker||series.fireLatch.ticker||null,
+      executionSide:series.currentAttempt?.outcomeSide||series.fireLatch.outcomeSide||null,
+      identityMatch:series.fireLatch.identityMatch||null,
+      freshLock:series.fireLatch.freshLock||null,
+      preSubmit:series.fireLatch.preSubmit||null,
+      providerPost:series.fireLatch.providerPost||'NO',
+      providerOrderId:series.fireLatch.providerOrderId||null,
+      finalResult:series.fireLatch.finalResult||null,
+      invalidationReason:series.fireLatch.invalidationReason||null,
+    }:null,
     latestLedgerEvent:latestLedgerEvent?{
       type:latestLedgerEvent.type||null,
       at:latestLedgerEvent.at||null,
@@ -3132,47 +3279,60 @@ export async function runPayneRealExecutionCycle(env,{postImpl=kalshiPayneOrderP
     return saveRealSeriesState(env,series);
   }
 
-  const data=await buildCockpitData(env,nowMs);
-  const candidate=data.selected;
-  if(!candidate || !candidate.payne?.available || candidate.payne?.state!=='PULL_TRIGGER'){
+  const latch=series?.fireLatch||null;
+  if(latch?.state!=='LATCHED'){
     series.status='ARMED_FISHING'; return saveRealSeriesState(env,series);
   }
-  if(data?.clocks?.consistency?.windowConsistency!==true){
-    series.status='HOLD_WINDOW_MISMATCH'; return saveRealSeriesState(env,series);
+  const candidate={
+    ticker:latch.ticker,
+    asset:latch.asset,
+    outcomeSide:String(latch.outcomeSide||'').toUpperCase(),
+    direction:latch.direction,
+    openTime:latch.marketOpenTime||null,
+    closeTime:latch.marketCloseTime||null,
+    exchangeIndex:Number(latch.marketExchangeIndex),
+  };
+  const expectedFingerprint=fireSpecimenFingerprint(latch);
+  if(latch.seriesId!==series.seriesId || Number(latch.attemptNo)!==started+1 || latch.identityFingerprint!==expectedFingerprint || Number(latch.threshold)!==cfg.threshold || Number(latch.effectiveLockThreshold)!==cfg.effectiveLockThreshold){
+    return invalidateFireSpecimen(env,series,'FIRE_SPECIMEN_IDENTITY_MISMATCH',{identityMatch:'FAIL'},nowMs);
+  }
+  series.fireLatch={...latch,identityMatch:'PASS'};
+  if(!candidate.ticker || !candidate.asset || !['YES','NO'].includes(candidate.outcomeSide)){
+    return invalidateFireSpecimen(env,series,'FIRE_SPECIMEN_IDENTITY_INCOMPLETE',{identityMatch:'FAIL'},nowMs);
   }
   if(Number(candidate.exchangeIndex)!==2){
-    series.status='HOLD_REQUIRED_EXCHANGE_INDEX_2'; return saveRealSeriesState(env,series);
+    return invalidateFireSpecimen(env,series,'HOLD_REQUIRED_EXCHANGE_INDEX_2',{identityMatch:'PASS'},nowMs);
   }
-  if(data?.pipeline?.freshLock!=='PROVEN' || data?.pipeline?.preSubmit!=='PROVEN' || data?.pipeline?.tickerConsistent!==true || data?.pipeline?.sideConsistent!==true || data?.pipeline?.timeGate6_5m!=='PASS'){
-    series.status='HOLD_PREFIRE_EVIDENCE_INCOMPLETE'; return saveRealSeriesState(env,series);
+  if(kalshiCandidateTimeSafe({closeTime:candidate.closeTime},nowMs)!==true){
+    return invalidateFireSpecimen(env,series,'TIME_GATE_FAILED',{identityMatch:'PASS'},nowMs);
   }
 
   const auto=await baselineAutoTickerConflict(env,candidate.ticker);
   if(!auto.ok || auto.conflict!==false){
-    series.status=auto.conflict?'HOLD_AUTO_TICKER_CONFLICT':'HOLD_AUTO_OWNERSHIP_UNKNOWN'; return saveRealSeriesState(env,series);
+    return invalidateFireSpecimen(env,series,auto.conflict?'AUTO_EXACT_TICKER_POSITION_CONFLICT':'AUTO_OWNERSHIP_UNKNOWN',{identityMatch:'PASS'},nowMs);
   }
   const providerConflict=await providerTickerPositionEvidence(env,candidate.ticker);
   if(!providerConflict.ok || ['OPEN','UNKNOWN'].includes(providerConflict.classification)){
-    series.status=providerConflict.classification==='OPEN'?'HOLD_PROVIDER_TICKER_POSITION_CONFLICT':'HOLD_PROVIDER_POSITION_UNKNOWN'; return saveRealSeriesState(env,series);
+    return invalidateFireSpecimen(env,series,providerConflict.classification==='OPEN'?'PROVIDER_TICKER_POSITION_CONFLICT':'PROVIDER_POSITION_UNKNOWN',{identityMatch:'PASS'},nowMs);
   }
 
   const freshLock=await exactMarketRead(env,candidate.ticker,candidate.asset);
-  if(!freshLock?.ok || freshLock?.market?.ticker!==candidate.ticker){
-    series.status='HOLD_FRESH_LOCK_INVALIDATED'; return saveRealSeriesState(env,series);
+  if(!freshLock?.ok || freshLock?.market?.ticker!==candidate.ticker || String(freshLock?.market?.closeTime||'')!==String(candidate.closeTime||'')){
+    return invalidateFireSpecimen(env,series,'FRESH_LOCK_INVALIDATED',{identityMatch:'PASS',freshLock:'FAIL'},nowMs);
   }
+  series.fireLatch={...series.fireLatch,freshLock:'PASS',freshLockAt:freshLock.readAt};
+
   const preSubmit=await exactMarketRead(env,candidate.ticker,candidate.asset);
-  if(!preSubmit?.ok || preSubmit?.market?.ticker!==candidate.ticker){
-    series.status='HOLD_PRE_SUBMIT_INVALIDATED'; return saveRealSeriesState(env,series);
+  if(!preSubmit?.ok || preSubmit?.market?.ticker!==candidate.ticker || String(preSubmit?.market?.closeTime||'')!==String(candidate.closeTime||'')){
+    return invalidateFireSpecimen(env,series,'PRE_SUBMIT_INVALIDATED',{identityMatch:'PASS',freshLock:'PASS',preSubmit:'FAIL'},nowMs);
   }
-  if(String(preSubmit?.market?.closeTime||'')!==String(candidate.closeTime||'')){
-    series.status='HOLD_WINDOW_CHANGED_PRE_SUBMIT'; return saveRealSeriesState(env,series);
-  }
+  series.fireLatch={...series.fireLatch,preSubmit:'PASS',preSubmitAt:preSubmit.readAt};
 
   const features=await readAuthoritativePayneFeatures(env,nowMs);
   const finalFeature=featureForCandidate(features,candidate.ticker,candidate.outcomeSide,candidate.asset,cfg.threshold);
   const finalGate=payneStage(finalFeature,cfg.threshold,cfg.effectiveLockThreshold);
   if(!finalFeature.available || !finalGate.pullTrigger){
-    series.status='HOLD_PRE_SUBMIT_REQUALIFICATION_FAILED'; return saveRealSeriesState(env,series);
+    return invalidateFireSpecimen(env,series,'PRE_SUBMIT_REQUALIFICATION_FAILED',{identityMatch:'PASS',freshLock:'PASS',preSubmit:'FAIL'},nowMs);
   }
 
   const ask=candidate.outcomeSide==='YES'?Number(preSubmit.market.yesAsk):Number(preSubmit.market.noAsk);
@@ -3196,7 +3356,8 @@ export async function runPayneRealExecutionCycle(env,{postImpl=kalshiPayneOrderP
 
   const attempt={
     schema:'PAYNE_REAL_ATTEMPT_V1',owner:REAL_OWNER,seriesId,attemptId,attemptNo,status:'SUBMITTING',
-    wouldFireEventId:data?.zeroMoneyPreview?.eventId||null,
+    fireSpecimenId:series.fireLatch?.specimenId||null,
+    fireIdentityFingerprint:series.fireLatch?.identityFingerprint||null,
     asset:candidate.asset,marketTicker:candidate.ticker,outcomeSide:candidate.outcomeSide,direction:candidate.direction,
     exchangeIndex:2,score:finalFeature.score,move:finalFeature.move,edge:finalFeature.edge,threshold:cfg.threshold,
     observedAt:data.updatedAt||new Date(nowMs).toISOString(),freshLockAt:freshLock.readAt,preSubmitAt:preSubmit.readAt,
@@ -3204,7 +3365,7 @@ export async function runPayneRealExecutionCycle(env,{postImpl=kalshiPayneOrderP
     preSubmitPrice:ask,maxEntryDebitUsd:cfg.maxEntryDebitUsd,count:sizing.count,estimatedEntryFeeUsd:sizing.feeUsd,
     estimatedEntryDebitUsd:sizing.totalDebitUsd,clientOrderId,payload:{...payload},
   };
-  series={...series,seriesId,status:'ENTRY_SUBMITTING',attemptsStarted:attemptNo,unresolvedEntry:true,currentAttempt:attempt};
+  series={...series,seriesId,status:'ENTRY_SUBMITTING',attemptsStarted:attemptNo,unresolvedEntry:true,currentAttempt:attempt,fireLatch:{...series.fireLatch,state:'PROVIDER_POST_PENDING',identityMatch:'PASS',freshLock:'PASS',preSubmit:'PASS',providerPost:'PENDING',providerOrderId:null,finalResult:null}};
   await persistAttempt(env,{runId:seriesId,attemptId,attemptNo,result:'SUBMITTING',...attempt});
   await appendRealLedger(env,'ENTRY_PRE_SUBMIT_LATCHED',{...attempt,providerWritePlanned:true});
   await saveRealSeriesState(env,series);
@@ -3212,6 +3373,11 @@ export async function runPayneRealExecutionCycle(env,{postImpl=kalshiPayneOrderP
   control=await loadControl(env);
   if(!control.armed || Number(control.attemptTarget)!==cfg.attemptTarget || Number(control.maxEntryDebitUsd)!==cfg.maxEntryDebitUsd || Number(control.activeThreshold)!==cfg.threshold || Number(control.requiredExchangeIndex)!==2){
     series.status='ENTRY_AUTHORITY_REVOKED_AFTER_LATCH';
+    series.unresolvedEntry=false;
+    series.fireLatch={...series.fireLatch,state:'INVALIDATED_BEFORE_POST',providerPost:'NO',providerOrderId:null,finalResult:'INVALIDATED_BEFORE_POST',invalidationReason:'ENTRY_AUTHORITY_REVOKED_AFTER_LATCH'};
+    series.currentAttempt={...attempt,status:'INVALIDATED_BEFORE_POST',providerResult:{state:'INVALIDATED_BEFORE_POST',reason:'ENTRY_AUTHORITY_REVOKED_AFTER_LATCH',clientOrderId}};
+    await persistAttempt(env,{runId:seriesId,attemptId,attemptNo,result:'INVALIDATED_BEFORE_POST',...series.currentAttempt});
+    await appendRealLedger(env,'FIRE_SPECIMEN_INVALIDATED_BEFORE_POST',{seriesId,attemptId,specimenId:series.fireLatch?.specimenId||null,ticker:candidate.ticker,reason:'ENTRY_AUTHORITY_REVOKED_AFTER_LATCH',providerPost:false,providerOrderId:null});
     await closeRealSeriesControl(env,attemptNo,0);
     return saveRealSeriesState(env,series);
   }
@@ -3224,19 +3390,21 @@ export async function runPayneRealExecutionCycle(env,{postImpl=kalshiPayneOrderP
     const providerPostStarted=error?.payneProviderPostStarted===true;
     if(!providerPostStarted){
       const reconciledAt=new Date(nowMs).toISOString();
-      const providerResult={state:'NO_FILL',reason:'LOCAL_PRE_PROVIDER_REJECTED',clientOrderId,fillCount:0,remainingCount:0,error:String(error?.message||error)};
+      const providerResult={state:'INVALIDATED_BEFORE_POST',reason:'LOCAL_PRE_PROVIDER_REJECTED',clientOrderId,error:String(error?.message||error)};
       series.unresolvedEntry=false;
       series.position=null;
-      series.currentAttempt={...attempt,status:'NO_FILL',providerResult,reconciledAt};
-      if(seriesTerminal(series)){series.status='COMPLETE_NO_FILL_LOCAL_REJECT';series.completedAt=reconciledAt;}
+      series.fireLatch={...series.fireLatch,state:'INVALIDATED_BEFORE_POST',providerPost:'NO',providerOrderId:null,finalResult:'INVALIDATED_BEFORE_POST',invalidationReason:'LOCAL_PRE_PROVIDER_REJECTED',invalidatedAt:reconciledAt};
+      series.currentAttempt={...attempt,status:'INVALIDATED_BEFORE_POST',providerResult,reconciledAt};
+      if(seriesTerminal(series)){series.status='COMPLETE_INVALIDATED_BEFORE_POST';series.completedAt=reconciledAt;}
       else {series.status='ARMED_FISHING';}
-      await persistAttempt(env,{runId:seriesId,attemptId,attemptNo,result:'NO_FILL',...series.currentAttempt});
-      await appendRealLedger(env,'ENTRY_LOCAL_PRE_PROVIDER_REJECTED',{seriesId,attemptId,attemptNo,ticker:candidate.ticker,clientOrderId,error:String(error?.message||error),providerPostStarted:false});
+      await persistAttempt(env,{runId:seriesId,attemptId,attemptNo,result:'INVALIDATED_BEFORE_POST',...series.currentAttempt});
+      await appendRealLedger(env,'ENTRY_LOCAL_PRE_PROVIDER_REJECTED',{seriesId,attemptId,attemptNo,specimenId:series.fireLatch?.specimenId||null,ticker:candidate.ticker,clientOrderId,error:String(error?.message||error),providerPostStarted:false,finalResult:'INVALIDATED_BEFORE_POST'});
       await settleSeriesControl(env,series,0);
       return saveRealSeriesState(env,series);
     }
     series.status='ENTRY_RECONCILIATION_REQUIRED';
     series.unresolvedEntry=true;
+    series.fireLatch={...series.fireLatch,state:'PROVIDER_POST_UNKNOWN',providerPost:'UNKNOWN',providerOrderId:null,finalResult:'UNKNOWN'};
     series.currentAttempt={...attempt,status:'WRITE_ERROR_UNKNOWN',error:String(error?.message||error),providerPostStarted:true};
     await persistAttempt(env,{runId:seriesId,attemptId,attemptNo,result:'UNKNOWN',...series.currentAttempt});
     await appendRealLedger(env,'ENTRY_WRITE_ERROR_UNKNOWN',{seriesId,attemptId,attemptNo,ticker:candidate.ticker,clientOrderId,error:String(error?.message||error),providerPostStarted:true});
@@ -3247,6 +3415,7 @@ export async function runPayneRealExecutionCycle(env,{postImpl=kalshiPayneOrderP
   if(!response.ok){
     series.status='ENTRY_RECONCILIATION_REQUIRED';
     series.unresolvedEntry=true;
+    series.fireLatch={...series.fireLatch,state:'PROVIDER_POST_CREATED',providerPost:'YES',providerOrderId:null,finalResult:'REJECTED_OR_UNKNOWN'};
     series.currentAttempt={...attempt,status:'PROVIDER_REJECTED_OR_UNKNOWN',providerHttpStatus:response.status};
     await appendRealLedger(env,'ENTRY_PROVIDER_REJECTED_OR_UNKNOWN',{seriesId,attemptId,ticker:candidate.ticker,httpStatus:response.status,proof});
     await settleSeriesControl(env,series,0);
@@ -3254,6 +3423,7 @@ export async function runPayneRealExecutionCycle(env,{postImpl=kalshiPayneOrderP
   }
 
   const result=interpretPayneOrderResponse(body);
+  series.fireLatch={...series.fireLatch,state:'PROVIDER_RESULT',providerPost:'YES',providerOrderId:result.orderId||null,finalResult:result.state};
   series.currentAttempt={...attempt,status:result.state,providerResult:result,providerProof:proof};
   if(result.state==='NO_FILL'){
     series.unresolvedEntry=false;
