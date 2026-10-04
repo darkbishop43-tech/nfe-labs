@@ -15,6 +15,7 @@ import {
   runReadOnlyScan,
   summarizeRealExecutionState,
   reconcileUnresolvedEntryFromProvider,
+  buildHistoricalSeriesReport,
 } from '../src/index.js';
 import { kalshiPayneOrderPost, payneOrderWriteProof } from '../src/kalshi-real-write.js';
 
@@ -222,6 +223,88 @@ test('scheduled tick self-reconciles a disarmed unresolved entry before any new 
     assert.equal((await loadControl(e)).armed,false);
     assert.equal(io.calls.filter(c=>c.method==='POST').length,0);
   }finally{io.restore();}
+});
+
+test('historical UNKNOWN is removed when a later authoritative no-execution event resolves the attempt',()=>{
+  const ledger=[
+    {at:'2026-10-04T00:00:00Z',seriesId:'HIST-1',attemptId:'HIST-1-1',type:'ENTRY_PRE_SUBMIT_LATCHED'},
+    {at:'2026-10-04T00:00:01Z',seriesId:'HIST-1',attemptId:'HIST-1-1',type:'ENTRY_RESULT_UNKNOWN'},
+    {at:'2026-10-04T00:00:02Z',seriesId:'HIST-1',attemptId:'HIST-1-1',type:'ENTRY_RECONCILED_NO_EXECUTION'},
+  ];
+  const out=summarizeRealExecutionState({
+    control:{armed:false,attempts:1,attemptTarget:1},
+    series:{seriesId:'HIST-1',attemptsStarted:1,attemptTarget:1,status:'COMPLETE_NO_FILL_RECONCILED',unresolvedEntry:false,position:null,currentAttempt:{status:'NO_FILL',providerResult:{state:'NO_FILL'}}},
+    ledger,
+  });
+  assert.equal(out.attempted,1);
+  assert.equal(out.filled,0);
+  assert.equal(out.noFill,1);
+  assert.equal(out.unknown,0);
+  assert.equal(out.lastAttempt.result,'NO_FILL');
+});
+
+test('read-only historical series report returns current terminal truth and P&L without provider writes',async()=>{
+  const e=await env();
+  const seriesId='HIST-PNL',attemptId='HIST-PNL-1';
+  await e.PAYNE_KALSHI_STATE.put('payne-kalshi:run:'+seriesId,JSON.stringify({
+    runId:seriesId,threshold:.70,maxEntryDebitUsd:1,attemptTarget:1,requiredExchangeIndex:2,frozenAt:'2026-10-04T00:00:00Z'
+  }));
+  await e.PAYNE_KALSHI_STATE.put('payne-kalshi:attempt:'+seriesId+':1',JSON.stringify({
+    runId:seriesId,seriesId,attemptId,attemptNo:1,asset:'BTC',marketTicker:'KXBTC15M-HIST',direction:'UP',outcomeSide:'YES',
+    score:.72,threshold:.70,maxEntryDebitUsd:1,freshLockPrice:.50,preSubmitPrice:.50,estimatedEntryDebitUsd:.52,
+    clientOrderId:'payne-real-hist-1-entry',payload:{side:'bid',price:'0.5000'},
+    providerResult:{state:'FILLED',orderId:'ORDER-HIST',clientOrderId:'payne-real-hist-1-entry',fillCount:1,remainingCount:0,averageFillPrice:.50,averageFeePaid:.02},
+  }));
+  await e.PAYNE_KALSHI_STATE.put('payne-kalshi:position:'+attemptId,JSON.stringify({
+    positionId:attemptId,attemptId,asset:'BTC',marketTicker:'KXBTC15M-HIST',direction:'UP',outcomeSide:'YES',
+    entryOrderId:'ORDER-HIST',entryAverageFillPrice:.50,entryAverageFeePaid:.02,exitAverageFillPrice:.70,exitAverageFeePaid:.03,filledCount:1,
+  }));
+  const ledgerRows=[
+    {schema:'PAYNE_REAL_LEDGER_V1',recordId:'1',at:'2026-10-04T00:00:00Z',owner:'PAYNE_KALSHI_REAL',type:'ENTRY_PRE_SUBMIT_LATCHED',seriesId,attemptId,attemptNo:1,asset:'BTC',marketTicker:'KXBTC15M-HIST',direction:'UP',outcomeSide:'YES',score:.72,threshold:.70,maxEntryDebitUsd:1,freshLockPrice:.50,preSubmitPrice:.50,estimatedEntryDebitUsd:.52,clientOrderId:'payne-real-hist-1-entry',payload:{side:'bid',price:'0.5000'}},
+    {schema:'PAYNE_REAL_LEDGER_V1',recordId:'2',at:'2026-10-04T00:00:01Z',owner:'PAYNE_KALSHI_REAL',type:'POSITION_OWNERSHIP_ESTABLISHED',seriesId,attemptId,attemptNo:1,ticker:'KXBTC15M-HIST',entryOrderId:'ORDER-HIST',filledCount:1},
+    {schema:'PAYNE_REAL_LEDGER_V1',recordId:'3',at:'2026-10-04T00:01:00Z',owner:'PAYNE_KALSHI_REAL',type:'EXIT_PROVIDER_RESULT',seriesId,attemptId,ticker:'KXBTC15M-HIST',result:{state:'FILLED',averageFillPrice:.70,averageFeePaid:.03}},
+    {schema:'PAYNE_REAL_LEDGER_V1',recordId:'4',at:'2026-10-04T00:01:01Z',owner:'PAYNE_KALSHI_REAL',type:'PROVIDER_RECONCILED_FLAT',seriesId,attemptId,ticker:'KXBTC15M-HIST',realizedPnlUsd:.15},
+  ];
+  for(const row of ledgerRows) await e.PAYNE_KALSHI_STATE.put('payne-kalshi:real-ledger:'+row.at+':'+row.recordId,JSON.stringify(row));
+  const report=await buildHistoricalSeriesReport(e,seriesId);
+  assert.equal(report.readOnly,true);
+  assert.equal(report.attempted,1);
+  assert.equal(report.filled,1);
+  assert.equal(report.noFill,0);
+  assert.equal(report.unknownUnresolved,0);
+  assert.equal(report.netRealizedPnlUsd,.15);
+  assert.equal(report.entryFeesUsd,.02);
+  assert.equal(report.exitFeesUsd,.03);
+  assert.equal(report.totalFeesUsd,.05);
+  assert.equal(report.grossRealizedPnlUsd,.20);
+  assert.equal(report.attempts[0].finalResult,'FILLED');
+  assert.equal(report.attempts[0].providerOrderId,'ORDER-HIST');
+
+  const response=await worker.fetch(new Request('https://payne.test/real-history?seriesId='+seriesId,{method:'GET'}),e);
+  const body=await response.json();
+  assert.equal(response.status,200);
+  assert.equal(body.readOnly,true);
+  assert.equal(body.providerWrites,0);
+  assert.equal(body.ordersSubmittedByThisRead,0);
+  assert.equal(body.capitalMovedUsd,0);
+});
+
+test('historical NO_FILL reports zero P&L when no actual provider fee is recorded',async()=>{
+  const e=await env();
+  const seriesId='HIST-NF',attemptId='HIST-NF-1';
+  await e.PAYNE_KALSHI_STATE.put('payne-kalshi:run:'+seriesId,JSON.stringify({runId:seriesId,threshold:.70,maxEntryDebitUsd:1,attemptTarget:1}));
+  await e.PAYNE_KALSHI_STATE.put('payne-kalshi:attempt:'+seriesId+':1',JSON.stringify({
+    runId:seriesId,seriesId,attemptId,attemptNo:1,asset:'ZEC',marketTicker:'KXZEC15M-HIST',direction:'DOWN',outcomeSide:'NO',
+    maxEntryDebitUsd:1,providerResult:{state:'NO_FILL',fillCount:0,remainingCount:2}
+  }));
+  const row={schema:'PAYNE_REAL_LEDGER_V1',recordId:'nf',at:'2026-10-04T00:02:00Z',owner:'PAYNE_KALSHI_REAL',type:'ENTRY_RECONCILED_NO_EXECUTION',seriesId,attemptId,attemptNo:1,ticker:'KXZEC15M-HIST',reconciliation:'PROVIDER_RECONCILED_NO_EXECUTION'};
+  await e.PAYNE_KALSHI_STATE.put('payne-kalshi:real-ledger:'+row.at+':'+row.recordId,JSON.stringify(row));
+  const report=await buildHistoricalSeriesReport(e,seriesId);
+  assert.equal(report.noFill,1);
+  assert.equal(report.unknownUnresolved,0);
+  assert.equal(report.netRealizedPnlUsd,0);
+  assert.equal(report.totalFeesUsd,0);
+  assert.equal(report.attempts[0].netRealizedPnlUsd,0);
 });
 
 test('authenticated Payne write transport is fixed to one order POST and zero-money intercepts ENTRY',async()=>{
