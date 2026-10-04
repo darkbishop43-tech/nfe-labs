@@ -655,6 +655,7 @@ export async function recordReconciliationEvidence(env, evidence) {
 export const COCKPIT_REFRESH_MS = 60_000;
 const BASELINE_SERVICE_BINDING = 'BASELINE_REAL_READ';
 const BASELINE_SHADOW_STATE_PATH = '/shadow-state';
+const BASELINE_SHADOW_REFRESH_PATH = '/shadow-refresh-proof';
 const BASELINE_FEATURE_MAX_AGE_MS = 120_000;
 const KALSHI_15M_SERIES = Object.freeze([
   {asset:'BTC', seriesTicker:'KXBTC15M'},
@@ -895,7 +896,7 @@ async function baselineReadOnlyPath(env, path) {
   if (!service || typeof service.fetch!=='function') {
     return {ok:false,status:null,body:{},error:'BASELINE_REAL_SERVICE_BINDING_UNBOUND'};
   }
-  if (!['/shadow-state','/execution-test-state','/execution-test-nofill-forensic','/forensic-provider-history'].includes(String(path||''))) {
+  if (!['/shadow-state','/shadow-refresh-proof','/execution-test-state','/execution-test-nofill-forensic','/forensic-provider-history'].includes(String(path||''))) {
     return {ok:false,status:null,body:{},error:'BASELINE_READ_PATH_NOT_ALLOWED'};
   }
   try {
@@ -915,33 +916,55 @@ async function baselineShadowRead(env) {
   return baselineReadOnlyPath(env,BASELINE_SHADOW_STATE_PATH);
 }
 
-export async function readAuthoritativePayneFeatures(env, nowMs = Date.now()) {
-  const read=await baselineShadowRead(env);
-  const body=read.body||{};
+function baselineFeatureReadState(read, nowMs) {
+  const body=read?.body||{};
   const lastRunAt=body?.lastRunAt||body?.lastSuccessfulObservationAt||null;
   const observedMs=Date.parse(lastRunAt||'');
   const ageMs=Number.isFinite(observedMs)?Math.max(0,nowMs-observedMs):null;
   const fresh=Boolean(
-    read.ok &&
+    read?.ok &&
     body?.mode==='REAL_KALSHI_SHADOW' &&
     ageMs!==null &&
     ageMs<=BASELINE_FEATURE_MAX_AGE_MS
   );
+  return {read,body,lastRunAt,ageMs,fresh};
+}
+
+export async function readAuthoritativePayneFeatures(env, nowMs = Date.now()) {
+  let state=baselineFeatureReadState(await baselineShadowRead(env),nowMs);
+  let refreshAttempted=false;
+  let refreshSucceeded=false;
+
+  // Baseline's scheduler can be healthy while its cross-POP snapshot is several minutes old.
+  // If PAYNE sees a stale shadow snapshot, refresh the existing read-only Baseline observer
+  // directly. This performs provider GETs only; it does not invoke Baseline trade execution.
+  if (!state.fresh && state.read?.ok) {
+    refreshAttempted=true;
+    const refreshed=baselineFeatureReadState(await baselineReadOnlyPath(env,BASELINE_SHADOW_REFRESH_PATH),nowMs);
+    if (refreshed.fresh) {
+      state=refreshed;
+      refreshSucceeded=true;
+    }
+  }
+
+  const {read,body,lastRunAt,ageMs,fresh}=state;
   return {
-    ok:read.ok,
+    ok:read?.ok===true,
     source:'BASELINE_REAL_SERVICE_BINDING_READ_ONLY',
     transport:'SERVICE_BINDING',
     binding:BASELINE_SERVICE_BINDING,
-    endpoint:BASELINE_SHADOW_STATE_PATH,
-    httpStatus:read.status,
+    endpoint:refreshSucceeded?BASELINE_SHADOW_REFRESH_PATH:BASELINE_SHADOW_STATE_PATH,
+    httpStatus:read?.status??null,
     lastRunAt,
     ageMs,
     fresh,
+    refreshAttempted,
+    refreshSucceeded,
     status:body?.status||null,
     startedAt:body?.startedAt||null,
     priceSources:body?.priceSources||{},
     opportunities:Array.isArray(body?.opportunities)?body.opportunities:[],
-    error:fresh?null:(read.error||(read.ok?'BASELINE_SHADOW_NOT_FRESH':'BASELINE_SHADOW_READ_FAILED')),
+    error:fresh?null:(read?.error||(read?.ok?'BASELINE_SHADOW_NOT_FRESH':'BASELINE_SHADOW_READ_FAILED')),
   };
 }
 
