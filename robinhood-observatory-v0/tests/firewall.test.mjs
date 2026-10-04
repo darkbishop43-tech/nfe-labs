@@ -36,7 +36,11 @@ if(v0a.scores.SI_CORE_V0A!==null)throw new Error('V0-A core score must remain nu
 if(v0a.scores.fullSI!==null)throw new Error('V0-A full score must remain null while N is invalid');
 if(v0a.robinhoodOfficialApi.historicalOHLCV!==false)throw new Error('Official API OHLCV proof mismatch');
 if(v0a.robinhoodOfficialApi.secretCreated!==false)throw new Error('Unexpected Robinhood API secret creation');
-if(v0a.thirdPartyCandidates.some(x=>!/NOT CONNECTED/.test(x.status)))throw new Error('Third-party source unexpectedly connected');
+const binance=v0a.thirdPartyCandidates.find(x=>x.name.startsWith('Binance.US'));
+if(!binance||!/APPROVED \+ CONNECTED/.test(binance.status))throw new Error('Approved Binance.US public source not represented');
+if(v0a.binanceUsPublicData?.credential!=='NONE')throw new Error('Unexpected Binance.US credential');
+if(v0a.binanceUsPublicData?.executionAuthority!=='NONE')throw new Error('Unexpected Binance.US execution authority');
+if(v0a.binanceUsPublicData?.sample?.Q!==null)throw new Error('Q must remain null before historical spread collection');
 console.log('PASS SI Crypto V0-A governed hold');
 console.log('PASS official Robinhood API data gap truth');
-console.log('PASS no third-party source connected');
+console.log('PASS Binance.US public research source only');
