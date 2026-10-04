@@ -1,0 +1,76 @@
+name: Baseline shared Kalshi writer zero-money proof
+
+on:
+  push:
+    branches:
+      - baseline-shared-kalshi-writer-refactor
+    paths:
+      - "market-edge-lab/real/baseline/**"
+      - "market-edge-lab/real/shared/**"
+      - ".github/workflows/baseline-shared-kalshi-writer-zero-money.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  prove:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Prove shared writer mechanical contract
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'NODE'
+          import {assertKalshiMechanicalOrderPayload,KALSHI_EXECUTION_ORDER_PATH} from './market-edge-lab/real/shared/kalshi-execution-write.js';
+          const payload={
+            ticker:'KXBTC15M-ZERO-MONEY',
+            client_order_id:'zero-money-proof',
+            side:'bid',
+            count:'1.00',
+            price:'0.5000',
+            time_in_force:'immediate_or_cancel',
+            self_trade_prevention_type:'taker_at_cross',
+            post_only:false,
+            cancel_order_on_pause:true,
+            reduce_only:false
+          };
+          if(assertKalshiMechanicalOrderPayload(payload)!==true) throw new Error('SHARED_WRITER_CONTRACT_FAIL');
+          if(KALSHI_EXECUTION_ORDER_PATH!=='/trade-api/v2/portfolio/events/orders') throw new Error('ORDER_PATH_DRIFT');
+          console.log('SHARED_MECHANICAL_CONTRACT=PASS');
+          console.log('PROVIDER_WRITES=0');
+          console.log('ORDERS=0');
+          console.log('CAPITAL_MOVED_USD=0');
+          NODE
+
+      - name: Prove AUTO entry and exit call shared primitive
+        run: |
+          set -euo pipefail
+          src='market-edge-lab/real/baseline/src/index.js'
+          grep -q 'import { kalshiExecutionOrderPost } from "../../shared/kalshi-execution-write.js";' "$src"
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          const s=fs.readFileSync('market-edge-lab/real/baseline/src/index.js','utf8');
+          const entry=s.slice(s.indexOf('async function executionTestEntryWrite'),s.indexOf('async function executionTestExitWrite'));
+          const exit=s.slice(s.indexOf('async function executionTestExitWrite'),s.indexOf('function executionTestCandidatePool'));
+          if(!entry.includes('return kalshiExecutionOrderPost(env,payload)')) throw new Error('AUTO_ENTRY_NOT_SHARED');
+          if(!exit.includes('return kalshiExecutionOrderPost(env,payload)')) throw new Error('AUTO_EXIT_NOT_SHARED');
+          if(entry.includes('fetch("https://external-api.kalshi.com"')) throw new Error('AUTO_ENTRY_DUPLICATE_POST_REMAINS');
+          if(exit.includes('fetch("https://external-api.kalshi.com"')) throw new Error('AUTO_EXIT_DUPLICATE_POST_REMAINS');
+          console.log('AUTO_SHARED_WRITER=PASS');
+          NODE
+
+      - name: Cloudflare bundle dry-run only
+        working-directory: market-edge-lab/real/baseline
+        run: |
+          set -euo pipefail
+          npm install --no-audit --no-fund
+          npx --yes wrangler@4 deploy --dry-run
+          echo 'DEPLOYMENT=NONE_DRY_RUN_ONLY'
+          echo 'PROVIDER_WRITES=0'
+          echo 'ORDERS=0'
+          echo 'CAPITAL_MOVED_USD=0'
