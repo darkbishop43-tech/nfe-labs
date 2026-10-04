@@ -82,7 +82,10 @@ jobs:
           grep -q '"researchLanes"' /tmp/snapshot
           grep -q '"siCryptoV0"' /tmp/snapshot
           grep -q '"siCryptoV0A"' /tmp/snapshot
-          grep -q '"GOVERNED HOLD — OFFICIAL ROBINHOOD DATA INSUFFICIENT' /tmp/snapshot
+          grep -q '"PARTIAL GREEN / GOVERNED HOLD — BINANCE.US SENSOR LIVE' /tmp/snapshot
+          grep -q '"credential": "NONE"' /tmp/snapshot
+          grep -q '"executionAuthority": "NONE"' /tmp/snapshot
+          grep -q '"Q": null' /tmp/snapshot
           grep -q '"DISARMED / FIRE BLOCKED"' /tmp/snapshot
           grep -q '"qualificationThreshold": null' /tmp/snapshot
           grep -q '"MCP ACTIVE MARKET SURFACE NOT CURRENTLY EXPOSED"' /tmp/snapshot
