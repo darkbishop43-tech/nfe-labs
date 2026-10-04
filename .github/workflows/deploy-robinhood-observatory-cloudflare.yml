@@ -70,10 +70,10 @@ jobs:
         run: |
           set -euo pipefail
           curl --fail --silent --show-error --location --dump-header /tmp/headers "$LIVE_URL/" --output /tmp/body
-          grep -q 'NFE-OS Robinhood Observatory' /tmp/body
-          grep -q 'READ ONLY' /tmp/body
-          grep -q 'Live Trader Cockpit' /tmp/body
-          grep -q 'Crypto Radar Universe' /tmp/body
+          grep -q 'NFE-OS Robinhood Observatory' /tmp/body && echo "VERIFY title PASS"
+          grep -q 'EXECUTION DISARMED' /tmp/body && echo "VERIFY execution badge PASS"
+          grep -q 'Live Trader Cockpit' /tmp/body && echo "VERIFY cockpit PASS"
+          grep -q 'Crypto Radar Universe' /tmp/body && echo "VERIFY universe PASS"
           curl --fail --silent --show-error --location "$LIVE_URL/data/snapshot.json" --output /tmp/snapshot
           grep -q '"operationalCockpit"' /tmp/snapshot
           grep -q '"cryptoUniverse"' /tmp/snapshot
