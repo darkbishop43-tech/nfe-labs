@@ -90,3 +90,40 @@ jobs:
           grep -qi '^x-content-type-options: nosniff' /tmp/headers
           grep -qi '^x-frame-options: DENY' /tmp/headers
           echo "PUBLIC_LOAD_PASS $LIVE_URL"
+          curl --fail --silent --show-error --location "$LIVE_URL/api/v0a/ping" --output /tmp/v0a-ping
+          grep -q '"status": "PASS"' /tmp/v0a-ping && echo "VERIFY Binance.US public ping PASS"
+          grep -q '"credential": "NONE"' /tmp/v0a-ping && echo "VERIFY Binance.US no credential PASS"
+          curl --fail --silent --show-error --location "$LIVE_URL/api/v0a/mapping" --output /tmp/v0a-mapping
+          grep -q '"mappingStatus": "MAPPED"' /tmp/v0a-mapping && echo "VERIFY symbol mapping PASS"
+          curl --fail --silent --show-error --location "$LIVE_URL/api/v0a/research?symbol=BTC-USD&featureInterval=5m&lookbackDays=30" --output /tmp/v0a-research
+          grep -q '"source": "Binance.US"' /tmp/v0a-research && echo "VERIFY V0-A Binance component provenance PASS"
+          grep -q '"M": {' /tmp/v0a-research && grep -q '"T": {' /tmp/v0a-research && grep -q '"V": {' /tmp/v0a-research && grep -q '"F": {' /tmp/v0a-research && echo "VERIFY M/T/V/F component payload PASS"
+          grep -q '"qSpread": null' /tmp/v0a-research && echo "VERIFY Q spread-history blocker PASS"
+          grep -q '"fireAuthority": "ZERO"' /tmp/v0a-research && echo "VERIFY zero FIRE authority PASS"
+          echo "V0A_MAPPING_SUMMARY"
+          python - <<'PY'
+import json
+m=json.load(open('/tmp/v0a-mapping'))
+print(json.dumps({k:m[k] for k in ['robinhoodPairs','mapped','unmapped']},sort_keys=True))
+r=json.load(open('/tmp/v0a-research'))
+print(json.dumps({
+ 'status':r.get('status'),
+ 'mapping':r.get('mapping'),
+ 'configuration':r.get('configuration'),
+ 'components':{k:v.get('value') for k,v in r.get('components',{}).items()},
+ 'scores':r.get('scores'),
+ 'raw':{
+   'ema9':r.get('raw',{}).get('ema9'),
+   'ema20':r.get('raw',{}).get('ema20'),
+   'ema50':r.get('raw',{}).get('ema50'),
+   'atr14':r.get('raw',{}).get('atr14'),
+   'atrPercentile':r.get('raw',{}).get('atrPercentile'),
+   'volume':r.get('raw',{}).get('volume'),
+   'relativeVolume':r.get('raw',{}).get('relativeVolume'),
+   'quoteVolume':r.get('raw',{}).get('quoteVolume'),
+   'tradeCount':r.get('raw',{}).get('tradeCount'),
+   'researchBook':r.get('raw',{}).get('researchBook'),
+   'depthSummary':r.get('raw',{}).get('depthSummary')
+ }
+},sort_keys=True))
+PY
