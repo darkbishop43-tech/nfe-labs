@@ -168,7 +168,7 @@ export async function updateFounderControl(env, action, rawValue = null) {
   if (before.armed && !['DISARM','SET_SCAN_ENABLED'].includes(name)) throw new Error('PAYNE_REAL_CONFIG_LOCKED_WHILE_ARMED');
 
   if (name==='ARM') {
-    const series=await loadRealSeriesState(env);
+    let series=await loadRealSeriesState(env);
     const cfgThreshold=Number(before.activeThreshold), cfgStake=Number(before.maxEntryDebitUsd), cfgTarget=Number(before.attemptTarget);
     if (!parseFounderThreshold(String(cfgThreshold)).ok) throw new Error('PAYNE_REAL_ARM_THRESHOLD_NOT_ALLOWED');
     if (!CONTROL_STAKE_OPTIONS.includes(cfgStake)) throw new Error('PAYNE_REAL_ARM_STAKE_NOT_ALLOWED');
@@ -176,10 +176,12 @@ export async function updateFounderControl(env, action, rawValue = null) {
     if (Number(before.requiredExchangeIndex)!==2) throw new Error('PAYNE_REAL_ARM_INDEX2_REQUIRED');
     if (series?.unresolvedEntry===true) throw new Error('PAYNE_REAL_ENTRY_RECONCILIATION_REQUIRED');
     if (series?.position && SERIES_BLOCKING_POSITION_STATUSES.includes(String(series.position.status||''))) throw new Error('PAYNE_REAL_OPEN_POSITION_EXISTS');
+    const superseded=await reconcileDisarmedSupersededSeries(env,series,before);
+    series=superseded.series;
     const started=Number(series?.attemptsStarted||0);
     const priorTarget=Number(series?.attemptTarget||1);
     let armedSeries;
-    if (started>0 && started<priorTarget) {
+    if (!seriesTerminal(series) && started>0 && started<priorTarget) {
       // An unfinished governed series: ARM resumes it with its FROZEN config. It never re-snapshots or resets the count.
       const frozen=frozenSeriesConfig(series);
       if (!frozen.ok) throw new Error('PAYNE_REAL_SERIES_IN_PROGRESS_NOT_FROZEN');
@@ -2246,7 +2248,40 @@ export function frozenSeriesConfig(series) {
 }
 
 export function seriesTerminal(series) {
-  return Number(series?.attemptsStarted||0)>=Number(series?.attemptTarget||1);
+  return Boolean(series?.completedAt) || Number(series?.attemptsStarted||0)>=Number(series?.attemptTarget||1);
+}
+
+function frozenSeriesMatchesControl(series,control) {
+  const frozen=frozenSeriesConfig(series);
+  if(!frozen.ok) return false;
+  const threshold=Number(control?.activeThreshold);
+  return frozen.attemptTarget===Number(control?.attemptTarget)
+    && frozen.threshold===threshold
+    && frozen.effectiveLockThreshold===effectiveLockThreshold(threshold)
+    && frozen.maxEntryDebitUsd===Number(control?.maxEntryDebitUsd)
+    && frozen.requiredExchangeIndex===2
+    && Number(control?.requiredExchangeIndex)===2;
+}
+
+async function reconcileDisarmedSupersededSeries(env,series,control,nowMs=Date.now()) {
+  if(control?.armed===true || seriesTerminal(series)) return {series,terminalized:false,reason:'NOT_APPLICABLE'};
+  const started=Number(series?.attemptsStarted||0), target=Number(series?.attemptTarget||1);
+  if(!(started>0 && started<target)) return {series,terminalized:false,reason:'NOT_UNFINISHED'};
+  const frozen=frozenSeriesConfig(series);
+  if(!frozen.ok) return {series,terminalized:false,reason:'SERIES_NOT_FROZEN'};
+  if(frozenSeriesMatchesControl(series,control)) return {series,terminalized:false,reason:'CONFIG_MATCHES_RESUMABLE'};
+  const gate=seriesInterlock(series);
+  if(!gate.clear) return {series,terminalized:false,reason:'PRIOR_ATTEMPT_NOT_CLEAN_'+gate.reason};
+  const completedAt=new Date(nowMs).toISOString();
+  const next={...series,status:'TERMINAL_DISARMED_CONFIG_SUPERSEDED',completedAt,terminalReason:'FOUNDER_CONFIG_CHANGED_WHILE_DISARMED'};
+  await appendRealLedger(env,'SERIES_TERMINAL_DISARMED_CONFIG_SUPERSEDED',{
+    seriesId:series.seriesId,attemptsStarted:started,attemptTarget:target,
+    frozenThreshold:frozen.threshold,nextThreshold:Number(control?.activeThreshold),
+    frozenStake:frozen.maxEntryDebitUsd,nextStake:Number(control?.maxEntryDebitUsd),
+    frozenAttemptTarget:frozen.attemptTarget,nextAttemptTarget:Number(control?.attemptTarget),
+    unresolvedEntry:false,ownedPosition:false,providerWrites:0,capitalMovedUsd:0,
+  });
+  return {series:await saveRealSeriesState(env,next),terminalized:true,reason:'CLEAN_CONFIG_MISMATCH_SUPERSEDED'};
 }
 
 // Attempt N+1 may begin only if attempt N is authoritatively clean.
@@ -3063,7 +3098,10 @@ export async function runPayneRealExecutionCycle(env,{postImpl=kalshiPayneOrderP
 
   const started=Number(series.attemptsStarted||0);
   if(!control.armed){
-    series.status=started>=Number(series.attemptTarget||1)?'COMPLETE_ENTRY_AUTHORITY':started>=1?'SERIES_PAUSED_DISARMED':'READY_DISARMED';
+    const superseded=await reconcileDisarmedSupersededSeries(env,series,control,nowMs);
+    if(superseded.terminalized) return superseded.series;
+    series=superseded.series;
+    series.status=seriesTerminal(series)?(series.status||'COMPLETE_ENTRY_AUTHORITY'):started>=1?'SERIES_PAUSED_DISARMED':'READY_DISARMED';
     return saveRealSeriesState(env,series);
   }
   // Run config is consumed ONLY from the series' frozen snapshot.
