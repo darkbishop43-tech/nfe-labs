@@ -12,9 +12,74 @@ fetch('./data/snapshot.json',{cache:'no-store'})
 
 function render(){
   el('capturedAt').textContent=fmtTime(D.meta.capturedAt);
-  renderAccount();renderOperational();renderCryptoUniverse();renderMarkets();renderResearchLanes();renderDetail();renderOptions();renderExisting();renderCrypto();renderEvidence();
+  renderAccount();renderSiCrypto();renderOperational();renderCryptoUniverse();renderMarkets();renderResearchLanes();renderDetail();renderOptions();renderExisting();renderCrypto();renderEvidence();
   document.querySelectorAll('[data-symbol]').forEach(b=>b.onclick=()=>{selected=b.dataset.symbol;document.querySelectorAll('[data-symbol]').forEach(x=>x.classList.toggle('active',x===b));renderDetail()});
 }
+
+
+function readTestConfig(){
+  try{return JSON.parse(sessionStorage.getItem('nfeSiCryptoTestConfig')||'null')}catch{return null}
+}
+function writeTestConfig(v){sessionStorage.setItem('nfeSiCryptoTestConfig',JSON.stringify(v))}
+function clearTestConfig(){sessionStorage.removeItem('nfeSiCryptoTestConfig')}
+
+function renderSiCrypto(){
+ const s=D.siCryptoV0, c=s.components, cfg=readTestConfig();
+ el('siFormula').innerHTML=`
+   <div class="formula">${s.formula}</div>
+   <div class="chips"><span class="chip">${s.hypothesis}</span><span class="chip error">${s.composite.status}</span><span class="chip">Qualification threshold: NOT SET</span></div>
+   <p class="sub">${s.scoreValidityRule}</p>
+   <p class="sub">Component rule status: ${s.componentRuleStatus}</p>`;
+
+ el('siComponents').innerHTML=['M','T','V','Q','F','N'].map(k=>{const x=c[k];return `
+   <article class="panel si-card">
+     <div class="si-key">${k}</div><h3>${x.name}</h3>
+     <div class="si-value">${x.value==null?'MISSING INPUT':num(x.value,4)}</div>
+     <div class="state error">${x.status}</div>
+     <div class="raw-box"><b>Raw authentic inputs</b><pre>${escapeHtml(JSON.stringify(x.raw,null,2))}</pre></div>
+     <div class="sub">Missing: ${x.missing.join(' · ')}</div>
+   </article>`}).join('');
+
+ el('shadowLane').innerHTML=`
+   <div class="hero-symbol">${s.shadow.state}</div>
+   <div class="kv"><span>Authority</span><b>${s.shadow.authority}</b><span>Recorded evaluations</span><b>${s.shadow.records.length}</b><span>Would-fire</span><b>BLOCKED — NO VALID SI SCORE</b><span>Outcome horizons</span><b>${s.shadow.horizons.join(' · ')}</b><span>Excursion metrics</span><b>${s.shadow.excursionMetrics.join(' · ')}</b></div>
+   <p class="sub">${s.shadow.automationGap}</p>`;
+
+ el('liveLane').innerHTML=`
+   <div class="hero-symbol">${s.live.state}</div>
+   <div class="kv"><span>Authority</span><b>${s.live.authority}</b><span>Execution adapter</span><b>${s.live.executionCapability}</b><span>Positions</span><b>${s.live.providerReconciliation.positions}</b><span>Open orders</span><b>${s.live.providerReconciliation.openOrders}</b><span>Crypto buying power</span><b>${money(s.live.providerReconciliation.cryptoBuyingPower)}</b><span>Last provider requalification</span><b>${fmtTime(s.live.providerReconciliation.lastChecked)}</b></div>
+   <p class="sub">FIRE requirements: ${s.live.fireRequirements.join(' → ')}</p>`;
+
+ const frozen=cfg?.frozen===true;
+ el('testConfig').innerHTML=`
+   <div class="config-grid">
+     <label>Live dollar amount / max debit<input id="stakeInput" type="number" min="0.01" step="0.01" placeholder="Founder enters amount" ${frozen?'disabled':''} value="${cfg?.stake??''}"></label>
+     <label>Entry order type<select id="entryType" ${frozen?'disabled':''}><option value="">Select</option><option value="market" ${cfg?.entryType==='market'?'selected':''}>Market</option><option value="limit" ${cfg?.entryType==='limit'?'selected':''}>Limit</option><option value="stop" ${cfg?.entryType==='stop'?'selected':''}>Stop order</option><option value="stop_limit" ${cfg?.entryType==='stop_limit'?'selected':''}>Stop limit order</option></select></label>
+     <label>Exit condition<select id="exitCondition" ${frozen?'disabled':''}><option value="">Select</option><option value="manual" ${cfg?.exitCondition==='manual'?'selected':''}>Manual Founder exit</option><option value="profit" ${cfg?.exitCondition==='profit'?'selected':''}>Profit / target</option><option value="loss" ${cfg?.exitCondition==='loss'?'selected':''}>Loss / invalidation</option><option value="time" ${cfg?.exitCondition==='time'?'selected':''}>Time / max hold</option><option value="score" ${cfg?.exitCondition==='score'?'selected':''}>Score deterioration</option></select></label>
+     <label>Exit value / rule<input id="exitValue" type="text" placeholder="Founder-defined; blank for manual" ${frozen?'disabled':''} value="${cfg?.exitValue??''}"></label>
+     <label>Exit order mechanic<select id="exitType" ${frozen?'disabled':''}><option value="">Select</option><option value="market" ${cfg?.exitType==='market'?'selected':''}>Market</option><option value="limit" ${cfg?.exitType==='limit'?'selected':''}>Limit</option><option value="stop" ${cfg?.exitType==='stop'?'selected':''}>Stop order</option><option value="stop_limit" ${cfg?.exitType==='stop_limit'?'selected':''}>Stop limit order</option></select></label>
+   </div>
+   <div class="controls-inline">
+     <button class="control-btn" id="freezeConfig" ${frozen?'disabled':''}>Freeze next-test config</button>
+     <button class="control-btn" id="clearConfig" ${frozen?'':'disabled'}>Clear frozen config</button>
+   </div>
+   <div class="config-proof">${frozen?`<b>FROZEN FOR THIS BROWSER SESSION:</b> stake ${money(cfg.stake)} · entry ${cfg.entryType} · exit ${cfg.exitCondition} · exit mechanic ${cfg.exitType} · rule ${cfg.exitValue||'manual/no numeric value'}`:'No Founder test configuration is frozen.'}</div>`;
+
+ el('freezeConfig').onclick=()=>{
+   const stake=Number(el('stakeInput').value),entryType=el('entryType').value,exitCondition=el('exitCondition').value,exitValue=el('exitValue').value.trim(),exitType=el('exitType').value;
+   if(!Number.isFinite(stake)||stake<=0)return showConfigStatus('Cannot freeze: enter a positive dollar amount.');
+   if(stake>D.account.buyingPower)return showConfigStatus(`Cannot freeze: ${money(stake)} exceeds current captured crypto buying power of ${money(D.account.buyingPower)}.`);
+   if(!entryType)return showConfigStatus('Cannot freeze: select an entry order type.');
+   if(!exitCondition)return showConfigStatus('Cannot freeze: select an exit condition.');
+   if(exitCondition!=='manual'&&!exitValue)return showConfigStatus('Cannot freeze: selected exit condition needs a Founder-defined value/rule.');
+   if(!exitType)return showConfigStatus('Cannot freeze: select an exit order mechanic.');
+   writeTestConfig({stake,entryType,exitCondition,exitValue,exitType,frozen:true,frozenAt:new Date().toISOString()});
+   renderSiCrypto(); showConfigStatus('Test configuration frozen locally. This does NOT arm or submit anything.');
+ };
+ el('clearConfig').onclick=()=>{clearTestConfig();renderSiCrypto();showConfigStatus('Frozen local test configuration cleared. Execution remains DISARMED.')};
+}
+function showConfigStatus(msg){el('configStatus').textContent=msg||''}
+function escapeHtml(s){return String(s).replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]))}
 
 function renderAccount(){
  const a=D.account;
@@ -26,14 +91,14 @@ function renderOperational(){
  const o=D.operationalCockpit,r=o.radar,l=o.lock,p=o.position,m=o.manage;
  el('executionStrip').innerHTML=`
    <div><span>EXECUTION</span><strong class="stale">${o.execution.state}</strong><small>${o.execution.reason}</small></div>
-   <div><span>RADAR</span><strong class="current">${r.state}</strong><small>${r.eligibleCount} eligible of ${r.universeSize} provider pairs</small></div>
-   <div><span>LOCK</span><strong class="current">${l.state}</strong><small>${l.symbol} · ${l.freshness}</small></div>
+   <div><span>RADAR</span><strong class="stale">${r.state}</strong><small>${r.eligibleCount} eligible of ${r.universeSize} provider pairs</small></div>
+   <div><span>LOCK</span><strong class="stale">${l.state}</strong><small>${l.symbol} · ${l.freshness}</small></div>
    <div><span>POSITION</span><strong>${p.state}</strong><small>${p.orderState}</small></div>
    <div><span>MANAGE</span><strong>${m.state}</strong><small>${m.reason}</small></div>`;
 
  el('radarPanel').innerHTML=`
    <div class="hero-symbol">${r.leader}</div>
-   <div class="state current">LEADING GOVERNED SPECIMEN</div>
+   <div class="state stale">NO SI-RANKED LEADER</div>
    <p>${r.leaderBasis}</p>
    <div class="kv"><span>Universe</span><b>${r.universeSize}</b><span>Eligible now</span><b>${r.eligibleCount}</b><span>Candidate pool</span><b>${r.candidateCount}</b><span>Last provider capture</span><b>${fmtTime(r.lastProviderUpdate)}</b></div>`;
 
@@ -50,7 +115,7 @@ function renderOperational(){
  el('lifecycle').innerHTML=o.lifecycle.map((x,i)=>`<span class="life-step ${i<o.currentLifecycleIndex?'done':i===o.currentLifecycleIndex?'active':''}">${x}</span>`).join('<span class="life-arrow">→</span>');
 
  el('controls').innerHTML=`
-   <button class="control-btn" id="inspectLeader">Inspect ${r.leader}</button>
+   <button class="control-btn" id="inspectLeader">Inspect BTC governed specimen</button>
    <button class="control-btn" id="pauseRadar">${radarViewPaused?'Resume':'Pause'} radar view</button>
    <button class="control-btn" id="viewPreview">View captured preview</button>
    <button class="control-btn disabled" disabled title="Execution is disarmed and the public shell has no approved order-submission bridge.">ARM</button>
@@ -60,7 +125,7 @@ function renderOperational(){
    <button class="control-btn disabled" disabled title="A fresh order preview requires the governed Robinhood MCP path; it is not wired into the public shell.">Run fresh order preview</button>
    <button class="control-btn disabled" disabled title="Founder approval is not accepted through this static public shell.">Founder approve order</button>
    <button class="control-btn disabled" disabled title="No position exists, so there is nothing to manage or exit.">Exit review</button>`;
- el('inspectLeader').onclick=()=>{inspectedCrypto=r.leader;renderCryptoUniverse(true)};
+ el('inspectLeader').onclick=()=>{inspectedCrypto='BTC-USD';renderCryptoUniverse(true)};
  el('pauseRadar').onclick=()=>{radarViewPaused=!radarViewPaused;renderOperational()};
  el('viewPreview').onclick=()=>{el('lockPanel').scrollIntoView({behavior:'smooth',block:'center'});showControlReason('Captured preview is evidence only. It does not submit an order.')};
  document.querySelectorAll('.control-btn.disabled').forEach(b=>b.onclick=()=>showControlReason(b.title));
@@ -75,7 +140,7 @@ function renderCryptoUniverse(keepPosition=false){
  el('cryptoUniverseSummary').innerHTML=`<span class="chip">${u.totalPairs} provider pairs</span><span class="chip">${u.eligiblePairs} tradable now</span><span class="chip">${radarViewPaused?'RADAR VIEW PAUSED':'RADAR VIEW ACTIVE'}</span><span class="chip">CAPTURE ${fmtTime(u.capturedAt)}</span>`;
  const x=u.rows.find(v=>v.symbol===inspectedCrypto);
  el('cryptoInspect').innerHTML=x?`<div><strong>${x.symbol}</strong> · ${x.name}</div><div class="kv"><span>State</span><b>${x.tradable?'TRADABLE':'HALTED / RESTRICTED'}</b><span>Bid</span><b>${money(x.bid,8)}</b><span>Ask</span><b>${money(x.ask,8)}</b><span>Mark</span><b>${money(x.mark,8)}</b><span>Spread <em class="calc">NFE</em></span><b>${money(x.spread,8)} · ${pct(x.spreadPct)}</b><span>Change <em class="calc">NFE</em></span><b>${pct(x.changePct)}</b><span>Provider time</span><b>${fmtTime(x.providerTimestamp)}</b></div>`:''; 
- el('cryptoUniverseTable').innerHTML=`<table><thead><tr><th>Symbol</th><th>State</th><th>Bid</th><th>Ask</th><th>Mark</th><th>Spread</th><th>Rel spread</th><th>Change</th><th>Provider time</th><th>Inspect</th></tr></thead><tbody>${rows.map(x=>`<tr><td>${x.symbol}</td><td>${x.tradable?'TRADABLE':'HALTED / RESTRICTED'}</td><td>${money(x.bid,8)}</td><td>${money(x.ask,8)}</td><td>${money(x.mark,8)}</td><td>${money(x.spread,8)}</td><td>${pct(x.spreadPct)}</td><td>${pct(x.changePct)}</td><td>${fmtTime(x.providerTimestamp)}</td><td><button class="mini-btn" data-inspect="${x.symbol}">Inspect</button></td></tr>`).join('')}</tbody></table>`;
+ el('cryptoUniverseTable').innerHTML=`<table><thead><tr><th>Symbol</th><th>State</th><th>Bid</th><th>Ask</th><th>Mark</th><th>Spread</th><th>Rel spread</th><th>Change</th><th>SI Score</th><th>Provider time</th><th>Inspect</th></tr></thead><tbody>${rows.map(x=>`<tr><td>${x.symbol}</td><td>${x.tradable?'TRADABLE':'HALTED / RESTRICTED'}</td><td>${money(x.bid,8)}</td><td>${money(x.ask,8)}</td><td>${money(x.mark,8)}</td><td>${money(x.spread,8)}</td><td>${pct(x.spreadPct)}</td><td>${pct(x.changePct)}</td><td>INCOMPLETE</td><td>${fmtTime(x.providerTimestamp)}</td><td><button class="mini-btn" data-inspect="${x.symbol}">Inspect</button></td></tr>`).join('')}</tbody></table>`;
  el('cryptoSearch').oninput=()=>renderCryptoUniverse();
  el('cryptoFilter').onchange=()=>renderCryptoUniverse();
  document.querySelectorAll('[data-inspect]').forEach(b=>b.onclick=()=>{inspectedCrypto=b.dataset.inspect;renderCryptoUniverse(true)});
