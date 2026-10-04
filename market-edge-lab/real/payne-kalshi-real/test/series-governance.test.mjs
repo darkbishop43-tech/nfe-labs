@@ -17,6 +17,9 @@ import {
   frozenSeriesConfig,
   seriesInterlock,
   seriesTerminal,
+  parseFounderThreshold,
+  effectiveLockThreshold,
+  payneStage,
 } from '../src/index.js';
 import { kalshiPayneOrderPost, payneOrderWriteProof } from '../src/kalshi-real-write.js';
 
@@ -132,11 +135,52 @@ async function configure(e,{threshold,stake,target}){
   if(target!=null) await updateFounderControl(e,'SET_ATTEMPT_TARGET',target);
 }
 const cycle=(e,post,ms=T0)=>runPayneRealExecutionCycle(e,{postImpl:post.fn,nowMs:ms});
-const frozenSeries=async(e,over={})=>saveRealSeriesState(e,{...defaultRealSeriesState(),seriesId:'GOV-S',status:'ARMED_FISHING',attemptsStarted:1,attemptTarget:5,threshold:.70,maxEntryDebitUsd:1,configFrozen:true,...over});
+const frozenSeries=async(e,over={})=>{
+  const threshold=over.threshold??.70;
+  return saveRealSeriesState(e,{...defaultRealSeriesState(),seriesId:'GOV-S',status:'ARMED_FISHING',attemptsStarted:1,attemptTarget:5,threshold,effectiveLockThreshold:over.effectiveLockThreshold??effectiveLockThreshold(threshold),maxEntryDebitUsd:1,configFrozen:true,...over});
+};
 const armedControl=async(e)=>{ // put control in a legitimately armed, matching state without calling live ARM semantics twice
   const c=await loadControl(e); await e.PAYNE_KALSHI_STATE.put('payne-kalshi:control:v1',JSON.stringify({...c,armed:true,attemptTarget:5,attempts:1}));
 };
 const cleanPosition=(over={})=>({schema:'PAYNE_REAL_POSITION_V1',owner:'PAYNE_KALSHI_REAL',seriesId:'GOV-S',attemptId:'GOV-S-1',attemptNo:1,status:'CLOSED',asset:'BTC',marketTicker:'KXBTC15M-REALTEST',outcomeSide:'YES',exchangeIndex:2,entryOrderId:'E',entryClientOrderId:'CID',filledCount:1,entryAverageFillPrice:.5,entryTime:'2026-10-02T06:04:00Z',reconciliationState:'FLAT',...over});
+
+test('Founder numeric threshold validator accepts approved range and rejects invalid precision/range',()=>{
+  for(const raw of ['.50','.55','.64','.65','.70','1.00']) {
+    const out=parseFounderThreshold(raw); assert.equal(out.ok,true,raw);
+  }
+  for(const raw of ['.49','1.01','.555','abc','NaN','Infinity']) {
+    assert.equal(parseFounderThreshold(raw).ok,false,raw);
+  }
+});
+
+test('diagnostic lower-lock rule derives and freezes the approved effective LOCK',async()=>{
+  assert.equal(effectiveLockThreshold(.50),.50);
+  assert.equal(effectiveLockThreshold(.55),.55);
+  assert.equal(effectiveLockThreshold(.64),.64);
+  assert.equal(effectiveLockThreshold(.65),.65);
+  assert.equal(effectiveLockThreshold(.70),.65);
+
+  for(const [threshold,lock] of [[.50,.50],[.55,.55],[.64,.64],[.65,.65],[.70,.65]]){
+    const e=await env(),io=installProvider();
+    try{
+      await configure(e,{threshold,stake:1,target:1});
+      await arm(e);
+      const series=await loadRealSeriesState(e);
+      assert.equal(series.threshold,threshold);
+      assert.equal(series.effectiveLockThreshold,lock);
+      assert.equal(frozenSeriesConfig(series).effectiveLockThreshold,lock);
+    }finally{io.restore();}
+  }
+});
+
+test('diagnostic lower-lock PULL semantics preserve radar, move and edge gates',()=>{
+  assert.equal(payneStage({score:.55,edge:.05,move:.003},.55,.55).pullTrigger,true);
+  assert.equal(payneStage({score:.55,edge:.05,move:.003},.60,.60).pullTrigger,false);
+  assert.equal(payneStage({score:.60,edge:.05,move:.003},.50,.50).pullTrigger,true);
+  assert.equal(payneStage({score:.49,edge:.05,move:.003},.50,.50).radar,false);
+  assert.equal(payneStage({score:.60,edge:.05,move:.001},.50,.50).pullTrigger,false);
+  assert.equal(payneStage({score:.60,edge:0,move:.003},.50,.50).pullTrigger,false);
+});
 
 // ---------- 1,3 target 1 + attemptsStarted begins at 0 ----------
 test('GOV 1/3/16: target 1 retains behaviour; ARM snapshots config with attemptsStarted=0',async()=>{
@@ -395,9 +439,9 @@ test('GOV 24/25/26: AUTO is only read (GET), zero provider POSTs, zero capital m
 
 test('GOV: no hard-coded run-shape - frozenSeriesConfig accepts any validated combination, rejects unfrozen/invalid',()=>{
   for(const [t,th,st] of [[1,.70,1],[5,.70,1],[10,.75,1],[10,.80,2],[30,.65,1],[7,.91,3]]){
-    assert.equal(frozenSeriesConfig({configFrozen:true,attemptTarget:t,threshold:th,maxEntryDebitUsd:st,requiredExchangeIndex:2}).ok,true);
+    assert.equal(frozenSeriesConfig({configFrozen:true,attemptTarget:t,threshold:th,effectiveLockThreshold:effectiveLockThreshold(th),maxEntryDebitUsd:st,requiredExchangeIndex:2}).ok,true);
   }
-  assert.equal(frozenSeriesConfig({configFrozen:false,attemptTarget:5,threshold:.7,maxEntryDebitUsd:1,requiredExchangeIndex:2}).ok,false);
-  assert.equal(frozenSeriesConfig({configFrozen:true,attemptTarget:0,threshold:.7,maxEntryDebitUsd:1,requiredExchangeIndex:2}).ok,false);
-  assert.equal(frozenSeriesConfig({configFrozen:true,attemptTarget:5,threshold:.7,maxEntryDebitUsd:1,requiredExchangeIndex:3}).ok,false);
+  assert.equal(frozenSeriesConfig({configFrozen:false,attemptTarget:5,threshold:.7,effectiveLockThreshold:.65,maxEntryDebitUsd:1,requiredExchangeIndex:2}).ok,false);
+  assert.equal(frozenSeriesConfig({configFrozen:true,attemptTarget:0,threshold:.7,effectiveLockThreshold:.65,maxEntryDebitUsd:1,requiredExchangeIndex:2}).ok,false);
+  assert.equal(frozenSeriesConfig({configFrozen:true,attemptTarget:5,threshold:.7,effectiveLockThreshold:.65,maxEntryDebitUsd:1,requiredExchangeIndex:3}).ok,false);
 });
