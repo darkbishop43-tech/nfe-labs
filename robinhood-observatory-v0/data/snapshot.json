@@ -3,20 +3,24 @@
     "site": "NFE-OS ROBINHOOD OBSERVATORY",
     "mode": "SNAPSHOT",
     "readOnly": true,
-    "capturedAt": "2026-10-03T05:45:02-04:00",
-    "notes": "Sanitized real Robinhood MCP specimens. No OAuth/session/auth material is included."
+    "capturedAt": "2026-10-04T04:59:40.076275-04:00",
+    "notes": "Sanitized real Robinhood MCP specimens. Three-lane research cockpit uses authentic current captures; the deployed shell remains snapshot-backed and has no direct Robinhood connection."
   },
   "account": {
     "label": "Agentic",
     "maskedId": "••••3756",
     "type": "individual / limited margin",
-    "cash": 5.0,
-    "buyingPower": 5.0,
-    "portfolioValue": 5.0,
-    "equityValue": 0.0,
-    "optionValue": 0.0,
-    "cryptoValue": 0.0,
-    "positionCounts": {"equity":0,"crypto":0,"option":0}
+    "cash": 5,
+    "buyingPower": 5,
+    "portfolioValue": 5,
+    "equityValue": 0,
+    "optionValue": 0,
+    "cryptoValue": 0,
+    "positionCounts": {
+      "equity": 0,
+      "crypto": 0,
+      "option": 0
+    }
   },
   "markets": {
     "SPY": {
@@ -28,7 +32,7 @@
       "last": 769.65,
       "bid": 769.57,
       "ask": 769.87,
-      "spread": 0.30,
+      "spread": 0.3,
       "spreadSource": "NFE calculated: ask - bid",
       "previousClose": 763.99,
       "changePct": 0.7683,
@@ -44,9 +48,9 @@
       "price": 749.4964,
       "priceField": "last_non_reg_trade_price",
       "last": 749.53,
-      "bid": 749.40,
-      "ask": 754.00,
-      "spread": 4.60,
+      "bid": 749.4,
+      "ask": 754,
+      "spread": 4.6,
       "spreadSource": "NFE calculated: ask - bid",
       "previousClose": 742.03,
       "changePct": 1.0062,
@@ -59,111 +63,541 @@
       "assetClass": "crypto",
       "provider": "Robinhood MCP",
       "sourceTool": "get_crypto_quotes",
-      "bid": 83802.1695897,
-      "ask": 85382.47152431,
-      "mark": 84592.320557005,
-      "spread": 1580.30193461,
+      "bid": 84327.8483256,
+      "ask": 85909.87311768,
+      "mark": 85118.86072164,
+      "spread": 1582.02479208,
       "spreadSource": "NFE calculated: ask - bid",
-      "previousClose": 84698.28,
-      "changePct": -0.1251,
+      "previousClose": 84845.795,
+      "changePct": 0.321837,
       "routing": "Market Maker Routing",
-      "providerTimestamp": "2026-10-03T05:45:01.830-04:00",
+      "providerTimestamp": "2026-10-04T04:59:21.138-04:00",
       "freshness": "CURRENT AT CAPTURE"
     },
     "ETH": {
       "assetClass": "crypto",
       "provider": "Robinhood MCP",
       "sourceTool": "get_crypto_quotes",
-      "bid": 2656.70658869,
-      "ask": 2706.90051116,
-      "mark": 2681.803549925,
-      "spread": 50.19392247,
+      "bid": 2674.8902453,
+      "ask": 2725.78076331,
+      "mark": 2700.335504305,
+      "spread": 50.89051801,
       "spreadSource": "NFE calculated: ask - bid",
-      "previousClose": 2682.035,
-      "changePct": -0.0086,
+      "previousClose": 2694.505,
+      "changePct": 0.2163849874,
       "routing": "Market Maker Routing",
-      "providerTimestamp": "2026-10-03T05:45:01.863-04:00",
+      "providerTimestamp": "2026-10-04T04:59:05.775-04:00",
       "freshness": "CURRENT AT CAPTURE"
     }
   },
   "historicalSupport": {
-    "equityNativeIntervals": ["15second","30second","minute","5minute","10minute","30minute","hour","4hour","day","week","month","3month","6month","year","5year","10year","20year","50year"],
+    "equityNativeIntervals": [
+      "15second",
+      "30second",
+      "minute",
+      "5minute",
+      "10minute",
+      "30minute",
+      "hour",
+      "4hour",
+      "day",
+      "week",
+      "month",
+      "3month",
+      "6month",
+      "year",
+      "5year",
+      "10year",
+      "20year",
+      "50year"
+    ],
     "requested15Minute": "NOT NATIVELY EXPOSED — aggregate a finer native interval only in future research if authorized",
-    "verifiedSpecimenIntervals": ["minute","5minute","hour","day"],
+    "verifiedSpecimenIntervals": [
+      "minute",
+      "5minute",
+      "hour",
+      "day"
+    ],
     "chartWindow": "2026-10-02 regular session"
   },
   "historicalSamples": {
     "SPY": [
-      {"t":"2026-10-02T13:30:00Z","o":770.57,"h":770.84,"l":770.15,"c":770.285,"v":259540},
-      {"t":"2026-10-02T13:35:00Z","o":770.68,"h":770.89,"l":770.44,"c":770.72,"v":106120},
-      {"t":"2026-10-02T13:40:00Z","o":770.80,"h":770.80,"l":770.405,"c":770.455,"v":37916},
-      {"t":"2026-10-02T13:45:00Z","o":771.63,"h":772.09,"l":771.63,"c":771.81,"v":99511},
-      {"t":"2026-10-02T13:50:00Z","o":771.38,"h":771.75,"l":771.28,"c":771.58,"v":44320},
-      {"t":"2026-10-02T13:55:00Z","o":770.19,"h":770.245,"l":769.55,"c":769.62,"v":84950}
+      {
+        "t": "2026-10-02T13:30:00Z",
+        "o": 770.57,
+        "h": 770.84,
+        "l": 770.15,
+        "c": 770.285,
+        "v": 259540
+      },
+      {
+        "t": "2026-10-02T13:35:00Z",
+        "o": 770.68,
+        "h": 770.89,
+        "l": 770.44,
+        "c": 770.72,
+        "v": 106120
+      },
+      {
+        "t": "2026-10-02T13:40:00Z",
+        "o": 770.8,
+        "h": 770.8,
+        "l": 770.405,
+        "c": 770.455,
+        "v": 37916
+      },
+      {
+        "t": "2026-10-02T13:45:00Z",
+        "o": 771.63,
+        "h": 772.09,
+        "l": 771.63,
+        "c": 771.81,
+        "v": 99511
+      },
+      {
+        "t": "2026-10-02T13:50:00Z",
+        "o": 771.38,
+        "h": 771.75,
+        "l": 771.28,
+        "c": 771.58,
+        "v": 44320
+      },
+      {
+        "t": "2026-10-02T13:55:00Z",
+        "o": 770.19,
+        "h": 770.245,
+        "l": 769.55,
+        "c": 769.62,
+        "v": 84950
+      }
     ],
     "QQQ": [
-      {"t":"2026-10-02T00:00:00Z","o":751.31,"h":754.54,"l":747.53,"c":749.58,"v":34498919},
-      {"t":"2026-10-01T00:00:00Z","o":742.51,"h":744.67,"l":736.25,"c":742.03,"v":35728920},
-      {"t":"2026-09-30T00:00:00Z","o":740.19,"h":745.10,"l":739.46,"c":739.77,"v":29820353},
-      {"t":"2026-09-29T00:00:00Z","o":740.145,"h":740.5799,"l":735.34,"c":737.93,"v":27052269},
-      {"t":"2026-09-28T00:00:00Z","o":740.455,"h":741.42,"l":731.63,"c":736.53,"v":41775024}
+      {
+        "t": "2026-10-02T00:00:00Z",
+        "o": 751.31,
+        "h": 754.54,
+        "l": 747.53,
+        "c": 749.58,
+        "v": 34498919
+      },
+      {
+        "t": "2026-10-01T00:00:00Z",
+        "o": 742.51,
+        "h": 744.67,
+        "l": 736.25,
+        "c": 742.03,
+        "v": 35728920
+      },
+      {
+        "t": "2026-09-30T00:00:00Z",
+        "o": 740.19,
+        "h": 745.1,
+        "l": 739.46,
+        "c": 739.77,
+        "v": 29820353
+      },
+      {
+        "t": "2026-09-29T00:00:00Z",
+        "o": 740.145,
+        "h": 740.5799,
+        "l": 735.34,
+        "c": 737.93,
+        "v": 27052269
+      },
+      {
+        "t": "2026-09-28T00:00:00Z",
+        "o": 740.455,
+        "h": 741.42,
+        "l": 731.63,
+        "c": 736.53,
+        "v": 41775024
+      }
     ]
   },
   "priceBooks": {
-    "SPY": {"tool":"get_equity_price_book","updatedAt":"2026-10-03T05:45:02.047218909-04:00","bids":[],"asks":[],"status":"NO RESTING LEVELS AT CAPTURE / MARKET CLOSED"},
-    "QQQ": {"tool":"get_equity_price_book","updatedAt":"2026-10-03T05:45:02.045285531-04:00","bids":[],"asks":[],"status":"NO RESTING LEVELS AT CAPTURE / MARKET CLOSED"}
+    "SPY": {
+      "tool": "get_equity_price_book",
+      "updatedAt": "2026-10-03T05:45:02.047218909-04:00",
+      "bids": [],
+      "asks": [],
+      "status": "NO RESTING LEVELS AT CAPTURE / MARKET CLOSED"
+    },
+    "QQQ": {
+      "tool": "get_equity_price_book",
+      "updatedAt": "2026-10-03T05:45:02.045285531-04:00",
+      "bids": [],
+      "asks": [],
+      "status": "NO RESTING LEVELS AT CAPTURE / MARKET CLOSED"
+    }
   },
   "technicals": {
     "SPY": {
-      "tool":"get_equity_technical_indicators",
-      "interval":"5minute",
-      "asOf":"2026-10-02T19:55:00Z",
-      "ema20":769.3998303627931,
-      "rsi14":57.558176087890445,
-      "vwap":769.8851040731877,
-      "macd":{"macd":0.12633576965731663,"signal":0.08727738495968586,"histogram":0.039058384697630774},
-      "bollinger20x2":{"lower":768.8612092100944,"middle":769.3998303627931,"upper":769.9384515154917}
+      "tool": "get_equity_technical_indicators",
+      "interval": "5minute",
+      "asOf": "2026-10-02T19:55:00Z",
+      "ema20": 769.3998303627931,
+      "rsi14": 57.558176087890445,
+      "vwap": 769.8851040731877,
+      "macd": {
+        "macd": 0.12633576965731663,
+        "signal": 0.08727738495968586,
+        "histogram": 0.039058384697630774
+      },
+      "bollinger20x2": {
+        "lower": 768.8612092100944,
+        "middle": 769.3998303627931,
+        "upper": 769.9384515154917
+      }
     },
     "QQQ": {
-      "tool":"get_equity_technical_indicators",
-      "interval":"5minute",
-      "asOf":"2026-10-02T19:55:00Z",
-      "ema20":749.1954142001113,
-      "rsi14":55.718462333236246
+      "tool": "get_equity_technical_indicators",
+      "interval": "5minute",
+      "asOf": "2026-10-02T19:55:00Z",
+      "ema20": 749.1954142001113,
+      "rsi14": 55.718462333236246
     },
-    "supportedTypes":["ema","sma","rsi","momentum","roc","cci","williams_r","atr","mfi","adx","donchian_channels","bollinger_bands","macd","keltner_channels","supertrend","vwap","obv","pivot_points"]
+    "supportedTypes": [
+      "ema",
+      "sma",
+      "rsi",
+      "momentum",
+      "roc",
+      "cci",
+      "williams_r",
+      "atr",
+      "mfi",
+      "adx",
+      "donchian_channels",
+      "bollinger_bands",
+      "macd",
+      "keltner_channels",
+      "supertrend",
+      "vwap",
+      "obv",
+      "pivot_points"
+    ]
   },
   "options": {
-    "expiration":"2026-10-05",
-    "note":"Near-the-money bounded specimen only; no recommendations.",
-    "contracts":[
-      {"underlying":"SPY","type":"call","strike":770,"tradability":"tradable","bid":2.02,"bidSize":147,"ask":2.04,"askSize":35,"mark":2.03,"spread":0.02,"previousClose":1.35,"iv":0.08367,"delta":0.490575,"gamma":0.075802,"theta":-0.47215,"vega":0.250825,"rho":0.025075,"openInterest":3563,"volume":83420,"updatedAt":"2026-10-02T20:14:59.946959761Z"},
-      {"underlying":"SPY","type":"put","strike":770,"tradability":"tradable","bid":1.88,"bidSize":41,"ask":1.89,"askSize":1,"mark":1.885,"spread":0.01,"previousClose":6.34,"iv":0.072196,"delta":-0.514203,"gamma":0.089327,"theta":-0.329983,"vega":0.250374,"rho":-0.024664,"openInterest":1578,"volume":67272,"updatedAt":"2026-10-02T20:14:59.947312372Z"},
-      {"underlying":"QQQ","type":"call","strike":750,"tradability":"tradable","bid":2.80,"bidSize":2,"ask":2.83,"askSize":5,"mark":2.815,"spread":0.03,"previousClose":1.88,"iv":0.120774,"delta":0.487534,"gamma":0.053901,"theta":-0.645288,"vega":0.244217,"rho":0.024211,"openInterest":4039,"volume":53834,"updatedAt":"2026-10-02T20:14:59.964378911Z"},
-      {"underlying":"QQQ","type":"put","strike":750,"tradability":"tradable","bid":2.84,"bidSize":5,"ask":2.88,"askSize":5,"mark":2.86,"spread":0.04,"previousClose":8.64,"iv":0.111237,"delta":-0.515449,"gamma":0.059097,"theta":-0.516148,"vega":0.244021,"rho":-0.024595,"openInterest":184,"volume":59252,"updatedAt":"2026-10-02T20:14:59.995445576Z"}
+    "expiration": "2026-10-05",
+    "note": "Near-the-money bounded specimen only; no recommendations.",
+    "contracts": [
+      {
+        "underlying": "SPY",
+        "type": "call",
+        "strike": 770,
+        "tradability": "tradable",
+        "bid": 2.02,
+        "bidSize": 147,
+        "ask": 2.04,
+        "askSize": 35,
+        "mark": 2.03,
+        "spread": 0.02,
+        "previousClose": 1.35,
+        "iv": 0.08367,
+        "delta": 0.490575,
+        "gamma": 0.075802,
+        "theta": -0.47215,
+        "vega": 0.250825,
+        "rho": 0.025075,
+        "openInterest": 3563,
+        "volume": 83420,
+        "updatedAt": "2026-10-02T20:14:59.946959761Z"
+      },
+      {
+        "underlying": "SPY",
+        "type": "put",
+        "strike": 770,
+        "tradability": "tradable",
+        "bid": 1.88,
+        "bidSize": 41,
+        "ask": 1.89,
+        "askSize": 1,
+        "mark": 1.885,
+        "spread": 0.01,
+        "previousClose": 6.34,
+        "iv": 0.072196,
+        "delta": -0.514203,
+        "gamma": 0.089327,
+        "theta": -0.329983,
+        "vega": 0.250374,
+        "rho": -0.024664,
+        "openInterest": 1578,
+        "volume": 67272,
+        "updatedAt": "2026-10-02T20:14:59.947312372Z"
+      },
+      {
+        "underlying": "QQQ",
+        "type": "call",
+        "strike": 750,
+        "tradability": "tradable",
+        "bid": 2.8,
+        "bidSize": 2,
+        "ask": 2.83,
+        "askSize": 5,
+        "mark": 2.815,
+        "spread": 0.03,
+        "previousClose": 1.88,
+        "iv": 0.120774,
+        "delta": 0.487534,
+        "gamma": 0.053901,
+        "theta": -0.645288,
+        "vega": 0.244217,
+        "rho": 0.024211,
+        "openInterest": 4039,
+        "volume": 53834,
+        "updatedAt": "2026-10-02T20:14:59.964378911Z"
+      },
+      {
+        "underlying": "QQQ",
+        "type": "put",
+        "strike": 750,
+        "tradability": "tradable",
+        "bid": 2.84,
+        "bidSize": 5,
+        "ask": 2.88,
+        "askSize": 5,
+        "mark": 2.86,
+        "spread": 0.04,
+        "previousClose": 8.64,
+        "iv": 0.111237,
+        "delta": -0.515449,
+        "gamma": 0.059097,
+        "theta": -0.516148,
+        "vega": 0.244021,
+        "rho": -0.024595,
+        "openInterest": 184,
+        "volume": 59252,
+        "updatedAt": "2026-10-02T20:14:59.995445576Z"
+      }
     ],
-    "historicals":{"supported":true,"volumeField":"NOT EXPOSED IN OPTION HISTORICAL BARS","verifiedInterval":"5minute"}
+    "historicals": {
+      "supported": true,
+      "volumeField": "NOT EXPOSED IN OPTION HISTORICAL BARS",
+      "verifiedInterval": "5minute"
+    }
   },
   "existingOptions": {
-    "sourceTool":"get_option_positions",
-    "accountsChecked":["••••2430","••••6064","••••2115"],
-    "openPositions":[],
-    "status":"0 OPEN OPTION POSITIONS RETURNED ACROSS CHECKED READ-ONLY ACCOUNTS"
+    "sourceTool": "get_option_positions",
+    "accountsChecked": [
+      "••••2430",
+      "••••6064",
+      "••••2115"
+    ],
+    "openPositions": [],
+    "status": "0 OPEN OPTION POSITIONS RETURNED ACROSS CHECKED READ-ONLY ACCOUNTS"
   },
   "evidence": [
-    {"tool":"get_accounts","status":"SUCCESS","mode":"READ ONLY"},
-    {"tool":"get_portfolio","status":"SUCCESS","mode":"READ ONLY"},
-    {"tool":"get_equity_positions","status":"SUCCESS","mode":"READ ONLY"},
-    {"tool":"get_crypto_positions","status":"SUCCESS","mode":"READ ONLY"},
-    {"tool":"get_option_positions","status":"SUCCESS","mode":"READ ONLY"},
-    {"tool":"get_equity_quotes","status":"SUCCESS","mode":"READ ONLY"},
-    {"tool":"get_equity_historicals","status":"SUCCESS","mode":"READ ONLY"},
-    {"tool":"get_equity_price_book","status":"SUCCESS","mode":"READ ONLY"},
-    {"tool":"get_equity_technical_indicators","status":"SUCCESS","mode":"READ ONLY"},
-    {"tool":"get_crypto_quotes","status":"SUCCESS","mode":"READ ONLY"},
-    {"tool":"get_option_chains","status":"SUCCESS","mode":"READ ONLY"},
-    {"tool":"get_option_instruments","status":"SUCCESS","mode":"READ ONLY"},
-    {"tool":"get_option_quotes","status":"SUCCESS","mode":"READ ONLY"},
-    {"tool":"get_option_historicals","status":"SUCCESS","mode":"READ ONLY"}
-  ]
+    {
+      "tool": "get_accounts",
+      "status": "SUCCESS",
+      "mode": "READ ONLY"
+    },
+    {
+      "tool": "get_portfolio",
+      "status": "SUCCESS",
+      "mode": "READ ONLY"
+    },
+    {
+      "tool": "get_equity_positions",
+      "status": "SUCCESS",
+      "mode": "READ ONLY"
+    },
+    {
+      "tool": "get_crypto_positions",
+      "status": "SUCCESS",
+      "mode": "READ ONLY"
+    },
+    {
+      "tool": "get_option_positions",
+      "status": "SUCCESS",
+      "mode": "READ ONLY"
+    },
+    {
+      "tool": "get_equity_quotes",
+      "status": "SUCCESS",
+      "mode": "READ ONLY"
+    },
+    {
+      "tool": "get_equity_historicals",
+      "status": "SUCCESS",
+      "mode": "READ ONLY"
+    },
+    {
+      "tool": "get_equity_price_book",
+      "status": "SUCCESS",
+      "mode": "READ ONLY"
+    },
+    {
+      "tool": "get_equity_technical_indicators",
+      "status": "SUCCESS",
+      "mode": "READ ONLY"
+    },
+    {
+      "tool": "get_crypto_quotes",
+      "status": "SUCCESS",
+      "mode": "READ ONLY"
+    },
+    {
+      "tool": "get_option_chains",
+      "status": "SUCCESS",
+      "mode": "READ ONLY"
+    },
+    {
+      "tool": "get_option_instruments",
+      "status": "SUCCESS",
+      "mode": "READ ONLY"
+    },
+    {
+      "tool": "get_option_quotes",
+      "status": "SUCCESS",
+      "mode": "READ ONLY"
+    },
+    {
+      "tool": "get_option_historicals",
+      "status": "SUCCESS",
+      "mode": "READ ONLY"
+    },
+    {
+      "tool": "get_currency_pairs",
+      "status": "SUCCESS — 91 supported / 58 currently eligible",
+      "mode": "READ ONLY"
+    },
+    {
+      "tool": "get_crypto_quotes",
+      "status": "SUCCESS — account-routed current capture",
+      "mode": "READ ONLY"
+    },
+    {
+      "tool": "crypto order preview",
+      "status": "SUCCESS — non-executing BTC specimen",
+      "mode": "PREVIEW ONLY"
+    },
+    {
+      "tool": "get_popular_watchlists",
+      "status": "SUCCESS — provider-curated equity discovery",
+      "mode": "READ ONLY"
+    },
+    {
+      "tool": "get_watchlist_items",
+      "status": "SUCCESS — Trending stocks capture",
+      "mode": "READ ONLY"
+    }
+  ],
+  "researchLanes": {
+    "crypto": {
+      "state": "CANDIDATE / FOUNDER APPROVAL REQUIRED",
+      "positionState": "FLAT",
+      "lifecycle": "FLAT → PREVIEWED → AWAITING BUY APPROVAL",
+      "catalogCount": 91,
+      "eligibleCount": 58,
+      "discoveryMethod": "get_currency_pairs + current account-routed quotes",
+      "candidate": {
+        "symbol": "BTC-USD",
+        "bid": 84327.8483256,
+        "ask": 85909.87311768,
+        "mark": 85118.86072164,
+        "spread": 1582.02479208,
+        "spreadPct": 1.858594,
+        "previousClose": 84845.795,
+        "changePct": 0.321837,
+        "providerTimestamp": "2026-10-04T04:59:21.138-04:00",
+        "routing": "Market Maker Routing"
+      },
+      "selectionReason": "Selected for the first controlled lifecycle proof because the current dynamic scan found BTC unhalted/tradable with one of the tightest relative spreads in the eligible set and a modest positive move versus the provider local-day reference. This is an execution-control specimen choice, not a permanent strategy preference.",
+      "preview": {
+        "status": "PASS / NON-EXECUTING",
+        "side": "BUY",
+        "asset": "BTC (BTC-USD)",
+        "orderType": "Market",
+        "dollarAmount": 1,
+        "quantity": "0.00001164 BTC estimated",
+        "price": 85909.40655329,
+        "timeInForce": "GTC",
+        "estimatedFee": 0,
+        "estimatedTotal": 1,
+        "routing": "Market Maker Routing",
+        "accountMask": "••••4142"
+      },
+      "management": "Proposed management: after an explicitly approved buy fills, observe provider quote, owned quantity, current value and unrealized result with no fixed hold timer or target. Return to Founder for the sell decision. Proposed exit: one Founder-approved sell of the owned BTC amount, then verify FLAT."
+    },
+    "equities": {
+      "state": "WATCH / RESEARCH ONLY",
+      "session": "MARKET CLOSED",
+      "discoverySource": "Robinhood-curated Trending stocks",
+      "sourceListCapturedAt": "2026-10-04",
+      "specimens": [
+        {
+          "symbol": "XRPN",
+          "price": 37.75,
+          "previousClose": 23.43,
+          "changePct": 61.1182,
+          "providerTimestamp": "2026-10-02T23:59:42.688798928Z"
+        },
+        {
+          "symbol": "VST",
+          "price": 143.9605,
+          "previousClose": 139.75,
+          "changePct": 3.0129,
+          "providerTimestamp": "2026-10-02T23:59:26.381895928Z"
+        },
+        {
+          "symbol": "LEU",
+          "price": 141.2263,
+          "previousClose": 139.11,
+          "changePct": 1.5213,
+          "providerTimestamp": "2026-10-02T23:53:14.213846153Z"
+        },
+        {
+          "symbol": "PL",
+          "price": 17.6957,
+          "previousClose": 16.14,
+          "changePct": 9.6388,
+          "providerTimestamp": "2026-10-02T23:59:41.085765509Z"
+        },
+        {
+          "symbol": "PEP",
+          "price": 125.9,
+          "previousClose": 125.6,
+          "changePct": 0.2389,
+          "providerTimestamp": "2026-10-02T23:33:25.318725321Z"
+        }
+      ],
+      "note": "No equity order preview or order was run. The first fractional-equity lifecycle remains deferred until an open session and exact Founder approval."
+    },
+    "options": {
+      "state": "WATCH / SHADOW RESEARCH ONLY",
+      "execution": "DISABLED",
+      "contractCount": 4,
+      "researchStates": [
+        "WATCH",
+        "CANDIDATE",
+        "LOCK",
+        "WOULD-BUY",
+        "PASS",
+        "OUTCOME"
+      ],
+      "fields": [
+        "chain",
+        "expiration",
+        "strike",
+        "call/put",
+        "bid",
+        "ask",
+        "mark",
+        "IV",
+        "delta",
+        "gamma",
+        "theta",
+        "vega",
+        "open interest",
+        "volume",
+        "price history"
+      ],
+      "note": "Existing Options Lab preserved. Current Agentic account option execution authority is not proven/authorized; no option review or order is permitted."
+    }
+  },
+  "predictionMarkets": {
+    "status": "MCP ACTIVE MARKET SURFACE NOT CURRENTLY EXPOSED",
+    "note": "Read-only capability placeholder only. Portfolio/P&L can recognize event-contract accounting, but active contract discovery/quotes are not exposed by the current MCP. No fabricated contracts or prices."
+  }
 }
