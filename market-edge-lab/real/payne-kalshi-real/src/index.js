@@ -3341,13 +3341,13 @@ export async function runPayneRealExecutionCycle(env,{postImpl=kalshiPayneOrderP
   const ask=candidate.outcomeSide==='YES'?Number(preSubmit.market.yesAsk):Number(preSubmit.market.noAsk);
   const sizing=estimateKalshiFeeSafeSize(ask,cfg.maxEntryDebitUsd);
   if(!sizing.ok || Number(sizing.totalDebitUsd)>cfg.maxEntryDebitUsd || Number(sizing.count)<1){
-    series.status='HOLD_STAKE_CAP_SIZING_FAILED'; return saveRealSeriesState(env,series);
+    return invalidateFireSpecimen(env,series,'HOLD_STAKE_CAP_SIZING_FAILED',{identityMatch:'PASS',freshLock:'PASS',preSubmit:'PASS'},nowMs);
   }
   const balanceResponse=await kalshiGetOnly(env,'/trade-api/v2/portfolio/balance');
   const balanceBody=await balanceResponse.json().catch(()=>({}));
   const index2=index2FundingEvidence(balanceBody,sizing.totalDebitUsd);
   if(!balanceResponse.ok || !index2.available || !index2.sufficient){
-    series.status='HOLD_INDEX2_FUNDING_INSUFFICIENT'; return saveRealSeriesState(env,series);
+    return invalidateFireSpecimen(env,series,'HOLD_INDEX2_FUNDING_INSUFFICIENT',{identityMatch:'PASS',freshLock:'PASS',preSubmit:'PASS'},nowMs);
   }
 
   const attemptNo=started+1;
@@ -3355,7 +3355,7 @@ export async function runPayneRealExecutionCycle(env,{postImpl=kalshiPayneOrderP
   const attemptId=seriesId+'-'+attemptNo;
   const clientOrderId=payneClientOrderId(seriesId,attemptNo,'entry');
   const payload=kalshiV2EntryPayload({marketTicker:candidate.ticker,outcomeSide:candidate.outcomeSide,yes:ask},sizing,clientOrderId);
-  if(!payload){series.status='HOLD_ENTRY_PAYLOAD_INVALID';return saveRealSeriesState(env,series);}
+  if(!payload) return invalidateFireSpecimen(env,series,'HOLD_ENTRY_PAYLOAD_INVALID',{identityMatch:'PASS',freshLock:'PASS',preSubmit:'PASS'},nowMs);
 
   const attempt={
     schema:'PAYNE_REAL_ATTEMPT_V1',owner:REAL_OWNER,seriesId,attemptId,attemptNo,status:'SUBMITTING',
