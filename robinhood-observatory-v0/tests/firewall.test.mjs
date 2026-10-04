@@ -29,3 +29,14 @@ if(si.live.state!=='DISARMED / FIRE BLOCKED')throw new Error('Live lane unexpect
 console.log('PASS SI Crypto V0 authorized weights');
 console.log('PASS no unapproved stake or qualification threshold');
 console.log('PASS incomplete SI score blocks FIRE');
+
+const v0a=data.siCryptoV0A;
+if(!v0a)throw new Error('SI Crypto V0-A state missing');
+if(v0a.scores.SI_CORE_V0A!==null)throw new Error('V0-A core score must remain null without required historical inputs');
+if(v0a.scores.fullSI!==null)throw new Error('V0-A full score must remain null while N is invalid');
+if(v0a.robinhoodOfficialApi.historicalOHLCV!==false)throw new Error('Official API OHLCV proof mismatch');
+if(v0a.robinhoodOfficialApi.secretCreated!==false)throw new Error('Unexpected Robinhood API secret creation');
+if(v0a.thirdPartyCandidates.some(x=>!/NOT CONNECTED/.test(x.status)))throw new Error('Third-party source unexpectedly connected');
+console.log('PASS SI Crypto V0-A governed hold');
+console.log('PASS official Robinhood API data gap truth');
+console.log('PASS no third-party source connected');
