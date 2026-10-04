@@ -1529,7 +1529,8 @@ async function invalidateFireSpecimen(env,series,reason,details={},nowMs=Date.no
     providerWrites:0,
     capitalMovedUsd:0,
   });
-  return saveRealSeriesState(env,{...series,fireLatch:invalidated,status:'ARMED_FISHING'});
+  const holdStatus=String(reason||'PRE_POST_INVALIDATION').startsWith('HOLD_')?String(reason):'HOLD_'+String(reason||'PRE_POST_INVALIDATION');
+  return saveRealSeriesState(env,{...series,fireLatch:invalidated,status:holdStatus});
 }
 
 export async function runReadOnlyScan(env, source='SCHEDULED_CRON', nowMs=Date.now()) {
@@ -2544,9 +2545,9 @@ export function summarizeHistoricalAttempt({attempt={},ledgerRows=[],position=nu
   const exitFee=Number.isFinite(Number(exitResult?.result?.averageFeePaid))?Number(exitResult.result.averageFeePaid):
     Number.isFinite(Number(position?.exitAverageFeePaid))?Number(position.exitAverageFeePaid):null;
   const netRealized=latestFiniteLedgerValue(rows,'realizedPnlUsd');
-  const terminalNoFill=classification.classification==='NO_FILL';
-  const netPnlUsd=netRealized!==null?netRealized:(terminalNoFill?0:null);
-  const totalFees=(entryFee!==null||exitFee!==null)?Number(((entryFee||0)+(exitFee||0)).toFixed(4)):(terminalNoFill?0:null);
+  const terminalNoEconomicExecution=['NO_FILL','PROVIDER_RECONCILED_NO_EXECUTION','INVALIDATED_BEFORE_POST'].includes(classification.classification);
+  const netPnlUsd=netRealized!==null?netRealized:(terminalNoEconomicExecution?0:null);
+  const totalFees=(entryFee!==null||exitFee!==null)?Number(((entryFee||0)+(exitFee||0)).toFixed(4)):(terminalNoEconomicExecution?0:null);
   const grossRealizedPnlUsd=netPnlUsd!==null&&totalFees!==null?Number((netPnlUsd+totalFees).toFixed(4)):null;
   return {
     attemptNo:Number.isFinite(Number(attempt?.attemptNo))?Number(attempt.attemptNo):null,
@@ -2689,6 +2690,8 @@ export function summarizeRealExecutionState({control={},series={},ledger=[],asOf
     else lastAttemptResult='UNKNOWN';
   }
   const holdReason=attempted===0 && rawSeriesStatus.startsWith('HOLD_')?rawSeriesStatus:null;
+  if(latestLedgerEvent?.type==='ENTRY_RECONCILED_NO_EXECUTION') lastAttemptResult='PROVIDER_RECONCILED_NO_EXECUTION';
+  if(latestLedgerEvent?.type==='ENTRY_LOCAL_PRE_PROVIDER_REJECTED' || latestLedgerEvent?.type==='FIRE_SPECIMEN_INVALIDATED_BEFORE_POST') lastAttemptResult='INVALIDATED_BEFORE_POST';
   const lastAttempt={
     result:lastAttemptResult,
     holdReason,
@@ -3309,11 +3312,11 @@ export async function runPayneRealExecutionCycle(env,{postImpl=kalshiPayneOrderP
 
   const auto=await baselineAutoTickerConflict(env,candidate.ticker);
   if(!auto.ok || auto.conflict!==false){
-    return invalidateFireSpecimen(env,series,auto.conflict?'AUTO_EXACT_TICKER_POSITION_CONFLICT':'AUTO_OWNERSHIP_UNKNOWN',{identityMatch:'PASS'},nowMs);
+    return invalidateFireSpecimen(env,series,auto.conflict?'HOLD_AUTO_TICKER_CONFLICT':'HOLD_AUTO_OWNERSHIP_UNKNOWN',{identityMatch:'PASS'},nowMs);
   }
   const providerConflict=await providerTickerPositionEvidence(env,candidate.ticker);
   if(!providerConflict.ok || ['OPEN','UNKNOWN'].includes(providerConflict.classification)){
-    return invalidateFireSpecimen(env,series,providerConflict.classification==='OPEN'?'PROVIDER_TICKER_POSITION_CONFLICT':'PROVIDER_POSITION_UNKNOWN',{identityMatch:'PASS'},nowMs);
+    return invalidateFireSpecimen(env,series,providerConflict.classification==='OPEN'?'HOLD_PROVIDER_TICKER_POSITION_CONFLICT':'HOLD_PROVIDER_POSITION_UNKNOWN',{identityMatch:'PASS'},nowMs);
   }
 
   const freshLock=await exactMarketRead(env,candidate.ticker,candidate.asset);
@@ -3360,7 +3363,7 @@ export async function runPayneRealExecutionCycle(env,{postImpl=kalshiPayneOrderP
     fireIdentityFingerprint:series.fireLatch?.identityFingerprint||null,
     asset:candidate.asset,marketTicker:candidate.ticker,outcomeSide:candidate.outcomeSide,direction:candidate.direction,
     exchangeIndex:2,score:finalFeature.score,move:finalFeature.move,edge:finalFeature.edge,threshold:cfg.threshold,
-    observedAt:data.updatedAt||new Date(nowMs).toISOString(),freshLockAt:freshLock.readAt,preSubmitAt:preSubmit.readAt,
+    observedAt:series.fireLatch?.fireObservedAt||new Date(nowMs).toISOString(),freshLockAt:freshLock.readAt,preSubmitAt:preSubmit.readAt,
     freshLockPrice:candidate.outcomeSide==='YES'?freshLock.market.yesAsk:freshLock.market.noAsk,
     preSubmitPrice:ask,maxEntryDebitUsd:cfg.maxEntryDebitUsd,count:sizing.count,estimatedEntryFeeUsd:sizing.feeUsd,
     estimatedEntryDebitUsd:sizing.totalDebitUsd,clientOrderId,payload:{...payload},
