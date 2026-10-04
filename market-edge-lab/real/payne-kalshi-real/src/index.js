@@ -181,6 +181,7 @@ export async function updateFounderControl(env, action, rawValue = null) {
       next.attempts=0; next.openPositions=0;
     }
     await saveRealSeriesState(env,armedSeries);
+    await persistRun(env,{runId:armedSeries.seriesId,threshold:armedSeries.threshold,maxEntryDebitUsd:armedSeries.maxEntryDebitUsd,attemptTarget:armedSeries.attemptTarget,requiredExchangeIndex:2,frozenAt:armedSeries.frozenAt||null});
     next.armed=true;
   } else if (name==='DISARM') next.armed=false;
   else if (name==='SET_THRESHOLD') {
@@ -2295,22 +2296,175 @@ export async function listRealLedger(env,limit=200) {
   return rows.sort((a,b)=>String(a.at).localeCompare(String(b.at))).slice(-Math.max(1,Math.min(1000,Number(limit)||200)));
 }
 
+export async function listRealAttemptsForSeries(env,seriesId) {
+  const id=String(seriesId||'').trim();
+  if(!id) return [];
+  const kv=binding(env);
+  if(typeof kv.list!=='function') return [];
+  const page=await kv.list({prefix:ATTEMPT_PREFIX+id+':',limit:1000});
+  const rows=[];
+  for(const item of page?.keys||[]){const x=await kvGetJson(env,item.name);if(x)rows.push(x);}
+  return rows.sort((a,b)=>Number(a?.attemptNo||0)-Number(b?.attemptNo||0));
+}
+
+function latestAttemptClassification(attempt,rows=[]) {
+  const ordered=[...(Array.isArray(rows)?rows:[])].sort((a,b)=>Date.parse(a?.at||0)-Date.parse(b?.at||0));
+  let classification=null, terminalReason=null;
+  for(const row of ordered){
+    const type=String(row?.type||'');
+    if(type==='ENTRY_RECONCILED_NO_EXECUTION' || type==='ENTRY_NO_FILL' || type==='ENTRY_LOCAL_PRE_PROVIDER_REJECTED'){
+      classification='NO_FILL'; terminalReason=type;
+    } else if(type==='ENTRY_RECONCILED_OWNED' || type==='ENTRY_RECONCILED_SETTLED_FLAT' || type==='POSITION_OWNERSHIP_ESTABLISHED'){
+      classification='FILLED'; terminalReason=type;
+    } else if(['ENTRY_RESULT_UNKNOWN','ENTRY_PROVIDER_REJECTED_OR_UNKNOWN','ENTRY_WRITE_ERROR_UNKNOWN','ENTRY_RECONCILIATION_STILL_UNKNOWN'].includes(type)){
+      classification='UNKNOWN'; terminalReason=type;
+    }
+  }
+  const state=String(attempt?.providerResult?.state||attempt?.status||attempt?.result||'').toUpperCase();
+  if(classification===null){
+    if(state==='FILLED'||state==='PARTIAL') classification='FILLED';
+    else if(state==='NO_FILL') classification='NO_FILL';
+    else if(state==='UNKNOWN'||state.includes('UNKNOWN')) classification='UNKNOWN';
+  }
+  return {classification:classification||'UNKNOWN',terminalReason};
+}
+
+function latestFiniteLedgerValue(rows,field){
+  const ordered=[...(Array.isArray(rows)?rows:[])].sort((a,b)=>Date.parse(a?.at||0)-Date.parse(b?.at||0));
+  for(let i=ordered.length-1;i>=0;i--){
+    const n=Number(ordered[i]?.[field]);
+    if(Number.isFinite(n)) return n;
+  }
+  return null;
+}
+
+function latestEventByType(rows,type){
+  const filtered=(Array.isArray(rows)?rows:[]).filter(x=>String(x?.type||'')===String(type));
+  return filtered.length?filtered.sort((a,b)=>Date.parse(a?.at||0)-Date.parse(b?.at||0))[filtered.length-1]:null;
+}
+
+export function summarizeHistoricalAttempt({attempt={},ledgerRows=[],position=null,seriesConfig=null}={}) {
+  const attemptId=attempt?.attemptId||null;
+  const rows=(Array.isArray(ledgerRows)?ledgerRows:[]).filter(x=>!attemptId || String(x?.attemptId||'')===String(attemptId));
+  const classification=latestAttemptClassification(attempt,rows);
+  const entryResult=attempt?.providerResult||{};
+  const ownership=latestEventByType(rows,'POSITION_OWNERSHIP_ESTABLISHED')||latestEventByType(rows,'ENTRY_RECONCILED_OWNED');
+  const exitResult=latestEventByType(rows,'EXIT_PROVIDER_RESULT');
+  const reconciledFlat=latestEventByType(rows,'PROVIDER_RECONCILED_FLAT');
+  const reconciledNoExecution=latestEventByType(rows,'ENTRY_RECONCILED_NO_EXECUTION');
+  const settledFlat=latestEventByType(rows,'ENTRY_RECONCILED_SETTLED_FLAT');
+  const preSubmit=latestEventByType(rows,'ENTRY_PRE_SUBMIT_LATCHED');
+  const entryFee=Number.isFinite(Number(entryResult?.averageFeePaid))?Number(entryResult.averageFeePaid):
+    Number.isFinite(Number(position?.entryAverageFeePaid))?Number(position.entryAverageFeePaid):null;
+  const exitFee=Number.isFinite(Number(exitResult?.result?.averageFeePaid))?Number(exitResult.result.averageFeePaid):
+    Number.isFinite(Number(position?.exitAverageFeePaid))?Number(position.exitAverageFeePaid):null;
+  const netRealized=latestFiniteLedgerValue(rows,'realizedPnlUsd');
+  const terminalNoFill=classification.classification==='NO_FILL';
+  const netPnlUsd=netRealized!==null?netRealized:(terminalNoFill?0:null);
+  const totalFees=(entryFee!==null||exitFee!==null)?Number(((entryFee||0)+(exitFee||0)).toFixed(4)):(terminalNoFill?0:null);
+  const grossRealizedPnlUsd=netPnlUsd!==null&&totalFees!==null?Number((netPnlUsd+totalFees).toFixed(4)):null;
+  return {
+    attemptNo:Number.isFinite(Number(attempt?.attemptNo))?Number(attempt.attemptNo):null,
+    attemptId,
+    asset:attempt?.asset||preSubmit?.asset||position?.asset||null,
+    ticker:attempt?.marketTicker||preSubmit?.marketTicker||preSubmit?.ticker||position?.marketTicker||null,
+    direction:attempt?.direction||preSubmit?.direction||position?.direction||null,
+    outcomeSide:attempt?.outcomeSide||preSubmit?.outcomeSide||position?.outcomeSide||null,
+    score:attempt?.score??preSubmit?.score??position?.entryScore??null,
+    threshold:seriesConfig?.threshold??attempt?.threshold??null,
+    stakeUsd:seriesConfig?.maxEntryDebitUsd??attempt?.maxEntryDebitUsd??null,
+    freshLockPrice:attempt?.freshLockPrice??preSubmit?.freshLockPrice??null,
+    preSubmitPrice:attempt?.preSubmitPrice??preSubmit?.preSubmitPrice??null,
+    payloadSide:attempt?.payload?.side??preSubmit?.payload?.side??null,
+    payloadPrice:attempt?.payload?.price??preSubmit?.payload?.price??null,
+    clientOrderId:attempt?.clientOrderId??preSubmit?.clientOrderId??entryResult?.clientOrderId??null,
+    providerOrderId:entryResult?.orderId??ownership?.entryOrderId??position?.entryOrderId??null,
+    httpStatus:attempt?.providerHttpStatus??latestEventByType(rows,'ENTRY_PROVIDER_REJECTED_OR_UNKNOWN')?.httpStatus??null,
+    fillCount:Number.isFinite(Number(entryResult?.fillCount))?Number(entryResult.fillCount):
+      Number.isFinite(Number(ownership?.filledCount))?Number(ownership.filledCount):null,
+    remainingCount:Number.isFinite(Number(entryResult?.remainingCount))?Number(entryResult.remainingCount):null,
+    averageFillPrice:entryResult?.averageFillPrice??position?.entryAverageFillPrice??null,
+    entryFeeUsd:entryFee,
+    entryDebitUsd:attempt?.estimatedEntryDebitUsd??preSubmit?.estimatedEntryDebitUsd??null,
+    exitPrice:exitResult?.result?.averageFillPrice??position?.exitAverageFillPrice??null,
+    exitFeeUsd:exitFee,
+    settlement:settledFlat||null,
+    reconciliation:reconciledNoExecution?.reconciliation||reconciledFlat?.reason||settledFlat?.reason||classification.terminalReason||null,
+    finalResult:classification.classification,
+    grossRealizedPnlUsd,
+    totalFeesUsd:totalFees,
+    netRealizedPnlUsd:netPnlUsd,
+  };
+}
+
+export async function buildHistoricalSeriesReport(env,seriesId) {
+  const id=String(seriesId||'').trim();
+  if(!id) throw new Error('PAYNE_HISTORY_SERIES_ID_REQUIRED');
+  const [ledger,attempts,currentSeries,run]=await Promise.all([
+    listRealLedger(env,1000),
+    listRealAttemptsForSeries(env,id),
+    loadRealSeriesState(env),
+    kvGetJson(env,RUN_PREFIX+id),
+  ]);
+  const rows=ledger.filter(x=>String(x?.seriesId||'')===id);
+  const seriesConfig=run||((String(currentSeries?.seriesId||'')===id)?currentSeries:null);
+  const perAttempt=[];
+  for(const attempt of attempts){
+    const position=await kvGetJson(env,POSITION_PREFIX+String(attempt?.attemptId||''));
+    perAttempt.push(summarizeHistoricalAttempt({attempt,ledgerRows:rows,position,seriesConfig}));
+  }
+  const filled=perAttempt.filter(x=>x.finalResult==='FILLED').length;
+  const noFill=perAttempt.filter(x=>x.finalResult==='NO_FILL').length;
+  const unknownUnresolved=perAttempt.filter(x=>x.finalResult==='UNKNOWN').length;
+  const knownNet=perAttempt.filter(x=>x.netRealizedPnlUsd!==null);
+  const knownFees=perAttempt.filter(x=>x.totalFeesUsd!==null);
+  const netRealizedPnlUsd=knownNet.length?Number(knownNet.reduce((a,x)=>a+Number(x.netRealizedPnlUsd||0),0).toFixed(4)):0;
+  const totalFeesUsd=knownFees.length?Number(knownFees.reduce((a,x)=>a+Number(x.totalFeesUsd||0),0).toFixed(4)):0;
+  const grossRealizedPnlUsd=Number((netRealizedPnlUsd+totalFeesUsd).toFixed(4));
+  return {
+    ok:true,
+    schema:'PAYNE_REAL_SERIES_HISTORY_V1',
+    readOnly:true,
+    seriesId:id,
+    threshold:seriesConfig?.threshold??null,
+    stakeUsd:seriesConfig?.maxEntryDebitUsd??null,
+    attemptTarget:seriesConfig?.attemptTarget??null,
+    attemptsCompleted:perAttempt.filter(x=>x.finalResult!=='UNKNOWN').length,
+    attempted:perAttempt.length,
+    filled,
+    noFill,
+    unknownUnresolved,
+    grossRealizedPnlUsd,
+    entryFeesUsd:Number(perAttempt.reduce((a,x)=>a+Number(x.entryFeeUsd||0),0).toFixed(4)),
+    exitFeesUsd:Number(perAttempt.reduce((a,x)=>a+Number(x.exitFeeUsd||0),0).toFixed(4)),
+    totalFeesUsd,
+    netRealizedPnlUsd,
+    attempts:perAttempt,
+    providerWrites:0,
+    ordersSubmittedByThisRead:0,
+    capitalMovedUsd:0,
+  };
+}
+
 
 export function summarizeRealExecutionState({control={},series={},ledger=[],asOf=new Date().toISOString()}={}) {
   const seriesId=series?.seriesId||null;
   const allRows=Array.isArray(ledger)?[...ledger].sort((a,b)=>Date.parse(a?.at||0)-Date.parse(b?.at||0)):[];
   const rows=seriesId?allRows.filter(row=>String(row?.seriesId||'')===String(seriesId)):allRows.filter(row=>!row?.seriesId);
   const attemptIds=new Set();
-  const filledIds=new Set();
-  const noFillIds=new Set();
-  const unknownIds=new Set();
+  const latestByAttempt=new Map();
   for(const row of rows){
     const attemptId=row?.attemptId||null;
-    if(attemptId && ['ENTRY_PRE_SUBMIT_LATCHED','ENTRY_NO_FILL','ENTRY_RESULT_UNKNOWN','ENTRY_PROVIDER_REJECTED_OR_UNKNOWN','ENTRY_WRITE_ERROR_UNKNOWN','POSITION_OWNERSHIP_ESTABLISHED'].includes(String(row?.type||''))) attemptIds.add(attemptId);
-    if(attemptId && row?.type==='POSITION_OWNERSHIP_ESTABLISHED') filledIds.add(attemptId);
-    if(attemptId && row?.type==='ENTRY_NO_FILL') noFillIds.add(attemptId);
-    if(attemptId && ['ENTRY_RESULT_UNKNOWN','ENTRY_PROVIDER_REJECTED_OR_UNKNOWN','ENTRY_WRITE_ERROR_UNKNOWN'].includes(String(row?.type||''))) unknownIds.add(attemptId);
+    if(!attemptId) continue;
+    if(['ENTRY_PRE_SUBMIT_LATCHED','ENTRY_NO_FILL','ENTRY_RESULT_UNKNOWN','ENTRY_PROVIDER_REJECTED_OR_UNKNOWN','ENTRY_WRITE_ERROR_UNKNOWN','POSITION_OWNERSHIP_ESTABLISHED','ENTRY_RECONCILED_NO_EXECUTION','ENTRY_RECONCILED_OWNED','ENTRY_RECONCILED_SETTLED_FLAT'].includes(String(row?.type||''))) attemptIds.add(attemptId);
+    if(!latestByAttempt.has(attemptId)) latestByAttempt.set(attemptId,[]);
+    latestByAttempt.get(attemptId).push(row);
   }
+  const classifications=new Map();
+  for(const [attemptId,attemptRows] of latestByAttempt.entries()) classifications.set(attemptId,latestAttemptClassification({},attemptRows).classification);
+  const filledIds=new Set([...classifications.entries()].filter(([,v])=>v==='FILLED').map(([k])=>k));
+  const noFillIds=new Set([...classifications.entries()].filter(([,v])=>v==='NO_FILL').map(([k])=>k));
+  const unknownIds=new Set([...classifications.entries()].filter(([,v])=>v==='UNKNOWN').map(([k])=>k));
   const attempted=Math.max(
     Number.isFinite(Number(series?.attemptsStarted))?Math.max(0,Math.trunc(Number(series.attemptsStarted))):0,
     Number.isFinite(Number(control?.attempts))?Math.max(0,Math.trunc(Number(control.attempts))):0,
@@ -2981,7 +3135,7 @@ export async function runPayneRealExecutionCycle(env,{postImpl=kalshiPayneOrderP
     schema:'PAYNE_REAL_ATTEMPT_V1',owner:REAL_OWNER,seriesId,attemptId,attemptNo,status:'SUBMITTING',
     wouldFireEventId:data?.zeroMoneyPreview?.eventId||null,
     asset:candidate.asset,marketTicker:candidate.ticker,outcomeSide:candidate.outcomeSide,direction:candidate.direction,
-    exchangeIndex:2,score:finalFeature.score,move:finalFeature.move,edge:finalFeature.edge,
+    exchangeIndex:2,score:finalFeature.score,move:finalFeature.move,edge:finalFeature.edge,threshold:cfg.threshold,
     observedAt:data.updatedAt||new Date(nowMs).toISOString(),freshLockAt:freshLock.readAt,preSubmitAt:preSubmit.readAt,
     freshLockPrice:candidate.outcomeSide==='YES'?freshLock.market.yesAsk:freshLock.market.noAsk,
     preSubmitPrice:ask,maxEntryDebitUsd:cfg.maxEntryDebitUsd,count:sizing.count,estimatedEntryFeeUsd:sizing.feeUsd,
@@ -3167,8 +3321,18 @@ export default {
     }
     if (url.pathname === '/real-ledger') {
       const requested=Number(url.searchParams.get('limit')||200);
-      const rows=await listRealLedger(env,requested);
-      return Response.json({ok:true,schema:'PAYNE_REAL_LEDGER_EXPORT_V1',count:rows.length,rows,providerWrites:0,ordersSubmittedByThisRead:0,capitalMovedUsd:0},{headers:{'cache-control':'no-store'}});
+      const seriesId=String(url.searchParams.get('seriesId')||'').trim();
+      let rows=await listRealLedger(env,requested);
+      if(seriesId) rows=rows.filter(x=>String(x?.seriesId||'')===seriesId);
+      return Response.json({ok:true,schema:'PAYNE_REAL_LEDGER_EXPORT_V1',readOnly:true,seriesId:seriesId||null,count:rows.length,rows,providerWrites:0,ordersSubmittedByThisRead:0,capitalMovedUsd:0},{headers:{'cache-control':'no-store'}});
+    }
+    if (url.pathname === '/real-history') {
+      try{
+        const report=await buildHistoricalSeriesReport(env,url.searchParams.get('seriesId'));
+        return Response.json(report,{headers:{'cache-control':'no-store'}});
+      }catch(error){
+        return Response.json({ok:false,error:String(error?.message||'PAYNE_HISTORY_FAILED'),providerWrites:0,ordersSubmittedByThisRead:0,capitalMovedUsd:0},{status:400,headers:{'cache-control':'no-store'}});
+      }
     }
     if (url.pathname === '/cockpit-data') return Response.json(await buildCockpitData(env), { headers:{'cache-control':'no-store'} });
     if (url.pathname === '/export') {
