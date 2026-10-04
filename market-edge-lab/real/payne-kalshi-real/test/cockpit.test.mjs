@@ -15,6 +15,8 @@ import {
   loadControl,
   normalizeBaselineEconomicEntryPrice,
   buildAccountFinancialSummary,
+  parseFounderThreshold,
+  effectiveLockThreshold,
 } from '../src/index.js';
 import payneWorker from '../src/index.js';
 import { cockpitHtml } from '../src/cockpit-html.js';
@@ -225,13 +227,24 @@ test('missing Baseline service binding fails closed without fabricating Payne fi
 });
 
 test('Payne decision evidence explains advancement and rejection truthfully',()=>{
-  assert.deepEqual(payneDecisionEvidence({score:.49,edge:.2,move:.01},.70),{
-    radar:'RADAR_REJECT',lock:'LOCK_NOT_REACHED',pull:'PULL_NOT_REACHED',decision:'RADAR_REJECT_SCORE_BELOW_0_50'
-  });
-  assert.equal(payneDecisionEvidence({score:.60,edge:.1,move:.01},.70).decision,'LOCK_REJECT_SCORE_BELOW_0_65');
+  assert.equal(payneDecisionEvidence({score:.49,edge:.2,move:.01},.70).decision,'RADAR_REJECT_SCORE_BELOW_0_50');
+  assert.equal(payneDecisionEvidence({score:.60,edge:.1,move:.01},.70).decision,'LOCK_REJECT_SCORE_BELOW_EFFECTIVE_LOCK');
+  assert.equal(payneDecisionEvidence({score:.55,edge:.1,move:.01},.55).decision,'PULL_QUALIFIED');
   assert.equal(payneDecisionEvidence({score:.68,edge:.1,move:.01},.70).decision,'PULL_REJECTED_SCORE_BELOW_THRESHOLD');
   assert.equal(payneDecisionEvidence({score:.72,edge:.1,move:.001},.70).decision,'PULL_REJECTED_MOVE_BELOW_0_002');
   assert.equal(payneDecisionEvidence({score:.72,edge:.1,move:.003},.70).decision,'PULL_QUALIFIED');
+});
+
+test('cockpit exposes Founder numeric threshold input and diagnostic lock observability',()=>{
+  const html=cockpitHtml();
+  assert.match(html,/id=\"threshold\" type=\"number\"/);
+  assert.match(html,/min=\"0\.50\"/);
+  assert.match(html,/max=\"1\.00\"/);
+  assert.match(html,/step=\"0\.01\"/);
+  assert.match(html,/DIAGNOSTIC LOWER-LOCK MODE/);
+  assert.doesNotMatch(html,/select id=\"threshold\"/);
+  assert.equal(parseFounderThreshold('.50').value,.50);
+  assert.equal(effectiveLockThreshold(.70),.65);
 });
 
 test('cockpit calculates authentic Payne fields, decisions, clocks, exact rereads, and zero-money FIRE plan',async()=>{
@@ -416,16 +429,21 @@ test('Founder real controls default disarmed and ARM validates founder config ag
   c=await updateFounderControl(env,'DISARM');
   assert.equal(c.armed,false);
   assert.equal(c.providerWriteAuthority,'BUILT_INACTIVE_DISARMED');
-  c=await updateFounderControl(env,'SET_THRESHOLD',.75);
-  assert.equal(c.activeThreshold,.75);
-  c=await updateFounderControl(env,'ARM');   // validated founder config (.75) is frozen into the series; no .70-only gate
+  c=await updateFounderControl(env,'SET_THRESHOLD','.55');
+  assert.equal(c.activeThreshold,.55);
+  c=await updateFounderControl(env,'ARM');
   assert.equal(c.armed,true);
   const frozen=await loadRealSeriesState(env);
-  assert.equal(frozen.threshold,.75);
+  assert.equal(frozen.threshold,.55);
+  assert.equal(frozen.effectiveLockThreshold,.55);
   assert.equal(frozen.configFrozen,true);
   c=await updateFounderControl(env,'DISARM');
-  c=await updateFounderControl(env,'SET_THRESHOLD',.70);
-  await assert.rejects(updateFounderControl(env,'SET_THRESHOLD',.65),/PAYNE_CONTROL_THRESHOLD_NOT_ALLOWED/);
+  c=await updateFounderControl(env,'SET_THRESHOLD','.70');
+  assert.equal(c.activeThreshold,.70);
+  await assert.rejects(updateFounderControl(env,'SET_THRESHOLD','.49'),/PAYNE_CONTROL_THRESHOLD_OUT_OF_RANGE/);
+  await assert.rejects(updateFounderControl(env,'SET_THRESHOLD','1.01'),/PAYNE_CONTROL_THRESHOLD_OUT_OF_RANGE/);
+  await assert.rejects(updateFounderControl(env,'SET_THRESHOLD','.555'),/PAYNE_CONTROL_THRESHOLD_INVALID_PRECISION/);
+  await assert.rejects(updateFounderControl(env,'SET_THRESHOLD','abc'),/PAYNE_CONTROL_THRESHOLD_INVALID_PRECISION/);
 });
 
 test('each scheduled scan updates current observation while history remains bounded-cadence',async()=>{
