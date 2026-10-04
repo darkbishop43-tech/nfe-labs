@@ -5,6 +5,7 @@ on:
     branches:
       - market-edge-payne-kalshi-real-step1
       - payne-numeric-threshold-repair
+      - payne-feature-freshness-repair
     paths:
       - "market-edge-lab/real/payne-kalshi-real/**"
       - ".github/workflows/payne-kalshi-real-zero-money-tests.yml"
