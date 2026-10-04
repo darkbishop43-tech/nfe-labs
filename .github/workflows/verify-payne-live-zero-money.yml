@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - market-edge-payne-kalshi-real-step1
+      - payne-numeric-threshold-repair
     paths:
       - ".github/workflows/verify-payne-live-zero-money.yml"
   workflow_dispatch:
@@ -22,6 +23,7 @@ jobs:
           base='https://market-edge-payne-kalshi-real.darkbishop43.workers.dev'
           curl -fsS "$base/status" -o /tmp/status.json
           curl -fsS "$base/cockpit-data" -o /tmp/cockpit.json
+          curl -fsS "$base/real-state" -o /tmp/real-state.json
           curl -fsS "$base/evidence/latest" -o /tmp/latest.json || true
           curl -fsS "$base/export?range=current&format=json" -o /tmp/export.json || true
 
@@ -39,6 +41,9 @@ jobs:
             comparison,
             researchCounters
           }' /tmp/cockpit.json
+
+          echo 'REAL_STATE_SAFE='
+          jq '{schema,control:{armed:.control.armed,requiredExchangeIndex:.control.requiredExchangeIndex},series:{seriesId:.series.seriesId,status:.series.status,unresolvedEntry:.series.unresolvedEntry,positionStatus:.series.position.status},providerWrites,ordersSubmittedByThisRead,capitalMovedUsd}' /tmp/real-state.json
 
           echo 'LATEST_SAFE='
           jq '{schema,at,source,providerGets,providerWrites,orders,capitalMovedUsd,selected,pipeline,clocks,comparison,researchCounters}' /tmp/latest.json 2>/dev/null || cat /tmp/latest.json
