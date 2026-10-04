@@ -75,11 +75,14 @@ jobs:
           grep -q 'Live Trader Cockpit' /tmp/body && echo "VERIFY cockpit PASS"
           grep -q 'Crypto Radar Universe' /tmp/body && echo "VERIFY universe PASS"
           grep -q 'NFE-OS SI Crypto V0' /tmp/body && echo "VERIFY SI Crypto V0 PASS"
+          grep -q 'SI Crypto V0-A Instrumentation' /tmp/body && echo "VERIFY V0-A PASS"
           curl --fail --silent --show-error --location "$LIVE_URL/data/snapshot.json" --output /tmp/snapshot
           grep -q '"operationalCockpit"' /tmp/snapshot
           grep -q '"cryptoUniverse"' /tmp/snapshot
           grep -q '"researchLanes"' /tmp/snapshot
           grep -q '"siCryptoV0"' /tmp/snapshot
+          grep -q '"siCryptoV0A"' /tmp/snapshot
+          grep -q '"GOVERNED HOLD — OFFICIAL ROBINHOOD DATA INSUFFICIENT' /tmp/snapshot
           grep -q '"DISARMED / FIRE BLOCKED"' /tmp/snapshot
           grep -q '"qualificationThreshold": null' /tmp/snapshot
           grep -q '"MCP ACTIVE MARKET SURFACE NOT CURRENTLY EXPOSED"' /tmp/snapshot
