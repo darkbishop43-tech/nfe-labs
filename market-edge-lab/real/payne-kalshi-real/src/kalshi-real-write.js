@@ -1,6 +1,5 @@
 import {
   KALSHI_EXECUTION_ORDER_PATH,
-  assertKalshiMechanicalOrderPayload,
   kalshiExecutionOrderPost,
 } from '../../shared/kalshi-execution-write.js';
 
@@ -14,8 +13,7 @@ function assertPayneGovernance(kind,payload,scope){
   if(Number(scope?.exchangeIndex)!==REQUIRED_EXCHANGE_INDEX)throw new Error('PAYNE_WRITE_INDEX2_REQUIRED');
   if(scope?.authorized!==true)throw new Error('PAYNE_WRITE_AUTHORIZATION_REQUIRED');
 
-  // Mechanical provider requirements are enforced exactly once by the shared primitive.
-  assertKalshiMechanicalOrderPayload(payload);
+  // Provider-mechanical payload validation is owned by the shared primitive.
 
   if(kind==='ENTRY'){
     if(scope?.armed!==true)throw new Error('PAYNE_ENTRY_ARM_REQUIRED');
