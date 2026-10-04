@@ -43,10 +43,11 @@ export function assertKalshiMechanicalOrderPayload(payload){
   if(typeof payload.reduce_only!=='boolean')throw new Error('KALSHI_ORDER_REDUCE_ONLY_REQUIRED');
   return true;
 }
-export async function kalshiExecutionOrderPost(env,payload,{fetchImpl=fetch}={}){
+export async function kalshiExecutionOrderPost(env,payload,{fetchImpl=fetch,onProviderPostStart=null}={}){
   assertKalshiMechanicalOrderPayload(payload);
   const headers=await kalshiExecutionHeaders(env,'POST',KALSHI_EXECUTION_ORDER_PATH);
   headers['content-type']='application/json';
+  if(typeof onProviderPostStart==='function')onProviderPostStart();
   const response=await fetchImpl(KALSHI_EXECUTION_ORIGIN+KALSHI_EXECUTION_ORDER_PATH,{method:'POST',headers,body:JSON.stringify(payload)});
   if(!response||typeof response.ok!=='boolean')throw new Error('KALSHI_EXECUTION_INVALID_PROVIDER_RESPONSE');
   return response;
