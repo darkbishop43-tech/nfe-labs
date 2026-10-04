@@ -2396,6 +2396,8 @@ export async function buildCockpitData(env, nowMs=Date.now()) {
     zeroMoneyPreview?.status==='FIRE_READY'?'PULL_QUALIFIED_ZERO_MONEY_FIRE_READY':
     zeroMoneyPreview?.reason||'ZERO_MONEY_FIRE_NOT_REACHED';
 
+  const realAuthority=livePayneAuthorityEvidence(control,index2,zeroMoneyPreview?.sizing||null);
+
   return {
     ok:Boolean(balance.ok && discovery.ok),
     service:SERVICE_ID,
@@ -2458,7 +2460,7 @@ export async function buildCockpitData(env, nowMs=Date.now()) {
       fresh:featureState.fresh,
       error:featureState.error,
     },
-    realAuthority:livePayneAuthorityEvidence(control,index2,zeroMoneyPreview?.sizing||null),
+    realAuthority,
     pipeline:{
       radar:qualificationDecision.radar==='RADAR_PASS'?'PASS':qualificationDecision.radar==='RADAR_REJECT'?'REJECT':'UNKNOWN',
       lockIn:qualificationDecision.lock==='LOCK_PASS'?'PASS':qualificationDecision.lock==='LOCK_REJECT'?'REJECT':qualificationDecision.lock==='LOCK_NOT_REACHED'?'NOT_REACHED':'UNKNOWN',
