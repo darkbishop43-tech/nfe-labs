@@ -156,13 +156,14 @@ async function researchResponse(env, request) {
   if (!mapping.binanceSymbol) return json({mapping, status:"RESEARCH DATA UNAVAILABLE"},404);
 
   const end=Date.now(), start=end-lookbackDays*DAY_MS;
-  const [k5,k15,k60,book,depth] = await Promise.all([
-    fetchKlinesRange(mapping.binanceSymbol,"5m",start,end),
-    fetchKlinesRange(mapping.binanceSymbol,"15m",start,end),
-    fetchKlinesRange(mapping.binanceSymbol,"1h",start,end),
+  const [k5raw,k15raw,k60raw,book,depth] = await Promise.all([
+    publicGet("/api/v3/klines",{symbol:mapping.binanceSymbol,interval:"5m",limit:1000}),
+    publicGet("/api/v3/klines",{symbol:mapping.binanceSymbol,interval:"15m",limit:1000}),
+    publicGet("/api/v3/klines",{symbol:mapping.binanceSymbol,interval:"1h",startTime:start,endTime:end,limit:1000}),
     publicGet("/api/v3/ticker/bookTicker",{symbol:mapping.binanceSymbol}),
     publicGet("/api/v3/depth",{symbol:mapping.binanceSymbol,limit:20})
   ]);
+  const k5=k5raw.map(parseKline), k15=k15raw.map(parseKline), k60=k60raw.map(parseKline);
   const featureBars = featureInterval==="5m" ? k5 : featureInterval==="15m" ? k15 : k60;
 
   const h5=horizonStats(k5), h15=horizonStats(k15), h60=horizonStats(k60);
@@ -211,7 +212,7 @@ async function researchResponse(env, request) {
       credential:"NONE",
       executionAuthority:"NONE"
     },
-    configuration:{featureInterval,lookbackDays,momentumHorizons:["5m","15m","1h"]},
+    configuration:{featureInterval,lookbackDays,momentumHorizons:["5m","15m","1h"],momentumDistribution:"most recent up to 1000 bars per horizon",featureHistoryRequirement:"caller-selected interval; lookbackDays applies to 1h feature history in this V0-A specimen"},
     mapping,
     robinhoodSnapshot:rh?{symbol:rh.symbol,bid:rh.bid,ask:rh.ask,mark:rh.mark,providerTimestamp:rh.providerTimestamp,tradable:rh.tradable,halted:rh.halted}:null,
     raw:{
