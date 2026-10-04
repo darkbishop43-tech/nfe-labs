@@ -11,6 +11,7 @@ import {
   defaultControlState,
   updateFounderControl,
   loadRealSeriesState,
+  saveRealSeriesState,
   runReadOnlyScan,
   loadControl,
   normalizeBaselineEconomicEntryPrice,
@@ -448,6 +449,31 @@ test('Founder real controls default disarmed and ARM validates founder config ag
   await assert.rejects(updateFounderControl(env,'SET_THRESHOLD','1.01'),/PAYNE_CONTROL_THRESHOLD_OUT_OF_RANGE/);
   await assert.rejects(updateFounderControl(env,'SET_THRESHOLD','.555'),/PAYNE_CONTROL_THRESHOLD_INVALID_PRECISION/);
   await assert.rejects(updateFounderControl(env,'SET_THRESHOLD','abc'),/PAYNE_CONTROL_THRESHOLD_INVALID_PRECISION/);
+});
+
+test('scheduled disarmed maintenance terminalizes only a clean stale config-mismatched series without orders',async()=>{
+  const env=await authEnv();
+  const io=installKalshiFetch();
+  try{
+    await saveRealSeriesState(env,{
+      seriesId:'LIVE-STALE-SCHEDULED',status:'ARMED_FISHING',attemptsStarted:1,attemptTarget:5,
+      threshold:.70,effectiveLockThreshold:.65,maxEntryDebitUsd:1,requiredExchangeIndex:2,configFrozen:true,
+      frozenAt:'2026-10-04T04:00:00.000Z',unresolvedEntry:false,currentAttempt:{status:'NO_FILL'},position:null,completedAt:null,
+    });
+    await updateFounderControl(env,'SET_THRESHOLD','.60');
+    await updateFounderControl(env,'SET_ATTEMPT_TARGET',1);
+    await payneWorker.scheduled({},env);
+    const after=await loadRealSeriesState(env);
+    assert.equal(after.status,'TERMINAL_DISARMED_CONFIG_SUPERSEDED');
+    assert.ok(after.completedAt);
+    assert.equal(after.unresolvedEntry,false);
+    assert.equal(after.position,null);
+    assert.equal(io.urls.some(u=>u.includes('/orders') && /POST/i.test(u)),false);
+    const c=await loadControl(env);
+    assert.equal(c.armed,false);
+    assert.equal(c.activeThreshold,.60);
+    assert.equal(c.attemptTarget,1);
+  } finally { io.restore(); }
 });
 
 test('each scheduled scan updates current observation while history remains bounded-cadence',async()=>{
