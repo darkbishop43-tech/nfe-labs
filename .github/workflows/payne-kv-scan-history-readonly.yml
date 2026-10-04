@@ -1,0 +1,58 @@
+name: PAYNE KV scan-history read-only forensic
+
+on:
+  push:
+    branches:
+      - payne-near-presubmit-forensic-readonly
+    paths:
+      - ".github/workflows/payne-kv-scan-history-readonly.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  forensic:
+    runs-on: ubuntu-latest
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Read exact persisted scan-history keys from existing Cloudflare KV
+        shell: bash
+        run: |
+          set -euo pipefail
+          ns='03352b0ccb034f1bb8206f663a04b125'
+          ticker='KXNEAR15M-26OCT041815-15'
+          : > /tmp/keys.txt
+          for prefix in             'payne-kalshi:scan-history:2026-10-04T22:01'             'payne-kalshi:scan-history:2026-10-04T22:02'             'payne-kalshi:scan-history:2026-10-04T22:03'             'payne-kalshi:scan-history:2026-10-04T22:04'
+          do
+            npx --yes wrangler@4 kv key list --namespace-id "$ns" --prefix "$prefix"               | jq -r '.[].name' >> /tmp/keys.txt
+          done
+          sort -u /tmp/keys.txt -o /tmp/keys.txt
+          echo 'KEYS='
+          cat /tmp/keys.txt
+          while IFS= read -r key; do
+            [ -n "$key" ] || continue
+            npx --yes wrangler@4 kv key get "$key" --namespace-id "$ns" --remote > /tmp/value.json
+            if jq -e --arg ticker "$ticker" '
+              (.selected.ticker==$ticker) or
+              ([.decisions[]? | select(.ticker==$ticker)] | length>0)
+            ' /tmp/value.json >/dev/null; then
+              echo "SNAPSHOT_KEY=$key"
+              jq --arg ticker "$ticker" '{
+                at,source,
+                selected,
+                nearDecisions:[.decisions[]? | select(.ticker==$ticker)],
+                pipeline,clocks,featureProvenance,zeroMoneyPreview,
+                providerGets,providerWrites,orders,capitalMovedUsd
+              }' /tmp/value.json
+            fi
+          done < /tmp/keys.txt
+          echo 'MUTATION_AUDIT=READ_ONLY_KV_LIST_GET'
+          echo 'PROVIDER_WRITES=0'
+          echo 'ORDERS=0'
+          echo 'CAPITAL_MOVED_USD=0'
