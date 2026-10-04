@@ -506,6 +506,21 @@
       "tool": "SI Crypto V0 engine",
       "status": "FORMULA WIRED — SCORE INCOMPLETE / FIRE BLOCKED",
       "mode": "LOCAL RESEARCH LOGIC"
+    },
+    {
+      "tool": "Robinhood official Crypto Trading API documentation",
+      "status": "PROVEN — pairs/best bid-ask/estimated price/accounts/holdings/orders; no documented OHLCV/volume/depth endpoint",
+      "mode": "RESEARCH ONLY"
+    },
+    {
+      "tool": "V0-A instrumentation",
+      "status": "MATH + LEDGER SCHEMA WIRED / DATA HOLD",
+      "mode": "LOCAL RESEARCH LOGIC"
+    },
+    {
+      "tool": "third-party market data",
+      "status": "NOT CONNECTED — candidate list only",
+      "mode": "NO AUTHORITY"
     }
   ],
   "researchLanes": {
@@ -2143,7 +2158,7 @@
     "currentLifecycleIndex": 2
   },
   "siCryptoV0": {
-    "status": "WIRED / SCORE INCOMPLETE",
+    "status": "V0-A MATH WIRED / OFFICIAL DATA HOLD",
     "formula": "S_C = 100 × (0.30M + 0.20T + 0.15V + 0.10Q + 0.15F + 0.10N)",
     "weights": {
       "M": 0.3,
@@ -2155,7 +2170,7 @@
     },
     "hypothesis": "V0 TEST HYPOTHESIS — not permanent discovered truth",
     "scoreValidityRule": "Composite score is valid only when all M/T/V/Q/F/N are numeric under Founder-approved component rules.",
-    "componentRuleStatus": "MISSING — order defines component names and weights but not normalization/calculation rules for M/T/V/Q/F/N.",
+    "componentRuleStatus": "RESOLVED BY V0-A FOR M/T/V/F/Q MATH; AUTHENTIC HISTORICAL INPUTS STILL MISSING. N REMAINS RESEARCH_ONLY.",
     "qualificationThreshold": null,
     "qualificationThresholdStatus": "MISSING FOUNDER DECISION — no SI qualification threshold was supplied.",
     "officialCryptoSurface": {
@@ -2252,7 +2267,7 @@
     },
     "composite": {
       "score": null,
-      "status": "INCOMPLETE — FIRE BLOCKED",
+      "status": "V0-A CORE/FULL SCORES INCOMPLETE — OFFICIAL HISTORY MISSING",
       "availableComponents": 0,
       "totalComponents": 6,
       "reason": "M/T/V/Q/F/N are not all authentically calculable under approved component rules."
@@ -2430,6 +2445,231 @@
         "Exit plan not yet frozen",
         "Execution remains DISARMED"
       ]
+    }
+  },
+  "siCryptoV0A": {
+    "status": "GOVERNED HOLD — OFFICIAL ROBINHOOD DATA INSUFFICIENT FOR M/T/V/F/Q HISTORY",
+    "formula": "S_C = 100 × (0.30M + 0.20T + 0.15V + 0.10Q + 0.15F + 0.10N)",
+    "coreFormula": "SI_CORE_V0A = 100 × (0.30M + 0.20T + 0.15V + 0.10Q + 0.15F) / 0.90",
+    "logistic": "L(x)=1/(1+e^(-x))",
+    "parameters": {
+      "momentumHorizons": [
+        "5m",
+        "15m",
+        "1h"
+      ],
+      "momentumWeights": [
+        0.5,
+        0.3,
+        0.2
+      ],
+      "ema": [
+        9,
+        20,
+        50
+      ],
+      "atr": 14,
+      "volatilityDistributionDays": 30,
+      "trendWeights": [
+        0.5,
+        0.5
+      ],
+      "qWeights": {
+        "spread": 0.5,
+        "liquidity": 0.5
+      },
+      "rvolTransform": "clamp(RVOL / 2, 0, 1)",
+      "outcomes": [
+        "1m",
+        "5m",
+        "15m",
+        "1h"
+      ]
+    },
+    "componentMath": {
+      "M": "M = 0.50*L(Z5) + 0.30*L(Z15) + 0.20*L(Z60)",
+      "T": "T = 0.50*L((EMA9-EMA20)/ATR14) + 0.50*L((EMA20-EMA50)/ATR14)",
+      "V": "V = clamp(1 - 2*abs(P_ATR - 0.50), 0, 1)",
+      "F": "F = clamp(RVOL / 2, 0, 1)",
+      "Q": "Q = 0.50*(1-SPREAD_PERCENTILE) + 0.50*DOLLAR_VOLUME_PERCENTILE",
+      "N": "RESEARCH_ONLY; record E, Fr, Tr, Tx, A, C separately; no numeric N until separately valid"
+    },
+    "robinhoodMcp": {
+      "pairDiscovery": true,
+      "currentBidAskMark": true,
+      "tradability": true,
+      "haltState": true,
+      "account": true,
+      "buyingPower": true,
+      "orders": true,
+      "positions": true,
+      "preview": true,
+      "execution": true,
+      "historicalOHLCV": false,
+      "volume": false,
+      "depth": false,
+      "bidAskSize": false,
+      "cryptoTechnicals": false
+    },
+    "robinhoodOfficialApi": {
+      "investigated": true,
+      "documentedEndpoints": [
+        "GET /api/v2/crypto/trading/trading_pairs/",
+        "GET /api/v2/crypto/marketdata/best_bid_ask/",
+        "GET /api/v2/crypto/trading/estimated_price/",
+        "GET /api/v2/crypto/trading/accounts/",
+        "GET /api/v2/crypto/trading/holdings/",
+        "GET /api/v2/crypto/trading/orders/"
+      ],
+      "historicalOHLCV": false,
+      "volume": false,
+      "depth": false,
+      "bidAskSize": false,
+      "spreadHistory": false,
+      "auth": "API key + Ed25519 private signing key + x-api-key/x-signature/x-timestamp",
+      "readOnlyActionsSelectable": true,
+      "readOnlyCredentialCreated": false,
+      "secretCreated": false,
+      "note": "Official support documentation says API credentials can enable specific actions, including read-only actions. No credential was created in this mission."
+    },
+    "components": {
+      "M": {
+        "state": "BLOCKED",
+        "reason": "Needs 5m/15m/1h returns standardized by each horizon's realized-volatility history; no approved official Robinhood historical OHLCV source."
+      },
+      "T": {
+        "state": "BLOCKED",
+        "reason": "Needs EMA9/20/50 and ATR14 from crypto history; no approved official Robinhood historical OHLCV source."
+      },
+      "V": {
+        "state": "BLOCKED",
+        "reason": "Needs ATR14 percentile versus rolling 30-day same-asset distribution; no approved official Robinhood historical OHLCV source."
+      },
+      "F": {
+        "state": "BLOCKED",
+        "reason": "Needs current/comparable-interval volume and authentic normal-volume baseline; official Robinhood surfaces do not document crypto volume history."
+      },
+      "Q": {
+        "state": "BLOCKED",
+        "reason": "Current spread is available at LOCK, but V0-A Q also requires same-pair spread history and dollar-volume percentile history; official Robinhood surfaces do not document those histories."
+      },
+      "N": {
+        "state": "RESEARCH_ONLY / NOT FIRE-AUTHORIZING",
+        "subcomponents": {
+          "E": null,
+          "Fr": null,
+          "Tr": null,
+          "Tx": null,
+          "A": null,
+          "C": null
+        },
+        "halfLife": "CONFIGURABLE / NOT SET"
+      }
+    },
+    "scores": {
+      "SI_CORE_V0A": null,
+      "fullSI": null,
+      "fullSIState": "INCOMPLETE — N RESEARCH STATE NOT VALID",
+      "coreState": "INCOMPLETE — M/T/V/F/Q INPUT HISTORY MISSING"
+    },
+    "instrumentationLedger": {
+      "schema": [
+        "timestamp",
+        "symbol",
+        "research data source",
+        "Robinhood bid",
+        "Robinhood ask",
+        "Robinhood mark",
+        "spread %",
+        "5m return",
+        "15m return",
+        "1h return",
+        "EMA9",
+        "EMA20",
+        "EMA50",
+        "ATR14",
+        "ATR percentile",
+        "volume",
+        "relative volume",
+        "dollar volume",
+        "M",
+        "T",
+        "V",
+        "F",
+        "Q",
+        "N-E",
+        "N-Fr",
+        "N-Tr",
+        "N-Tx",
+        "N-A",
+        "N-C",
+        "SI_CORE_V0A",
+        "full SI score if valid",
+        "data freshness",
+        "missing input flags"
+      ],
+      "observationsRecorded": 1,
+      "observation": {
+        "timestamp": "2026-10-04T05:56:20.467-04:00",
+        "symbol": "BTC-USD",
+        "researchDataSource": "Robinhood MCP only",
+        "robinhoodBid": 84476.8553206,
+        "robinhoodAsk": 86067.86741299,
+        "robinhoodMark": 85272.361366795,
+        "spreadPct": 1.8658004386044067,
+        "missing": [
+          "5m return",
+          "15m return",
+          "1h return",
+          "EMA9",
+          "EMA20",
+          "EMA50",
+          "ATR14",
+          "ATR percentile",
+          "volume",
+          "relative volume",
+          "dollar volume",
+          "spread history",
+          "dollar-volume history",
+          "N subcomponents"
+        ],
+        "SI_CORE_V0A": null,
+        "fullSI": null
+      },
+      "forwardOutcomeEngine": "SCHEMA ACTIVE / AUTOMATIC COLLECTION NOT RUNNING",
+      "MFE_MAE": "SCHEMA ACTIVE / REQUIRES CONTINUOUS APPROVED MARKET-DATA RUNTIME"
+    },
+    "thirdPartyCandidates": [
+      {
+        "name": "Coinbase Advanced Trade public market endpoints",
+        "status": "CANDIDATE ONLY / NOT CONNECTED",
+        "capabilities": "Public product candles, product book, public market trades"
+      },
+      {
+        "name": "Kraken public Spot market-data API",
+        "status": "CANDIDATE ONLY / NOT CONNECTED",
+        "capabilities": "Public OHLC/live market data/order book/trades"
+      },
+      {
+        "name": "Binance.US public market-data API",
+        "status": "CANDIDATE ONLY / NOT CONNECTED",
+        "capabilities": "Public klines with volume, depth, trades; 5m/15m/1h supported"
+      }
+    ],
+    "continuousRuntime": {
+      "state": "NOT BUILT",
+      "reason": "Continuous V0-A needs an authorized historical/streaming source plus storage/scheduler design. No new credential, database, binding, retention rule, or scheduler was approved.",
+      "proposalRequired": {
+        "what": "Cloud-side read-only instrumentation collector + observation ledger persistence + outcome scheduler",
+        "why": "Compute rolling distributions, forward outcomes, MFE/MAE, and spread history continuously",
+        "authority": "Research-only; zero Robinhood execution authority",
+        "secretType": "Depends on Founder-selected data source; may be none for public endpoints",
+        "dataStored": "OHLCV/quotes-derived features, SI components, observation/outcome records; no Robinhood secrets",
+        "retentionNeed": "Founder decision required",
+        "schedulerNeed": "Founder decision required",
+        "where": "Existing approved NFE-OS Cloudflare infrastructure if technically suitable",
+        "whyExistingInsufficient": "Current Worker is static/snapshot-only and has no approved research feed or persistent instrumentation store"
+      }
     }
   }
 }
