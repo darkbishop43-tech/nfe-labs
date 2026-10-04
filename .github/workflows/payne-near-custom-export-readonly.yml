@@ -1,0 +1,29 @@
+name: PAYNE NEAR custom export read-only
+
+on:
+  push:
+    branches:
+      - payne-near-presubmit-forensic-readonly
+    paths:
+      - ".github/workflows/payne-near-custom-export-readonly.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  forensic:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Read narrow persisted PAYNE scan history only
+        shell: bash
+        run: |
+          set -euo pipefail
+          base='https://market-edge-payne-kalshi-real.darkbishop43.workers.dev'
+          ticker='KXNEAR15M-26OCT041815-15'
+          curl --max-time 40 -fsS "$base/export?range=custom&from=2026-10-04T22:01:00Z&to=2026-10-04T22:04:30Z&format=json" -o /tmp/export.json
+          echo 'NEAR_ROWS='
+          jq -c --arg ticker "$ticker" '.rows[] | select(.ticker==$ticker)' /tmp/export.json
+          echo 'ALL_SELECTED_FIRE_ROWS='
+          jq -c '.rows[] | select(.zeroMoneyFireStatus=="FIRE_READY")' /tmp/export.json
+          echo 'EXPORT_META='
+          jq '{from,to,observationCount,rowCount,eventCount,providerWrites,orders,capitalMovedUsd}' /tmp/export.json
