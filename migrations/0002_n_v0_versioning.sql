@@ -1,0 +1,12 @@
+ALTER TABLE v0a_observations ADD COLUMN n_version TEXT;
+ALTER TABLE v0a_observations ADD COLUMN si_version TEXT;
+ALTER TABLE v0a_observations ADD COLUMN n_v0 REAL;
+ALTER TABLE v0a_observations ADD COLUMN n_status TEXT;
+ALTER TABLE v0a_observations ADD COLUMN n_missing_components TEXT;
+ALTER TABLE v0a_observations ADD COLUMN n_provenance_json TEXT;
+ALTER TABLE v0a_observations ADD COLUMN n_e_reason TEXT;
+ALTER TABLE v0a_observations ADD COLUMN n_fr_reason TEXT;
+ALTER TABLE v0a_observations ADD COLUMN n_tr_reason TEXT;
+ALTER TABLE v0a_observations ADD COLUMN n_tx_reason TEXT;
+ALTER TABLE v0a_observations ADD COLUMN n_a_reason TEXT;
+ALTER TABLE v0a_observations ADD COLUMN n_c_reason TEXT;
