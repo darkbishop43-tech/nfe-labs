@@ -178,6 +178,13 @@ jobs:
           grep -q '"publicWorkerPreview": false' /tmp/rh-capability
           grep -q '"robinhoodExecution": "DISARMED"' /tmp/rh-capability
           grep -q '"fireAuthority": "ZERO"' /tmp/rh-capability
+          curl --fail --silent --show-error --location "$LIVE_URL/api/robinhood/crypto/status" --output /tmp/rh-read-status
+          cat /tmp/rh-read-status
+          grep -q '"readOnlyConnector": true' /tmp/rh-read-status
+          grep -q '"writeRoutesPresent": false' /tmp/rh-read-status
+          grep -q '"execution": "DISARMED"' /tmp/rh-read-status
+          grep -q '"fireAuthority": "ZERO"' /tmp/rh-read-status
+          echo "VERIFY Robinhood read-only connector shell PASS"
           if grep -q 'INCOMPLETE — SPREAD HISTORY REQUIRED' /tmp/app-js; then echo "Stale conflicting Q presentation remains"; exit 1; fi
           echo "V0A_MAPPING_SUMMARY"
           node -e "const fs=require('fs');const m=JSON.parse(fs.readFileSync('/tmp/v0a-mapping'));const mo=JSON.parse(fs.readFileSync('/tmp/v0a-momentum'));const f=JSON.parse(fs.readFileSync('/tmp/v0a-features'));const b=JSON.parse(fs.readFileSync('/tmp/v0a-book'));console.log(JSON.stringify({robinhoodPairs:m.robinhoodPairs,mapped:m.mapped,unmapped:m.unmapped,mappedAssets:m.rows.filter(x=>x.mappingStatus==='MAPPED').map(x=>x.robinhoodSymbol),unmappedAssets:m.rows.filter(x=>x.mappingStatus!=='MAPPED').map(x=>x.robinhoodSymbol)}));console.log(JSON.stringify({mapping:mo.mapping,M:mo.M,T:f.T,V:f.V,F:f.F,qLiquidity:f.qLiquidity,Q:b.Q,researchBook:b.researchBook,depthSummary:b.depthSummary,featureConfig:f.configuration,momentumConfig:mo.configuration}))"
