@@ -27,6 +27,10 @@ jobs:
           curl -fsS "$base/evidence/latest" -o /tmp/latest.json || true
           curl -fsS "$base/export?range=current&format=json" -o /tmp/export.json || true
 
+          # Bounded research-only GET evidence authorized by Mission Control.
+          curl -fsS "$base/evidence/events?limit=1000" -o /tmp/payne-events-1000.json
+          curl -fsS "$base/export?range=weekly&format=json" -o /tmp/payne-export-weekly.json
+
           echo 'STATUS_SAFE='
           jq '{mode,providerWrites,providerWriteAuthority,realExecution,fundingAuthority,secondIoc}' /tmp/status.json
 
@@ -50,3 +54,134 @@ jobs:
 
           echo 'EXPORT_SAFE='
           jq '{schema,exportedAt,range,observationCount,rowCount,providerWrites,orders,capitalMovedUsd,fields}' /tmp/export.json 2>/dev/null || cat /tmp/export.json
+
+          echo 'RESEARCH_GET_PROOF='
+          jq '{ok,schema,count,providerWrites,orders,capitalMovedUsd}' /tmp/payne-events-1000.json
+          jq '{schema,exportedAt,range,observationCount,eventCount,rowCount,providerWrites,orders,capitalMovedUsd,fields}' /tmp/payne-export-weekly.json
+
+          jq -e '(.providerWrites // 0) == 0 and (.orders // 0) == 0 and (.capitalMovedUsd // 0) == 0' /tmp/payne-events-1000.json >/dev/null
+          jq -e '(.providerWrites // 0) == 0 and (.orders // 0) == 0 and (.capitalMovedUsd // 0) == 0' /tmp/payne-export-weekly.json >/dev/null
+
+          mkdir -p /tmp/payne-research-evidence
+          cp /tmp/payne-events-1000.json /tmp/payne-research-evidence/
+          cp /tmp/payne-export-weekly.json /tmp/payne-research-evidence/
+
+          python - <<'PY'
+          import json, collections, statistics
+
+          events_doc=json.load(open('/tmp/payne-events-1000.json'))
+          export_doc=json.load(open('/tmp/payne-export-weekly.json'))
+          events=events_doc.get('events') or []
+
+          def first(o,*keys):
+              if not isinstance(o,dict): return None
+              for k in keys:
+                  v=o.get(k)
+                  if v is not None: return v
+              return None
+
+          def nested(o,*paths):
+              for path in paths:
+                  cur=o
+                  ok=True
+                  for p in path.split('.'):
+                      if not isinstance(cur,dict) or p not in cur:
+                          ok=False; break
+                      cur=cur[p]
+                  if ok and cur is not None: return cur
+              return None
+
+          types=collections.Counter(str(first(e,'type','eventType','stage','decision') or 'UNKNOWN') for e in events)
+          print('EVENT_COUNT',len(events))
+          print('EVENT_TYPES',json.dumps(types.most_common(),separators=(',',':')))
+
+          if events:
+              print('EVENT_FIRST_AT',first(events[0],'at','timestamp','observedAt'))
+              print('EVENT_LAST_AT',first(events[-1],'at','timestamp','observedAt'))
+              print('EVENT_KEYS',json.dumps(sorted(set().union(*(e.keys() for e in events if isinstance(e,dict))))))
+
+          print('EXPORT_TOP_KEYS',json.dumps(sorted(export_doc.keys())))
+          for k in ('observationCount','eventCount','rowCount','range','exportedAt'):
+              print('EXPORT_'+k.upper(),export_doc.get(k))
+
+          rows=[]
+          for key in ('rows','observations','events'):
+              v=export_doc.get(key)
+              if isinstance(v,list):
+                  print('EXPORT_LIST',key,len(v))
+                  if key!='events':
+                      rows.extend(v)
+
+          def record_from(e):
+              ticker=first(e,'ticker','marketTicker') or nested(e,'selected.ticker','candidate.ticker','market.ticker')
+              side=first(e,'outcomeSide','side') or nested(e,'selected.outcomeSide','candidate.outcomeSide')
+              direction=first(e,'direction') or nested(e,'selected.direction','candidate.direction')
+              open_t=first(e,'openTime','marketOpen') or nested(e,'selected.openTime','clocks.kalshi.open')
+              close_t=first(e,'closeTime','marketClose') or nested(e,'selected.closeTime','clocks.kalshi.close')
+              at=first(e,'at','timestamp','observedAt','payneObservationAt','payneWouldFireAt')
+              typ=str(first(e,'type','eventType','stage','decision') or '')
+              stage=first(e,'stage') or nested(e,'pipeline.stage','payne.state')
+              reason=first(e,'reason','qualificationReason','decisionReason') or nested(e,'pipeline.reason','payne.reason')
+              score=first(e,'score') or nested(e,'feature.score','features.score','payne.score')
+              edge=first(e,'edge') or nested(e,'feature.edge','features.edge','payne.edge')
+              fair=first(e,'fair') or nested(e,'feature.fair','features.fair','payne.fair')
+              move=first(e,'move') or nested(e,'feature.move','features.move','payne.move')
+              bid=first(e,'bid') or nested(e,'book.bid','fireBookEvidence.bid')
+              ask=first(e,'ask') or nested(e,'book.ask','fireBookEvidence.ask')
+              selected=first(e,'selectedPrice','executablePrice','hypotheticalEntryPrice','initialObservedPrice') or nested(e,'book.selected','fireBookEvidence.selected')
+              rem=first(e,'timeRemainingMs','remainingMs') or nested(e,'clocks.kalshi.remainingMs')
+              return dict(ticker=ticker,side=side,direction=direction,open=open_t,close=close_t,at=at,type=typ,stage=stage,reason=reason,score=score,edge=edge,fair=fair,move=move,bid=bid,ask=ask,price=selected,timeRemainingMs=rem,raw=e)
+
+          recs=[record_from(e) for e in events if isinstance(e,dict)]
+          groups=collections.defaultdict(list)
+          for r in recs:
+              if r['ticker']:
+                  groups[(str(r['ticker']),str(r['side']),str(r['open']),str(r['close']))].append(r)
+
+          print('TRAJECTORY_GROUPS',len(groups))
+          complete=0
+          stage_counts=collections.Counter()
+          for g in groups.values():
+              seen=set()
+              for r in g:
+                  text=' '.join(str(r.get(x) or '') for x in ('type','stage','reason')).upper()
+                  if 'RADAR' in text: seen.add('RADAR')
+                  if 'LOCK' in text: seen.add('LOCK')
+                  if 'PULL' in text: seen.add('PULL')
+                  if 'WOULD' in text and 'FIRE' in text: seen.add('WOULD_FIRE')
+              for s in seen: stage_counts[s]+=1
+              if {'RADAR','LOCK','PULL','WOULD_FIRE'} <= seen: complete+=1
+          print('TRAJECTORY_STAGE_GROUP_COUNTS',json.dumps(stage_counts,separators=(',',':')))
+          print('TRAJECTORY_COMPLETE_GROUPS',complete)
+
+          # Emit compact exact records for the two founder-specified specimens when present.
+          wanted={'KXNEAR15M-26OCT050115-15','KXDOGE15M-26OCT050300-00'}
+          for t in wanted:
+              matches=[r for r in recs if str(r['ticker'])==t]
+              print('SPECIMEN',t,'COUNT',len(matches))
+              for r in matches:
+                  small={k:r[k] for k in ('ticker','side','direction','open','close','at','type','stage','reason','score','edge','fair','move','bid','ask','price','timeRemainingMs')}
+                  print('SPECIMEN_ROW',json.dumps(small,separators=(',',':'),default=str))
+
+          # Output a bounded compact trajectory ledger for every group that contains WOULD-FIRE,
+          # plus early-stage groups with >=3 chronological records. This is analysis evidence only.
+          emitted=0
+          for key,g in sorted(groups.items()):
+              g=sorted(g,key=lambda r:str(r['at'] or ''))
+              text=' '.join(' '.join(str(r.get(x) or '') for x in ('type','stage','reason')).upper() for r in g)
+              if ('WOULD' in text and 'FIRE' in text) or len(g)>=3:
+                  compact=[]
+                  for r in g:
+                      compact.append({k:r[k] for k in ('at','type','stage','reason','score','edge','fair','move','bid','ask','price','timeRemainingMs')})
+                  print('TRAJECTORY',json.dumps({'key':key,'rows':compact},separators=(',',':'),default=str))
+                  emitted+=1
+          print('TRAJECTORIES_EMITTED',emitted)
+          PY
+
+      - name: Upload bounded PAYNE research evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: payne-v5-readonly-research-evidence
+          path: /tmp/payne-research-evidence/
+          if-no-files-found: error
+          retention-days: 1
