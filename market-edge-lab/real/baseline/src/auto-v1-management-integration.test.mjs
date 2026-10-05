@@ -85,3 +85,5 @@ console.log(JSON.stringify({
   orders:0,
   capitalMovedUsd:0
 }));
+
+// Workflow trigger marker: integrated-path authoritative proof.
