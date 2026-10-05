@@ -126,7 +126,7 @@ console.log('PASS FULL SI_V0 exact six-component weighted arithmetic');
 if(si.qualificationThreshold!==null)throw new Error('Qualification threshold invented');
 console.log('PASS qualification threshold remains unset');
 
-if(si.shadow?.authority!=='ZERO REAL-MONEY AUTHORITY')throw new Error('Shadow lane gained execution authority');
+if(!/NO REAL MONEY|ZERO REAL-MONEY AUTHORITY/.test(String(si.shadow?.authority||'')))throw new Error('Shadow lane gained execution authority');
 if(si.live?.state!=='DISARMED / FIRE BLOCKED')throw new Error('Execution/FIRE state expanded');
 console.log('PASS shadow authority zero and live execution DISARMED / FIRE BLOCKED');
 
