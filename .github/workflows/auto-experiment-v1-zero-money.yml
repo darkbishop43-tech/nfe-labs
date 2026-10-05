@@ -52,17 +52,21 @@ jobs:
           CURRENT2='{"seriesId":"SERIES-2","attemptId":"ATTEMPT-1"}'
 
           cleanup() {
-            npx --yes wrangler@4 kv key delete --namespace-id "$KV_ID" "$ARCHIVE_KEY" >/dev/null 2>&1 || true
-            npx --yes wrangler@4 kv key delete --namespace-id "$KV_ID" "$CURRENT_KEY" >/dev/null 2>&1 || true
+            npx --yes wrangler@4 kv key delete --remote --namespace-id "$KV_ID" "$ARCHIVE_KEY" >/dev/null 2>&1 || true
+            npx --yes wrangler@4 kv key delete --remote --namespace-id "$KV_ID" "$CURRENT_KEY" >/dev/null 2>&1 || true
           }
           trap cleanup EXIT
 
-          printf '%s' "$ARCHIVE" | npx --yes wrangler@4 kv key put --namespace-id "$KV_ID" "$ARCHIVE_KEY" --path=-
-          printf '%s' "$CURRENT1" | npx --yes wrangler@4 kv key put --namespace-id "$KV_ID" "$CURRENT_KEY" --path=-
-          printf '%s' "$CURRENT2" | npx --yes wrangler@4 kv key put --namespace-id "$KV_ID" "$CURRENT_KEY" --path=-
+          printf '%s' "$ARCHIVE" > /tmp/archive-write.json
+          printf '%s' "$CURRENT1" > /tmp/current1-write.json
+          printf '%s' "$CURRENT2" > /tmp/current2-write.json
 
-          npx --yes wrangler@4 kv key get --namespace-id "$KV_ID" "$ARCHIVE_KEY" > /tmp/archive.json
-          npx --yes wrangler@4 kv key get --namespace-id "$KV_ID" "$CURRENT_KEY" > /tmp/current.json
+          npx --yes wrangler@4 kv key put --remote --namespace-id "$KV_ID" "$ARCHIVE_KEY" --path=/tmp/archive-write.json
+          npx --yes wrangler@4 kv key put --remote --namespace-id "$KV_ID" "$CURRENT_KEY" --path=/tmp/current1-write.json
+          npx --yes wrangler@4 kv key put --remote --namespace-id "$KV_ID" "$CURRENT_KEY" --path=/tmp/current2-write.json
+
+          npx --yes wrangler@4 kv key get --remote --namespace-id "$KV_ID" "$ARCHIVE_KEY" > /tmp/archive.json
+          npx --yes wrangler@4 kv key get --remote --namespace-id "$KV_ID" "$CURRENT_KEY" > /tmp/current.json
 
           jq -e '.completed==true and .seriesId=="SERIES-1" and .fiveMinute.controlWould=="MAX_HOLD_EXIT" and .fiveMinute.experimentWould=="CONTINUE" and .mfe==0.4 and .mae==(-0.1) and .settlementValue==1 and .realizedPnl==0.39 and .providerWrites==0 and .orders==0 and .capitalMovedUsd==0' /tmp/archive.json >/dev/null
           jq -e '.seriesId=="SERIES-2"' /tmp/current.json >/dev/null
