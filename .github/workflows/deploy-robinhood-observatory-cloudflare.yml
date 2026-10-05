@@ -168,7 +168,11 @@ jobs:
           grep -q 'Fresh live execution connectivity' /tmp/app-js && echo "VERIFY research/provider freshness separation PASS"
           grep -q 'Start provider scan' /tmp/app-js && grep -q 'Run fresh order preview' /tmp/app-js && echo "VERIFY governed button behavior wiring PASS"
           grep -q 'STALE / SNAPSHOT' /tmp/app-js && grep -q 'FRESH LOCK REQUIRED' /tmp/app-js && echo "VERIFY crypto radar stale-provider semantics PASS"
-          curl --fail --silent --show-error --location "$LIVE_URL/api/robinhood/provider-capability?action=fire_readiness" --output /tmp/rh-capability
+          for i in 1 2 3 4 5 6; do
+            if curl --fail --silent --show-error --location "$LIVE_URL/api/robinhood/provider-capability?action=fire_readiness" --output /tmp/rh-capability; then break; fi
+            sleep 5
+          done
+          cat /tmp/rh-capability
           grep -q '"status": "BLOCKED_NO_CLOUD_ROBINHOOD_CONNECTOR"' /tmp/rh-capability && echo "VERIFY Robinhood public cloud connector blocker PASS"
           grep -q '"publicWorkerLiveRead": false' /tmp/rh-capability
           grep -q '"publicWorkerPreview": false' /tmp/rh-capability
