@@ -2518,7 +2518,7 @@
     }
   },
   "siCryptoV0A": {
-    "status": "PARTIAL GREEN / GOVERNED HOLD — BINANCE.US SENSOR LIVE; Q HISTORY + PERSISTENCE PENDING",
+    "status": "HISTORICAL / DIAGNOSTIC CONFIGURATION — CURRENT VALUES COME FROM D1",
     "formula": "S_C = 100 × (0.30M + 0.20T + 0.15V + 0.10Q + 0.15F + 0.10N)",
     "coreFormula": "SI_CORE_V0A = 100 × (0.30M + 0.20T + 0.15V + 0.10Q + 0.15F) / 0.90",
     "logistic": "L(x)=1/(1+e^(-x))",
@@ -2649,8 +2649,8 @@
     "scores": {
       "SI_CORE_V0A": null,
       "fullSI": null,
-      "coreState": "INCOMPLETE — Q_SPREAD HISTORY NOT YET AVAILABLE",
-      "fullSIState": "INCOMPLETE — N RESEARCH STATE NOT VALID"
+      "coreState": "CURRENT VALUE PROVIDED BY LIVE D1 OBSERVATION; STATIC SNAPSHOT VALUE IS HISTORICAL",
+      "fullSIState": "CURRENT VALUE PROVIDED BY LIVE D1 OBSERVATION; N_V0 FAILS CLOSED UNTIL AUTHENTIC EVIDENCE EXISTS"
     },
     "instrumentationLedger": {
       "schema": [
@@ -2721,8 +2721,8 @@
           "MAE"
         ]
       },
-      "forwardOutcomeEngine": "SCHEMA READY / AUTOMATIC COLLECTION BLOCKED BY NO APPROVED PERSISTENCE + CADENCE",
-      "MFE_MAE": "SUPPORTED BY RESEARCH PRICE SOURCE ONCE OBSERVATIONS ARE PERSISTED AND RECONCILED; AUTOMATION NOT ACTIVE"
+      "forwardOutcomeEngine": "LIVE IN DEDICATED D1 RUNTIME — STATIC SNAPSHOT TEXT IS HISTORICAL / DIAGNOSTIC",
+      "MFE_MAE": "LIVE RESEARCH OUTCOME RECONCILIATION IN DEDICATED D1 RUNTIME"
     },
     "thirdPartyCandidates": [
       {
@@ -2742,7 +2742,7 @@
       }
     ],
     "continuousRuntime": {
-      "state": "STATELESS SENSOR LIVE / PERSISTENT COLLECTION NOT BUILT",
+      "state": "LIVE D1 RESEARCH COLLECTION — STATIC SNAPSHOT CONFIGURATION RETAINED FOR DIAGNOSTIC PROVENANCE",
       "reason": "Public Binance.US research endpoints run cloud-side without credentials. Durable Q spread history, shadow ledger, forward outcomes and MFE/MAE still require an approved persistent resource and scheduler cadence.",
       "proposalRequired": {
         "what": "Cloud-side read-only instrumentation collector + observation ledger persistence + outcome scheduler",
@@ -2912,6 +2912,46 @@
       "status": "INCOMPLETE",
       "reason": "NFE/UMEO evidence bundle not connected; fail closed",
       "neutralDefaultUsed": false
+    },
+    "nEvidenceInventory": {
+      "checkedAt": "2026-10-05",
+      "result": "NO CURRENT CANDIDATE-SPECIFIC STRUCTURED NFE/UMEO BUNDLE FOUND",
+      "sourcesChecked": [
+        {
+          "source": "market-edge-sibling-build / market-edge-lab/siblings/nfe-reasoning/index.html",
+          "finding": "Historical NFE reasoning contract exists: obvious thesis, missing evidence, opposite-side check, correlated exposure, counter-case/invalidation. It does not expose current Robinhood candidate evidence items with N_V0 required fields."
+        },
+        {
+          "source": "market-edge-baseline-real / market-edge-lab/real/baseline/src/phase1a-shadow.js",
+          "finding": "Historical shadow code preserves fresh-evidence, contradiction, and insufficient-evidence semantics. It does not expose current E/Fr/Tr/Tx/A/C bundle inputs."
+        },
+        {
+          "source": "universal-observer-weather-v0 / WEATHER_V0_SPEC.md",
+          "finding": "Domain-specific evidence/provenance discipline exists, but weather evidence is unrelated to the current Robinhood crypto candidate and cannot be substituted."
+        },
+        {
+          "source": "robinhood-observatory-v0 current source + D1 schema",
+          "finding": "N_V0 ingestion interface exists, but nEvidenceBundle is not connected to an authentic current NFE/UMEO feed."
+        }
+      ],
+      "exactMissing": {
+        "N_E": "Current candidate evidence items with stance + independentGroup",
+        "N_Fr": "Evidence observedAt timestamps + evidence-specific freshnessHalfLifeMs",
+        "N_Tr": "Recognized sourceClass for each required evidence item",
+        "N_Tx": "Deterministic current crossChecks[] with PASS/FAIL",
+        "N_A": "Deterministic current anomalyChecks[] with PASS/FAIL",
+        "N_C": "Deterministic current collisionTests[] with candidateSurvives boolean"
+      },
+      "prohibitedSubstitutions": [
+        "M momentum",
+        "T trend",
+        "V volatility",
+        "Q spread/liquidity",
+        "F volume/market structure",
+        "historical Kalshi paper evidence",
+        "generic sentiment",
+        "default 0.50"
+      ]
     }
   }
 }
