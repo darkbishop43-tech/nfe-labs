@@ -79,7 +79,7 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: |
           set -euo pipefail
-          npx --yes wrangler@4 d1 execute nfe-os-robinhood-si-v0a-ledger --remote --file=migrations/0001_robinhood_si_v0a_ledger.sql --yes
+          npx --yes wrangler@4 d1 migrations apply nfe-os-robinhood-si-v0a-ledger --remote --config wrangler.deploy.toml
           npx --yes wrangler@4 d1 execute nfe-os-robinhood-si-v0a-ledger --remote --command="SELECT name FROM sqlite_schema WHERE type='table' AND name IN ('v0a_observations','v0a_spread_samples','v0a_outcomes') ORDER BY name" --json > /tmp/d1-tables.json
           cat /tmp/d1-tables.json
           grep -q 'v0a_observations' /tmp/d1-tables.json
