@@ -1,3 +1,4 @@
+import { calculateNV0, calculateFullSIV0, N_VERSION, SI_VERSION } from '../../cloudflare/si-n-v0.js';
 import fs from 'node:fs';
 const files=['index.html','app.js','styles.css','data/snapshot.json'];
 const text=files.map(f=>fs.readFileSync(new URL('../'+f,import.meta.url),'utf8')).join('\n');
@@ -44,3 +45,36 @@ if(v0a.binanceUsPublicData?.sample?.Q!==null)throw new Error('Q must remain null
 console.log('PASS SI Crypto V0-A governed hold');
 console.log('PASS official Robinhood API data gap truth');
 console.log('PASS Binance.US public research source only');
+
+
+const fixedNow=Date.parse('2026-10-05T06:00:00Z');
+const bundle={
+  evidence:[
+    {id:'e1',required:true,stance:'SUPPORT',independentGroup:'provider',observedAt:'2026-10-05T06:00:00Z',freshnessHalfLifeMs:60000,sourceClass:'DIRECT_PROVIDER_OFFICIAL'},
+    {id:'e2',required:true,stance:'SUPPORT',independentGroup:'filing',observedAt:'2026-10-05T06:00:00Z',freshnessHalfLifeMs:60000,sourceClass:'REGULATORY_OR_COMPANY_FILING'},
+    {id:'e3',required:true,stance:'SUPPORT',independentGroup:'reporting',observedAt:'2026-10-05T06:00:00Z',freshnessHalfLifeMs:60000,sourceClass:'HIGH_QUALITY_VERIFIED_REPORTING'}
+  ],
+  crossChecks:[{id:'x1',result:'PASS'},{id:'x2',result:'FAIL'}],
+  anomalyChecks:[{id:'a1',result:'PASS'},{id:'a2',result:'PASS'}],
+  collisionTests:[{id:'c1',candidateSurvives:true},{id:'c2',candidateSurvives:false}]
+};
+const nv0=calculateNV0(bundle,fixedNow);
+if(nv0.version!==N_VERSION||nv0.status!=='VALID')throw new Error('N_V0 valid fixture failed');
+if(!(nv0.value>=0&&nv0.value<=1))throw new Error('N_V0 bounds failed');
+if(nv0.components.N_E.value!==1)throw new Error('N_E independent evidence normalization failed');
+if(nv0.components.N_Fr.value!==1)throw new Error('N_Fr freshness normalization failed');
+if(Math.abs(nv0.components.N_Tr.value-((1+.9+.75)/3))>1e-12)throw new Error('N_Tr trust normalization failed');
+if(nv0.components.N_Tx.value!==.5)throw new Error('N_Tx normalization failed');
+if(nv0.components.N_A.value!==1)throw new Error('N_A normalization failed');
+if(nv0.components.N_C.value!==.5)throw new Error('N_C normalization failed');
+const missingN=calculateNV0(null,fixedNow);
+if(missingN.value!==null||missingN.status!=='INCOMPLETE')throw new Error('Missing N evidence did not fail closed');
+if(JSON.stringify(missingN).includes('"value":0.5'))throw new Error('Neutral N default detected');
+const full=calculateFullSIV0({M:.6,T:.6,V:.6,Q:.6,F:.6,N:nv0.value});
+if(full.version!==SI_VERSION||full.status!=='VALID'||!Number.isFinite(full.value))throw new Error('FULL SI_V0 valid fixture failed');
+const fullMissing=calculateFullSIV0({M:.6,T:.6,V:.6,Q:.6,F:.6,N:null});
+if(fullMissing.value!==null||fullMissing.status!=='INCOMPLETE')throw new Error('FULL SI_V0 did not fail closed on missing N');
+if(data.siCryptoV0?.nV0?.version!=='N_V0')throw new Error('N_V0 cockpit metadata missing');
+console.log('PASS N_V0 deterministic six-component normalization');
+console.log('PASS N_V0 fail-closed missing-data rule');
+console.log('PASS FULL SI_V0 versioned deterministic calculation');
