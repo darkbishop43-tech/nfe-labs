@@ -202,3 +202,21 @@ console.log('PASS NFE diagnostic panel preserves fail-closed provenance');
 if(!/freeze an exact Founder-selected dollar amount/.test(text))throw new Error('Fresh preview does not require Founder-selected config');
 if(/dollarAmount\s*[:=]\s*['"]?1(?:\.0+)?['"]?/i.test(text))throw new Error('Hard-coded $1 stake authority detected');
 console.log('PASS no default stake and preview requires Founder configuration');
+
+
+const rhRead=fs.readFileSync(new URL('../../cloudflare/robinhood-crypto-read.js',import.meta.url),'utf8');
+if(!/method:"GET"/.test(rhRead))throw new Error('Robinhood read connector does not enforce GET');
+if(/method:"POST"|method:'POST'/.test(rhRead))throw new Error('Robinhood read connector contains POST authority');
+if(/place_order|cancel_order|BUY|SELL/.test(rhRead))throw new Error('Robinhood read connector contains write semantics');
+for(const p of [
+  '/api/v2/crypto/trading/accounts/',
+  '/api/v2/crypto/trading/trading_pairs/',
+  '/api/v2/crypto/marketdata/best_bid_ask/',
+  '/api/v2/crypto/trading/estimated_price/',
+  '/api/v2/crypto/trading/holdings/',
+  '/api/v2/crypto/trading/orders/'
+]) if(!rhRead.includes(p)) throw new Error('Missing approved read endpoint '+p);
+if(!/ROBINHOOD_CRYPTO_API_KEY/.test(rhRead)||!/ROBINHOOD_CRYPTO_PRIVATE_KEY/.test(rhRead))throw new Error('Expected Cloudflare secret bindings missing');
+if(/console\.log\(|console\.error\(/.test(rhRead))throw new Error('Robinhood credentialed connector must not log');
+console.log('PASS Robinhood Crypto API connector is GET-only with six approved read surfaces');
+console.log('PASS Robinhood secrets are referenced only as Worker bindings and never logged');
