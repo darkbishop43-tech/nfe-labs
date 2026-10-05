@@ -3,7 +3,7 @@ const num=(n,d=2)=>n==null?'N/A':Number(n).toLocaleString('en-US',{minimumFracti
 const pct=n=>n==null?'N/A — NO POSITION':`${Number(n)>=0?'+':''}${Number(n).toFixed(2)}%`;
 const el=id=>document.getElementById(id);
 const fmtTime=t=>t?new Date(t).toLocaleString():'N/A — NO PROVIDER TIMESTAMP';
-let D, selected='SPY', inspectedCrypto=null, radarViewPaused=false;
+let D, selected='SPY', inspectedCrypto=null, radarViewPaused=false, providerScanState='STOPPED';
 
 Promise.all([
   fetch('./data/snapshot.json',{cache:'no-store'}).then(r=>{if(!r.ok)throw Error(`snapshot ${r.status}`);return r.json()}),
@@ -128,7 +128,7 @@ function renderOperational(){
  el('quickState').innerHTML=`<div class="kv"><span>Current lifecycle</span><b>${o.lifecycle[o.currentLifecycleIndex]||'FLAT'}</b><span>Current candidate</span><b>${r.leader||l.symbol||'NONE'}</b><span>MARKET INTELLIGENCE SCORE</span><b>${live?.si_core_v0a==null?'INCOMPLETE':('SI_CORE_V0A '+num(live.si_core_v0a,4))}</b><span>NFE EVIDENCE RESEARCH</span><b>${live?.n_v0==null?'N_V0 INCOMPLETE / NON-BLOCKING':('N_V0 '+num(live.n_v0,4))}</b><span>Robinhood LOCK</span><b>${l.state} · ${l.symbol}</b><span>Execution authority</span><b>${o.execution.state}</b><span>Position state</span><b>${p.state}</b></div>`;
  el('executionStrip').innerHTML=`
    <div><span>EXECUTION</span><strong class="stale">${o.execution.state}</strong><small>${o.execution.reason}</small></div>
-   <div><span>RADAR</span><strong class="stale">${r.state}</strong><small>${r.eligibleCount} eligible of ${r.universeSize} provider pairs</small></div>
+   <div><span>RADAR</span><strong class="stale">${r.state}</strong><small>${r.eligibleCount} eligible of ${r.universeSize} provider pairs · provider scan ${providerScanState}</small></div>
    <div><span>LOCK</span><strong class="stale">${l.state}</strong><small>${l.symbol} · ${l.freshness}</small></div>
    <div><span>POSITION</span><strong>${p.state}</strong><small>${p.orderState}</small></div>
    <div><span>MANAGE</span><strong>${m.state}</strong><small>${m.reason}</small></div>`;
@@ -151,33 +151,57 @@ function renderOperational(){
 
  el('lifecycle').innerHTML=o.lifecycle.map((x,i)=>`<span class="life-step ${i<o.currentLifecycleIndex?'done':i===o.currentLifecycleIndex?'active':''}">${x}</span>`).join('<span class="life-arrow">→</span>');
 
+ const governed=live?.robinhood_symbol||r.leader||l.symbol||inspectedCrypto||'NONE';
  el('controls').innerHTML=`
-   <button class="control-btn" id="inspectLeader">Inspect BTC governed specimen</button>
+   <button class="control-btn" id="inspectLeader">Inspect governed specimen</button>
    <button class="control-btn" id="pauseRadar">${radarViewPaused?'Resume':'Pause'} radar view</button>
    <button class="control-btn" id="viewPreview">View captured preview</button>
-   <button class="control-btn disabled" disabled title="Execution is disarmed and the public shell has no approved order-submission bridge.">ARM</button>
-   <button class="control-btn disabled" disabled title="Execution is already disarmed.">DISARM</button>
-   <button class="control-btn disabled" disabled title="The public snapshot shell cannot request a new Robinhood provider scan without a separately approved live bridge.">Start provider scan</button>
-   <button class="control-btn disabled" disabled title="No live provider scan is running in the public snapshot shell.">Pause provider scan</button>
-   <button class="control-btn disabled" disabled title="A fresh order preview requires the governed Robinhood MCP path; it is not wired into the public shell.">Run fresh order preview</button>
-   <button class="control-btn disabled" disabled title="Founder approval is not accepted through this static public shell.">Founder approve order</button>
-   <button class="control-btn disabled" disabled title="No position exists, so there is nothing to manage or exit.">Exit review</button>`;
- el('inspectLeader').onclick=()=>{inspectedCrypto='BTC-USD';renderCryptoUniverse(true)};
+   <button class="control-btn blocked" id="armBlocked">ARM — governed</button>
+   <button class="control-btn blocked" id="disarmState">DISARM state</button>
+   <button class="control-btn blocked" id="startProviderScan">Start provider scan</button>
+   <button class="control-btn blocked" id="pauseProviderScan">Pause provider scan</button>
+   <button class="control-btn blocked" id="freshPreview">Run fresh order preview</button>
+   <button class="control-btn blocked" id="founderApprove">Founder approve order</button>
+   <button class="control-btn blocked" id="exitReview">Exit review</button>`;
+ el('inspectLeader').onclick=()=>{if(governed!=='NONE')inspectedCrypto=governed;renderCryptoUniverse(true);showControlReason(`Inspecting ${governed} from the current D1 research observation plus last captured Robinhood snapshot. This is not a fresh Robinhood read.`)};
  el('pauseRadar').onclick=()=>{radarViewPaused=!radarViewPaused;renderOperational()};
- el('viewPreview').onclick=()=>{el('lockPanel').scrollIntoView({behavior:'smooth',block:'center'});showControlReason('Captured preview is evidence only. It does not submit an order.')};
- document.querySelectorAll('.control-btn.disabled').forEach(b=>b.onclick=()=>showControlReason(b.title));
+ el('viewPreview').onclick=()=>{el('lockPanel').scrollIntoView({behavior:'smooth',block:'center'});showControlReason('Showing the latest captured preview evidence only. It is stale until a new governed Robinhood preview is run through a provider-capable path.')};
+ el('armBlocked').onclick=()=>showControlReason('BLOCKED: Builder is not authorized to ARM. Founder authority plus fresh LOCK/requalification and a separate real-money order are required.');
+ el('disarmState').onclick=()=>showControlReason('Execution is already DISARMED. No provider mutation is required.');
+ el('startProviderScan').onclick=async()=>{providerScanState='CHECKING';renderOperational();const j=await requestRobinhoodCapability('start_provider_scan');providerScanState=j?.publicWorkerLiveRead?'RUNNING':'BLOCKED';renderOperational()};
+ el('pauseProviderScan').onclick=()=>{providerScanState='STOPPED';showControlReason('Provider scan state is STOPPED. No live Cloudflare Robinhood scan was running.');renderOperational()};
+ el('freshPreview').onclick=async()=>{const cfg=readTestConfig();if(!cfg?.frozen)return showControlReason('BLOCKED: freeze an exact Founder-selected dollar amount, entry type, and exit plan first. No default stake/order type will be invented.');await requestRobinhoodCapability('fresh_nonexecuting_preview')};
+ el('founderApprove').onclick=()=>showControlReason('BLOCKED: Founder approval is not accepted through this read-only public shell and this mission grants zero order authority.');
+ el('exitReview').onclick=()=>{if(p.state!=='FLAT')showControlReason('Position exists in snapshot; a fresh provider management reread is required before any exit review.');else showControlReason('NO POSITION: exit review is not applicable. Fresh Robinhood provider read currently shows the Agentic account flat.')};
+}
+
+async function requestRobinhoodCapability(action,targetId='controlReason'){
+  const target=el(targetId);
+  if(target) target.textContent='Checking Robinhood provider capability…';
+  try{
+    const r=await fetch('/api/robinhood/provider-capability?action='+encodeURIComponent(action),{cache:'no-store'});
+    const j=await r.json();
+    const msg=`${j.status}: ${j.blocker} Last Robinhood provider snapshot: ${j.lastRobinhoodProviderSnapshot||'unavailable'}.`;
+    if(target) target.textContent=msg;
+    return j;
+  }catch(e){
+    const msg='Provider capability check failed: '+String(e.message||e);
+    if(target) target.textContent=msg;
+    return null;
+  }
 }
 
 function showControlReason(msg){el('controlReason').textContent=msg||''}
 
 function renderCryptoUniverse(keepPosition=false){
- const u=D.cryptoUniverse, q=(el('cryptoSearch')?.value||'').trim().toLowerCase(), f=el('cryptoFilter')?.value||'all';
+ const u=D.cryptoUniverse, live=D.liveLedger?.latestObservation||null, q=(el('cryptoSearch')?.value||'').trim().toLowerCase(), f=el('cryptoFilter')?.value||'all';
  let rows=u.rows.filter(x=>(!q||x.symbol.toLowerCase().includes(q)||x.name.toLowerCase().includes(q))&&(f==='all'||(f==='tradable'&&x.tradable)||(f==='halted'&&!x.tradable)));
  rows.sort((a,b)=>(a.symbol>b.symbol?1:-1));
- el('cryptoUniverseSummary').innerHTML=`<span class="chip">${u.totalPairs} provider pairs</span><span class="chip">${u.eligiblePairs} tradable now</span><span class="chip">${radarViewPaused?'RADAR VIEW PAUSED':'RADAR VIEW ACTIVE'}</span><span class="chip">CAPTURE ${fmtTime(u.capturedAt)}</span>`;
+ el('cryptoUniverseSummary').innerHTML=`<span class="chip">${u.totalPairs} provider pairs in captured universe</span><span class="chip">${u.eligiblePairs} captured tradable</span><span class="chip">${radarViewPaused?'RADAR VIEW PAUSED':'RADAR VIEW ACTIVE'}</span><span class="chip">ROBINHOOD STATE: STALE / SNAPSHOT-BACKED</span><span class="chip">RESEARCH ${live?.observed_at||'UNAVAILABLE'}</span>`;
  const x=u.rows.find(v=>v.symbol===inspectedCrypto);
- el('cryptoInspect').innerHTML=x?`<div><strong>${x.symbol}</strong> · ${x.name}</div><div class="kv"><span>State</span><b>${x.tradable?'TRADABLE':'HALTED / RESTRICTED'}</b><span>Bid</span><b>${money(x.bid,8)}</b><span>Ask</span><b>${money(x.ask,8)}</b><span>Mark</span><b>${money(x.mark,8)}</b><span>Spread <em class="calc">NFE</em></span><b>${money(x.spread,8)} · ${pct(x.spreadPct)}</b><span>Change <em class="calc">NFE</em></span><b>${pct(x.changePct)}</b><span>Provider time</span><b>${fmtTime(x.providerTimestamp)}</b></div>`:''; 
- el('cryptoUniverseTable').innerHTML=`<table><thead><tr><th>Symbol</th><th>State</th><th>Bid</th><th>Ask</th><th>Mark</th><th>Spread</th><th>Rel spread</th><th>Change</th><th>SI Score</th><th>Provider time</th><th>Inspect</th></tr></thead><tbody>${rows.map(x=>`<tr><td>${x.symbol}</td><td>${x.tradable?'TRADABLE':'HALTED / RESTRICTED'}</td><td>${money(x.bid,8)}</td><td>${money(x.ask,8)}</td><td>${money(x.mark,8)}</td><td>${money(x.spread,8)}</td><td>${pct(x.spreadPct)}</td><td>${pct(x.changePct)}</td><td>INCOMPLETE</td><td>${fmtTime(x.providerTimestamp)}</td><td><button class="mini-btn" data-inspect="${x.symbol}">Inspect</button></td></tr>`).join('')}</tbody></table>`;
+ const xScore=x&&live?.robinhood_symbol===x.symbol?live.si_core_v0a:null;
+ el('cryptoInspect').innerHTML=x?`<div><strong>${x.symbol}</strong> · ${x.name}</div><div class="kv"><span>Captured tradability</span><b>${x.tradable?'TRADABLE':'HALTED / RESTRICTED'}</b><span>SI_CORE_V0A</span><b>${xScore==null?'NOT SCORED IN CURRENT D1 ROW':num(xScore,4)}</b><span>Research time</span><b>${xScore==null?'N/A':live.observed_at}</b><span>Robinhood provider state</span><b>STALE — SNAPSHOT-BACKED</b><span>Bid</span><b>${money(x.bid,8)}</b><span>Ask</span><b>${money(x.ask,8)}</b><span>Mark</span><b>${money(x.mark,8)}</b><span>Spread <em class="calc">NFE</em></span><b>${money(x.spread,8)} · ${pct(x.spreadPct)}</b><span>Provider time</span><b>${fmtTime(x.providerTimestamp)}</b><span>LOCK state</span><b>${D.operationalCockpit?.lock?.symbol===x.symbol?'STALE SNAPSHOT — FRESH LOCK REQUIRED':'NOT LOCKED'}</b></div>`:''; 
+ el('cryptoUniverseTable').innerHTML=`<table><thead><tr><th>Symbol</th><th>Captured state</th><th>SI state</th><th>Research time</th><th>Provider state</th><th>Bid</th><th>Ask</th><th>Mark</th><th>Spread</th><th>Provider time</th><th>LOCK</th><th>Inspect</th></tr></thead><tbody>${rows.map(x=>{const score=live?.robinhood_symbol===x.symbol?live.si_core_v0a:null;return `<tr><td>${x.symbol}</td><td>${x.tradable?'TRADABLE':'HALTED / RESTRICTED'}</td><td>${score==null?'NOT SCORED':num(score,4)}</td><td>${score==null?'N/A':fmtTime(live.observed_at)}</td><td>STALE / SNAPSHOT</td><td>${money(x.bid,8)}</td><td>${money(x.ask,8)}</td><td>${money(x.mark,8)}</td><td>${pct(x.spreadPct)}</td><td>${fmtTime(x.providerTimestamp)}</td><td>${D.operationalCockpit?.lock?.symbol===x.symbol?'FRESH LOCK REQUIRED':'—'}</td><td><button class="mini-btn" data-inspect="${x.symbol}">Inspect</button></td></tr>`}).join('')}</tbody></table>`;
  el('cryptoSearch').oninput=()=>renderCryptoUniverse();
  el('cryptoFilter').onchange=()=>renderCryptoUniverse();
  document.querySelectorAll('[data-inspect]').forEach(b=>b.onclick=()=>{inspectedCrypto=b.dataset.inspect;renderCryptoUniverse(true)});
@@ -188,11 +212,13 @@ function renderMarkets(){el('markets').innerHTML=['SPY','QQQ','BTC','ETH'].filte
 
 function renderResearchLanes(){
  const lanes=D.researchLanes||{}, e=lanes.equities||{}, o=lanes.options||{}, pr=D.predictionMarkets||{};
- el('cryptoLane').innerHTML=`<div class="chips"><span class="chip">PRIMARY EXECUTION-RESEARCH LANE</span><span class="chip">FLAT</span></div><p>Operational crypto state is shown above in RADAR → LOCK → MANAGE. The full dynamic provider universe is searchable below.</p>`;
+ el('cryptoLane').innerHTML=`<div class="chips"><span class="chip">PRIMARY EXECUTION-RESEARCH LANE</span><span class="chip">FLAT</span></div><p>Operational crypto state is shown above in RADAR → LOCK → MANAGE. Public Worker Robinhood freshness is currently blocked by the missing cloud provider connector.</p>`;
  const erows=(e.specimens||[]).map(x=>`<div class="evidence-row"><span>${x.symbol}</span><span>${money(x.price)}</span><span>${pct(x.changePct)}</span></div>`).join('');
- el('equityLane').innerHTML=`<div class="chips"><span class="chip">${e.state}</span><span class="chip">${e.session}</span></div><p class="sub">Discovery: ${e.discoverySource}. Provider-curated snapshot, not a fixed strategy list.</p><div class="evidence-row"><b>Symbol</b><b>Price</b><b>Move*</b></div>${erows}<p class="sub">* NFE calculated. Equity execution remains deferred.</p>`;
- el('optionsLane').innerHTML=`<div class="chips"><span class="chip">${o.state}</span><span class="chip">Execution: ${o.execution}</span></div><div class="kv"><span>Specimen contracts</span><b>${o.contractCount}</b><span>Research flow</span><b>${o.researchStates.join(' → ')}</b></div><p class="sub">${o.note}</p>`;
+ el('equityLane').innerHTML=`<div class="chips"><span class="chip">${e.state}</span><span class="chip">${e.session}</span><span class="chip">SNAPSHOT-BACKED</span></div><p class="sub">Discovery: ${e.discoverySource}. Provider-curated snapshot, not a fixed strategy list.</p><div class="evidence-row"><b>Symbol</b><b>Price</b><b>Move*</b></div>${erows}<button class="control-btn blocked" id="refreshEquityWatch">Refresh equity WATCH</button><div id="equityWatchStatus" class="control-reason"></div><p class="sub">* NFE calculated. Equity execution remains deferred.</p>`;
+ el('optionsLane').innerHTML=`<div class="chips"><span class="chip">${o.state}</span><span class="chip">Execution: ${o.execution}</span><span class="chip">SNAPSHOT-BACKED</span></div><div class="kv"><span>Specimen contracts</span><b>${o.contractCount}</b><span>Research flow</span><b>${o.researchStates.join(' → ')}</b></div><button class="control-btn blocked" id="refreshOptionsWatch">Refresh options WATCH</button><div id="optionsWatchStatus" class="control-reason"></div><p class="sub">${o.note}</p>`;
  el('predictionLane').innerHTML=`<p><strong>${pr.status}</strong></p><p class="sub">${pr.note}</p>`;
+ el('refreshEquityWatch').onclick=()=>requestRobinhoodCapability('refresh_equity_watch','equityWatchStatus');
+ el('refreshOptionsWatch').onclick=()=>requestRobinhoodCapability('refresh_options_watch','optionsWatchStatus');
 }
 
 function renderDetail(){const h=D.historicalSamples[selected]||[];drawChart(h);const b=D.priceBooks[selected];el('book').innerHTML=`<div class="kv"><span>Updated</span><b>${fmtTime(b.updatedAt)}</b><span>Bid levels</span><b>${b.bids.length}</b><span>Ask levels</span><b>${b.asks.length}</b></div><p class="state stale">${b.status}</p>`;const t=D.technicals[selected];if(!t){el('technicals').innerHTML='<p>UNKNOWN — NO TECHNICAL SNAPSHOT FOR THIS SYMBOL</p>'}else{let rows=`<span>Interval</span><b>${t.interval}</b>`;for(const [k,v] of Object.entries(t)){if(['tool','interval','asOf'].includes(k))continue;rows+=`<span>${k}</span><b>${typeof v==='object'?Object.entries(v).map(([a,b])=>`${a} ${num(b,3)}`).join(' · '):num(v,3)}</b>`}el('technicals').innerHTML=`<div class="kv">${rows}</div><div class="sub">Provider calculation · as of ${fmtTime(t.asOf)}</div>`}el('intervals').innerHTML=D.historicalSupport.verifiedSpecimenIntervals.map(x=>`<span class="chip">✓ ${x}</span>`).join('')+`<span class="chip">15m: NOT NATIVE</span>`}
