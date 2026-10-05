@@ -2175,7 +2175,7 @@
     },
     "hypothesis": "V0 TEST HYPOTHESIS — not permanent discovered truth",
     "scoreValidityRule": "Composite score is valid only when all M/T/V/Q/F/N are numeric under Founder-approved component rules.",
-    "componentRuleStatus": "RESOLVED BY V0-A FOR M/T/V/F/Q MATH; AUTHENTIC HISTORICAL INPUTS STILL MISSING. N REMAINS RESEARCH_ONLY.",
+    "componentRuleStatus": "M/T/V/Q/F V0-A math preserved; N_V0 versioned math defined; current N evidence feed incomplete.",
     "qualificationThreshold": null,
     "qualificationThresholdStatus": "MISSING FOUNDER DECISION — no SI qualification threshold was supplied.",
     "officialCryptoSurface": {
@@ -2272,7 +2272,7 @@
     },
     "composite": {
       "score": null,
-      "status": "V0-A CORE/FULL SCORES INCOMPLETE — OFFICIAL HISTORY MISSING",
+      "status": "FULL SI_V0 COMPUTES ONLY WHEN M/T/V/Q/F/N_V0 ARE ALL VALID",
       "availableComponents": 0,
       "totalComponents": 6,
       "reason": "M/T/V/Q/F/N are not all authentically calculable under approved component rules."
@@ -2449,6 +2449,71 @@
         "Founder stake not yet frozen",
         "Exit plan not yet frozen",
         "Execution remains DISARMED"
+      ]
+    },
+    "nV0": {
+      "version": "N_V0",
+      "siVersion": "SI_V0",
+      "historicalDefinitionSearch": {
+        "result": "NO AUTHORITATIVE PRIOR N-E / N-Fr / N-Tr / N-Tx / N-A / N-C NORMALIZATION FOUND IN REPOSITORY HISTORY / CURRENT MARKET EDGE SOURCE",
+        "preservedPatterns": [
+          "fail closed on insufficient evidence",
+          "fresh evidence required",
+          "contradictory observations recorded",
+          "shadow reasoning separated from trading authority"
+        ],
+        "newV0DefinitionRequired": [
+          "N_E",
+          "N_Fr",
+          "N_Tr",
+          "N_Tx",
+          "N_A",
+          "N_C"
+        ]
+      },
+      "components": {
+        "N_E": {
+          "meaning": "Evidence strength / quantity / independence",
+          "formula": "min(1, independent supporting evidence groups / 3)",
+          "missing": "INCOMPLETE when evidence bundle absent or supporting item lacks independentGroup"
+        },
+        "N_Fr": {
+          "meaning": "Freshness",
+          "formula": "mean(exp(-ln(2) * ageMs / evidenceSpecificHalfLifeMs))",
+          "missing": "INCOMPLETE when required evidence lacks timestamp or half-life"
+        },
+        "N_Tr": {
+          "meaning": "Trust / source reliability",
+          "formula": "mean(versioned source-class trust score)",
+          "missing": "INCOMPLETE when required evidence lacks recognized sourceClass"
+        },
+        "N_Tx": {
+          "meaning": "Independent cross-source / cross-signal agreement",
+          "formula": "PASS cross-checks / total required cross-checks",
+          "missing": "INCOMPLETE when no deterministic cross-check set exists"
+        },
+        "N_A": {
+          "meaning": "Anomaly survival",
+          "formula": "PASS anomaly checks / total required anomaly checks",
+          "missing": "INCOMPLETE when no deterministic anomaly-check set exists"
+        },
+        "N_C": {
+          "meaning": "Collision survival",
+          "formula": "candidate-survives collision tests / total required collision tests",
+          "missing": "INCOMPLETE when no deterministic collision-test set exists"
+        }
+      },
+      "composite": "(N_E + N_Fr + N_Tr + N_Tx + N_A + N_C) / 6",
+      "bounds": "0.00 <= N_V0 <= 1.00",
+      "missingDataRule": "FAIL CLOSED — NO 0.50 OR OTHER DEFAULT",
+      "currentValue": null,
+      "currentState": "INCOMPLETE — NFE/UMEO EVIDENCE BUNDLE NOT CONNECTED",
+      "doubleCountingGuard": [
+        "momentum",
+        "trend",
+        "volatility",
+        "spread",
+        "volume"
       ]
     }
   },
@@ -2840,6 +2905,13 @@
           ]
         }
       }
+    },
+    "nEvidenceBundle": null,
+    "nV0State": {
+      "version": "N_V0",
+      "status": "INCOMPLETE",
+      "reason": "NFE/UMEO evidence bundle not connected; fail closed",
+      "neutralDefaultUsed": false
     }
   }
 }
