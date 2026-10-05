@@ -476,6 +476,28 @@ async function runScheduledCollection(env) {
   return {sampledAt:nowIso,spreadSamplesInserted:spreadStatements.length,governedSymbol,observationId,reconciled,featureState};
 }
 
+async function robinhoodProviderCapability(env, action) {
+  const latest=env.V0A_DB
+    ? await env.V0A_DB.prepare("SELECT observed_at,robinhood_symbol,robinhood_provider_timestamp FROM v0a_observations ORDER BY observed_at_ms DESC LIMIT 1").first()
+    : null;
+  return {
+    status:"BLOCKED_NO_CLOUD_ROBINHOOD_CONNECTOR",
+    action:action||"status",
+    provider:"Robinhood MCP",
+    publicWorkerLiveRead:false,
+    publicWorkerPreview:false,
+    publicWorkerExecution:false,
+    robinhoodExecution:"DISARMED",
+    fireAuthority:"ZERO",
+    researchObservation:latest?.observed_at||null,
+    robinhoodSymbol:latest?.robinhood_symbol||null,
+    lastRobinhoodProviderSnapshot:latest?.robinhood_provider_timestamp||null,
+    blocker:"The connected Robinhood MCP/OAuth session is available to the governed Builder/ChatGPT provider path, but it is not exposed as a callable credential or connector inside this public Cloudflare Worker. No Robinhood credential is stored in the Worker.",
+    nextRequiredAuthority:"Separate Founder-approved cloud Robinhood connector/auth architecture or an official provider-supported cloud credential path. This mission does not authorize creating one.",
+    fabricatedValues:false
+  };
+}
+
 async function ledgerStatus(env) {
   if(!env.V0A_DB) return {status:"D1_BINDING_MISSING"};
   const [obs,spreads,outcomes,pending,reconciled,lastObs,lastSpread]=await Promise.all([
@@ -522,6 +544,7 @@ export default {
       if (url.pathname === "/api/v0a/features") return await featureResponse(env,request);
       if (url.pathname === "/api/v0a/book") return await bookResponse(env,request);
       if (url.pathname === "/api/v0a/ledger-status") return json(await ledgerStatus(env));
+      if (url.pathname === "/api/robinhood/provider-capability") return json(await robinhoodProviderCapability(env,url.searchParams.get("action")));
       if (url.pathname === "/api/v0a/ping") {
         const p=await publicGet("/api/v3/ping");
         return json({status:"PASS",source:"Binance.US public market data",credential:"NONE",executionAuthority:"NONE",upstream:p});
