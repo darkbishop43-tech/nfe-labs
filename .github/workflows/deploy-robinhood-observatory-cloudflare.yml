@@ -126,6 +126,7 @@ jobs:
           curl --fail --silent --show-error --location "$LIVE_URL/app.js" --output /tmp/app-js
           grep -q 'D1 LIVE RESEARCH FEED' /tmp/app-js && echo "VERIFY main SI D1 feed wiring PASS"
           grep -q 'N_V0 subcomponents + provenance' /tmp/app-js && echo "VERIFY N_V0 cockpit wiring PASS"
+          grep -q 'FAIL CLOSED — N_V0 EVIDENCE INCOMPLETE' /tmp/app-js && echo "VERIFY N_V0 fail-closed cockpit PASS"
           grep -q 'Founder Quick State' /tmp/body && echo "VERIFY lifecycle quick-state placement PASS"
           curl --fail --silent --show-error --location "$LIVE_URL/data/snapshot.json" --output /tmp/snapshot
           grep -q '"operationalCockpit"' /tmp/snapshot
