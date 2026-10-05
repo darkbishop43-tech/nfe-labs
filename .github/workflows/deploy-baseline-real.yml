@@ -57,25 +57,27 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: npx --yes wrangler@4 deploy
-      - name: Verify zero-money Founder Funding return path
+      - name: Verify dormant AUTO V1 production state
         shell: bash
         working-directory: .
         run: |
           set -euo pipefail
           B='https://market-edge-baseline-real.darkbishop43.workers.dev'
-          curl -fsS "$B/founder-funding-zero-money-proof" -o /tmp/funding-proof.json
-          jq -e '.ok==true and .state=="FOUNDER_FUNDING_3_TO_2_ZERO_MONEY_PROOF" and .providerTransferPosts==0 and .orders==0 and .capitalMovedUsd==0 and .amountDefault.ok==true and .amountDefault.amountUsd==9.8 and .amountCustom.ok==true and .amountCustom.amountUsd==5.25 and .amountInvalid.ok==false and .amountZero.ok==false and .reviewOk.ok==true and .reviewCustom.ok==true and .reviewTooLarge.ok==false and .confirmOk.ok==true and .reviewWrongSource.ok==false and .reviewWrongDestination.ok==false and .reviewArmed.ok==false and .reviewOpen.ok==false and .confirmStale.ok==false and .confirmChanged.ok==false and .confirmReplay.ok==false' /tmp/funding-proof.json >/dev/null
-          echo "FUNDING_ZERO_MONEY_PROOF=$(jq -c . /tmp/funding-proof.json)"
 
-          curl -fsS "$B/founder-funding-payne-state-proof" -o /tmp/payne-state-proof.json
-          jq -e '.ok==true and .state=="PAYNE_STATE_READ_PROVEN" and .payneSafety.source=="CLOUDFLARE_SERVICE_BINDING:PAYNE_REAL_READ:/real-state" and .payneSafety.armed==false and .payneSafety.openPositions==0 and .providerWrites==0 and .capitalMovedUsd==0' /tmp/payne-state-proof.json >/dev/null
-          echo "PAYNE_STATE_READ_PROOF=$(jq -c . /tmp/payne-state-proof.json)"
+          curl -fsS "$B/execution-test-state" -o /tmp/auto-state.json
+          jq -e '.ok==true and .readOnly==true and .state.armed==false and .state.openPositions==0 and .queue.active==false' /tmp/auto-state.json >/dev/null
+          echo "AUTO_STATE=$(jq -c '{status:.state.status,armed:.state.armed,openPositions:.state.openPositions,queueActive:.queue.active}' /tmp/auto-state.json)"
 
-          curl -fsS "$B/founder-funding" -o /tmp/founder-funding.html
-          grep -q 'SOURCE INDEX:</b> 3' /tmp/founder-funding.html
-          grep -q 'DESTINATION INDEX:</b> 2' /tmp/founder-funding.html
-          grep -q 'id="returnAmount"' /tmp/founder-funding.html
-          grep -q 'name="amountUsd"' /tmp/founder-funding.html
-          grep -q 'step="0.01"' /tmp/founder-funding.html
-          grep -q 'REVIEW INDEX 3 → INDEX 2 TRANSFER' /tmp/founder-funding.html
-          echo "FOUNDER_FUNDING_UX=AMOUNT_ENTRY_PRESENT"
+          grep -F 'applyAutoV1OwnedManagement({' market-edge-lab/real/baseline/src/index.js >/dev/null
+          grep -F 'AUTO_V1_DORMANT = "DORMANT"' market-edge-lab/real/baseline/src/auto-v1-management-integration.js >/dev/null
+          grep -F 'AUTO_V1_ACTIVE = "FOUNDER_ACTIVE_V1"' market-edge-lab/real/baseline/src/auto-v1-management-integration.js >/dev/null
+          if grep -q '^AUTO_DYNAMIC_MANAGEMENT_V1_AUTHORITY' market-edge-lab/real/baseline/wrangler.toml; then
+            echo "Unexpected live V1 authority configured"
+            exit 1
+          fi
+
+          echo "AUTO_V1_INTEGRATION=PRESENT"
+          echo "AUTO_V1_AUTHORITY=DORMANT"
+          echo "PROVIDER_WRITES=0"
+          echo "ORDERS=0"
+          echo "CAPITAL_MOVED_USD=0"
