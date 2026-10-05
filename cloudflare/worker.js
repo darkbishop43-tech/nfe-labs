@@ -1,4 +1,4 @@
-import { calculateNV0, calculateFullSIV0, N_VERSION, SI_VERSION } from "./si-n-v0.js";
+import { calculateNV0, calculateFullSIV0, calculateSICoreV0A, N_VERSION, SI_VERSION } from "./si-n-v0.js";
 const SECURITY_HEADERS = {
   "Content-Security-Policy": "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'none'",
   "Permissions-Policy": "camera=(), microphone=(), geolocation=()",
@@ -199,8 +199,9 @@ async function researchResponse(env, request) {
   const Q=null;
 
   const components={M,T,V,F,Q};
-  const coreReady=[M,T,V,F,Q].every(Number.isFinite);
-  const SI_CORE_V0A=coreReady?100*(0.30*M+0.20*T+0.15*V+0.10*Q+0.15*F)/0.90:null;
+  const coreState=calculateSICoreV0A({M,T,V,Q,F});
+  const coreReady=coreState.status==="VALID";
+  const SI_CORE_V0A=coreState.value;
 
   const rh=(snapshot.cryptoUniverse?.rows||[]).find(x=>x.symbol===robinhoodSymbol)||null;
   return {
@@ -342,7 +343,7 @@ async function computeShadowFeatureSet(env, robinhoodSymbol, mapping, currentBoo
   const qSpreadPercentile=priorSpreads.length?percentileRank(priorSpreads,currentBook.spreadPct):null;
   const qSpread=qSpreadPercentile==null?null:1-qSpreadPercentile;
   const Q=(qSpread!=null&&qLiquidity!=null)?0.50*qSpread+0.50*qLiquidity:null;
-  const SI_CORE_V0A=[M,T,V,F,Q].every(Number.isFinite)?100*(0.30*M+0.20*T+0.15*V+0.10*Q+0.15*F)/0.90:null;
+  const SI_CORE_V0A=calculateSICoreV0A({M,T,V,Q,F}).value;
 
   return {
     returns:{r5:h5?.return??null,r15:h15?.return??null,r60:h60?.return??null},
