@@ -57,7 +57,7 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: npx --yes wrangler@4 deploy
-      - name: Verify dormant AUTO V1 production state
+      - name: Verify active AUTO V1 production state
         shell: bash
         working-directory: .
         run: |
@@ -71,13 +71,10 @@ jobs:
           grep -F 'applyAutoV1OwnedManagement({' market-edge-lab/real/baseline/src/index.js >/dev/null
           grep -F 'AUTO_V1_DORMANT = "DORMANT"' market-edge-lab/real/baseline/src/auto-v1-management-integration.js >/dev/null
           grep -F 'AUTO_V1_ACTIVE = "FOUNDER_ACTIVE_V1"' market-edge-lab/real/baseline/src/auto-v1-management-integration.js >/dev/null
-          if grep -q '^AUTO_DYNAMIC_MANAGEMENT_V1_AUTHORITY' market-edge-lab/real/baseline/wrangler.toml; then
-            echo "Unexpected live V1 authority configured"
-            exit 1
-          fi
+          grep -F 'AUTO_DYNAMIC_MANAGEMENT_V1_AUTHORITY = "FOUNDER_ACTIVE_V1"' market-edge-lab/real/baseline/wrangler.toml >/dev/null
 
           echo "AUTO_V1_INTEGRATION=PRESENT"
-          echo "AUTO_V1_AUTHORITY=DORMANT"
+          echo "AUTO_V1_AUTHORITY=FOUNDER_ACTIVE_V1"
           echo "PROVIDER_WRITES=0"
           echo "ORDERS=0"
           echo "CAPITAL_MOVED_USD=0"
