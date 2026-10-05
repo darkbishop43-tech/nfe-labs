@@ -185,3 +185,20 @@ console.log('PASS stale N-blocking cockpit presentation removed');
 
 if(!/Fresh live execution connectivity/.test(text)||!/NOT CLAIMED — SNAPSHOT-BACKED/.test(text))throw new Error('Stale Robinhood snapshot disclosure missing');
 console.log('PASS stale Robinhood provider state remains visibly separated');
+
+
+if(!/provider-capability/.test(text))throw new Error('Robinhood provider capability endpoint wiring missing from cockpit');
+if(!/Start provider scan/.test(text)||!/Run fresh order preview/.test(text)||!/Refresh equity WATCH/.test(text)||!/Refresh options WATCH/.test(text))throw new Error('Governed read/preview control surface missing');
+if(/id="startProviderScan"[^>]*disabled/.test(text)||/id="freshPreview"[^>]*disabled/.test(text))throw new Error('Blocked provider controls are decorative-disabled instead of returning exact blockers');
+console.log('PASS provider-dependent buttons execute truthful capability checks');
+
+if(!/STALE \/ SNAPSHOT/.test(text)||!/FRESH LOCK REQUIRED/.test(text))throw new Error('Crypto radar does not label captured Robinhood state as stale');
+if(!/NOT SCORED/.test(text))throw new Error('Unscored crypto rows are not distinguished from current SI specimen');
+console.log('PASS crypto radar separates D1 score state from stale Robinhood snapshot state');
+
+if(!/NFE EVIDENCE RESEARCH — N_V0/.test(text)||!/UNKNOWN \/ INCOMPLETE/.test(text)||!/doubleCount|marketDataDoubleCountPrevented/.test(text))throw new Error('NFE diagnostic research panel missing operational evidence state');
+console.log('PASS NFE diagnostic panel preserves fail-closed provenance');
+
+if(!/freeze an exact Founder-selected dollar amount/.test(text))throw new Error('Fresh preview does not require Founder-selected config');
+if(/dollarAmount\s*[:=]\s*['"]?1(?:\.0+)?['"]?/i.test(text))throw new Error('Hard-coded $1 stake authority detected');
+console.log('PASS no default stake and preview requires Founder configuration');
