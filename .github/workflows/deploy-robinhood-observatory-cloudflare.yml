@@ -191,3 +191,24 @@ jobs:
           cat /tmp/v0a-latest-observation.json
           npx --yes wrangler@4 d1 execute nfe-os-robinhood-si-v0a-ledger --remote --command="SELECT horizon_minutes,status,COUNT(*) AS n,MAX(outcome_return) AS sample_outcome,MAX(mfe) AS sample_mfe,MIN(mae) AS sample_mae FROM v0a_outcomes GROUP BY horizon_minutes,status ORDER BY horizon_minutes,status;" --json > /tmp/v0a-outcomes.json
           cat /tmp/v0a-outcomes.json
+
+
+      - name: Verify reconciled one-minute outcome
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.ROBINHOOD_CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          npx --yes wrangler@4 d1 execute nfe-os-robinhood-si-v0a-ledger --remote --command="SELECT o.id,o.observation_id,o.horizon_minutes,o.status,o.start_mark,o.end_mark,o.outcome_return,o.mfe,o.mae,o.reconciled_at FROM v0a_outcomes o WHERE o.horizon_minutes=1 AND o.status='RECONCILED' ORDER BY o.reconciled_at_ms DESC LIMIT 1;" --json > /tmp/v0a-1m.json
+          cat /tmp/v0a-1m.json
+          node - <<'NODE'
+          const fs=require('fs');
+          const p=JSON.parse(fs.readFileSync('/tmp/v0a-1m.json','utf8'));
+          const row=p?.[0]?.results?.[0]||p?.results?.[0]||null;
+          if(!row) throw new Error('No reconciled +1m outcome yet');
+          if(row.outcome_return==null) throw new Error('+1m outcome_return missing');
+          if(row.mfe==null) throw new Error('+1m MFE missing');
+          if(row.mae==null) throw new Error('+1m MAE missing');
+          console.log('VERIFY +1m outcome PASS',JSON.stringify(row));
+          NODE
