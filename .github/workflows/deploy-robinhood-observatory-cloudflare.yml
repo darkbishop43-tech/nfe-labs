@@ -125,6 +125,8 @@ jobs:
           grep -q 'SI Crypto V0-A Instrumentation' /tmp/body && echo "VERIFY V0-A PASS"
           curl --fail --silent --show-error --location "$LIVE_URL/app.js" --output /tmp/app-js
           grep -q 'D1 LIVE RESEARCH FEED' /tmp/app-js && echo "VERIFY main SI D1 feed wiring PASS"
+          grep -q 'N_V0 subcomponents + provenance' /tmp/app-js && echo "VERIFY N_V0 cockpit wiring PASS"
+          grep -q 'Founder Quick State' /tmp/body && echo "VERIFY lifecycle quick-state placement PASS"
           curl --fail --silent --show-error --location "$LIVE_URL/data/snapshot.json" --output /tmp/snapshot
           grep -q '"operationalCockpit"' /tmp/snapshot
           grep -q '"cryptoUniverse"' /tmp/snapshot
@@ -214,3 +216,26 @@ jobs:
           if(row.mae==null) throw new Error('+1m MAE missing');
           console.log('VERIFY +1m outcome PASS',JSON.stringify(row));
           NODE
+
+
+      - name: Verify N_V0 persistence and versioning
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.ROBINHOOD_CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          for i in 1 2 3 4 5 6; do
+            npx --yes wrangler@4 d1 execute nfe-os-robinhood-si-v0a-ledger --remote --command="SELECT id,observed_at,n_version,si_version,n_v0,n_status,n_missing_components,n_e,n_fr,n_tr,n_tx,n_a,n_c,full_si,full_si_state,n_provenance_json FROM v0a_observations WHERE n_version='N_V0' ORDER BY observed_at_ms DESC LIMIT 1;" --json > /tmp/n-v0-row.json
+            if grep -q '"n_version": "N_V0"' /tmp/n-v0-row.json; then break; fi
+            sleep 15
+          done
+          cat /tmp/n-v0-row.json
+          grep -q '"n_version": "N_V0"' /tmp/n-v0-row.json
+          grep -q '"si_version": "SI_V0"' /tmp/n-v0-row.json
+          grep -q '"n_status": "INCOMPLETE"' /tmp/n-v0-row.json
+          grep -q '"n_v0": null' /tmp/n-v0-row.json
+          grep -q '"full_si": null' /tmp/n-v0-row.json
+          grep -q 'NFE/UMEO evidence bundle missing' /tmp/n-v0-row.json
+          grep -q '"marketDataDoubleCountPrevented":true' /tmp/n-v0-row.json
+          echo "VERIFY N_V0 persisted version + fail-closed state PASS"
