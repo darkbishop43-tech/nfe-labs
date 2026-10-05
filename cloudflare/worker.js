@@ -1,3 +1,4 @@
+import { calculateNV0, calculateFullSIV0, N_VERSION, SI_VERSION } from "./si-n-v0.js";
 const SECURITY_HEADERS = {
   "Content-Security-Policy": "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'none'",
   "Permissions-Policy": "camera=(), microphone=(), geolocation=()",
@@ -425,10 +426,12 @@ async function runScheduledCollection(env) {
       const bid=Number(b.bidPrice),ask=Number(b.askPrice),mark=(bid+ask)/2,spreadPct=(ask-bid)/mark;
       const currentBook={bid,ask,mark,spreadPct};
       featureState=await computeShadowFeatureSet(env,governedSymbol,mapping,currentBook);
+      const nState=calculateNV0(snapshot.siCryptoV0A?.nEvidenceBundle??null,nowMs);
+      const fullState=calculateFullSIV0({M:featureState.M,T:featureState.T,V:featureState.V,Q:featureState.Q,F:featureState.F,N:nState.value});
       const missing=[];
       if(featureState.Q==null) missing.push("Q_SPREAD_HISTORY");
       if(featureState.SI_CORE_V0A==null) missing.push("SI_CORE_INCOMPLETE");
-      missing.push("N_RESEARCH_ONLY");
+      for(const m of nState.missing) missing.push(`${m.component}:${m.reason}`);
       const ins=await env.V0A_DB.prepare(
         `INSERT INTO v0a_observations (
           observed_at,observed_at_ms,robinhood_symbol,research_symbol,research_source,mapping_status,mapping_confidence,quote_currency,
@@ -444,10 +447,21 @@ async function runScheduledCollection(env) {
         featureState.atr14,featureState.atrPercentile,featureState.volume,featureState.relativeVolume,featureState.quoteVolume,
         featureState.takerBuyBaseVolume,featureState.takerBuyQuoteVolume,featureState.tradeCount,featureState.dollarVolume,
         featureState.qSpread,featureState.qLiquidity,featureState.M,featureState.T,featureState.V,featureState.F,featureState.Q,
-        null,null,null,null,null,null,featureState.SI_CORE_V0A,null,"INCOMPLETE — N RESEARCH_ONLY","BINANCE.US_PUBLIC_CURRENT",JSON.stringify(missing)
+        nState.components.N_E.value,nState.components.N_Fr.value,nState.components.N_Tr.value,nState.components.N_Tx.value,nState.components.N_A.value,nState.components.N_C.value,
+        featureState.SI_CORE_V0A,fullState.value,fullState.status==="VALID"?"VALID":"INCOMPLETE — "+fullState.missing.join(","),"BINANCE.US_PUBLIC_CURRENT",JSON.stringify(missing)
       ).run();
       observationId=Number(ins.meta?.last_row_id||ins.results?.meta?.last_row_id||0)||null;
       if(observationId){
+        await env.V0A_DB.prepare(
+          `UPDATE v0a_observations
+              SET n_version=?,si_version=?,n_v0=?,n_status=?,n_missing_components=?,n_provenance_json=?,
+                  n_e_reason=?,n_fr_reason=?,n_tr_reason=?,n_tx_reason=?,n_a_reason=?,n_c_reason=?
+            WHERE id=?`
+        ).bind(
+          N_VERSION,SI_VERSION,nState.value,nState.status,JSON.stringify(nState.missing),JSON.stringify(nState.provenance),
+          nState.components.N_E.reason,nState.components.N_Fr.reason,nState.components.N_Tr.reason,nState.components.N_Tx.reason,nState.components.N_A.reason,nState.components.N_C.reason,
+          observationId
+        ).run();
         const horizons=[1,5,15,60];
         await env.V0A_DB.batch(horizons.map(h=>env.V0A_DB.prepare(
           "INSERT OR IGNORE INTO v0a_outcomes(observation_id,horizon_minutes,due_at_ms,start_mark,status,source) VALUES(?,?,?,?,?,?)"
@@ -483,6 +497,8 @@ async function ledgerStatus(env) {
     byHorizon:byHorizon.results||[],
     latestObservation:lastObs||null,
     latestSpreadSample:lastSpread||null,
+    versions:{n:N_VERSION,si:SI_VERSION},
+    nPolicy:{missingData:"FAIL_CLOSED_NO_DEFAULT",marketDataDoubleCountPrevented:true},
     robinhoodExecution:"DISARMED",
     binanceExecutionAuthority:"NONE",
     fireAuthority:"ZERO"
