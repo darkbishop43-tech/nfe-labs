@@ -1,7 +1,8 @@
 import { sendPushNotification, topicFromString } from "@mmmike/web-push/send";
 import { buildPhase1AShadowAttachment, freezePhase1ACheckpointDecision, authorizePhase1BContinuation, recordPhase1BAuthorizedObservation, freezePhase1BEndpointComparison, phase1AShadowFixtureProof, phase1BShadowFixtureProof } from "./phase1a-shadow.js";
 import { kalshiExecutionOrderPost } from "../../shared/kalshi-execution-write.js";
-import { initialDynamicManagementState, dynamicManagementStep, persistCompletedLifecycle } from "../experiments/dynamic-management-zero-money.js";
+import { persistCompletedLifecycle } from "../experiments/dynamic-management-zero-money.js";
+import { applyAutoV1OwnedManagement } from "./auto-v1-management-integration.js";
 
 // CLOUDFLARE DEPLOYMENT MARKER 2026-09-20: XRP recovery V2 proof route ce2252b / 7637a6f
 // SHARD_ROUTING_DEPLOYMENT_MARKER_2026_09_20
@@ -1968,59 +1969,13 @@ async function runExecutionTestSeries(env,freshShadow=null,preparedBalance=null)
     const exitByScore=Boolean(shadowCurrent&&Number(shadowCurrent.score)<=EXECUTION_TEST_CONFIG.exitScore);
     const exitByTime=age>=EXECUTION_TEST_CONFIG.maxHoldMs;
 
-    // AUTO V1 DORMANT PRODUCTION INTEGRATION.
-    // Default/unknown authority preserves CONTROL exactly. Only a future explicit Founder
-    // activation value can allow V1 to suppress the time-only exit for this SAME owned position.
-    const autoV1Active=String(env?.AUTO_DYNAMIC_MANAGEMENT_V1_AUTHORITY||"DORMANT").trim().toUpperCase()==="FOUNDER_ACTIVE_V1";
-    let effectiveExitByTime=exitByTime;
-    if(autoV1Active){
-      if(!position.autoV1Management){
-        position.autoV1Management=initialDynamicManagementState({
-          seriesId:state?.seriesId??state?.series?.id??"UNKNOWN",
-          attemptId:String(position?.attemptNo??"UNKNOWN"),
-          ticker:position?.marketTicker??null,
-          asset:position?.asset??null,
-          direction:position?.direction??null,
-          side:position?.outcomeSide??null,
-          entryAt:position?.filledAt??position?.submittedAt??null,
-          entryPrice:position?.fillPrice??position?.entryPrice??position?.submittedPrice??null,
-          entryScore:position?.entryScore??null,
-          entryFees:position?.entryFees??position?.fees??null,
-          quantity:position?.filledCount??null
-        });
-      }
-      const exactScore=shadowCurrent&&Number.isFinite(Number(shadowCurrent.score))?Number(shadowCurrent.score):null;
-      const evidenceReady=Boolean(
-        Number.isFinite(Number(exactQuote?.bid)) &&
-        exactScore!=null &&
-        position?.reconciliationClassification==="OPEN"
-      );
-      position.autoV1Management=dynamicManagementStep(position.autoV1Management,{
-        at:new Date(now).toISOString(),
-        ageMs:age,
-        score:exactScore,
-        bid:Number.isFinite(Number(exactQuote?.bid))?Number(exactQuote.bid):null,
-        ask:null,
-        thesisState:exactScore==null?"UNKNOWN":"UNCHANGED",
-        providerState:position?.reconciliationClassification||"UNKNOWN",
-        reconciliationState:position?.reconciliationClassification||"UNKNOWN",
-        contractIdentityOk:String(position?.matchedTicker||position?.marketTicker||"")===String(position?.marketTicker||""),
-        sideIdentityOk:Boolean(position?.outcomeSide),
-        requiredManagementEvidenceAvailable:evidenceReady,
-        isFiveMinuteCheckpoint:Boolean(exitByTime&&!position.autoV1Management?.fiveMinuteCheckpoint),
-        contractExpired:false
-      });
-      position.autoV1Authority="FOUNDER_ACTIVE_V1";
-      position.autoV1ControlWouldMaxHold=Boolean(exitByTime);
-      if(position.autoV1Management?.state==="CONTINUE"){
-        // Critical experiment semantic: V1 governs the same real owned position.
-        // CONTROL's 5-minute result is retained as a checkpoint, not executed as a time-only exit.
-        effectiveExitByTime=false;
-      }
-      // FAIL_CLOSED_TO_CONTROL deliberately leaves effectiveExitByTime unchanged.
-    }else{
-      position.autoV1Authority="DORMANT";
-    }
+    // AUTO V1 DORMANT PRODUCTION INTEGRATION: the same owned position is passed
+    // through the testable authority gate. Dormant returns CONTROL's time exit unchanged.
+    const autoV1Result=applyAutoV1OwnedManagement({
+      env,position,seriesId:state?.seriesId??"UNKNOWN",now,ageMs:age,
+      score:shadowCurrent?.score,bid:exactQuote?.bid,exitByTime
+    });
+    const effectiveExitByTime=autoV1Result.effectiveExitByTime;
     const managementForensic=exitByTime?{
       ts:new Date(now).toISOString(),type:"TEST_POST_DEADLINE_MANAGE_FORENSIC",controllerCycleAt:now,
       positionId:position.id||"UNKNOWN",attemptNo:position.attemptNo??"UNKNOWN",ticker:position.marketTicker||"UNKNOWN",
