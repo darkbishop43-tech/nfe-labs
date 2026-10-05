@@ -1,4 +1,4 @@
-import { calculateNV0, calculateFullSIV0, N_VERSION, SI_VERSION } from '../../cloudflare/si-n-v0.js';
+import { calculateNV0, calculateFullSIV0, calculateSICoreV0A, N_VERSION, SI_VERSION } from '../../cloudflare/si-n-v0.js';
 import fs from 'node:fs';
 const files=['index.html','app.js','styles.css','data/snapshot.json'];
 const text=files.map(f=>fs.readFileSync(new URL('../'+f,import.meta.url),'utf8')).join('\n');
@@ -21,7 +21,7 @@ console.log('PASS snapshot labeling');
 
 const si=data.siCryptoV0;
 if(!si)throw new Error('SI Crypto V0 state missing');
-const expected={M:0.30,T:0.20,V:0.15,Q:0.10,F:0.15,N:0.10};
+const expected={M:0.30,T:0.20,V:0.15,Q:0.10,F:0.15};
 for(const [k,v] of Object.entries(expected)){if(si.weights[k]!==v)throw new Error('SI weight mismatch '+k)}
 if(si.composite.score!==null)throw new Error('Composite score must remain null while component inputs/rules are incomplete');
 if(si.qualificationThreshold!==null)throw new Error('Unapproved SI qualification threshold found');
@@ -29,7 +29,7 @@ if(si.firstTest.proposedEntry.dollarAmount!=='FOUNDER SELECTS')throw new Error('
 if(si.live.state!=='DISARMED / FIRE BLOCKED')throw new Error('Live lane unexpectedly executable');
 console.log('PASS SI Crypto V0 authorized weights');
 console.log('PASS no unapproved stake or qualification threshold');
-console.log('PASS incomplete SI score blocks FIRE');
+console.log('PASS current SI market weights preserve 0.90 raw weight before normalization');
 
 const v0a=data.siCryptoV0A;
 if(!v0a)throw new Error('SI Crypto V0-A state missing');
@@ -133,7 +133,7 @@ console.log('PASS shadow authority zero and live execution DISARMED / FIRE BLOCK
 if(!/Historical \/ Diagnostic/.test(text))throw new Error('Lower V0-A section not labeled historical/diagnostic');
 if(!/SAME AUTHORITATIVE D1 VALUE AS TOP SI/.test(text))throw new Error('Lower V0-A cards are not tied to top D1 observation');
 if(/INCOMPLETE — SPREAD HISTORY REQUIRED/.test(text))throw new Error('Stale conflicting Q presentation remains in live UI code');
-console.log('PASS cockpit has one authoritative current M/T/V/Q/F/N state');
+console.log('PASS cockpit has one authoritative current M/T/V/Q/F market state with separate N_V0 research');
 
 if(!/Research observation/.test(text)||!/Robinhood provider snapshot/.test(text)||!/Fresh live execution connectivity/.test(text))throw new Error('Research vs Robinhood snapshot freshness is not visibly distinguished');
 console.log('PASS research freshness visibly separated from Robinhood snapshot freshness');
@@ -143,3 +143,45 @@ for(const k of ['N_E','N_Fr','N_Tr','N_Tx','N_A','N_C']){
   if(!data.siCryptoV0A.nEvidenceInventory.exactMissing[k])throw new Error('Missing evidence inventory for '+k);
 }
 console.log('PASS N evidence inventory records exact fail-closed missing inputs');
+
+
+const coreFixture={M:.2,T:.3,V:.4,Q:.5,F:.6};
+const coreExpectedRaw=.30*.2+.20*.3+.15*.4+.10*.5+.15*.6;
+const coreExpected=100*coreExpectedRaw/.90;
+const core=calculateSICoreV0A(coreFixture);
+if(core.status!=='VALID'||Math.abs(core.value-coreExpected)>1e-12)throw new Error('SI_CORE_V0A exact arithmetic mismatch');
+if(Math.abs(core.weightedSum-coreExpectedRaw)>1e-12||core.denominator!==.90)throw new Error('SI_CORE_V0A normalization mismatch');
+console.log('PASS SI_CORE_V0A exact authorized five-component arithmetic');
+
+const coreWithNUnknown=calculateSICoreV0A(coreFixture);
+const coreWithNIncomplete=calculateSICoreV0A(coreFixture);
+if(coreWithNUnknown.value!==core.value||coreWithNIncomplete.value!==core.value)throw new Error('N state changed SI_CORE_V0A');
+console.log('PASS N_V0 UNKNOWN/INCOMPLETE does not block or alter SI_CORE_V0A');
+
+for(const k of ['M','T','V','Q','F']){
+  const x={...coreFixture,[k]:null};
+  const r=calculateSICoreV0A(x);
+  if(r.status!=='INCOMPLETE'||r.value!==null||!r.missing.includes(k))throw new Error('Missing '+k+' did not block SI_CORE_V0A');
+}
+console.log('PASS missing M/T/V/Q/F blocks SI_CORE_V0A');
+
+for(const k of ['M','T','V','Q','F']){
+  const x={...coreFixture,[k]:1.01};
+  const r=calculateSICoreV0A(x);
+  if(r.status!=='INCOMPLETE'||r.value!==null||!r.invalid.some(v=>v.component===k))throw new Error('Invalid '+k+' accepted by SI_CORE_V0A');
+}
+console.log('PASS out-of-range M/T/V/Q/F blocks SI_CORE_V0A');
+
+if(data.siCryptoV0?.nV0?.blocksSiCore!==false)throw new Error('N_V0 still marked as SI core blocker');
+if(!/NFE EVIDENCE RESEARCH — N_V0/.test(text))throw new Error('Separate N_V0 research presentation missing');
+if(!/AUTHORITATIVE CURRENT MARKET INTELLIGENCE/.test(text))throw new Error('Authoritative SI core label missing');
+if(!/LIVE QUALIFICATION THRESHOLD: NOT YET FOUNDER APPROVED/.test(text))throw new Error('Threshold status missing');
+if(/FULL SI_V0/.test(text.split('function renderSiCrypto(){')[1]?.split('function showConfigStatus')[0]||''))throw new Error('Primary current SI panel still presents FULL SI_V0');
+console.log('PASS N_V0 research preserved but removed from primary market score');
+
+if(!/SI_CORE_V0A/.test(text)||!/M\/T\/V\/Q\/F/.test(text))throw new Error('Five-component market intelligence presentation missing');
+if(/V0 RESEARCH · FULL SI REQUIRES VALID N_V0/.test(text))throw new Error('Stale N-blocking status remains');
+console.log('PASS stale N-blocking cockpit presentation removed');
+
+if(!/Fresh live execution connectivity/.test(text)||!/NOT CLAIMED — SNAPSHOT-BACKED/.test(text))throw new Error('Stale Robinhood snapshot disclosure missing');
+console.log('PASS stale Robinhood provider state remains visibly separated');
