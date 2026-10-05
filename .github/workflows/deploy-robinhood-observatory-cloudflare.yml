@@ -159,3 +159,35 @@ jobs:
           grep -q '"fireAuthority": "ZERO"' /tmp/v0a-momentum && grep -q '"fireAuthority": "ZERO"' /tmp/v0a-features && grep -q '"fireAuthority": "ZERO"' /tmp/v0a-book && echo "VERIFY zero FIRE authority PASS"
           echo "V0A_MAPPING_SUMMARY"
           node -e "const fs=require('fs');const m=JSON.parse(fs.readFileSync('/tmp/v0a-mapping'));const mo=JSON.parse(fs.readFileSync('/tmp/v0a-momentum'));const f=JSON.parse(fs.readFileSync('/tmp/v0a-features'));const b=JSON.parse(fs.readFileSync('/tmp/v0a-book'));console.log(JSON.stringify({robinhoodPairs:m.robinhoodPairs,mapped:m.mapped,unmapped:m.unmapped,mappedAssets:m.rows.filter(x=>x.mappingStatus==='MAPPED').map(x=>x.robinhoodSymbol),unmappedAssets:m.rows.filter(x=>x.mappingStatus!=='MAPPED').map(x=>x.robinhoodSymbol)}));console.log(JSON.stringify({mapping:mo.mapping,M:mo.M,T:f.T,V:f.V,F:f.F,qLiquidity:f.qLiquidity,Q:b.Q,researchBook:b.researchBook,depthSummary:b.depthSummary,featureConfig:f.configuration,momentumConfig:mo.configuration}))"
+
+
+      - name: Verify scheduled persistence evidence
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.ROBINHOOD_CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          npx --yes wrangler@4 d1 execute nfe-os-robinhood-si-v0a-ledger --remote --command="SELECT
+            (SELECT COUNT(*) FROM v0a_observations) AS observations,
+            (SELECT COUNT(*) FROM v0a_spread_samples) AS spread_samples,
+            (SELECT COUNT(*) FROM v0a_outcomes) AS outcomes,
+            (SELECT COUNT(*) FROM v0a_outcomes WHERE status='PENDING') AS pending_outcomes,
+            (SELECT COUNT(*) FROM v0a_outcomes WHERE status='RECONCILED') AS reconciled_outcomes;" --json > /tmp/v0a-counts.json
+          cat /tmp/v0a-counts.json
+          node - <<'NODE'
+          const fs=require('fs');
+          const p=JSON.parse(fs.readFileSync('/tmp/v0a-counts.json','utf8'));
+          const row=p?.[0]?.results?.[0]||p?.[0]?.result?.[0]||p?.results?.[0]||{};
+          const observations=Number(row.observations||0);
+          const spreadSamples=Number(row.spread_samples||0);
+          const outcomes=Number(row.outcomes||0);
+          if(observations<1) throw new Error('No scheduled observation persisted');
+          if(spreadSamples<1) throw new Error('No prospective spread sample persisted');
+          if(outcomes<4) throw new Error('Expected four horizon outcome rows per observation');
+          console.log('VERIFY scheduled observation persistence PASS', JSON.stringify(row));
+          NODE
+          npx --yes wrangler@4 d1 execute nfe-os-robinhood-si-v0a-ledger --remote --command="SELECT id,observed_at,robinhood_symbol,research_symbol,m,t,v,f,q,q_spread,q_liquidity,si_core_v0a,full_si_state,missing_input_flags FROM v0a_observations ORDER BY observed_at_ms DESC LIMIT 1;" --json > /tmp/v0a-latest-observation.json
+          cat /tmp/v0a-latest-observation.json
+          npx --yes wrangler@4 d1 execute nfe-os-robinhood-si-v0a-ledger --remote --command="SELECT horizon_minutes,status,COUNT(*) AS n,MAX(outcome_return) AS sample_outcome,MAX(mfe) AS sample_mfe,MIN(mae) AS sample_mae FROM v0a_outcomes GROUP BY horizon_minutes,status ORDER BY horizon_minutes,status;" --json > /tmp/v0a-outcomes.json
+          cat /tmp/v0a-outcomes.json
