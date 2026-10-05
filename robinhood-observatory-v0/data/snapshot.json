@@ -2163,19 +2163,18 @@
     "currentLifecycleIndex": 2
   },
   "siCryptoV0": {
-    "status": "V0-A MATH WIRED / OFFICIAL DATA HOLD",
-    "formula": "S_C = 100 × (0.30M + 0.20T + 0.15V + 0.10Q + 0.15F + 0.10N)",
+    "status": "SI_CORE_V0A MARKET INTELLIGENCE AUTHORITATIVE / N_V0 SEPARATE RESEARCH",
+    "formula": "SI_CORE_V0A = 100 × (0.30M + 0.20T + 0.15V + 0.10Q + 0.15F) / 0.90",
     "weights": {
       "M": 0.3,
       "T": 0.2,
       "V": 0.15,
       "Q": 0.1,
-      "F": 0.15,
-      "N": 0.1
+      "F": 0.15
     },
     "hypothesis": "V0 TEST HYPOTHESIS — not permanent discovered truth",
-    "scoreValidityRule": "Composite score is valid only when all M/T/V/Q/F/N are numeric under Founder-approved component rules.",
-    "componentRuleStatus": "M/T/V/Q/F V0-A math preserved; N_V0 versioned math defined; current N evidence feed incomplete.",
+    "scoreValidityRule": "SI_CORE_V0A is valid when M/T/V/Q/F are all numeric in [0,1]. N_V0 is separate research and does not block the market-intelligence score.",
+    "componentRuleStatus": "M/T/V/Q/F V0-A math preserved; N_V0 preserved as separate research/diagnostic evidence instrument.",
     "qualificationThreshold": null,
     "qualificationThresholdStatus": "MISSING FOUNDER DECISION — no SI qualification threshold was supplied.",
     "officialCryptoSurface": {
@@ -2272,10 +2271,10 @@
     },
     "composite": {
       "score": null,
-      "status": "FULL SI_V0 COMPUTES ONLY WHEN M/T/V/Q/F/N_V0 ARE ALL VALID",
+      "status": "CURRENT SCORE COMES FROM LIVE D1 SI_CORE_V0A",
       "availableComponents": 0,
-      "totalComponents": 6,
-      "reason": "M/T/V/Q/F/N are not all authentically calculable under approved component rules."
+      "totalComponents": 5,
+      "reason": "Static snapshot does not override live D1. N_V0 is not a required market-score component."
     },
     "universeScoring": {
       "totalProviderPairs": 91,
@@ -2284,7 +2283,7 @@
       "state": "UNRANKED — SI INPUTS INCOMPLETE",
       "leader": null,
       "currentGovernedSpecimen": "BTC-USD",
-      "reason": "No asset can receive a valid SI composite until required inputs and component rules exist."
+      "reason": "Current market ranking may use SI_CORE_V0A when M/T/V/Q/F are valid; no Founder-approved live qualification threshold exists."
     },
     "shadow": {
       "authority": "NO REAL MONEY",
@@ -2306,7 +2305,7 @@
           "spread": 1591.01209239,
           "wouldFire": false,
           "outcomeState": "NOT STARTED",
-          "reason": "SI score incomplete and no qualification threshold."
+          "reason": "Historical snapshot record. Current SI_CORE_V0A comes from D1; no Founder-approved qualification threshold exists."
         }
       ],
       "horizons": [
@@ -2328,7 +2327,7 @@
       "executionCapability": "Robinhood MCP crypto preview/place surface proven",
       "fireRequirements": [
         "Founder ARMED authority",
-        "Valid complete SI score",
+        "Valid SI_CORE_V0A market-intelligence score",
         "Founder-approved SI qualification requirement",
         "Fresh LOCK requalification",
         "Provider tradable / not halted",
@@ -2514,12 +2513,15 @@
         "volatility",
         "spread",
         "volume"
-      ]
-    }
+      ],
+      "role": "RESEARCH / DIAGNOSTIC NFE EVIDENCE INSTRUMENT — NON-BLOCKING FOR SI_CORE_V0A",
+      "blocksSiCore": false
+    },
+    "coreFormula": "SI_CORE_V0A = 100 × (0.30M + 0.20T + 0.15V + 0.10Q + 0.15F) / 0.90"
   },
   "siCryptoV0A": {
     "status": "HISTORICAL / DIAGNOSTIC CONFIGURATION — CURRENT VALUES COME FROM D1",
-    "formula": "S_C = 100 × (0.30M + 0.20T + 0.15V + 0.10Q + 0.15F + 0.10N)",
+    "formula": "N_V0 is separate research/diagnostic evidence state and is not part of the authoritative current SI_CORE_V0A market score.",
     "coreFormula": "SI_CORE_V0A = 100 × (0.30M + 0.20T + 0.15V + 0.10Q + 0.15F) / 0.90",
     "logistic": "L(x)=1/(1+e^(-x))",
     "parameters": {
@@ -2562,7 +2564,7 @@
       "V": "V = clamp(1 - 2*abs(P_ATR - 0.50), 0, 1)",
       "F": "F = clamp(RVOL / 2, 0, 1)",
       "Q": "Q = 0.50*(1-SPREAD_PERCENTILE) + 0.50*DOLLAR_VOLUME_PERCENTILE",
-      "N": "RESEARCH_ONLY; record E, Fr, Tr, Tx, A, C separately; no numeric N until separately valid"
+      "N": "SEPARATE RESEARCH / DIAGNOSTIC N_V0; preserved independently and non-blocking for SI_CORE_V0A"
     },
     "robinhoodMcp": {
       "pairDiscovery": true,
@@ -2650,7 +2652,8 @@
       "SI_CORE_V0A": null,
       "fullSI": null,
       "coreState": "CURRENT VALUE PROVIDED BY LIVE D1 OBSERVATION; STATIC SNAPSHOT VALUE IS HISTORICAL",
-      "fullSIState": "CURRENT VALUE PROVIDED BY LIVE D1 OBSERVATION; N_V0 FAILS CLOSED UNTIL AUTHENTIC EVIDENCE EXISTS"
+      "fullSIState": "N_V0 retained as separate research/diagnostic state; it does not block SI_CORE_V0A.",
+      "currentAuthority": "SI_CORE_V0A from live D1 observation"
     },
     "instrumentationLedger": {
       "schema": [
