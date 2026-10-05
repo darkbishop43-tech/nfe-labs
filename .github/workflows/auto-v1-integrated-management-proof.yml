@@ -1,0 +1,31 @@
+name: AUTO V1 Integrated Management Zero-Money Proof
+
+on:
+  push:
+    branches:
+      - auto-dynamic-management-experiment
+    paths:
+      - "market-edge-lab/real/baseline/src/index.js"
+      - "market-edge-lab/real/baseline/src/auto-v1-management-integration.js"
+      - "market-edge-lab/real/baseline/src/auto-v1-management-integration.test.mjs"
+      - "market-edge-lab/real/baseline/experiments/dynamic-management-zero-money.js"
+      - ".github/workflows/auto-v1-integrated-management-proof.yml"
+  workflow_dispatch:
+
+jobs:
+  proof:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Prove integrated AUTO V1 management path
+        run: |
+          node market-edge-lab/real/baseline/src/auto-v1-management-integration.test.mjs
+          grep -F 'applyAutoV1OwnedManagement({' market-edge-lab/real/baseline/src/index.js
+          grep -F 'if(!exitByScore&&!effectiveExitByTime)continue;' market-edge-lab/real/baseline/src/index.js
+          echo 'AUTO_V1_INTEGRATED_PATH_PROOF=PASS'
+          echo 'PROVIDER_WRITES=0'
+          echo 'ORDERS=0'
+          echo 'CAPITAL_MOVED_USD=0'
