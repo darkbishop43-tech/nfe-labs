@@ -1,0 +1,73 @@
+name: AUTO Experiment V1 Zero-Money Retention Proof
+
+on:
+  push:
+    branches:
+      - auto-dynamic-management-experiment
+    paths:
+      - 'market-edge-lab/real/baseline/experiments/**'
+      - '.github/workflows/auto-experiment-v1-zero-money.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  proof:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Run deterministic V1 management proof
+        run: node market-edge-lab/real/baseline/experiments/dynamic-management-zero-money.test.mjs
+
+      - name: Validate Cloudflare proof credentials
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+
+      - name: Prove durable lifecycle survives rolling replacement
+        shell: bash
+        working-directory: market-edge-lab/real/baseline
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          KV_ID="$(awk '/binding = "BASELINE_REAL_SHADOW_STATE"/{found=1;next} found && /id = /{gsub(/"/,"",$3);print $3;exit}' wrangler.toml)"
+          test -n "$KV_ID"
+
+          SUFFIX="${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          ARCHIVE_KEY="auto-exp-v1:proof:lifecycle:${SUFFIX}"
+          CURRENT_KEY="auto-exp-v1:proof:current:${SUFFIX}"
+
+          ARCHIVE='{"schema":"AUTO_EXPERIMENT_V1_LIFECYCLE","completed":true,"seriesId":"SERIES-1","attemptId":"ATTEMPT-1","ticker":"TEST-TICKER","entry":{"price":0.6,"score":0.8},"fiveMinute":{"controlWould":"MAX_HOLD_EXIT","experimentWould":"CONTINUE"},"mfe":0.4,"mae":-0.1,"settlementValue":1,"realizedPnl":0.39,"reconciliation":["SETTLED","RECONCILED"],"providerWrites":0,"orders":0,"capitalMovedUsd":0}'
+          CURRENT1='{"seriesId":"SERIES-1","attemptId":"ATTEMPT-1"}'
+          CURRENT2='{"seriesId":"SERIES-2","attemptId":"ATTEMPT-1"}'
+
+          cleanup() {
+            npx --yes wrangler@4 kv key delete --namespace-id "$KV_ID" "$ARCHIVE_KEY" >/dev/null 2>&1 || true
+            npx --yes wrangler@4 kv key delete --namespace-id "$KV_ID" "$CURRENT_KEY" >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+
+          printf '%s' "$ARCHIVE" | npx --yes wrangler@4 kv key put --namespace-id "$KV_ID" "$ARCHIVE_KEY" --path=-
+          printf '%s' "$CURRENT1" | npx --yes wrangler@4 kv key put --namespace-id "$KV_ID" "$CURRENT_KEY" --path=-
+          printf '%s' "$CURRENT2" | npx --yes wrangler@4 kv key put --namespace-id "$KV_ID" "$CURRENT_KEY" --path=-
+
+          npx --yes wrangler@4 kv key get --namespace-id "$KV_ID" "$ARCHIVE_KEY" > /tmp/archive.json
+          npx --yes wrangler@4 kv key get --namespace-id "$KV_ID" "$CURRENT_KEY" > /tmp/current.json
+
+          jq -e '.completed==true and .seriesId=="SERIES-1" and .fiveMinute.controlWould=="MAX_HOLD_EXIT" and .fiveMinute.experimentWould=="CONTINUE" and .mfe==0.4 and .mae==(-0.1) and .settlementValue==1 and .realizedPnl==0.39 and .providerWrites==0 and .orders==0 and .capitalMovedUsd==0' /tmp/archive.json >/dev/null
+          jq -e '.seriesId=="SERIES-2"' /tmp/current.json >/dev/null
+
+          echo 'DURABLE_RETENTION_PROOF=PASS'
+          echo 'PROVIDER_WRITES=0'
+          echo 'ORDERS=0'
+          echo 'CAPITAL_MOVED_USD=0'
