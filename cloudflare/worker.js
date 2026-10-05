@@ -1,3 +1,4 @@
+import { readConnectorStatus, readAccounts, readPairs, readBestBidAsk, readEstimatedPrice, readBoundHoldings, readBoundOrders } from "./robinhood-crypto-read.js";
 import { calculateNV0, calculateFullSIV0, calculateSICoreV0A, N_VERSION, SI_VERSION } from "./si-n-v0.js";
 const SECURITY_HEADERS = {
   "Content-Security-Policy": "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'none'",
@@ -545,12 +546,26 @@ export default {
       if (url.pathname === "/api/v0a/book") return await bookResponse(env,request);
       if (url.pathname === "/api/v0a/ledger-status") return json(await ledgerStatus(env));
       if (url.pathname === "/api/robinhood/provider-capability") return json(await robinhoodProviderCapability(env,url.searchParams.get("action")));
+      if (url.pathname === "/api/robinhood/crypto/status") return json(await readConnectorStatus(env));
+      if (url.pathname === "/api/robinhood/crypto/accounts") return json(await readAccounts(env));
+      if (url.pathname === "/api/robinhood/crypto/pairs") return json(await readPairs(env,url.searchParams.getAll("symbol")));
+      if (url.pathname === "/api/robinhood/crypto/quote") return json(await readBestBidAsk(env,url.searchParams.getAll("symbol")));
+      if (url.pathname === "/api/robinhood/crypto/estimate") return json(await readEstimatedPrice(env,{symbol:url.searchParams.get("symbol"),side:url.searchParams.get("side"),quantity:url.searchParams.get("quantity")}));
+      if (url.pathname === "/api/robinhood/crypto/holdings") return json(await readBoundHoldings(env,url.searchParams.getAll("asset_code")));
+      if (url.pathname === "/api/robinhood/crypto/orders") return json(await readBoundOrders(env,{
+        symbol:url.searchParams.get("symbol"),
+        side:url.searchParams.get("side"),
+        type:url.searchParams.get("type"),
+        state:url.searchParams.get("state")
+      }));
       if (url.pathname === "/api/v0a/ping") {
         const p=await publicGet("/api/v3/ping");
         return json({status:"PASS",source:"Binance.US public market data",credential:"NONE",executionAuthority:"NONE",upstream:p});
       }
     } catch (e) {
-      return json({status:"ERROR",message:String(e?.message||e),fabricatedValues:false},502);
+      const msg=String(e?.message||e);
+      const status=msg==="ROBINHOOD_READ_SECRETS_MISSING"?503:502;
+      return json({status:"ERROR",code:e?.code||null,message:msg,providerStatus:e?.status||null,accountCount:e?.accountCount??null,fabricatedValues:false,execution:"DISARMED",fireAuthority:"ZERO"},status);
     }
     const assetResponse=await env.ASSETS.fetch(request);
     const headers=new Headers(assetResponse.headers);
