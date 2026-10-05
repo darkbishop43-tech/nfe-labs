@@ -125,8 +125,9 @@ jobs:
           grep -q 'SI Crypto V0-A Instrumentation' /tmp/body && echo "VERIFY V0-A PASS"
           curl --fail --silent --show-error --location "$LIVE_URL/app.js" --output /tmp/app-js
           grep -q 'D1 LIVE RESEARCH FEED' /tmp/app-js && echo "VERIFY main SI D1 feed wiring PASS"
-          grep -q 'N_V0 subcomponents + provenance' /tmp/app-js && echo "VERIFY N_V0 cockpit wiring PASS"
-          grep -q 'FAIL CLOSED — N_V0 EVIDENCE INCOMPLETE' /tmp/app-js && echo "VERIFY N_V0 fail-closed cockpit PASS"
+          grep -q 'AUTHORITATIVE CURRENT MARKET INTELLIGENCE' /tmp/app-js && echo "VERIFY SI_CORE_V0A authoritative cockpit PASS"
+          grep -q 'NFE EVIDENCE RESEARCH — N_V0' /tmp/app-js && echo "VERIFY N_V0 separate research cockpit PASS"
+          grep -q 'It does NOT block or alter SI_CORE_V0A' /tmp/app-js && echo "VERIFY N_V0 non-blocking presentation PASS"
           grep -q 'Founder Quick State' /tmp/body && echo "VERIFY lifecycle quick-state placement PASS"
           curl --fail --silent --show-error --location "$LIVE_URL/data/snapshot.json" --output /tmp/snapshot
           grep -q '"operationalCockpit"' /tmp/snapshot
@@ -160,9 +161,10 @@ jobs:
           curl --fail --silent --show-error --location "$LIVE_URL/api/v0a/features?symbol=BTC-USD&featureInterval=1h&lookbackDays=30" --output /tmp/v0a-features
           grep -q '"T": ' /tmp/v0a-features && grep -q '"V": ' /tmp/v0a-features && grep -q '"F": ' /tmp/v0a-features && echo "VERIFY T/V/F payload PASS"
           curl --fail --silent --show-error --location "$LIVE_URL/api/v0a/book?symbol=BTC-USD" --output /tmp/v0a-book
-          grep -q '"qSpread": null' /tmp/v0a-book && echo "VERIFY Q spread-history blocker PASS"
+          grep -q '"qSpread": null' /tmp/v0a-book && echo "VERIFY standalone book endpoint remains diagnostic; authoritative current Q comes from D1 history PASS"
           grep -q '"fireAuthority": "ZERO"' /tmp/v0a-momentum && grep -q '"fireAuthority": "ZERO"' /tmp/v0a-features && grep -q '"fireAuthority": "ZERO"' /tmp/v0a-book && echo "VERIFY zero FIRE authority PASS"
-          grep -q 'SAME AUTHORITATIVE D1 VALUE AS TOP SI' /tmp/app-js && echo "VERIFY one authoritative current SI state PASS"
+          grep -q 'SAME AUTHORITATIVE D1 VALUE AS TOP SI' /tmp/app-js && echo "VERIFY one authoritative current SI component state PASS"
+          grep -q 'LIVE QUALIFICATION THRESHOLD: NOT YET FOUNDER APPROVED' /tmp/app-js && echo "VERIFY no qualification threshold invention PASS"
           grep -q 'Fresh live execution connectivity' /tmp/app-js && echo "VERIFY research/provider freshness separation PASS"
           if grep -q 'INCOMPLETE — SPREAD HISTORY REQUIRED' /tmp/app-js; then echo "Stale conflicting Q presentation remains"; exit 1; fi
           echo "V0A_MAPPING_SUMMARY"
@@ -222,28 +224,31 @@ jobs:
           NODE
 
 
-      - name: Verify current SI fail-closed specimen
+      - name: Verify authoritative SI_CORE_V0A with non-blocking N_V0
         shell: bash
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.ROBINHOOD_CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: |
           set -euo pipefail
-          npx --yes wrangler@4 d1 execute nfe-os-robinhood-si-v0a-ledger --remote --command="SELECT id,observed_at,robinhood_symbol,research_symbol,m,t,v,q,f,n_v0,si_core_v0a,full_si,full_si_state,n_status,n_version,si_version,robinhood_provider_timestamp FROM v0a_observations ORDER BY observed_at_ms DESC LIMIT 1;" --json > /tmp/current-si.json
+          npx --yes wrangler@4 d1 execute nfe-os-robinhood-si-v0a-ledger --remote --command="SELECT id,observed_at,robinhood_symbol,research_symbol,m,t,v,q,f,n_v0,si_core_v0a,n_status,n_version,robinhood_provider_timestamp FROM v0a_observations ORDER BY observed_at_ms DESC LIMIT 1;" --json > /tmp/current-si.json
           cat /tmp/current-si.json
           node - <<'NODE'
           const fs=require('fs');
           const p=JSON.parse(fs.readFileSync('/tmp/current-si.json','utf8'));
           const row=p?.[0]?.results?.[0]||p?.results?.[0]||null;
           if(!row) throw new Error('Current SI observation missing');
-          for(const k of ['m','t','v','q','f']){
-            const v=Number(row[k]);
+          const vals={M:row.m,T:row.t,V:row.v,Q:row.q,F:row.f};
+          for(const [k,raw] of Object.entries(vals)){
+            const v=Number(raw);
             if(!Number.isFinite(v)||v<0||v>1) throw new Error(k+' invalid');
           }
-          if(row.n_v0!==null||row.n_status!=='INCOMPLETE') throw new Error('N must remain fail-closed');
-          if(row.full_si!==null||!String(row.full_si_state).includes('INCOMPLETE')) throw new Error('FULL SI must remain incomplete while N is missing');
-          if(row.n_version!=='N_V0'||row.si_version!=='SI_V0') throw new Error('Version metadata mismatch');
-          console.log('VERIFY current SI fail-closed specimen PASS',JSON.stringify(row));
+          const expected=100*(.30*Number(row.m)+.20*Number(row.t)+.15*Number(row.v)+.10*Number(row.q)+.15*Number(row.f))/.90;
+          if(!Number.isFinite(Number(row.si_core_v0a))) throw new Error('SI_CORE_V0A not numeric');
+          if(Math.abs(Number(row.si_core_v0a)-expected)>1e-9) throw new Error('SI_CORE_V0A arithmetic mismatch');
+          if(row.n_v0!==null||row.n_status!=='INCOMPLETE') throw new Error('Expected preserved incomplete N_V0 research state');
+          if(row.n_version!=='N_V0') throw new Error('N version metadata mismatch');
+          console.log('VERIFY SI_CORE_V0A numeric while N_V0 incomplete PASS',JSON.stringify({id:row.id,observed_at:row.observed_at,M:row.m,T:row.t,V:row.v,Q:row.q,F:row.f,rawWeighted:.30*Number(row.m)+.20*Number(row.t)+.15*Number(row.v)+.10*Number(row.q)+.15*Number(row.f),SI_CORE_V0A:row.si_core_v0a,N_V0:row.n_v0,n_status:row.n_status,robinhood_provider_timestamp:row.robinhood_provider_timestamp}));
           NODE
 
       - name: Verify N_V0 persistence and versioning
