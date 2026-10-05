@@ -134,10 +134,10 @@ jobs:
           grep -q '"researchLanes"' /tmp/snapshot
           grep -q '"siCryptoV0"' /tmp/snapshot
           grep -q '"siCryptoV0A"' /tmp/snapshot
-          grep -q '"PARTIAL GREEN / GOVERNED HOLD — BINANCE.US SENSOR LIVE' /tmp/snapshot
+          grep -q '"HISTORICAL / DIAGNOSTIC CONFIGURATION — CURRENT VALUES COME FROM D1"' /tmp/snapshot && echo "VERIFY lower V0-A diagnostic labeling PASS"
           grep -q '"credential": "NONE"' /tmp/snapshot
           grep -q '"executionAuthority": "NONE"' /tmp/snapshot
-          grep -q '"Q": null' /tmp/snapshot
+          grep -q '"NO CURRENT CANDIDATE-SPECIFIC STRUCTURED NFE/UMEO BUNDLE FOUND"' /tmp/snapshot && echo "VERIFY N evidence inventory fail-closed truth PASS"
           grep -q '"DISARMED / FIRE BLOCKED"' /tmp/snapshot
           grep -q '"qualificationThreshold": null' /tmp/snapshot
           grep -q '"MCP ACTIVE MARKET SURFACE NOT CURRENTLY EXPOSED"' /tmp/snapshot
@@ -162,6 +162,9 @@ jobs:
           curl --fail --silent --show-error --location "$LIVE_URL/api/v0a/book?symbol=BTC-USD" --output /tmp/v0a-book
           grep -q '"qSpread": null' /tmp/v0a-book && echo "VERIFY Q spread-history blocker PASS"
           grep -q '"fireAuthority": "ZERO"' /tmp/v0a-momentum && grep -q '"fireAuthority": "ZERO"' /tmp/v0a-features && grep -q '"fireAuthority": "ZERO"' /tmp/v0a-book && echo "VERIFY zero FIRE authority PASS"
+          grep -q 'SAME AUTHORITATIVE D1 VALUE AS TOP SI' /tmp/app-js && echo "VERIFY one authoritative current SI state PASS"
+          grep -q 'Fresh live execution connectivity' /tmp/app-js && echo "VERIFY research/provider freshness separation PASS"
+          if grep -q 'INCOMPLETE — SPREAD HISTORY REQUIRED' /tmp/app-js; then echo "Stale conflicting Q presentation remains"; exit 1; fi
           echo "V0A_MAPPING_SUMMARY"
           node -e "const fs=require('fs');const m=JSON.parse(fs.readFileSync('/tmp/v0a-mapping'));const mo=JSON.parse(fs.readFileSync('/tmp/v0a-momentum'));const f=JSON.parse(fs.readFileSync('/tmp/v0a-features'));const b=JSON.parse(fs.readFileSync('/tmp/v0a-book'));console.log(JSON.stringify({robinhoodPairs:m.robinhoodPairs,mapped:m.mapped,unmapped:m.unmapped,mappedAssets:m.rows.filter(x=>x.mappingStatus==='MAPPED').map(x=>x.robinhoodSymbol),unmappedAssets:m.rows.filter(x=>x.mappingStatus!=='MAPPED').map(x=>x.robinhoodSymbol)}));console.log(JSON.stringify({mapping:mo.mapping,M:mo.M,T:f.T,V:f.V,F:f.F,qLiquidity:f.qLiquidity,Q:b.Q,researchBook:b.researchBook,depthSummary:b.depthSummary,featureConfig:f.configuration,momentumConfig:mo.configuration}))"
 
@@ -218,6 +221,30 @@ jobs:
           console.log('VERIFY +1m outcome PASS',JSON.stringify(row));
           NODE
 
+
+      - name: Verify current SI fail-closed specimen
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.ROBINHOOD_CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          npx --yes wrangler@4 d1 execute nfe-os-robinhood-si-v0a-ledger --remote --command="SELECT id,observed_at,robinhood_symbol,research_symbol,m,t,v,q,f,n_v0,si_core_v0a,full_si,full_si_state,n_status,n_version,si_version,robinhood_provider_timestamp FROM v0a_observations ORDER BY observed_at_ms DESC LIMIT 1;" --json > /tmp/current-si.json
+          cat /tmp/current-si.json
+          node - <<'NODE'
+          const fs=require('fs');
+          const p=JSON.parse(fs.readFileSync('/tmp/current-si.json','utf8'));
+          const row=p?.[0]?.results?.[0]||p?.results?.[0]||null;
+          if(!row) throw new Error('Current SI observation missing');
+          for(const k of ['m','t','v','q','f']){
+            const v=Number(row[k]);
+            if(!Number.isFinite(v)||v<0||v>1) throw new Error(k+' invalid');
+          }
+          if(row.n_v0!==null||row.n_status!=='INCOMPLETE') throw new Error('N must remain fail-closed');
+          if(row.full_si!==null||!String(row.full_si_state).includes('INCOMPLETE')) throw new Error('FULL SI must remain incomplete while N is missing');
+          if(row.n_version!=='N_V0'||row.si_version!=='SI_V0') throw new Error('Version metadata mismatch');
+          console.log('VERIFY current SI fail-closed specimen PASS',JSON.stringify(row));
+          NODE
 
       - name: Verify N_V0 persistence and versioning
         shell: bash
