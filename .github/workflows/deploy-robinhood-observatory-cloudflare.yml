@@ -232,11 +232,16 @@ jobs:
             sleep 15
           done
           cat /tmp/n-v0-row.json
-          grep -q '"n_version": "N_V0"' /tmp/n-v0-row.json
-          grep -q '"si_version": "SI_V0"' /tmp/n-v0-row.json
-          grep -q '"n_status": "INCOMPLETE"' /tmp/n-v0-row.json
-          grep -q '"n_v0": null' /tmp/n-v0-row.json
-          grep -q '"full_si": null' /tmp/n-v0-row.json
-          grep -q 'NFE/UMEO evidence bundle missing' /tmp/n-v0-row.json
-          grep -q '"marketDataDoubleCountPrevented":true' /tmp/n-v0-row.json
-          echo "VERIFY N_V0 persisted version + fail-closed state PASS"
+          node - <<'NODE'
+          const fs=require('fs');
+          const p=JSON.parse(fs.readFileSync('/tmp/n-v0-row.json','utf8'));
+          const row=p?.[0]?.results?.[0]||p?.results?.[0]||null;
+          if(!row) throw new Error('N_V0 row missing');
+          if(row.n_version!=='N_V0'||row.si_version!=='SI_V0') throw new Error('N/SI version mismatch');
+          if(row.n_status!=='INCOMPLETE'||row.n_v0!==null||row.full_si!==null) throw new Error('N_V0 fail-closed state mismatch');
+          const missing=JSON.parse(row.n_missing_components||'[]');
+          if(!missing.some(x=>String(x.reason).includes('evidence bundle missing'))) throw new Error('N_V0 missing-evidence reason absent');
+          const prov=JSON.parse(row.n_provenance_json||'{}');
+          if(prov.marketDataDoubleCountPrevented!==true) throw new Error('N_V0 double-count guard provenance absent');
+          console.log('VERIFY N_V0 persisted version + fail-closed state PASS',JSON.stringify({id:row.id,n_version:row.n_version,si_version:row.si_version,n_status:row.n_status,missingCount:missing.length,provenance:prov}));
+          NODE
