@@ -134,7 +134,7 @@ export function calculateNV0(bundle,nowMs=Date.now()){
 
 export function calculateFullSIV0({M,T,V,Q,F,N}={}){
   const vals={M,T,V,Q,F,N};
-  const missing=Object.entries(vals).filter(([,v])=>!Number.isFinite(Number(v))).map(([k])=>k);
+  const missing=Object.entries(vals).filter(([,v])=>v===null||v===undefined||v===""||!Number.isFinite(Number(v))).map(([k])=>k);
   if(missing.length) return {version:SI_VERSION,status:"INCOMPLETE",value:null,missing,formula:"100*(0.30M+0.20T+0.15V+0.10Q+0.15F+0.10N)"};
   const value=100*(0.30*Number(M)+0.20*Number(T)+0.15*Number(V)+0.10*Number(Q)+0.15*Number(F)+0.10*Number(N));
   return {version:SI_VERSION,status:"VALID",value,missing:[],formula:"100*(0.30M+0.20T+0.15V+0.10Q+0.15F+0.10N)"};
