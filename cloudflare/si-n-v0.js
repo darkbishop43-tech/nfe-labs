@@ -135,7 +135,16 @@ export function calculateNV0(bundle,nowMs=Date.now()){
 export function calculateFullSIV0({M,T,V,Q,F,N}={}){
   const vals={M,T,V,Q,F,N};
   const missing=Object.entries(vals).filter(([,v])=>v===null||v===undefined||v===""||!Number.isFinite(Number(v))).map(([k])=>k);
-  if(missing.length) return {version:SI_VERSION,status:"INCOMPLETE",value:null,missing,formula:"100*(0.30M+0.20T+0.15V+0.10Q+0.15F+0.10N)"};
+  if(missing.length) return {version:SI_VERSION,status:"INCOMPLETE",value:null,missing,invalid:[],formula:"100*(0.30M+0.20T+0.15V+0.10Q+0.15F+0.10N)"};
+  const invalid=Object.entries(vals).filter(([,v])=>Number(v)<0||Number(v)>1).map(([k,v])=>({component:k,value:Number(v),reason:"OUTSIDE_0_1"}));
+  if(invalid.length) return {version:SI_VERSION,status:"INCOMPLETE",value:null,missing:[],invalid,formula:"100*(0.30M+0.20T+0.15V+0.10Q+0.15F+0.10N)"};
   const value=100*(0.30*Number(M)+0.20*Number(T)+0.15*Number(V)+0.10*Number(Q)+0.15*Number(F)+0.10*Number(N));
-  return {version:SI_VERSION,status:"VALID",value,missing:[],formula:"100*(0.30M+0.20T+0.15V+0.10Q+0.15F+0.10N)"};
+  return {
+    version:SI_VERSION,status:"VALID",value,missing:[],invalid:[],
+    contributions:{
+      M:0.30*Number(M),T:0.20*Number(T),V:0.15*Number(V),Q:0.10*Number(Q),F:0.15*Number(F),N:0.10*Number(N)
+    },
+    weightedSum:value/100,
+    formula:"100*(0.30M+0.20T+0.15V+0.10Q+0.15F+0.10N)"
+  };
 }
