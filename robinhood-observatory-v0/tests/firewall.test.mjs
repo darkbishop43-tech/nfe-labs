@@ -78,3 +78,68 @@ if(data.siCryptoV0?.nV0?.version!=='N_V0')throw new Error('N_V0 cockpit metadata
 console.log('PASS N_V0 deterministic six-component normalization');
 console.log('PASS N_V0 fail-closed missing-data rule');
 console.log('PASS FULL SI_V0 versioned deterministic calculation');
+
+
+const componentNames=['N_E','N_Fr','N_Tr','N_Tx','N_A','N_C'];
+for(const name of componentNames){
+  const value=nv0.components[name].value;
+  if(value!==null&&(!Number.isFinite(value)||value<0||value>1))throw new Error(name+' outside [0,1]');
+}
+console.log('PASS every N_V0 subcomponent bounded [0,1]');
+
+const missingCases=[
+  {name:'E',bundle:null},
+  {name:'Fr',bundle:{...bundle,evidence:bundle.evidence.map((e,i)=>i?e:{...e,observedAt:null})}},
+  {name:'Tr',bundle:{...bundle,evidence:bundle.evidence.map((e,i)=>i?e:{...e,sourceClass:'NOT_A_CLASS'})}},
+  {name:'Tx',bundle:{...bundle,crossChecks:[]}},
+  {name:'A',bundle:{...bundle,anomalyChecks:[]}},
+  {name:'C',bundle:{...bundle,collisionTests:[]}}
+];
+for(const x of missingCases){
+  const r=calculateNV0(x.bundle,fixedNow);
+  if(r.value!==null||r.status!=='INCOMPLETE')throw new Error('Missing '+x.name+' did not fail closed');
+  const vals=Object.values(r.components).map(v=>v.value);
+  if(vals.some(v=>v===0 && x.name!=='E')){/* valid observed zero is permitted; missing itself must remain null */}
+}
+console.log('PASS missing E/Fr/Tr/Tx/A/C never imputed');
+
+const invalidMain=[
+  {M:-0.01,T:.5,V:.5,Q:.5,F:.5,N:.5},
+  {M:.5,T:1.01,V:.5,Q:.5,F:.5,N:.5},
+  {M:.5,T:.5,V:-1,Q:.5,F:.5,N:.5},
+  {M:.5,T:.5,V:.5,Q:2,F:.5,N:.5},
+  {M:.5,T:.5,V:.5,Q:.5,F:-.1,N:.5},
+  {M:.5,T:.5,V:.5,Q:.5,F:.5,N:1.1}
+];
+for(const x of invalidMain){
+  const r=calculateFullSIV0(x);
+  if(r.value!==null||r.status!=='INCOMPLETE'||!r.invalid.length)throw new Error('Out-of-range SI component accepted');
+}
+console.log('PASS FULL SI_V0 refuses any M/T/V/Q/F/N outside [0,1]');
+
+const exact=calculateFullSIV0({M:.2,T:.3,V:.4,Q:.5,F:.6,N:.7});
+const expectedWeighted=.30*.2+.20*.3+.15*.4+.10*.5+.15*.6+.10*.7;
+if(exact.status!=='VALID'||Math.abs(exact.weightedSum-expectedWeighted)>1e-12||Math.abs(exact.value-100*expectedWeighted)>1e-12)throw new Error('Weighted SI arithmetic mismatch');
+if(Math.abs(exact.contributions.M-.30*.2)>1e-12||Math.abs(exact.contributions.N-.10*.7)>1e-12)throw new Error('SI contribution arithmetic mismatch');
+console.log('PASS FULL SI_V0 exact six-component weighted arithmetic');
+
+if(si.qualificationThreshold!==null)throw new Error('Qualification threshold invented');
+console.log('PASS qualification threshold remains unset');
+
+if(si.shadow?.authority!=='ZERO REAL-MONEY AUTHORITY')throw new Error('Shadow lane gained execution authority');
+if(si.live?.state!=='DISARMED / FIRE BLOCKED')throw new Error('Execution/FIRE state expanded');
+console.log('PASS shadow authority zero and live execution DISARMED / FIRE BLOCKED');
+
+if(!/Historical \/ Diagnostic/.test(text))throw new Error('Lower V0-A section not labeled historical/diagnostic');
+if(!/SAME AUTHORITATIVE D1 VALUE AS TOP SI/.test(text))throw new Error('Lower V0-A cards are not tied to top D1 observation');
+if(/INCOMPLETE — SPREAD HISTORY REQUIRED/.test(text))throw new Error('Stale conflicting Q presentation remains in live UI code');
+console.log('PASS cockpit has one authoritative current M/T/V/Q/F/N state');
+
+if(!/Research observation/.test(text)||!/Robinhood provider snapshot/.test(text)||!/Fresh live execution connectivity/.test(text))throw new Error('Research vs Robinhood snapshot freshness is not visibly distinguished');
+console.log('PASS research freshness visibly separated from Robinhood snapshot freshness');
+
+if(data.siCryptoV0A?.nEvidenceInventory?.result!=='NO CURRENT CANDIDATE-SPECIFIC STRUCTURED NFE/UMEO BUNDLE FOUND')throw new Error('N evidence inventory truth missing');
+for(const k of ['N_E','N_Fr','N_Tr','N_Tx','N_A','N_C']){
+  if(!data.siCryptoV0A.nEvidenceInventory.exactMissing[k])throw new Error('Missing evidence inventory for '+k);
+}
+console.log('PASS N evidence inventory records exact fail-closed missing inputs');
