@@ -166,6 +166,14 @@ jobs:
           grep -q 'SAME AUTHORITATIVE D1 VALUE AS TOP SI' /tmp/app-js && echo "VERIFY one authoritative current SI component state PASS"
           grep -q 'LIVE QUALIFICATION THRESHOLD: NOT YET FOUNDER APPROVED' /tmp/app-js && echo "VERIFY no qualification threshold invention PASS"
           grep -q 'Fresh live execution connectivity' /tmp/app-js && echo "VERIFY research/provider freshness separation PASS"
+          grep -q 'Start provider scan' /tmp/app-js && grep -q 'Run fresh order preview' /tmp/app-js && echo "VERIFY governed button behavior wiring PASS"
+          grep -q 'STALE / SNAPSHOT' /tmp/app-js && grep -q 'FRESH LOCK REQUIRED' /tmp/app-js && echo "VERIFY crypto radar stale-provider semantics PASS"
+          curl --fail --silent --show-error --location "$LIVE_URL/api/robinhood/provider-capability?action=fire_readiness" --output /tmp/rh-capability
+          grep -q '"status": "BLOCKED_NO_CLOUD_ROBINHOOD_CONNECTOR"' /tmp/rh-capability && echo "VERIFY Robinhood public cloud connector blocker PASS"
+          grep -q '"publicWorkerLiveRead": false' /tmp/rh-capability
+          grep -q '"publicWorkerPreview": false' /tmp/rh-capability
+          grep -q '"robinhoodExecution": "DISARMED"' /tmp/rh-capability
+          grep -q '"fireAuthority": "ZERO"' /tmp/rh-capability
           if grep -q 'INCOMPLETE — SPREAD HISTORY REQUIRED' /tmp/app-js; then echo "Stale conflicting Q presentation remains"; exit 1; fi
           echo "V0A_MAPPING_SUMMARY"
           node -e "const fs=require('fs');const m=JSON.parse(fs.readFileSync('/tmp/v0a-mapping'));const mo=JSON.parse(fs.readFileSync('/tmp/v0a-momentum'));const f=JSON.parse(fs.readFileSync('/tmp/v0a-features'));const b=JSON.parse(fs.readFileSync('/tmp/v0a-book'));console.log(JSON.stringify({robinhoodPairs:m.robinhoodPairs,mapped:m.mapped,unmapped:m.unmapped,mappedAssets:m.rows.filter(x=>x.mappingStatus==='MAPPED').map(x=>x.robinhoodSymbol),unmappedAssets:m.rows.filter(x=>x.mappingStatus!=='MAPPED').map(x=>x.robinhoodSymbol)}));console.log(JSON.stringify({mapping:mo.mapping,M:mo.M,T:f.T,V:f.V,F:f.F,qLiquidity:f.qLiquidity,Q:b.Q,researchBook:b.researchBook,depthSummary:b.depthSummary,featureConfig:f.configuration,momentumConfig:mo.configuration}))"
