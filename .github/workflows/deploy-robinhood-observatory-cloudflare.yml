@@ -123,6 +123,8 @@ jobs:
           grep -q 'Crypto Radar Universe' /tmp/body && echo "VERIFY universe PASS"
           grep -q 'NFE-OS SI Crypto V0' /tmp/body && echo "VERIFY SI Crypto V0 PASS"
           grep -q 'SI Crypto V0-A Instrumentation' /tmp/body && echo "VERIFY V0-A PASS"
+          curl --fail --silent --show-error --location "$LIVE_URL/app.js" --output /tmp/app-js
+          grep -q 'D1 LIVE RESEARCH FEED' /tmp/app-js && echo "VERIFY main SI D1 feed wiring PASS"
           curl --fail --silent --show-error --location "$LIVE_URL/data/snapshot.json" --output /tmp/snapshot
           grep -q '"operationalCockpit"' /tmp/snapshot
           grep -q '"cryptoUniverse"' /tmp/snapshot
