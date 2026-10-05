@@ -27,33 +27,44 @@ function clearTestConfig(){sessionStorage.removeItem('nfeSiCryptoTestConfig')}
 
 function renderSiCrypto(){
  const s=D.siCryptoV0, c=s.components, cfg=readTestConfig(), live=D.liveLedger?.latestObservation||null;
- const liveMap=live?{M:live.m,T:live.t,V:live.v,Q:live.q,F:live.f,N:live.n_v0}:{};
- const liveCore=live?.si_core_v0a??null, fullSI=live?.full_si??null;
+ const liveMap=live?{M:live.m,T:live.t,V:live.v,Q:live.q,F:live.f}:{};
+ const liveCore=live?.si_core_v0a??null;
+ const nValue=live?.n_v0??null;
  const nParts=live?{N_E:live.n_e,N_Fr:live.n_fr,N_Tr:live.n_tr,N_Tx:live.n_tx,N_A:live.n_a,N_C:live.n_c}:{};
+ const nMissing=live?.n_missing_components?(()=>{try{return JSON.parse(live.n_missing_components)}catch{return []}})():[];
  el('siFormula').innerHTML=`
-   <div class="formula">${s.formula}</div>
-   <div class="chips"><span class="chip">${s.hypothesis}</span><span class="chip">Qualification threshold: NOT SET</span><span class="chip">${live?'D1 LIVE RESEARCH FEED':'D1 FEED UNAVAILABLE'}</span></div>
-   <div class="kv"><span>SI_CORE_V0A</span><b>${liveCore==null?'INCOMPLETE':num(liveCore,4)}</b><span>FULL SI_V0</span><b>${fullSI==null?(live?.full_si_state||'INCOMPLETE'):num(fullSI,4)}</b><span>N version</span><b>${live?.n_version||'N_V0'}</b><span>SI version</span><b>${live?.si_version||'SI_V0'}</b><span>Research observation</span><b>${live?.observed_at||'N/A'}</b><span>Robinhood provider snapshot</span><b>${D.operationalCockpit?.lock?.providerTimestamp||D.meta?.capturedAt||'N/A'}</b></div>
-   <p class="sub">${s.scoreValidityRule}</p>
-   <p class="sub">Research freshness and Robinhood provider freshness are separate. Binance.US public → D1 supplies research state; only a fresh Robinhood MCP reread may establish a future LOCK.</p>`;
+   <div class="formula">${s.coreFormula||D.siCryptoV0A?.coreFormula}</div>
+   <div class="chips"><span class="chip">AUTHORITATIVE CURRENT MARKET INTELLIGENCE</span><span class="chip">LIVE QUALIFICATION THRESHOLD: NOT YET FOUNDER APPROVED</span><span class="chip">${live?'D1 LIVE RESEARCH FEED':'D1 FEED UNAVAILABLE'}</span></div>
+   <div class="kv"><span>MARKET INTELLIGENCE SCORE</span><b>${liveCore==null?'INCOMPLETE':('SI_CORE_V0A '+num(liveCore,4))}</b><span>Research observation</span><b>${live?.observed_at||'N/A'}</b><span>Research source</span><b>Binance.US public → D1</b><span>Robinhood provider snapshot</span><b>${D.operationalCockpit?.lock?.providerTimestamp||D.meta?.capturedAt||'N/A'}</b></div>
+   <p class="sub">SI_CORE_V0A is a normalized composite research score, not probability of profit or directional success. Numeric intelligence does not authorize FIRE.</p>
+   <p class="sub">Research freshness and Robinhood provider freshness are separate. Only a fresh Robinhood MCP reread may establish a future LOCK.</p>`;
 
- el('siComponents').innerHTML=['M','T','V','Q','F','N'].map(k=>{const x=c[k],lv=liveMap[k],has=Number.isFinite(Number(lv))&&lv!==null;const nMissing=live?.n_missing_components?(()=>{try{return JSON.parse(live.n_missing_components)}catch{return []}})():[];return `
+ el('siComponents').innerHTML=['M','T','V','Q','F'].map(k=>{const x=c[k],lv=liveMap[k],has=Number.isFinite(Number(lv))&&lv!==null;return `
    <article class="panel si-card">
      <div class="si-key">${k}</div><h3>${x.name}</h3>
      <div class="si-value">${has?num(lv,4):'INCOMPLETE'}</div>
-     <div class="state ${has?'current':'error'}">${has?'VALID / POPULATED / CALCULATED':k==='N'?'FAIL CLOSED — N_V0 EVIDENCE INCOMPLETE':'MISSING / NOT YET VALID'}</div>
-     <div class="raw-box"><b>${k==='N'?'N_V0 subcomponents + provenance':'Source provenance'}</b><pre>${escapeHtml(JSON.stringify(k==='N'?{version:live?.n_version||'N_V0',N_V0:live?.n_v0??null,...nParts,missing:nMissing,provenance:live?.n_provenance_json?(()=>{try{return JSON.parse(live.n_provenance_json)}catch{return live.n_provenance_json}})():null,reasons:{N_E:live?.n_e_reason||null,N_Fr:live?.n_fr_reason||null,N_Tr:live?.n_tr_reason||null,N_Tx:live?.n_tx_reason||null,N_A:live?.n_a_reason||null,N_C:live?.n_c_reason||null}}:{researchSource:'Binance.US public',ledger:'nfe-os-robinhood-si-v0a-ledger',robinhoodLockAuthority:'MCP only',observedAt:live?.observed_at||null},null,2))}</pre></div>
+     <div class="state ${has?'current':'error'}">${has?'VALID / POPULATED / CALCULATED':'MISSING / NOT YET VALID'}</div>
+     <div class="raw-box"><b>Source provenance</b><pre>${escapeHtml(JSON.stringify({researchSource:'Binance.US public',ledger:'nfe-os-robinhood-si-v0a-ledger',robinhoodLockAuthority:'MCP only',observedAt:live?.observed_at||null},null,2))}</pre></div>
    </article>`}).join('');
+
+ el('nResearch').innerHTML=`
+   <article class="panel si-card">
+     <div class="si-key">N</div><h3>NFE EVIDENCE RESEARCH — N_V0</h3>
+     <div class="si-value">${nValue==null?'INCOMPLETE':num(nValue,4)}</div>
+     <div class="state ${nValue==null?'error':'current'}">${nValue==null?'RESEARCH / DIAGNOSTIC — UNKNOWN / INCOMPLETE':'RESEARCH / DIAGNOSTIC — CALCULATED'}</div>
+     <p class="sub">N_V0 is preserved as an independent NFE/UMEO evidence instrument. It does NOT block or alter SI_CORE_V0A.</p>
+     <div class="raw-box"><b>N_V0 subcomponents + provenance</b><pre>${escapeHtml(JSON.stringify({version:live?.n_version||'N_V0',N_V0:nValue,...nParts,missing:nMissing,provenance:live?.n_provenance_json?(()=>{try{return JSON.parse(live.n_provenance_json)}catch{return live.n_provenance_json}})():null,reasons:{N_E:live?.n_e_reason||null,N_Fr:live?.n_fr_reason||null,N_Tr:live?.n_tr_reason||null,N_Tx:live?.n_tx_reason||null,N_A:live?.n_a_reason||null,N_C:live?.n_c_reason||null}},null,2))}</pre></div>
+   </article>`;
 
  el('shadowLane').innerHTML=`
    <div class="hero-symbol">${s.shadow.state}</div>
-   <div class="kv"><span>Authority</span><b>${s.shadow.authority}</b><span>Recorded evaluations</span><b>${s.shadow.records.length}</b><span>Would-fire</span><b>BLOCKED — NO VALID SI SCORE</b><span>Outcome horizons</span><b>${s.shadow.horizons.join(' · ')}</b><span>Excursion metrics</span><b>${s.shadow.excursionMetrics.join(' · ')}</b></div>
-   <p class="sub">${s.shadow.automationGap}</p>`;
+   <div class="kv"><span>Authority</span><b>${s.shadow.authority}</b><span>Recorded evaluations</span><b>${s.shadow.records.length}</b><span>Current market score</span><b>${liveCore==null?'INCOMPLETE':num(liveCore,4)}</b><span>Would-fire</span><b>BLOCKED — NO FOUNDER-APPROVED SI QUALIFICATION THRESHOLD</b><span>Outcome horizons</span><b>${s.shadow.horizons.join(' · ')}</b><span>Excursion metrics</span><b>${s.shadow.excursionMetrics.join(' · ')}</b></div>
+   <p class="sub">Shadow may observe, score, record, and reconcile outcomes. It has zero real-money authority.</p>`;
 
  el('liveLane').innerHTML=`
    <div class="hero-symbol">${s.live.state}</div>
    <div class="kv"><span>Authority</span><b>${s.live.authority}</b><span>Execution adapter</span><b>${s.live.executionCapability}</b><span>Positions</span><b>${s.live.providerReconciliation.positions}</b><span>Open orders</span><b>${s.live.providerReconciliation.openOrders}</b><span>Crypto buying power</span><b>${money(s.live.providerReconciliation.cryptoBuyingPower)}</b><span>Last provider requalification</span><b>${fmtTime(s.live.providerReconciliation.lastChecked)}</b></div>
-   <p class="sub">FIRE requirements: ${s.live.fireRequirements.join(' → ')}</p>`;
+   <p class="sub">FIRE remains blocked. A numeric SI_CORE_V0A is measurement only; fresh Robinhood LOCK, an approved qualification rule, Founder authority, and all existing safety gates are still required.</p>`;
 
  const frozen=cfg?.frozen===true;
  el('testConfig').innerHTML=`
@@ -83,6 +94,7 @@ function renderSiCrypto(){
  };
  el('clearConfig').onclick=()=>{clearTestConfig();renderSiCrypto();showConfigStatus('Frozen local test configuration cleared. Execution remains DISARMED.')};
 }
+
 function showConfigStatus(msg){el('configStatus').textContent=msg||''}
 function escapeHtml(s){return String(s).replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]))}
 
@@ -96,12 +108,12 @@ function renderV0A(){
    <div class="formula">${v.coreFormula}</div>
    <div class="chips"><span class="chip">NOT A SECOND SI BRAIN</span><span class="chip">CURRENT VALUES COME FROM THE SAME D1 OBSERVATION AS THE TOP SI CARDS</span></div>
    <p class="sub">Static V0-A configuration/specimen fields below are retained for provenance only. They do not override the current D1 observation.</p>
-   <div class="kv"><span>Current D1 observation</span><b>${live?.observed_at||'UNAVAILABLE'}</b><span>Current Q</span><b>${current.Q==null?'INCOMPLETE':num(current.Q,4)}</b><span>Current N_V0</span><b>${current.N==null?'INCOMPLETE':num(current.N,4)}</b><span>Current FULL SI_V0</span><b>${live?.full_si==null?(live?.full_si_state||'INCOMPLETE'):num(live.full_si,4)}</b></div>`;
+   <div class="kv"><span>Current D1 observation</span><b>${live?.observed_at||'UNAVAILABLE'}</b><span>Current Q</span><b>${current.Q==null?'INCOMPLETE':num(current.Q,4)}</b><span>Current N_V0</span><b>${current.N==null?'INCOMPLETE':num(current.N,4)}</b><span>Current SI_CORE_V0A</span><b>${live?.si_core_v0a==null?'INCOMPLETE':num(live.si_core_v0a,4)}</b></div>`;
  el('v0aComponents').innerHTML=['M','T','V','F','Q','N'].map(k=>{const value=current[k],valid=value!==null&&Number.isFinite(Number(value));return `<article class="panel si-card"><div class="si-key">${k}</div><h3>${k}</h3><div class="si-value">${valid?num(value,4):'INCOMPLETE'}</div><div class="state ${valid?'current':'error'}">${valid?'SAME AUTHORITATIVE D1 VALUE AS TOP SI':'FAIL CLOSED / CURRENT D1 INPUT MISSING'}</div><div class="sub">Observation: ${live?.observed_at||'N/A'}${k==='N'&&nMissing.length?' · Missing: '+nMissing.map(x=>x.component).join(', '):''}</div></article>`}).join('');
  const a=v.robinhoodOfficialApi;
  el('v0aOfficial').innerHTML=`<div class="kv"><span>Historical OHLCV</span><b>${a.historicalOHLCV?'YES':'NO'}</b><span>Volume</span><b>${a.volume?'YES':'NO'}</b><span>Depth</span><b>${a.depth?'YES':'NO'}</b><span>Bid/ask size</span><b>${a.bidAskSize?'YES':'NO'}</b><span>Robinhood provider snapshot</span><b>${D.operationalCockpit?.lock?.providerTimestamp||D.meta?.capturedAt||'N/A'}</b><span>Fresh live execution connectivity</span><b>NOT CLAIMED — SNAPSHOT-BACKED</b></div><p class="sub">This panel is diagnostic. Fresh Robinhood LOCK is a separate future mission.</p>`;
  const counts=D.liveLedger?.counts||{};
- el('v0aLedger').innerHTML=`<div class="kv"><span>Observations</span><b>${counts.observations??'N/A'}</b><span>Spread samples</span><b>${counts.spreadSamples??'N/A'}</b><span>Outcomes reconciled</span><b>${counts.reconciled??'N/A'}</b><span>Current research symbol</span><b>${live?.research_symbol||'N/A'}</b><span>SI_CORE_V0A</span><b>${live?.si_core_v0a==null?'INCOMPLETE':num(live.si_core_v0a,4)}</b><span>FULL SI_V0</span><b>${live?.full_si==null?(live?.full_si_state||'INCOMPLETE'):num(live.full_si,4)}</b></div><p class="sub">Current-state source: dedicated D1 ledger. Historical V0-A snapshot text is diagnostic only.</p>`;
+ el('v0aLedger').innerHTML=`<div class="kv"><span>Observations</span><b>${counts.observations??'N/A'}</b><span>Spread samples</span><b>${counts.spreadSamples??'N/A'}</b><span>Outcomes reconciled</span><b>${counts.reconciled??'N/A'}</b><span>Current research symbol</span><b>${live?.research_symbol||'N/A'}</b><span>SI_CORE_V0A</span><b>${live?.si_core_v0a==null?'INCOMPLETE':num(live.si_core_v0a,4)}</b><span>N_V0 research</span><b>${live?.n_v0==null?'INCOMPLETE / NON-BLOCKING':num(live.n_v0,4)}</b></div><p class="sub">Current-state source: dedicated D1 ledger. Historical V0-A snapshot text is diagnostic only.</p>`;
  el('v0aCandidates').innerHTML=`<div class="evidence-row"><span>N_V0 evidence ingestion</span><span class="stale">FAIL-CLOSED</span><span>Existing approved surfaces checked; no current candidate-specific structured NFE/UMEO bundle supplies all E/Fr/Tr/Tx/A/C inputs.</span></div><p class="sub">No new third-party NFE score provider was connected. No missing N evidence was synthesized.</p>`;
 }
 
@@ -113,7 +125,7 @@ function renderAccount(){
 
 function renderOperational(){
  const o=D.operationalCockpit,r=o.radar,l=o.lock,p=o.position,m=o.manage,live=D.liveLedger?.latestObservation||null;
- el('quickState').innerHTML=`<div class="kv"><span>Current lifecycle</span><b>${o.lifecycle[o.currentLifecycleIndex]||'FLAT'}</b><span>Current candidate</span><b>${r.leader||l.symbol||'NONE'}</b><span>SI status</span><b>${live?.full_si==null?(live?.full_si_state||'INCOMPLETE'):('FULL SI_V0 '+num(live.full_si,4))}</b><span>Robinhood LOCK</span><b>${l.state} · ${l.symbol}</b><span>Execution authority</span><b>${o.execution.state}</b><span>Position state</span><b>${p.state}</b></div>`;
+ el('quickState').innerHTML=`<div class="kv"><span>Current lifecycle</span><b>${o.lifecycle[o.currentLifecycleIndex]||'FLAT'}</b><span>Current candidate</span><b>${r.leader||l.symbol||'NONE'}</b><span>MARKET INTELLIGENCE SCORE</span><b>${live?.si_core_v0a==null?'INCOMPLETE':('SI_CORE_V0A '+num(live.si_core_v0a,4))}</b><span>NFE EVIDENCE RESEARCH</span><b>${live?.n_v0==null?'N_V0 INCOMPLETE / NON-BLOCKING':('N_V0 '+num(live.n_v0,4))}</b><span>Robinhood LOCK</span><b>${l.state} · ${l.symbol}</b><span>Execution authority</span><b>${o.execution.state}</b><span>Position state</span><b>${p.state}</b></div>`;
  el('executionStrip').innerHTML=`
    <div><span>EXECUTION</span><strong class="stale">${o.execution.state}</strong><small>${o.execution.reason}</small></div>
    <div><span>RADAR</span><strong class="stale">${r.state}</strong><small>${r.eligibleCount} eligible of ${r.universeSize} provider pairs</small></div>
