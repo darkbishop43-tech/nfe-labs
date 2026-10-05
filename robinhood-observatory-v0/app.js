@@ -5,9 +5,11 @@ const el=id=>document.getElementById(id);
 const fmtTime=t=>t?new Date(t).toLocaleString():'N/A — NO PROVIDER TIMESTAMP';
 let D, selected='SPY', inspectedCrypto=null, radarViewPaused=false;
 
-fetch('./data/snapshot.json',{cache:'no-store'})
-.then(r=>{if(!r.ok)throw Error(`snapshot ${r.status}`);return r.json()})
-.then(d=>{D=d;inspectedCrypto=D.operationalCockpit?.lock?.symbol||D.cryptoUniverse?.rows?.[0]?.symbol||null;render()})
+Promise.all([
+  fetch('./data/snapshot.json',{cache:'no-store'}).then(r=>{if(!r.ok)throw Error(`snapshot ${r.status}`);return r.json()}),
+  fetch('/api/v0a/ledger-status',{cache:'no-store'}).then(r=>r.ok?r.json():null).catch(()=>null)
+])
+.then(([d,ledger])=>{D=d;D.liveLedger=ledger;inspectedCrypto=D.operationalCockpit?.lock?.symbol||D.cryptoUniverse?.rows?.[0]?.symbol||null;render()})
 .catch(e=>{document.body.innerHTML=`<main><div class="panel"><h2 class="error">🔴 SNAPSHOT LOAD ERROR</h2><p>No values were fabricated.</p><code>${String(e.message)}</code></div></main>`});
 
 function render(){
@@ -24,20 +26,22 @@ function writeTestConfig(v){sessionStorage.setItem('nfeSiCryptoTestConfig',JSON.
 function clearTestConfig(){sessionStorage.removeItem('nfeSiCryptoTestConfig')}
 
 function renderSiCrypto(){
- const s=D.siCryptoV0, c=s.components, cfg=readTestConfig();
+ const s=D.siCryptoV0, c=s.components, cfg=readTestConfig(), live=D.liveLedger?.latestObservation||null;
+ const liveMap=live?{M:live.m,T:live.t,V:live.v,Q:live.q,F:live.f,N:null}:{};
+ const liveCore=live?.si_core_v0a??null;
  el('siFormula').innerHTML=`
    <div class="formula">${s.formula}</div>
-   <div class="chips"><span class="chip">${s.hypothesis}</span><span class="chip error">${s.composite.status}</span><span class="chip">Qualification threshold: NOT SET</span></div>
+   <div class="chips"><span class="chip">${s.hypothesis}</span><span class="chip">Qualification threshold: NOT SET</span><span class="chip">${live?'D1 LIVE RESEARCH FEED':'D1 FEED UNAVAILABLE'}</span></div>
+   <div class="kv"><span>SI_CORE_V0A</span><b>${liveCore==null?'INCOMPLETE':num(liveCore,4)}</b><span>Full SI</span><b>INCOMPLETE — N RESEARCH_ONLY</b><span>Observation</span><b>${live?.observed_at||'N/A'}</b></div>
    <p class="sub">${s.scoreValidityRule}</p>
-   <p class="sub">Component rule status: ${s.componentRuleStatus}</p>`;
+   <p class="sub">Research feed: Binance.US public → D1. LOCK / execution truth remains Robinhood MCP only.</p>`;
 
- el('siComponents').innerHTML=['M','T','V','Q','F','N'].map(k=>{const x=c[k];return `
+ el('siComponents').innerHTML=['M','T','V','Q','F','N'].map(k=>{const x=c[k],lv=liveMap[k],has=Number.isFinite(Number(lv))&&lv!==null;return `
    <article class="panel si-card">
      <div class="si-key">${k}</div><h3>${x.name}</h3>
-     <div class="si-value">${x.value==null?'MISSING INPUT':num(x.value,4)}</div>
-     <div class="state error">${x.status}</div>
-     <div class="raw-box"><b>Raw authentic inputs</b><pre>${escapeHtml(JSON.stringify(x.raw,null,2))}</pre></div>
-     <div class="sub">Missing: ${x.missing.join(' · ')}</div>
+     <div class="si-value">${k==='N'?'RESEARCH_ONLY':has?num(lv,4):'INCOMPLETE'}</div>
+     <div class="state ${has?'current':'error'}">${k==='N'?'N SUBCOMPONENTS NOT VALID FOR FIRE':has?'VALIDATED D1 RESEARCH VALUE':'MISSING / NOT YET VALID'}</div>
+     <div class="raw-box"><b>Source provenance</b><pre>${escapeHtml(JSON.stringify(k==='N'?{source:'NFE/UMEO research only',E:null,Fr:null,Tr:null,Tx:null,A:null,C:null}:{researchSource:'Binance.US public',ledger:'nfe-os-robinhood-si-v0a-ledger',robinhoodLockAuthority:'MCP only',observedAt:live?.observed_at||null},null,2))}</pre></div>
    </article>`}).join('');
 
  el('shadowLane').innerHTML=`
