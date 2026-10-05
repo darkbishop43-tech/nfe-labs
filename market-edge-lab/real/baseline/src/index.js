@@ -7,6 +7,26 @@ import { initialDynamicManagementState, dynamicManagementStep, persistCompletedL
 // SHARD_ROUTING_DEPLOYMENT_MARKER_2026_09_20
 // SHARD_ALLOCATION_DEPLOYMENT_MARKER_2026_09_20
 
+async function archiveIntegratedAutoV1Lifecycle(env, position) {
+  if(!position?.autoV1Management) return null;
+  const evidence={
+    ...position.autoV1Management,
+    actualExitAt:position?.closedAt?new Date(position.closedAt).toISOString():null,
+    actualExitReason:position?.exitReason||null,
+    actualHoldDurationMs:position?.closedAt&&position?.filledAt?Number(position.closedAt)-Number(position.filledAt):null,
+    exitOrderId:position?.exitOrderId||null,
+    exitFillPrice:position?.exitAverageFillPrice??null,
+    exitFees:position?.exitAverageFeePaid??null,
+    realizedPnl:position?.realizedPnlUsd??position?.autoV1Management?.realizedPnl??null,
+    providerReconciliation:position?.reconciliationClassification||null,
+    reconciliationReason:position?.reconciliationReason||null
+  };
+  const key=await persistCompletedLifecycle(env?.BASELINE_REAL_SHADOW_STATE,evidence);
+  position.autoV1ArchiveKey=key;
+  position.autoV1ArchivedAt=new Date().toISOString();
+  return key;
+}
+
 const JSON_HEADERS = {
   "content-type": "application/json; charset=utf-8",
   "cache-control": "no-store",
@@ -1931,6 +1951,7 @@ async function runExecutionTestSeries(env,freshShadow=null,preparedBalance=null)
         position.providerReconciledFlat=true;
         position.providerReconciledAt=new Date().toISOString();
         position.exitReason=position.exitReason||"PROVIDER_FLAT_RECONCILIATION";
+        if(position.autoV1Management){try{await archiveIntegratedAutoV1Lifecycle(env,position);}catch(error){position.autoV1ArchiveError=String(error?.message||error).slice(0,160);}}
         executionTestLedger(state,"TEST_STALE_POSITION_PROVIDER_FLAT_RECONCILED",{positionId:position.id,attemptNo:position.attemptNo,ticker:position.marketTicker,side:position.outcomeSide,reconciliationReason:rec.reason});
       }else if(rec.classification==="UNKNOWN"){
         executionTestLedger(state,"TEST_POSITION_RECONCILIATION_UNKNOWN_RETAINED",{positionId:position.id,attemptNo:position.attemptNo,ticker:position.marketTicker,side:position.outcomeSide,reconciliationReason:rec.reason});
@@ -2105,6 +2126,7 @@ async function runExecutionTestSeries(env,freshShadow=null,preparedBalance=null)
       position.providerReconciledFlat=true;
       position.providerReconciledAt=new Date().toISOString();
       position.exitReason="PROVIDER_FLAT_RECONCILIATION";
+      if(position.autoV1Management){try{await archiveIntegratedAutoV1Lifecycle(env,position);}catch(error){position.autoV1ArchiveError=String(error?.message||error).slice(0,160);}}
       executionTestLedger(state,"TEST_STALE_POSITION_PROVIDER_FLAT_RECONCILED",{positionId:position.id,attemptNo:position.attemptNo,ticker:position.marketTicker,side:position.outcomeSide,reconciliationReason:preExitRec.reason,phase:"PRE_EXIT_WRITE"});
       continue;
     }
@@ -2145,6 +2167,7 @@ async function runExecutionTestSeries(env,freshShadow=null,preparedBalance=null)
     position.exitAverageFeePaid=x.averageFeePaid??position.exitAverageFeePaid??null;
     if(position.exitRemainingCount<=1e-9){
       position.status="CLOSED";position.closedAt=Date.now();
+      if(position.autoV1Management){try{await archiveIntegratedAutoV1Lifecycle(env,position);}catch(error){position.autoV1ArchiveError=String(error?.message||error).slice(0,160);}}
       executionTestLedger(state,"TEST_POSITION_CLOSED",{positionId:position.id,attemptNo:position.attemptNo,ticker:position.marketTicker,side:position.outcomeSide,reason:position.exitReason,exitOrderId:position.exitOrderId});
     }else{
       position.status="EXIT_RETRY";
