@@ -27,21 +27,22 @@ function clearTestConfig(){sessionStorage.removeItem('nfeSiCryptoTestConfig')}
 
 function renderSiCrypto(){
  const s=D.siCryptoV0, c=s.components, cfg=readTestConfig(), live=D.liveLedger?.latestObservation||null;
- const liveMap=live?{M:live.m,T:live.t,V:live.v,Q:live.q,F:live.f,N:null}:{};
- const liveCore=live?.si_core_v0a??null;
+ const liveMap=live?{M:live.m,T:live.t,V:live.v,Q:live.q,F:live.f,N:live.n_v0}:{};
+ const liveCore=live?.si_core_v0a??null, fullSI=live?.full_si??null;
+ const nParts=live?{N_E:live.n_e,N_Fr:live.n_fr,N_Tr:live.n_tr,N_Tx:live.n_tx,N_A:live.n_a,N_C:live.n_c}:{};
  el('siFormula').innerHTML=`
    <div class="formula">${s.formula}</div>
    <div class="chips"><span class="chip">${s.hypothesis}</span><span class="chip">Qualification threshold: NOT SET</span><span class="chip">${live?'D1 LIVE RESEARCH FEED':'D1 FEED UNAVAILABLE'}</span></div>
-   <div class="kv"><span>SI_CORE_V0A</span><b>${liveCore==null?'INCOMPLETE':num(liveCore,4)}</b><span>Full SI</span><b>INCOMPLETE — N RESEARCH_ONLY</b><span>Observation</span><b>${live?.observed_at||'N/A'}</b></div>
+   <div class="kv"><span>SI_CORE_V0A</span><b>${liveCore==null?'INCOMPLETE':num(liveCore,4)}</b><span>FULL SI_V0</span><b>${fullSI==null?(live?.full_si_state||'INCOMPLETE'):num(fullSI,4)}</b><span>N version</span><b>${live?.n_version||'N_V0'}</b><span>SI version</span><b>${live?.si_version||'SI_V0'}</b><span>Observation</span><b>${live?.observed_at||'N/A'}</b></div>
    <p class="sub">${s.scoreValidityRule}</p>
    <p class="sub">Research feed: Binance.US public → D1. LOCK / execution truth remains Robinhood MCP only.</p>`;
 
- el('siComponents').innerHTML=['M','T','V','Q','F','N'].map(k=>{const x=c[k],lv=liveMap[k],has=Number.isFinite(Number(lv))&&lv!==null;return `
+ el('siComponents').innerHTML=['M','T','V','Q','F','N'].map(k=>{const x=c[k],lv=liveMap[k],has=Number.isFinite(Number(lv))&&lv!==null;const nMissing=live?.n_missing_components?(()=>{try{return JSON.parse(live.n_missing_components)}catch{return []}})():[];return `
    <article class="panel si-card">
      <div class="si-key">${k}</div><h3>${x.name}</h3>
-     <div class="si-value">${k==='N'?'RESEARCH_ONLY':has?num(lv,4):'INCOMPLETE'}</div>
-     <div class="state ${has?'current':'error'}">${k==='N'?'N SUBCOMPONENTS NOT VALID FOR FIRE':has?'VALIDATED D1 RESEARCH VALUE':'MISSING / NOT YET VALID'}</div>
-     <div class="raw-box"><b>Source provenance</b><pre>${escapeHtml(JSON.stringify(k==='N'?{source:'NFE/UMEO research only',E:null,Fr:null,Tr:null,Tx:null,A:null,C:null}:{researchSource:'Binance.US public',ledger:'nfe-os-robinhood-si-v0a-ledger',robinhoodLockAuthority:'MCP only',observedAt:live?.observed_at||null},null,2))}</pre></div>
+     <div class="si-value">${has?num(lv,4):'INCOMPLETE'}</div>
+     <div class="state ${has?'current':'error'}">${has?'VALID / POPULATED / CALCULATED':k==='N'?'FAIL CLOSED — N_V0 EVIDENCE INCOMPLETE':'MISSING / NOT YET VALID'}</div>
+     <div class="raw-box"><b>${k==='N'?'N_V0 subcomponents + provenance':'Source provenance'}</b><pre>${escapeHtml(JSON.stringify(k==='N'?{version:live?.n_version||'N_V0',N_V0:live?.n_v0??null,...nParts,missing:nMissing,provenance:live?.n_provenance_json?(()=>{try{return JSON.parse(live.n_provenance_json)}catch{return live.n_provenance_json}})():null,reasons:{N_E:live?.n_e_reason||null,N_Fr:live?.n_fr_reason||null,N_Tr:live?.n_tr_reason||null,N_Tx:live?.n_tx_reason||null,N_A:live?.n_a_reason||null,N_C:live?.n_c_reason||null}}:{researchSource:'Binance.US public',ledger:'nfe-os-robinhood-si-v0a-ledger',robinhoodLockAuthority:'MCP only',observedAt:live?.observed_at||null},null,2))}</pre></div>
    </article>`}).join('');
 
  el('shadowLane').innerHTML=`
@@ -110,7 +111,8 @@ function renderAccount(){
 }
 
 function renderOperational(){
- const o=D.operationalCockpit,r=o.radar,l=o.lock,p=o.position,m=o.manage;
+ const o=D.operationalCockpit,r=o.radar,l=o.lock,p=o.position,m=o.manage,live=D.liveLedger?.latestObservation||null;
+ el('quickState').innerHTML=`<div class="kv"><span>Current lifecycle</span><b>${o.lifecycle[o.currentLifecycleIndex]||'FLAT'}</b><span>Current candidate</span><b>${r.leader||l.symbol||'NONE'}</b><span>SI status</span><b>${live?.full_si==null?(live?.full_si_state||'INCOMPLETE'):('FULL SI_V0 '+num(live.full_si,4))}</b><span>Robinhood LOCK</span><b>${l.state} · ${l.symbol}</b><span>Execution authority</span><b>${o.execution.state}</b><span>Position state</span><b>${p.state}</b></div>`;
  el('executionStrip').innerHTML=`
    <div><span>EXECUTION</span><strong class="stale">${o.execution.state}</strong><small>${o.execution.reason}</small></div>
    <div><span>RADAR</span><strong class="stale">${r.state}</strong><small>${r.eligibleCount} eligible of ${r.universeSize} provider pairs</small></div>
