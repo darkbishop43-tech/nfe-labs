@@ -220,3 +220,10 @@ if(!/ROBINHOOD_CRYPTO_API_KEY/.test(rhRead)||!/ROBINHOOD_CRYPTO_PRIVATE_KEY/.tes
 if(/console\.log\(|console\.error\(/.test(rhRead))throw new Error('Robinhood credentialed connector must not log');
 console.log('PASS Robinhood Crypto API connector is GET-only with six approved read surfaces');
 console.log('PASS Robinhood secrets are referenced only as Worker bindings and never logged');
+
+
+if(!/ACCOUNT_BINDINGS/.test(rhRead)||!/authorizedLast4:"4142"/.test(rhRead))throw new Error('Explicit crypto account binding 4142 missing');
+if(/rows\.length!==1/.test(rhRead))throw new Error('Legacy exactly-one-account assumption remains');
+if(!/resolveBoundAccount\(env,"crypto"\)/.test(rhRead))throw new Error('Crypto holdings/orders are not explicitly bound');
+if(!/bound_lanes/.test(rhRead))throw new Error('Discovered account registry does not preserve lane-binding visibility');
+console.log('PASS multiple Robinhood accounts are valid discovery state with explicit crypto binding 4142');
