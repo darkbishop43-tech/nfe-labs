@@ -2679,7 +2679,7 @@ function latestAttemptClassification(attempt,rows=[]) {
   let classification=null, terminalReason=null;
   for(const row of ordered){
     const type=String(row?.type||'');
-    if(type==='ENTRY_NO_FILL'){
+    if(type==='ENTRY_NO_FILL' || type==='ENTRY_RECONCILED_ORDER_ZERO_FILL'){
       classification='NO_FILL'; terminalReason=type;
     } else if(type==='ENTRY_LOCAL_PRE_PROVIDER_REJECTED' || type==='FIRE_SPECIMEN_INVALIDATED_BEFORE_POST'){
       classification='INVALIDATED_BEFORE_POST'; terminalReason=type;
@@ -3075,7 +3075,7 @@ export async function reconcileUnresolvedEntryFromProvider(env,nowMs=Date.now())
     ok:true,classification:'CLEAN',reason:'NO_UNRESOLVED_ENTRY',
     series,control:await loadControl(env),providerWrites:0,orders:0,capitalMovedUsd:0,
   };
-  const attempt=series?.currentAttempt||null;
+  let attempt=series?.currentAttempt||null;
   const ticker=String(attempt?.marketTicker||'').trim();
   const clientOrderId=String(attempt?.clientOrderId||attempt?.payload?.client_order_id||'').trim();
   if(!ticker || !attempt?.attemptId || !clientOrderId) {
@@ -3148,6 +3148,21 @@ export async function reconcileUnresolvedEntryFromProvider(env,nowMs=Date.now())
   const ownedFillCount=Math.max(orderFillCount,fillRowCount);
   const orderId=String(exactOrders.find(x=>x?.order_id||x?.orderId)?.order_id||exactOrders.find(x=>x?.order_id||x?.orderId)?.orderId||exactFills.find(x=>x?.order_id||x?.orderId)?.order_id||exactFills.find(x=>x?.order_id||x?.orderId)?.orderId||'')||null;
   const exactIdentityEvidence=exactOrders.length>0 || exactFills.length>0;
+
+  const promoteProviderAttemptIfNeeded=()=>{
+    const alreadyCounted=attempt?.providerAttemptCounted===true
+      || Number.isFinite(Number(attempt?.providerAttemptNo))
+      || Number.isFinite(Number(attempt?.attemptNo));
+    if(alreadyCounted){
+      const n=Number(attempt?.providerAttemptNo??attempt?.attemptNo??series.attemptsStarted??0);
+      return Number.isFinite(n)&&n>0?Math.trunc(n):Math.max(1,Number(series.attemptsStarted||1));
+    }
+    const n=Math.max(0,Math.trunc(Number(series.attemptsStarted||0)))+1;
+    series.attemptsStarted=n;
+    attempt={...attempt,attemptNo:n,providerAttemptNo:n,providerAttemptCounted:true,writerInvoked:attempt?.writerInvoked!==false,providerPostStarted:attempt?.providerPostStarted===true?true:null};
+    series.currentAttempt=attempt;
+    return n;
+  };
 
   if(positionEvidence.classification==='OPEN'){
     if(!exactIdentityEvidence || !(ownedFillCount>0)){
@@ -3224,21 +3239,30 @@ export async function reconcileUnresolvedEntryFromProvider(env,nowMs=Date.now())
 
   if((positionEvidence.classification==='ABSENT'||positionEvidence.classification==='FLAT') && exactOrders.length===0 && exactFills.length===0 && exactSettlements.length===0){
     const reconciledAt=new Date(nowMs).toISOString();
-    const providerResult={state:'NO_FILL',reason:'PROVIDER_RECONCILED_NO_EXECUTION',clientOrderId,fillCount:0,remainingCount:0};
+    const providerResult={state:'NO_PROVIDER_EXECUTION',reason:'PROVIDER_RECONCILED_NO_EXECUTION',clientOrderId,fillCount:0,remainingCount:0};
     series.unresolvedEntry=false; series.position=null;
-    series.currentAttempt={...attempt,status:'NO_FILL',providerResult,reconciledAt};
-    if(seriesTerminal(series)){series.status='COMPLETE_NO_FILL_RECONCILED';series.completedAt=reconciledAt;}
+    attempt={
+      ...attempt,status:'NO_PROVIDER_EXECUTION',providerResult,reconciledAt,
+      providerResponseState:'NO_PROVIDER_EXECUTION',providerOrderId:null,
+      providerAttemptCounted:attempt?.providerAttemptCounted===true,
+      terminalClassification:'NO_PROVIDER_EXECUTION',
+      reconciliationResult:'NO_PROVIDER_EXECUTION',reconciliationReason:'PROVIDER_RECONCILED_NO_EXECUTION'
+    };
+    series.currentAttempt=attempt;
+    if(seriesTerminal(series)){series.status='COMPLETE_ENTRY_AUTHORITY';series.completedAt=reconciledAt;}
     else {series.status=(await loadControl(env)).armed?'ARMED_FISHING':'SERIES_PAUSED_DISARMED_CLEAN';}
-    await persistAttempt(env,{runId:series.seriesId,attemptId:attempt.attemptId,attemptNo:Number(attempt.attemptNo||series.attemptsStarted||1),result:'NO_FILL',...series.currentAttempt});
+    await persistAttempt(env,{runId:series.seriesId,result:'NO_PROVIDER_EXECUTION',...attempt});
     await appendRealLedger(env,'ENTRY_RECONCILED_NO_EXECUTION',{
-      seriesId:series.seriesId,attemptId:attempt.attemptId,attemptNo:Number(attempt.attemptNo||series.attemptsStarted||1),
+      seriesId:series.seriesId,attemptId:attempt.attemptId,intentNo:attempt.intentNo??null,attemptNo:attempt.attemptNo??null,
       asset:attempt.asset||null,ticker,outcomeSide:attempt.outcomeSide||null,direction:attempt.direction||null,clientOrderId,
+      writerInvoked:attempt.writerInvoked===true,providerPostStarted:attempt.providerPostStarted===true?true:null,
+      providerAttemptCounted:attempt.providerAttemptCounted===true,providerOrderId:null,
       providerPositionClassification:positionEvidence.classification,exactOrderCount:0,exactFillCount:0,exactSettlementCount:0,
-      reconciliation:'PROVIDER_RECONCILED_NO_EXECUTION',
+      reconciliation:'PROVIDER_RECONCILED_NO_EXECUTION',terminalClassification:'NO_PROVIDER_EXECUTION',
     });
     await saveRealSeriesState(env,series);
     await settleSeriesControl(env,series,0);
-    return {ok:true,classification:'FLAT',reason:'PROVIDER_RECONCILED_NO_EXECUTION',ticker,clientOrderId,orderId:null,exactOrderCount:0,exactFillCount:0,exactSettlementCount:0,providerPositionClassification:positionEvidence.classification,series:await loadRealSeriesState(env),control:await loadControl(env),providerWrites:0,orders:0,capitalMovedUsd:0};
+    return {ok:true,classification:'FLAT',reason:'PROVIDER_RECONCILED_NO_EXECUTION',terminalClassification:'NO_PROVIDER_EXECUTION',ticker,clientOrderId,orderId:null,exactOrderCount:0,exactFillCount:0,exactSettlementCount:0,providerPositionClassification:positionEvidence.classification,series:await loadRealSeriesState(env),control:await loadControl(env),providerWrites:0,orders:0,capitalMovedUsd:0};
   }
 
   if((positionEvidence.classification==='ABSENT'||positionEvidence.classification==='FLAT') && exactOrders.length>0){
@@ -3248,21 +3272,28 @@ export async function reconcileUnresolvedEntryFromProvider(env,nowMs=Date.now())
     });
     if(zeroFillOrders && exactFills.length===0 && exactSettlements.length===0){
       const reconciledAt=new Date(nowMs).toISOString();
+      const attemptNo=promoteProviderAttemptIfNeeded();
       const providerResult={state:'NO_FILL',reason:'PROVIDER_ORDER_ZERO_FILL_RECONCILED',orderId,clientOrderId,fillCount:0,remainingCount:0};
       series.unresolvedEntry=false; series.position=null;
-      series.currentAttempt={...attempt,status:'NO_FILL',providerResult,reconciledAt};
+      attempt={
+        ...attempt,attemptNo,providerAttemptNo:attemptNo,providerAttemptCounted:true,status:'NO_FILL',providerResult,reconciledAt,
+        providerOrderId:orderId,providerResponseState:'NO_FILL',terminalClassification:'NO_FILL',
+        reconciliationResult:'NO_FILL',reconciliationReason:'PROVIDER_ORDER_ZERO_FILL_RECONCILED'
+      };
+      series.currentAttempt=attempt;
       if(seriesTerminal(series)){series.status='COMPLETE_NO_FILL_RECONCILED';series.completedAt=reconciledAt;}
       else {series.status=(await loadControl(env)).armed?'ARMED_FISHING':'SERIES_PAUSED_DISARMED_CLEAN';}
-      await persistAttempt(env,{runId:series.seriesId,attemptId:attempt.attemptId,attemptNo:Number(attempt.attemptNo||series.attemptsStarted||1),result:'NO_FILL',...series.currentAttempt});
-      await appendRealLedger(env,'ENTRY_RECONCILED_NO_EXECUTION',{
-        seriesId:series.seriesId,attemptId:attempt.attemptId,attemptNo:Number(attempt.attemptNo||series.attemptsStarted||1),
+      await persistAttempt(env,{runId:series.seriesId,result:'NO_FILL',...attempt});
+      await appendRealLedger(env,'ENTRY_RECONCILED_ORDER_ZERO_FILL',{
+        seriesId:series.seriesId,attemptId:attempt.attemptId,intentNo:attempt.intentNo??null,attemptNo,
         asset:attempt.asset||null,ticker,outcomeSide:attempt.outcomeSide||null,direction:attempt.direction||null,clientOrderId,
-        providerOrderId:orderId,providerPositionClassification:positionEvidence.classification,
+        providerOrderId:orderId,writerInvoked:attempt.writerInvoked!==false,providerPostStarted:attempt.providerPostStarted===true?true:null,
+        providerAttemptCounted:true,providerPositionClassification:positionEvidence.classification,
         exactOrderCount:exactOrders.length,exactFillCount:0,exactSettlementCount:0,reconciliation:'PROVIDER_ORDER_ZERO_FILL_RECONCILED',
       });
       await saveRealSeriesState(env,series);
       await settleSeriesControl(env,series,0);
-      return {ok:true,classification:'FLAT',reason:'PROVIDER_ORDER_ZERO_FILL_RECONCILED',ticker,clientOrderId,orderId,exactOrderCount:exactOrders.length,exactFillCount:0,exactSettlementCount:0,providerPositionClassification:positionEvidence.classification,series:await loadRealSeriesState(env),control:await loadControl(env),providerWrites:0,orders:0,capitalMovedUsd:0};
+      return {ok:true,classification:'FLAT',reason:'PROVIDER_ORDER_ZERO_FILL_RECONCILED',terminalClassification:'NO_FILL',ticker,clientOrderId,orderId,exactOrderCount:exactOrders.length,exactFillCount:0,exactSettlementCount:0,providerPositionClassification:positionEvidence.classification,series:await loadRealSeriesState(env),control:await loadControl(env),providerWrites:0,orders:0,capitalMovedUsd:0};
     }
   }
 
