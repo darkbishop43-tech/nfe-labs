@@ -22,6 +22,7 @@ jobs:
         run: |
           set -euo pipefail
           node - <<'NODE'
+          (async()=>{
           const fs=require('fs');
           const base=process.env.LIVE_URL;
           const sleep=ms=>new Promise(r=>setTimeout(r,ms));
@@ -106,6 +107,7 @@ jobs:
           if(!result.leader)throw new Error('NO_VALID_SI_CANDIDATE');
           if(result.leader.qualificationThreshold!=='NOT SET'||result.leader.fireAuthority!=='ZERO')throw new Error('AUTHORITY_BOUNDARY_MISMATCH');
           console.log('VERIFY dynamic universe ranking PASS',JSON.stringify({discovery:result.discovery,leader:{symbol:result.leader.symbol,score:result.leader.score,components:result.leader.components,capturedAt:result.leader.capturedAt}}));
+          })().catch(e=>{console.error(e);process.exit(1)});
           NODE
 
       - name: Confirm zero-money boundary
