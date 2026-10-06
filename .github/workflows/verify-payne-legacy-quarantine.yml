@@ -1,5 +1,7 @@
 name: Verify PAYNE legacy quarantine read-only
 
+# Post-deploy verification for repaired legacy provider-attempt semantics
+
 on:
   push:
     branches:
