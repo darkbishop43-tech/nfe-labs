@@ -264,11 +264,9 @@ function shadowWithCompetingLeader({btcScore=.83,btcMove=.004,btcEdge=.08,zecSco
   ]};
 }
 
-test('FEATURE EPOCH 1: epoch A qualifies but newer epoch B invalidates before FIRE latch with no attempt consumed',async()=>{
-  const A={...baselineShadow({score:.716,move:.003,edge:.054}),lastRunAt:'2026-10-02T06:04:00Z'};
-  const B={...baselineShadow({score:.50,move:0,edge:0}),lastRunAt:'2026-10-02T06:05:00Z'};
-  const e=await env(); e.BASELINE_REAL_READ=sequentialBaseline(A,B);
-  const io=installProvider();
+test('FEATURE EPOCH 1: epoch A qualifies but fresher PAYNE spot epoch B invalidates before FIRE latch with no attempt consumed',async()=>{
+  const e=await env();
+  const io=installProvider({spotSequence:[100,spotForScores(.716,.50)]});
   try{
     await configure(e,{threshold:.70,stake:1,target:5}); await arm(e);
     await runReadOnlyScan(e,'FEATURE_EPOCH_TEST',T0);
@@ -276,7 +274,7 @@ test('FEATURE EPOCH 1: epoch A qualifies but newer epoch B invalidates before FI
     assert.equal(out.attemptsStarted,0);
     assert.equal(out.fireLatch,null);
     assert.equal(out.status,'ARMED_FISHING');
-    assert.equal(out.fireRefreshEvidence.sourceLastRunAt,'2026-10-02T06:05:00Z');
+    assert.equal(out.fireRefreshEvidence.sourceLastRunAt,'2026-10-02T06:05:00.000Z');
     assert.ok(out.fireRefreshEvidence.failureReasons.includes('FIRE_SCORE_BELOW_THRESHOLD'));
     assert.ok(out.fireRefreshEvidence.failureReasons.includes('FIRE_SCORE_BELOW_EFFECTIVE_LOCK'));
     assert.ok(out.fireRefreshEvidence.failureReasons.includes('FIRE_EDGE_NOT_POSITIVE'));
@@ -287,34 +285,24 @@ test('FEATURE EPOCH 1: epoch A qualifies but newer epoch B invalidates before FI
   }finally{io.restore();}
 });
 
-test('FEATURE EPOCH 2: newer same-specimen epoch that still qualifies becomes the latched FIRE evidence',async()=>{
-  const A={...baselineShadow({score:.716,move:.003,edge:.054}),lastRunAt:'2026-10-02T06:04:00Z'};
-  const B={...baselineShadow({score:.74,move:.004,edge:.06}),lastRunAt:'2026-10-02T06:05:00Z'};
-  const e=await env(); e.BASELINE_REAL_READ=sequentialBaseline(A,B);
-  const io=installProvider();
+test('FEATURE EPOCH 2: fresher same-specimen PAYNE spot epoch that still qualifies becomes latched FIRE evidence',async()=>{
+  const e=await env();
+  const io=installProvider({spotSequence:[100,spotForScores(.716,.74)]});
   try{
     await configure(e,{threshold:.70,target:1}); await arm(e);
     await runReadOnlyScan(e,'FEATURE_EPOCH_TEST',T0);
     const out=await loadRealSeriesState(e);
     assert.equal(out.fireLatch.state,'LATCHED');
     assert.equal(out.fireLatch.ticker,'KXBTC15M-REALTEST');
-    assert.equal(out.fireLatch.fireFeatureEvidence.sourceLastRunAt,'2026-10-02T06:05:00Z');
-    assert.equal(out.fireLatch.fireFeatureEvidence.score,.74);
+    assert.equal(out.fireLatch.fireFeatureEvidence.sourceLastRunAt,'2026-10-02T06:05:00.000Z');
+    assert.ok(Math.abs(out.fireLatch.fireFeatureEvidence.score-.74)<1e-10);
     assert.deepEqual(out.fireLatch.fireFeatureEvidence.failureReasons,[]);
   }finally{io.restore();}
 });
 
-test('FEATURE EPOCH 3/9/10: valid FIRE refresh + valid final refresh reaches shared-writer boundary and persists full books',async()=>{
-  const A={...baselineShadow({score:.716,move:.003,edge:.054}),lastRunAt:'2026-10-02T06:04:00Z'};
-  const B={...baselineShadow({score:.74,move:.004,edge:.06}),lastRunAt:'2026-10-02T06:05:00Z'};
-  const C={...baselineShadow({score:.75,move:.0045,edge:.065}),lastRunAt:'2026-10-02T06:05:01Z'};
-  const e=await env(); e.BASELINE_REAL_READ=sequentialBaseline(A,B,C);
-  const io=installProvider({exactSequence:[
-    {status:200,market:providerMarket({yesBid:.90,yesAsk:.91})},
-    {status:200,market:providerMarket({yesBid:.95,yesAsk:.957})},
-    {status:200,market:providerMarket({yesBid:.95,yesAsk:.957})},
-    {status:200,market:providerMarket({yesBid:.95,yesAsk:.957})},
-  ]});
+test('FEATURE EPOCH 3/9/10: valid direct FIRE refresh + valid final refresh reaches shared-writer boundary and persists full books',async()=>{
+  const e=await env();
+  const io=installProvider({spotSequence:[100,spotForScores(.716,.74),spotForScores(.716,.75)]});
   const zeroWriterCalls=[];
   const zeroWriter=async(env,kind,payload,scope)=>{
     zeroWriterCalls.push({kind,payload,scope});
@@ -328,7 +316,7 @@ test('FEATURE EPOCH 3/9/10: valid FIRE refresh + valid final refresh reaches sha
     const out=await runPayneRealExecutionCycle(e,{postImpl:zeroWriter,nowMs:T0});
     assert.equal(zeroWriterCalls.length,1);
     assert.equal(out.fireLatch.finalFeature,'PASS');
-    assert.equal(out.fireLatch.finalFeatureEvidence.sourceLastRunAt,'2026-10-02T06:05:01Z');
+    assert.ok(Math.abs(out.fireLatch.finalFeatureEvidence.score-.75)<1e-10);
     for(const key of ['fireBookEvidence','freshLockBookEvidence','preSubmitBookEvidence']){
       assert.ok(Number.isFinite(Number(out.fireLatch[key].bid)),key+' bid');
       assert.ok(Number.isFinite(Number(out.fireLatch[key].ask)),key+' ask');
@@ -349,12 +337,9 @@ test('FEATURE EPOCH 4-8: exact final feature failure labels use existing PAYNE p
   assert.deepEqual(payneFeatureFailureReasons({available:false},threshold,lock,'FINAL'),['FINAL_FEATURE_NOT_AVAILABLE']);
 });
 
-test('FEATURE EPOCH 9: Fresh LOCK and pre-submit may pass while final same-specimen feature requalification fails distinctly',async()=>{
-  const A={...baselineShadow({score:.716,move:.003,edge:.054}),lastRunAt:'2026-10-02T06:04:00Z'};
-  const B={...baselineShadow({score:.74,move:.004,edge:.06}),lastRunAt:'2026-10-02T06:05:00Z'};
-  const C={...baselineShadow({score:.69,move:.004,edge:.06}),lastRunAt:'2026-10-02T06:05:01Z'};
-  const e=await env(); e.BASELINE_REAL_READ=sequentialBaseline(A,B,C);
-  const io=installProvider(),post=postFixture(NOFILL);
+test('FEATURE EPOCH 9: Fresh LOCK and pre-submit may pass while final direct feature requalification fails distinctly',async()=>{
+  const e=await env();
+  const io=installProvider({spotSequence:[100,spotForScores(.716,.74),spotForScores(.716,.69)]}),post=postFixture(NOFILL);
   try{
     await configure(e,{threshold:.70,target:1}); await arm(e);
     await runReadOnlyScan(e,'FEATURE_EPOCH_TEST',T0);
@@ -423,7 +408,8 @@ test('FIRE LATCH 3: same specimen fresh LOCK failure invalidates before POST wit
   const e=await env({shadow:baselineShadow({score:.83,move:.004,edge:.08})});
   const io=installProvider({exactSequence:[
     {status:200,market:providerMarket()}, {status:200,market:providerMarket()}, // scan
-    {status:500,market:{error:'fresh lock failed'}},                          // execution fresh lock
+    {status:200,market:providerMarket()},                                      // FIRE feature exact reread
+    {status:500,market:{error:'fresh lock failed'}},                           // execution fresh lock
   ]});
   const post=postFixture(NOFILL);
   try{
@@ -456,6 +442,7 @@ test('FIRE LATCH 5: pre-submit exact-market failure invalidates same specimen be
   const e=await env({shadow:baselineShadow({score:.83,move:.004,edge:.08})});
   const io=installProvider({exactSequence:[
     {status:200,market:providerMarket()}, {status:200,market:providerMarket()}, // scan
+    {status:200,market:providerMarket()},                                      // FIRE feature exact reread
     {status:200,market:providerMarket()},                                      // execution fresh lock
     {status:500,market:{error:'pre-submit failed'}},                           // execution pre-submit
   ]});
