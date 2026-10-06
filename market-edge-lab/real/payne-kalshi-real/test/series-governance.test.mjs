@@ -728,6 +728,11 @@ test('LEGACY QUARANTINE A/B/C: old 4/5 accounting is terminalized without rewrit
     assert.equal(quarantined.attemptTarget,5);
     assert.ok(quarantined.completedAt);
 
+    const legacyObs=summarizeRealExecutionState({control:await loadControl(e),series:quarantined,ledger:await listRealLedger(e,1000)});
+    assert.equal(legacyObs.attempted,4);                 // preserved OLD-semantic historical count
+    assert.equal(legacyObs.executionIntents,4);         // old local/intention evidence remains visible
+    assert.equal(legacyObs.providerOrderAttempts,0);    // never relabel old 4/5 as authenticated provider POSTs
+
     const history=await buildHistoricalSeriesReport(e,LEGACY_ID);
     assert.equal(history.seriesId,LEGACY_ID);
     assert.equal(history.attemptTarget,5);

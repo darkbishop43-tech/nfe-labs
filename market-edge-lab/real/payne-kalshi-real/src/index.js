@@ -2892,11 +2892,17 @@ export function summarizeRealExecutionState({control={},series={},ledger=[],asOf
   const prePostInvalidatedIds=new Set([...classifications.entries()].filter(([,v])=>v==='INVALIDATED_BEFORE_POST').map(([k])=>k));
   const noProviderExecutionIds=new Set([...classifications.entries()].filter(([,v])=>v==='NO_PROVIDER_EXECUTION').map(([k])=>k));
   const unknownIds=new Set([...classifications.entries()].filter(([,v])=>v==='UNKNOWN').map(([k])=>k));
-  const attempted=Math.max(
+  const legacyAccounting=series?.accountingSemantics!==PROVIDER_ATTEMPT_ACCOUNTING_SEMANTICS;
+  const historicalAttempted=Math.max(
     Number.isFinite(Number(series?.attemptsStarted))?Math.max(0,Math.trunc(Number(series.attemptsStarted))):0,
-    Number.isFinite(Number(control?.attempts))?Math.max(0,Math.trunc(Number(control.attempts))):0,
-    providerAttemptIds.size
+    Number.isFinite(Number(control?.attempts))?Math.max(0,Math.trunc(Number(control.attempts))):0
   );
+  const providerOrderAttempts=legacyAccounting
+    ? providerAttemptIds.size
+    : Math.max(historicalAttempted,providerAttemptIds.size);
+  // Backward-compatible attempted remains the preserved historical series count for legacy records;
+  // providerOrderAttempts is the truthful authenticated-provider boundary count.
+  const attempted=legacyAccounting?historicalAttempted:providerOrderAttempts;
   const executionIntents=Math.max(
     Number.isFinite(Number(series?.executionIntentsStarted))?Math.max(0,Math.trunc(Number(series.executionIntentsStarted))):0,
     executionIntentIds.size
@@ -2964,7 +2970,7 @@ export function summarizeRealExecutionState({control={},series={},ledger=[],asOf
     seriesId:series?.seriesId||null,
     armed:control?.armed===true,
     executionIntents,
-    providerOrderAttempts:attempted,
+    providerOrderAttempts,
     attempted,target,remaining,
     filled:filledIds.size,
     noFill:noFillIds.size,
