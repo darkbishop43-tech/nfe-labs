@@ -15,6 +15,8 @@ const REAL_SERIES_KEY = 'payne-kalshi:real-series:v1';
 const REAL_LEDGER_PREFIX = 'payne-kalshi:real-ledger:';
 const REAL_CONTROL_SCHEMA = 'PAYNE_REAL_CONTROL_V1';
 const REAL_OWNER = 'PAYNE_KALSHI_REAL';
+const PROVIDER_ATTEMPT_ACCOUNTING_SEMANTICS = 'PROVIDER_POST_BOUNDARY_V1';
+const LEGACY_ATTEMPT_ACCOUNTING_SEMANTICS = 'LEGACY_PRE_PROVIDER_BOUNDARY_V0';
 const SCAN_PERSIST_INTERVAL_MS = 60 * 1000;
 const SCAN_HISTORY_INTERVAL_MS = 15 * 60 * 1000;
 const FOUNDER_THRESHOLD_MIN = 0.50;
@@ -182,7 +184,11 @@ export async function updateFounderControl(env, action, rawValue = null) {
     const priorTarget=Number(series?.attemptTarget||1);
     let armedSeries;
     if (!seriesTerminal(series) && started>0 && started<priorTarget) {
-      // An unfinished governed series: ARM resumes it with its FROZEN config. It never re-snapshots or resets the count.
+      // Only repaired provider-boundary accounting series may resume. Legacy unfinished series must quarantine first.
+      if(series?.accountingSemantics!==PROVIDER_ATTEMPT_ACCOUNTING_SEMANTICS || series?.legacyQuarantined===true) {
+        throw new Error('PAYNE_LEGACY_SERIES_NON_RESUMABLE');
+      }
+      // An unfinished governed repaired series: ARM resumes it with its FROZEN config. It never re-snapshots or resets the count.
       const frozen=frozenSeriesConfig(series);
       if (!frozen.ok) throw new Error('PAYNE_REAL_SERIES_IN_PROGRESS_NOT_FROZEN');
       if (frozen.attemptTarget!==cfgTarget || frozen.threshold!==cfgThreshold || frozen.effectiveLockThreshold!==effectiveLockThreshold(cfgThreshold) || frozen.maxEntryDebitUsd!==cfgStake) throw new Error('PAYNE_REAL_SERIES_IN_PROGRESS_CONFIG_MISMATCH');
@@ -202,7 +208,7 @@ export async function updateFounderControl(env, action, rawValue = null) {
       next.attempts=0; next.openPositions=0;
     }
     await saveRealSeriesState(env,armedSeries);
-    await persistRun(env,{runId:armedSeries.seriesId,threshold:armedSeries.threshold,effectiveLockThreshold:armedSeries.effectiveLockThreshold,maxEntryDebitUsd:armedSeries.maxEntryDebitUsd,attemptTarget:armedSeries.attemptTarget,requiredExchangeIndex:2,frozenAt:armedSeries.frozenAt||null});
+    await persistRun(env,{runId:armedSeries.seriesId,threshold:armedSeries.threshold,effectiveLockThreshold:armedSeries.effectiveLockThreshold,maxEntryDebitUsd:armedSeries.maxEntryDebitUsd,attemptTarget:armedSeries.attemptTarget,requiredExchangeIndex:2,accountingSemantics:armedSeries.accountingSemantics,frozenAt:armedSeries.frozenAt||null});
     next.armed=true;
   } else if (name==='DISARM') next.armed=false;
   else if (name==='SET_THRESHOLD') {
@@ -2567,9 +2573,37 @@ async function reconcileDisarmedSupersededSeries(env,series,control,nowMs=Date.n
   if(!(started>0 && started<target)) return {series,terminalized:false,reason:'NOT_UNFINISHED'};
   const frozen=frozenSeriesConfig(series);
   if(!frozen.ok) return {series,terminalized:false,reason:'SERIES_NOT_FROZEN'};
-  if(frozenSeriesMatchesControl(series,control)) return {series,terminalized:false,reason:'CONFIG_MATCHES_RESUMABLE'};
   const gate=seriesInterlock(series);
   if(!gate.clear) return {series,terminalized:false,reason:'PRIOR_ATTEMPT_NOT_CLEAN_'+gate.reason};
+
+  if(series?.accountingSemantics!==PROVIDER_ATTEMPT_ACCOUNTING_SEMANTICS){
+    const completedAt=new Date(nowMs).toISOString();
+    const next={
+      ...series,
+      status:'TERMINAL_LEGACY_ACCOUNTING_QUARANTINED',
+      completedAt,
+      terminalReason:'LEGACY_PRE_PROVIDER_ACCOUNTING_NON_RESUMABLE',
+      accountingSemantics:LEGACY_ATTEMPT_ACCOUNTING_SEMANTICS,
+      legacyQuarantined:true,
+    };
+    await appendRealLedger(env,'SERIES_LEGACY_ACCOUNTING_QUARANTINED',{
+      seriesId:series.seriesId,
+      attemptsStarted:started,
+      attemptTarget:target,
+      threshold:frozen.threshold,
+      maxEntryDebitUsd:frozen.maxEntryDebitUsd,
+      accountingSemantics:LEGACY_ATTEMPT_ACCOUNTING_SEMANTICS,
+      historicalCountsPreserved:true,
+      unresolvedEntry:false,
+      ownedPosition:false,
+      providerWrites:0,
+      orders:0,
+      capitalMovedUsd:0,
+    });
+    return {series:await saveRealSeriesState(env,next),terminalized:true,reason:'LEGACY_ACCOUNTING_QUARANTINED'};
+  }
+
+  if(frozenSeriesMatchesControl(series,control)) return {series,terminalized:false,reason:'CONFIG_MATCHES_RESUMABLE'};
   const completedAt=new Date(nowMs).toISOString();
   const next={...series,status:'TERMINAL_DISARMED_CONFIG_SUPERSEDED',completedAt,terminalReason:'FOUNDER_CONFIG_CHANGED_WHILE_DISARMED'};
   await appendRealLedger(env,'SERIES_TERMINAL_DISARMED_CONFIG_SUPERSEDED',{
@@ -2603,6 +2637,8 @@ export function defaultRealSeriesState() {
     owner:REAL_OWNER,
     seriesId:null,
     status:'READY_DISARMED',
+    accountingSemantics:PROVIDER_ATTEMPT_ACCOUNTING_SEMANTICS,
+    legacyQuarantined:false,
     attemptsStarted:0,
     executionIntentsStarted:0,
     attemptTarget:1,
@@ -2630,6 +2666,10 @@ export async function loadRealSeriesState(env) {
     ...saved,
     owner:REAL_OWNER,
     requiredExchangeIndex:2,
+    accountingSemantics:saved?.accountingSemantics===PROVIDER_ATTEMPT_ACCOUNTING_SEMANTICS
+      ?PROVIDER_ATTEMPT_ACCOUNTING_SEMANTICS
+      :LEGACY_ATTEMPT_ACCOUNTING_SEMANTICS,
+    legacyQuarantined:saved?.legacyQuarantined===true,
     attemptsStarted:Number.isFinite(Number(saved?.attemptsStarted))?Math.max(0,Math.trunc(Number(saved.attemptsStarted))):0,
     executionIntentsStarted:Number.isFinite(Number(saved?.executionIntentsStarted))
       ?Math.max(0,Math.trunc(Number(saved.executionIntentsStarted)))
@@ -2808,6 +2848,9 @@ export async function buildHistoricalSeriesReport(env,seriesId) {
     threshold:seriesConfig?.threshold??null,
     stakeUsd:seriesConfig?.maxEntryDebitUsd??null,
     attemptTarget:seriesConfig?.attemptTarget??null,
+    accountingSemantics:seriesConfig?.accountingSemantics
+      ?? ((String(currentSeries?.seriesId||'')===id)?currentSeries?.accountingSemantics:null),
+    legacyQuarantined:(String(currentSeries?.seriesId||'')===id)?currentSeries?.legacyQuarantined===true:false,
     attemptsCompleted:perAttempt.filter(x=>x.finalResult!=='UNKNOWN').length,
     attempted:perAttempt.length,
     filled,

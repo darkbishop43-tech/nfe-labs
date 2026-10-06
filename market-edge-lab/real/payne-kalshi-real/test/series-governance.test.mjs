@@ -9,6 +9,7 @@ import {
   saveRealSeriesState,
   loadRealSeriesState,
   listRealLedger,
+  buildHistoricalSeriesReport,
   runPayneRealExecutionCycle,
   interpretPayneOrderResponse,
   runReadOnlyScan,
@@ -685,6 +686,118 @@ test('GOV 20: mid-run control changes cannot mutate the active series snapshot',
 });
 
 // ---------- 21,22,23 existing checks preserved ----------
+
+test('LEGACY QUARANTINE A/B/C: old 4/5 accounting is terminalized without rewriting history and next .70 x5 $1 ARM creates a fresh repaired 0/5 series',async()=>{
+  const LEGACY_ID='568186d7-57a8-42b0-80ed-db0429786fe2';
+  const e=await env(),io=installProvider();
+  try{
+    await configure(e,{threshold:.70,stake:1,target:5});
+    const legacy={
+      schema:'PAYNE_REAL_SERIES_V1',owner:'PAYNE_KALSHI_REAL',seriesId:LEGACY_ID,
+      status:'SERIES_PAUSED_DISARMED',attemptsStarted:4,attemptTarget:5,
+      threshold:.70,effectiveLockThreshold:.65,maxEntryDebitUsd:1,requiredExchangeIndex:2,
+      configFrozen:true,frozenAt:'2026-10-05T00:00:00.000Z',unresolvedEntry:false,
+      fireLatch:null,currentAttempt:{attemptId:LEGACY_ID+'-4',attemptNo:4,status:'NO_FILL'},position:null,completedAt:null,
+    };
+    // Directly seed pre-marker persisted state to represent the actual old-accounting compatibility case.
+    await e.PAYNE_KALSHI_STATE.put('payne-kalshi:real-series:v1',JSON.stringify(legacy));
+    await e.PAYNE_KALSHI_STATE.put('payne-kalshi:run:'+LEGACY_ID,JSON.stringify({
+      runId:LEGACY_ID,threshold:.70,effectiveLockThreshold:.65,maxEntryDebitUsd:1,attemptTarget:5,requiredExchangeIndex:2,frozenAt:legacy.frozenAt
+    }));
+    for(let n=1;n<=4;n++){
+      await e.PAYNE_KALSHI_STATE.put('payne-kalshi:attempt:'+LEGACY_ID+':attempt:'+n,JSON.stringify({
+        schema:'PAYNE_REAL_ATTEMPT_V1',owner:'PAYNE_KALSHI_REAL',runId:LEGACY_ID,seriesId:LEGACY_ID,
+        attemptId:LEGACY_ID+'-'+n,attemptNo:n,asset:'BTC',marketTicker:'KXBTC15M-REALTEST',outcomeSide:'YES',
+        score:.71,threshold:.70,status:'NO_FILL',result:'NO_FILL'
+      }));
+    }
+
+    const loaded=await loadRealSeriesState(e);
+    assert.equal(loaded.seriesId,LEGACY_ID);
+    assert.equal(loaded.attemptsStarted,4);
+    assert.equal(loaded.attemptTarget,5);
+    assert.equal(loaded.accountingSemantics,'LEGACY_PRE_PROVIDER_BOUNDARY_V0');
+
+    // Disarmed maintenance quarantines; no provider interaction is required.
+    const quarantined=await runPayneRealExecutionCycle(e,{nowMs:T0});
+    assert.equal(quarantined.seriesId,LEGACY_ID);
+    assert.equal(quarantined.status,'TERMINAL_LEGACY_ACCOUNTING_QUARANTINED');
+    assert.equal(quarantined.terminalReason,'LEGACY_PRE_PROVIDER_ACCOUNTING_NON_RESUMABLE');
+    assert.equal(quarantined.legacyQuarantined,true);
+    assert.equal(quarantined.attemptsStarted,4);
+    assert.equal(quarantined.attemptTarget,5);
+    assert.ok(quarantined.completedAt);
+
+    const history=await buildHistoricalSeriesReport(e,LEGACY_ID);
+    assert.equal(history.seriesId,LEGACY_ID);
+    assert.equal(history.attemptTarget,5);
+    assert.equal(history.attempted,4);
+    assert.equal(history.attempts.length,4);
+    assert.deepEqual(history.attempts.map(x=>x.attemptNo),[1,2,3,4]);
+    assert.equal(history.legacyQuarantined,true);
+    assert.equal(history.accountingSemantics,'LEGACY_PRE_PROVIDER_BOUNDARY_V0');
+
+    // Founder ARM simulation is in-memory zero-money only: terminal legacy record cannot resume.
+    const oldId=quarantined.seriesId;
+    await updateFounderControl(e,'ARM');
+    const fresh=await loadRealSeriesState(e);
+    assert.notEqual(fresh.seriesId,oldId);
+    assert.equal(fresh.accountingSemantics,'PROVIDER_POST_BOUNDARY_V1');
+    assert.equal(fresh.legacyQuarantined,false);
+    assert.equal(fresh.attemptsStarted,0);
+    assert.equal(fresh.executionIntentsStarted,0);
+    assert.equal(fresh.attemptTarget,5);
+    assert.equal(fresh.threshold,.70);
+    assert.equal(fresh.maxEntryDebitUsd,1);
+    const obs=summarizeRealExecutionState({control:await loadControl(e),series:fresh,ledger:await listRealLedger(e,1000)});
+    assert.equal(obs.executionIntents,0);
+    assert.equal(obs.providerOrderAttempts,0);
+    assert.equal(obs.filled,0);
+    assert.equal(obs.noFill,0);
+    assert.equal(obs.noProviderExecution,0);
+    assert.equal(obs.invalidatedBeforePost,0);
+    assert.equal(obs.unknown,0);
+    await updateFounderControl(e,'DISARM');
+    assert.equal((await loadControl(e)).armed,false);
+    assert.equal(providerPosts(io),0);
+  }finally{io.restore();}
+});
+
+test('LEGACY QUARANTINE D: legitimate repaired-semantic unfinished series still resumes with same identity and provider-attempt count',async()=>{
+  const e=await env(),io=installProvider();
+  try{
+    await configure(e,{threshold:.70,stake:1,target:5});
+    const repaired=await saveRealSeriesState(e,{
+      ...defaultRealSeriesState(),
+      seriesId:'REPAIRED-RESUME',
+      status:'SERIES_PAUSED_DISARMED',
+      attemptsStarted:2,
+      executionIntentsStarted:3,
+      attemptTarget:5,
+      threshold:.70,
+      effectiveLockThreshold:.65,
+      maxEntryDebitUsd:1,
+      requiredExchangeIndex:2,
+      configFrozen:true,
+      frozenAt:'2026-10-05T01:00:00.000Z',
+      unresolvedEntry:false,
+      currentAttempt:{attemptId:'REPAIRED-RESUME-intent-3',intentNo:3,attemptNo:2,providerAttemptNo:2,status:'NO_FILL'},
+      position:null,
+      completedAt:null,
+    });
+    assert.equal(repaired.accountingSemantics,'PROVIDER_POST_BOUNDARY_V1');
+    await updateFounderControl(e,'ARM');
+    const resumed=await loadRealSeriesState(e);
+    assert.equal(resumed.seriesId,'REPAIRED-RESUME');
+    assert.equal(resumed.attemptsStarted,2);
+    assert.equal(resumed.executionIntentsStarted,3);
+    assert.equal(resumed.status,'ARMED_WAITING');
+    await updateFounderControl(e,'DISARM');
+    assert.equal((await loadControl(e)).armed,false);
+    assert.equal(providerPosts(io),0);
+  }finally{io.restore();}
+});
+
 test('ARM blocker regression: clean disarmed 1/5 @ .70 is superseded for Founder .60 x1 without provider writes',async()=>{
   const e=await env(),io=installProvider(),post=postFixture(NOFILL);
   try{
