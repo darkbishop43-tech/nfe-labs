@@ -239,7 +239,7 @@ test('authoritative Payne feature read uses PAYNE-owned direct source and no Bas
     assert.equal(out.binding,'PAYNE_KALSHI_STATE');
     assert.equal(out.baselineStateRead,false);
     assert.ok(Math.abs(out.opportunities.find(x=>x.asset==='BTC'&&x.outcomeSide==='YES').move-.003)<1e-12);
-    assert.equal(out.opportunities.find(x=>x.asset==='BTC'&&x.outcomeSide==='YES').edge,.054);
+    assert.ok(Math.abs(out.opportunities.find(x=>x.asset==='BTC'&&x.outcomeSide==='YES').edge-.054)<1e-12);
     assert.equal(out.opportunities.find(x=>x.asset==='BTC'&&x.outcomeSide==='YES').score,.716);
   } finally { io.restore(); }
 });
@@ -308,9 +308,9 @@ test('cockpit calculates authentic Payne fields, decisions, clocks, exact reread
     assert.equal(out.selected.direction,'UP');
     assert.equal(out.payne.source,'KALSHI_AUTHORITATIVE');
     assert.ok(Math.abs(out.payne.move-.003)<1e-12);
-    assert.equal(out.payne.fair,.544);
-    assert.equal(out.payne.edge,.054);
-    assert.equal(out.payne.score,.716);
+    assert.ok(Math.abs(out.payne.fair-.544)<1e-12);
+    assert.ok(Math.abs(out.payne.edge-.054)<1e-12);
+    assert.ok(Math.abs(out.payne.score-.716)<1e-12);
     assert.equal(out.payne.state,'PULL_TRIGGER');
     assert.equal(out.selected.decision.radar,'RADAR_PASS');
     assert.equal(out.selected.decision.lock,'LOCK_PASS');
