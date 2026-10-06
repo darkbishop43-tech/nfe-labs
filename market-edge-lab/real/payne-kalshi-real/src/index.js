@@ -2830,12 +2830,15 @@ export function summarizeRealExecutionState({control={},series={},ledger=[],asOf
   const seriesId=series?.seriesId||null;
   const allRows=Array.isArray(ledger)?[...ledger].sort((a,b)=>Date.parse(a?.at||0)-Date.parse(b?.at||0)):[];
   const rows=seriesId?allRows.filter(row=>String(row?.seriesId||'')===String(seriesId)):allRows.filter(row=>!row?.seriesId);
-  const attemptIds=new Set();
+  const executionIntentIds=new Set();
+  const providerAttemptIds=new Set();
   const latestByAttempt=new Map();
   for(const row of rows){
     const attemptId=row?.attemptId||null;
     if(!attemptId) continue;
-    if(['ENTRY_PRE_SUBMIT_LATCHED','ENTRY_NO_FILL','ENTRY_RESULT_UNKNOWN','ENTRY_PROVIDER_REJECTED_OR_UNKNOWN','ENTRY_WRITE_ERROR_UNKNOWN','POSITION_OWNERSHIP_ESTABLISHED','ENTRY_RECONCILED_NO_EXECUTION','ENTRY_RECONCILED_OWNED','ENTRY_RECONCILED_SETTLED_FLAT'].includes(String(row?.type||''))) attemptIds.add(attemptId);
+    const type=String(row?.type||'');
+    if(['ENTRY_PRE_SUBMIT_LATCHED','ENTRY_LOCAL_PRE_PROVIDER_REJECTED','FIRE_SPECIMEN_INVALIDATED_BEFORE_POST','ENTRY_RECONCILED_NO_EXECUTION','ENTRY_PROVIDER_POST_STARTED','ENTRY_NO_FILL','ENTRY_RESULT_UNKNOWN','ENTRY_PROVIDER_REJECTED_OR_UNKNOWN','ENTRY_WRITE_ERROR_UNKNOWN','POSITION_OWNERSHIP_ESTABLISHED','ENTRY_RECONCILED_OWNED','ENTRY_RECONCILED_SETTLED_FLAT'].includes(type)) executionIntentIds.add(attemptId);
+    if(['ENTRY_PROVIDER_POST_STARTED','ENTRY_NO_FILL','ENTRY_RESULT_UNKNOWN','ENTRY_PROVIDER_REJECTED_OR_UNKNOWN','ENTRY_WRITE_ERROR_UNKNOWN','POSITION_OWNERSHIP_ESTABLISHED','ENTRY_RECONCILED_OWNED','ENTRY_RECONCILED_SETTLED_FLAT'].includes(type)) providerAttemptIds.add(attemptId);
     if(!latestByAttempt.has(attemptId)) latestByAttempt.set(attemptId,[]);
     latestByAttempt.get(attemptId).push(row);
   }
@@ -2844,12 +2847,16 @@ export function summarizeRealExecutionState({control={},series={},ledger=[],asOf
   const filledIds=new Set([...classifications.entries()].filter(([,v])=>v==='FILLED').map(([k])=>k));
   const noFillIds=new Set([...classifications.entries()].filter(([,v])=>v==='NO_FILL').map(([k])=>k));
   const prePostInvalidatedIds=new Set([...classifications.entries()].filter(([,v])=>v==='INVALIDATED_BEFORE_POST').map(([k])=>k));
-  const reconciledNoExecutionIds=new Set([...classifications.entries()].filter(([,v])=>v==='PROVIDER_RECONCILED_NO_EXECUTION').map(([k])=>k));
+  const noProviderExecutionIds=new Set([...classifications.entries()].filter(([,v])=>v==='NO_PROVIDER_EXECUTION').map(([k])=>k));
   const unknownIds=new Set([...classifications.entries()].filter(([,v])=>v==='UNKNOWN').map(([k])=>k));
   const attempted=Math.max(
     Number.isFinite(Number(series?.attemptsStarted))?Math.max(0,Math.trunc(Number(series.attemptsStarted))):0,
     Number.isFinite(Number(control?.attempts))?Math.max(0,Math.trunc(Number(control.attempts))):0,
-    attemptIds.size
+    providerAttemptIds.size
+  );
+  const executionIntents=Math.max(
+    Number.isFinite(Number(series?.executionIntentsStarted))?Math.max(0,Math.trunc(Number(series.executionIntentsStarted))):0,
+    executionIntentIds.size
   );
   const target=Number.isFinite(Number(series?.attemptTarget))?Math.max(1,Math.trunc(Number(series.attemptTarget))):
     Number.isFinite(Number(control?.attemptTarget))?Math.max(1,Math.trunc(Number(control.attemptTarget))):1;
@@ -2869,27 +2876,28 @@ export function summarizeRealExecutionState({control={},series={},ledger=[],asOf
   const latestLedgerEvent=rows.length?rows[rows.length-1]:null;
   const currentAttempt=series?.currentAttempt||null;
   const providerResult=currentAttempt?.providerResult||null;
-  let lastAttemptResult='NO_PROVIDER_ATTEMPT';
-  if(attempted>0){
-    const state=String(providerResult?.state||currentAttempt?.status||'').toUpperCase();
-    if(state==='FILLED'||state==='PARTIAL') lastAttemptResult='FILLED';
-    else if(state==='NO_FILL') lastAttemptResult='NO_FILL';
-    else if(state==='INVALIDATED_BEFORE_POST') lastAttemptResult='INVALIDATED_BEFORE_POST';
-    else if(state==='PROVIDER_RECONCILED_NO_EXECUTION') lastAttemptResult='PROVIDER_RECONCILED_NO_EXECUTION';
-    else if(state==='UNKNOWN'||rawSeriesStatus.includes('UNKNOWN')||series?.unresolvedEntry===true) lastAttemptResult='UNKNOWN';
-    else if(filledIds.size>0) lastAttemptResult='FILLED';
-    else if(noFillIds.size>0) lastAttemptResult='NO_FILL';
-    else if(unknownIds.size>0) lastAttemptResult='UNKNOWN';
-    else lastAttemptResult='UNKNOWN';
-  }
+  let lastAttemptResult=executionIntents>0?'EXECUTION_INTENT':'NO_PROVIDER_ATTEMPT';
+  const state=String(providerResult?.state||currentAttempt?.status||'').toUpperCase();
+  if(state==='FILLED'||state==='PARTIAL') lastAttemptResult='FILLED';
+  else if(state==='NO_FILL') lastAttemptResult='NO_FILL';
+  else if(state==='NO_PROVIDER_EXECUTION'||state==='PROVIDER_RECONCILED_NO_EXECUTION') lastAttemptResult='NO_PROVIDER_EXECUTION';
+  else if(state==='INVALIDATED_BEFORE_POST') lastAttemptResult='INVALIDATED_BEFORE_POST';
+  else if(state==='UNKNOWN'||rawSeriesStatus.includes('UNKNOWN')||series?.unresolvedEntry===true) lastAttemptResult='UNKNOWN';
+  else if(filledIds.size>0) lastAttemptResult='FILLED';
+  else if(noFillIds.size>0) lastAttemptResult='NO_FILL';
+  else if(noProviderExecutionIds.size>0) lastAttemptResult='NO_PROVIDER_EXECUTION';
+  else if(unknownIds.size>0) lastAttemptResult='UNKNOWN';
+
   const holdReason=series?.fireLatch?.invalidationReason
     || currentAttempt?.providerResult?.reason
     || (attempted===0 && rawSeriesStatus.startsWith('HOLD_')?rawSeriesStatus:null);
-  if(latestLedgerEvent?.type==='ENTRY_RECONCILED_NO_EXECUTION') lastAttemptResult='PROVIDER_RECONCILED_NO_EXECUTION';
+  if(latestLedgerEvent?.type==='ENTRY_RECONCILED_NO_EXECUTION') lastAttemptResult='NO_PROVIDER_EXECUTION';
   if(latestLedgerEvent?.type==='ENTRY_LOCAL_PRE_PROVIDER_REJECTED' || latestLedgerEvent?.type==='FIRE_SPECIMEN_INVALIDATED_BEFORE_POST') lastAttemptResult='INVALIDATED_BEFORE_POST';
   const lastAttempt={
     result:lastAttemptResult,
     holdReason,
+    intentNo:currentAttempt?.intentNo??null,
+    providerAttemptNo:currentAttempt?.providerAttemptNo??currentAttempt?.attemptNo??null,
     asset:currentAttempt?.asset||position?.asset||null,
     ticker:currentAttempt?.marketTicker||position?.marketTicker||null,
     side:currentAttempt?.outcomeSide||position?.outcomeSide||null,
@@ -2900,6 +2908,10 @@ export function summarizeRealExecutionState({control={},series={},ledger=[],asOf
     submittedPrice:currentAttempt?.preSubmitPrice??null,
     freshLockPrice:currentAttempt?.freshLockPrice??null,
     preSubmitPrice:currentAttempt?.preSubmitPrice??null,
+    writerInvoked:currentAttempt?.writerInvoked===true,
+    providerPostStarted:currentAttempt?.providerPostStarted===true,
+    providerHttpStatus:currentAttempt?.providerHttpStatus??null,
+    providerResponseState:currentAttempt?.providerResponseState??providerResult?.state??null,
     providerOrderId:providerResult?.orderId||position?.entryOrderId||null,
     timestamp:currentAttempt?.preSubmitAt||currentAttempt?.observedAt||position?.entryTime||latestLedgerEvent?.at||null,
   };
@@ -2908,11 +2920,14 @@ export function summarizeRealExecutionState({control={},series={},ledger=[],asOf
     asOf,
     seriesId:series?.seriesId||null,
     armed:control?.armed===true,
+    executionIntents,
+    providerOrderAttempts:attempted,
     attempted,target,remaining,
     filled:filledIds.size,
     noFill:noFillIds.size,
     invalidatedBeforePost:prePostInvalidatedIds.size,
-    providerReconciledNoExecution:reconciledNoExecutionIds.size,
+    noProviderExecution:noProviderExecutionIds.size,
+    providerReconciledNoExecution:noProviderExecutionIds.size,
     unknown:unknownIds.size,
     status,
     rawSeriesStatus,
@@ -2955,7 +2970,7 @@ export function summarizeRealExecutionState({control={},series={},ledger=[],asOf
       attemptId:latestLedgerEvent.attemptId||null,
       ticker:latestLedgerEvent.ticker||null,
       result:latestLedgerEvent.result?.state||latestLedgerEvent.result||null,
-      providerOrderId:latestLedgerEvent.result?.orderId||latestLedgerEvent.entryOrderId||null,
+      providerOrderId:latestLedgerEvent.result?.orderId||latestLedgerEvent.entryOrderId||latestLedgerEvent.providerOrderId||null,
     }:null,
     lastAttempt,
     safeguards:{
