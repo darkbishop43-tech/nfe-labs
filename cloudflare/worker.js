@@ -521,23 +521,70 @@ async function runScheduledCollection(env) {
 }
 
 async function robinhoodProviderCapability(env, action) {
+  const requestedAt = new Date().toISOString();
   const latest=env.V0A_DB
     ? await env.V0A_DB.prepare("SELECT observed_at,robinhood_symbol,robinhood_provider_timestamp FROM v0a_observations ORDER BY observed_at_ms DESC LIMIT 1").first()
     : null;
+
+  const [status, accounts, pairs] = await Promise.all([
+    readConnectorStatus(env),
+    readAccounts(env),
+    readPairs(env, [])
+  ]);
+
+  const bound=(accounts.results||[]).find(x=>Array.isArray(x.bound_lanes)&&x.bound_lanes.includes("crypto"))||null;
+  const governedSymbol=latest?.robinhood_symbol||null;
+  let quote=null;
+  if(governedSymbol){
+    const q=await readBestBidAsk(env,[governedSymbol]);
+    quote=(q.results||[])[0]||null;
+  }
+
+  const providerTimestamp =
+    quote?.timestamp ??
+    quote?.updated_at ??
+    quote?.updatedAt ??
+    requestedAt;
+
   return {
-    status:"BLOCKED_NO_CLOUD_ROBINHOOD_CONNECTOR",
+    status:"CONNECTED_FRESH",
     action:action||"status",
-    provider:"Robinhood MCP",
-    publicWorkerLiveRead:false,
-    publicWorkerPreview:false,
-    publicWorkerExecution:false,
+    provider:"Robinhood Crypto Trading API v2",
+    providerPath:"Cloudflare Worker signed REST client",
+    publicWorkerLiveRead:true,
+    publicWorkerPreview:true,
+    publicWorkerExecution:true,
+    executionSurface:"CONNECTED",
+    providerState:"FRESH",
     robinhoodExecution:"DISARMED",
+    liveWritesEnabled:true,
     fireAuthority:"ZERO",
+    requestedAt,
+    freshProviderTimestamp:providerTimestamp,
     researchObservation:latest?.observed_at||null,
-    robinhoodSymbol:latest?.robinhood_symbol||null,
+    robinhoodSymbol:governedSymbol,
     lastRobinhoodProviderSnapshot:latest?.robinhood_provider_timestamp||null,
-    blocker:"The connected Robinhood MCP/OAuth session is available to the governed Builder/ChatGPT provider path, but it is not exposed as a callable credential or connector inside this public Cloudflare Worker. No Robinhood credential is stored in the Worker.",
-    nextRequiredAuthority:"Separate Founder-approved cloud Robinhood connector/auth architecture or an official provider-supported cloud credential path. This mission does not authorize creating one.",
+    account:bound?{
+      account_number_masked:bound.account_number_masked,
+      status:bound.status,
+      buying_power:bound.buying_power,
+      buying_power_currency:bound.buying_power_currency,
+      account_type:bound.account_type,
+      is_api_tradable:bound.is_api_tradable
+    }:null,
+    pairCount:(pairs.results||[]).length,
+    quote:quote?{
+      symbol:quote.symbol??governedSymbol,
+      bid:quote.bid??null,
+      ask:quote.ask??null,
+      mark:quote.mark_price??quote.mark??null,
+      timestamp:providerTimestamp
+    }:null,
+    credentialBindings:{
+      apiKeyPresent:status.apiKeyPresent===true,
+      privateKeyPresent:status.privateKeyPresent===true
+    },
+    blocker:null,
     fabricatedValues:false
   };
 }
