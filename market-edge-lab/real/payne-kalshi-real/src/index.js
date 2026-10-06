@@ -1664,10 +1664,20 @@ async function synchronizeFireFeatureEpoch(env,series,snapshot,nowMs=Date.now())
   const cfg=frozenSeriesConfig(series);
   const selected=snapshot?.selected||null;
   if(!cfg.ok || !selected?.ticker) return {ok:false,reason:'FIRE_REFRESH_IDENTITY_UNAVAILABLE',series};
-  const state=await readAuthoritativePayneFeatures(env,[selected],nowMs,{forceRefresh:true});
-  const feature=featureForCandidate(state,selected.ticker,selected.outcomeSide,selected.asset,cfg.threshold,selected);
+  const featureMarketRead=await exactMarketRead(env,selected.ticker,selected.asset);
+  const exactMarket=featureMarketRead?.market||null;
+  const exactIdentity=Boolean(
+    featureMarketRead?.ok===true &&
+    exactMarket?.ticker===selected.ticker &&
+    String(exactMarket?.openTime||'')===String(selected?.openTime||'') &&
+    String(exactMarket?.closeTime||'')===String(selected?.closeTime||'')
+  );
+  const state=exactIdentity
+    ? await readAuthoritativePayneFeatures(env,[exactMarket],nowMs,{forceRefresh:true})
+    : {fresh:false,source:'KALSHI_AUTHORITATIVE',lastRunAt:featureMarketRead?.readAt||new Date(nowMs).toISOString(),ageMs:0,error:'FIRE_EXACT_MARKET_IDENTITY_FAILED',opportunities:[]};
+  const feature=featureForCandidate(state,selected.ticker,selected.outcomeSide,selected.asset,cfg.threshold,exactMarket);
   const evidence=payneFeatureBoundaryEvidence(feature,cfg.threshold,cfg.effectiveLockThreshold,'FIRE');
-  const windowMatch=String(feature?.baselineOpenTime||'')===String(selected?.openTime||'')
+  const windowMatch=exactIdentity && String(feature?.baselineOpenTime||'')===String(selected?.openTime||'')
     && String(feature?.baselineCloseTime||'')===String(selected?.closeTime||'');
   const reasons=[...evidence.failureReasons];
   if(!windowMatch) reasons.push('FIRE_WINDOW_MISMATCH');
