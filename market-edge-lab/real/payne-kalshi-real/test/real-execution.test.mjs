@@ -16,6 +16,7 @@ import {
   summarizeRealExecutionState,
   reconcileUnresolvedEntryFromProvider,
   buildHistoricalSeriesReport,
+  listRealAttemptsForSeries,
 } from '../src/index.js';
 import { kalshiPayneOrderPost, payneOrderWriteProof } from '../src/kalshi-real-write.js';
 
@@ -105,7 +106,7 @@ function postFixture(resultBody,status=200){
   const calls=[];
   const fn=async (env,kind,payload,scope)=>{
     calls.push({kind,payload:structuredClone(payload),scope:structuredClone(scope)});
-    return {response:jsonResponse(resultBody,status),proof:payneOrderWriteProof(kind,payload,scope)};
+    return {response:jsonResponse(resultBody,status),proof:payneOrderWriteProof(kind,payload,scope),writerInvoked:true,providerPostStarted:true};
   };
   return {calls,fn};
 }
@@ -140,12 +141,14 @@ test('UNKNOWN entry self-reconciliation: authenticated provider proves FLAT/no e
     assert.equal(out.ok,true);
     assert.equal(out.classification,'FLAT');
     assert.equal(out.reason,'PROVIDER_RECONCILED_NO_EXECUTION');
+    assert.equal(out.terminalClassification,'NO_PROVIDER_EXECUTION');
     assert.equal(out.exactOrderCount,0);
     assert.equal(out.exactFillCount,0);
     assert.equal(out.exactSettlementCount,0);
     assert.equal(out.series.unresolvedEntry,false);
     assert.equal(out.series.position,null);
-    assert.equal(out.series.status,'COMPLETE_NO_FILL_RECONCILED');
+    assert.equal(out.series.status,'COMPLETE_ENTRY_AUTHORITY');
+    assert.equal(out.series.currentAttempt.status,'NO_PROVIDER_EXECUTION');
     assert.equal(out.control.armed,false);
     const ledger=await listRealLedger(e,100);
     assert.ok(ledger.some(x=>x.type==='ENTRY_RECONCILED_NO_EXECUTION'&&x.attemptId==='RECON-FLAT-1'));
@@ -223,8 +226,8 @@ test('scheduled tick self-reconciles a disarmed unresolved entry before any new 
     const after=await loadRealSeriesState(e);
     assert.equal(after.unresolvedEntry,false);
     assert.equal(after.position,null);
-    assert.equal(after.currentAttempt.status,'NO_FILL');
-    assert.equal(after.status,'COMPLETE_NO_FILL_RECONCILED');
+    assert.equal(after.currentAttempt.status,'NO_PROVIDER_EXECUTION');
+    assert.equal(after.status,'COMPLETE_ENTRY_AUTHORITY');
     assert.equal((await loadControl(e)).armed,false);
     assert.equal(io.calls.filter(c=>c.method==='POST').length,0);
   }finally{io.restore();}
@@ -246,7 +249,7 @@ test('historical UNKNOWN is removed when a later authoritative no-execution even
   assert.equal(out.noFill,0);
   assert.equal(out.providerReconciledNoExecution,1);
   assert.equal(out.unknown,0);
-  assert.equal(out.lastAttempt.result,'PROVIDER_RECONCILED_NO_EXECUTION');
+  assert.equal(out.lastAttempt.result,'NO_PROVIDER_EXECUTION');
 });
 
 test('read-only historical series report returns current terminal truth and P&L without provider writes',async()=>{
@@ -308,7 +311,7 @@ test('historical NO_FILL reports zero P&L when no actual provider fee is recorde
   const report=await buildHistoricalSeriesReport(e,seriesId);
   assert.equal(report.noFill,0);
   assert.equal(report.unknownUnresolved,0);
-  assert.equal(report.attempts[0].finalResult,'PROVIDER_RECONCILED_NO_EXECUTION');
+  assert.equal(report.attempts[0].finalResult,'NO_PROVIDER_EXECUTION');
   assert.equal(report.netRealizedPnlUsd,0);
   assert.equal(report.totalFeesUsd,0);
   assert.equal(report.attempts[0].netRealizedPnlUsd,0);
@@ -323,6 +326,132 @@ test('authenticated Payne write transport is fixed to one order POST and zero-mo
   assert.equal(intercepted.options.method,'POST');
   assert.equal(JSON.parse(intercepted.options.body).time_in_force,'immediate_or_cancel');
   assert.equal(out.proof.exchangeIndex,2);
+  assert.equal(out.writerInvoked,true);
+  assert.equal(out.providerPostStarted,true);
+});
+
+
+test('provider-attempt semantics A: local pre-provider rejection records intent but does not consume provider attempt',async()=>{
+  const e=await env(),io=installProvider();
+  const localReject={calls:[],fn:async()=>{
+    localReject.calls.push(1);
+    const error=new Error('ZERO_MONEY_LOCAL_PRE_PROVIDER_REJECT');
+    error.payneWriterInvoked=false;
+    error.payneProviderPostStarted=false;
+    throw error;
+  }};
+  try{
+    await arm(e);
+    const out=await scanThenExecute(e,localReject);
+    assert.equal(localReject.calls.length,1);
+    assert.equal(out.executionIntentsStarted,1);
+    assert.equal(out.attemptsStarted,0);
+    assert.equal(out.unresolvedEntry,false);
+    assert.equal(out.currentAttempt.writerInvoked,false);
+    assert.equal(out.currentAttempt.providerPostStarted,false);
+    assert.equal(out.currentAttempt.providerOrderId,null);
+    assert.equal(out.currentAttempt.status,'INVALIDATED_BEFORE_POST');
+    assert.notEqual(out.currentAttempt.providerResult.state,'NO_FILL');
+    const obs=summarizeRealExecutionState({control:await loadControl(e),series:out,ledger:await listRealLedger(e,100)});
+    assert.equal(obs.executionIntents,1);
+    assert.equal(obs.providerOrderAttempts,0);
+    assert.equal(obs.noFill,0);
+  }finally{io.restore();}
+});
+
+test('provider-attempt semantics B: accepted IOC zero fill counts exactly one provider attempt and retains order identity',async()=>{
+  const e=await env(),io=installProvider(),post=postFixture({order_id:'ORDER-ZERO',client_order_id:'CID-ZERO',fill_count:0,remaining_count:1,average_fill_price:null,average_fee_paid:0});
+  try{
+    await arm(e);
+    const out=await scanThenExecute(e,post);
+    assert.equal(out.executionIntentsStarted,1);
+    assert.equal(out.attemptsStarted,1);
+    assert.equal(out.currentAttempt.writerInvoked,true);
+    assert.equal(out.currentAttempt.providerPostStarted,true);
+    assert.equal(out.currentAttempt.providerOrderId,'ORDER-ZERO');
+    assert.equal(out.currentAttempt.providerResponseState,'NO_FILL');
+    assert.equal(out.currentAttempt.providerResult.fillCount,0);
+    assert.equal(out.currentAttempt.terminalClassification,'NO_FILL');
+  }finally{io.restore();}
+});
+
+test('provider-attempt semantics C: accepted fill counts provider attempt and retains filled quantity',async()=>{
+  const e=await env(),io=installProvider(),post=postFixture({order_id:'ORDER-FILL-BOUNDARY',client_order_id:'CID-FILL',fill_count:1,remaining_count:0,average_fill_price:.50,average_fee_paid:.01});
+  try{
+    await arm(e);
+    const out=await scanThenExecute(e,post);
+    assert.equal(out.attemptsStarted,1);
+    assert.equal(out.currentAttempt.providerPostStarted,true);
+    assert.equal(out.currentAttempt.providerOrderId,'ORDER-FILL-BOUNDARY');
+    assert.equal(out.currentAttempt.providerResponseState,'FILLED');
+    assert.equal(out.position.filledCount,1);
+    assert.equal(out.currentAttempt.terminalClassification,'FILLED');
+  }finally{io.restore();}
+});
+
+test('provider-attempt semantics D: ambiguous provider response counts boundary once and requires reconciliation without retry',async()=>{
+  const e=await env(),io=installProvider({position:'ABSENT',orders:[],fills:[],historicalFills:[],settlements:[]});
+  let calls=0;
+  const ambiguous=async()=>{
+    calls++;
+    const error=new Error('ZERO_MONEY_TRANSPORT_AMBIGUOUS');
+    error.payneWriterInvoked=true;
+    error.payneProviderPostStarted=true;
+    throw error;
+  };
+  try{
+    await arm(e);
+    await runReadOnlyScan(e,'ZERO_MONEY_AMBIGUOUS',Date.parse('2026-10-02T06:05:00Z'));
+    const first=await runPayneRealExecutionCycle(e,{postImpl:ambiguous,nowMs:Date.parse('2026-10-02T06:05:00Z')});
+    assert.equal(calls,1);
+    assert.equal(first.attemptsStarted,1);
+    assert.equal(first.currentAttempt.providerPostStarted,true);
+    assert.equal(first.currentAttempt.providerResponseState,'UNKNOWN');
+    assert.equal(first.unresolvedEntry,true);
+    assert.equal(first.status,'ENTRY_RECONCILIATION_REQUIRED');
+    const second=await runPayneRealExecutionCycle(e,{postImpl:ambiguous,nowMs:Date.parse('2026-10-02T06:05:30Z')});
+    assert.equal(calls,1);
+    assert.equal(second.attemptsStarted,1);
+    assert.equal(second.unresolvedEntry,false);
+    assert.equal(second.currentAttempt.status,'NO_PROVIDER_EXECUTION');
+    assert.equal(second.currentAttempt.terminalClassification,'NO_PROVIDER_EXECUTION');
+  }finally{io.restore();}
+});
+
+test('provider-attempt semantics E: multiple execution intents remain independently durable while only real provider boundary advances target',async()=>{
+  const e=await env(),io=installProvider();
+  let localCalls=0;
+  const localReject=async()=>{
+    localCalls++;
+    const error=new Error('ZERO_MONEY_LOCAL_REJECT');
+    error.payneWriterInvoked=false;
+    error.payneProviderPostStarted=false;
+    throw error;
+  };
+  const zero=postFixture({order_id:'ORDER-AFTER-LOCAL',client_order_id:'CID-AFTER-LOCAL',fill_count:0,remaining_count:1,average_fee_paid:0});
+  try{
+    await updateFounderControl(e,'SET_ATTEMPT_TARGET',5);
+    await arm(e);
+    await runReadOnlyScan(e,'ZERO_MONEY_RETENTION_1',Date.parse('2026-10-02T06:05:00Z'));
+    const first=await runPayneRealExecutionCycle(e,{postImpl:localReject,nowMs:Date.parse('2026-10-02T06:05:00Z')});
+    assert.equal(first.executionIntentsStarted,1);
+    assert.equal(first.attemptsStarted,0);
+
+    await runReadOnlyScan(e,'ZERO_MONEY_RETENTION_2',Date.parse('2026-10-02T06:05:10Z'));
+    const second=await runPayneRealExecutionCycle(e,{postImpl:zero.fn,nowMs:Date.parse('2026-10-02T06:05:10Z')});
+    assert.equal(second.executionIntentsStarted,2);
+    assert.equal(second.attemptsStarted,1);
+
+    const attempts=await listRealAttemptsForSeries(e,second.seriesId);
+    assert.equal(attempts.length,2);
+    assert.equal(attempts[0].intentNo,1);
+    assert.equal(attempts[0].providerAttemptCounted,false);
+    assert.equal(attempts[0].status,'INVALIDATED_BEFORE_POST');
+    assert.equal(attempts[1].intentNo,2);
+    assert.equal(attempts[1].providerAttemptCounted,true);
+    assert.equal(attempts[1].providerAttemptNo,1);
+    assert.equal(attempts[1].providerOrderId,'ORDER-AFTER-LOCAL');
+  }finally{io.restore();}
 });
 
 test('authenticated Payne write transport permits only PAYNE-owned reduce-only EXIT',async()=>{
