@@ -192,6 +192,8 @@ jobs:
 
       - name: Verify authenticated Robinhood Crypto read surfaces
         shell: bash
+        env:
+          LIVE_URL: ${{ steps.deploy.outputs.live_url }}
         run: |
           set -euo pipefail
 
