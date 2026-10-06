@@ -147,6 +147,8 @@ function renderOperational(){
  const lockSpreadPct=(lockMark&&lockSpread!=null)?lockSpread/Number(lockMark):(snapshotMatchesRuntime?l.spreadPct:null);
  const previewState=durableSpecimenMatchesRuntime&&activePreview?'CURRENT SPECIMEN PREVIEW':(snapshotMatchesRuntime?l.previewState:'INVALID — DIFFERENT SPECIMEN');
  const approvalState=durableSpecimenMatchesRuntime&&durable?.approval?.specimenFp===durable?.specimenFp?'BOUND TO CURRENT SPECIMEN':(snapshotMatchesRuntime?l.founderApproval:'INVALID — DIFFERENT SPECIMEN');
+ if(el('executionBadge')) el('executionBadge').textContent=durableState;
+ if(el('executionSurfaceState')) el('executionSurfaceState').textContent=scan?.executionSurface||'';
  el('quickState').innerHTML=`<div class="kv"><span>Current lifecycle</span><b>${durableState}</b><span>Current candidate</span><b>${candidate?.symbol||r.leader||l.symbol||'NONE'}</b><span>Candidate SI_CORE_V0A</span><b>${candidate?.score==null?'NOT YET RANKED':num(candidate.score,4)}</b><span>Qualification mode</span><b>${candidate?'FIRST SPECIMEN — RANK ONLY / NO PERMANENT THRESHOLD':'START PROVIDER SCAN TO RANK'}</b><span>Robinhood LOCK</span><b>${providerFresh&&lockSymbol?'FRESH · '+lockSymbol:(l.state+' · '+(lockSymbol||'NONE'))}</b><span>Execution authority</span><b>${durableState}</b><span>Armed</span><b>${durableArmed?'YES':'NO'}</b><span>Position state</span><b>${durable?.owned?'OWNED':p.state}</b></div>`;
  el('executionStrip').innerHTML=`
    <div><span>EXECUTION</span><strong class="${durableArmed?'current':'stale'}">${durableState}</strong><small>${providerFresh?'PROVIDER CONNECTED / FRESH':o.execution.reason}</small></div>
