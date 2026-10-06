@@ -39,6 +39,53 @@ jobs:
           test -n "$CLOUDFLARE_API_TOKEN" || { echo "Missing CLOUDFLARE_API_TOKEN"; exit 1; }
           test -n "$CLOUDFLARE_ACCOUNT_ID" || { echo "Missing CLOUDFLARE_ACCOUNT_ID"; exit 1; }
 
+      - name: Pre-deploy Robinhood execution safety gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          LIVE_URL="https://nfe-os-robinhood-observatory.darkbishop43.workers.dev"
+
+          curl --fail --silent --show-error --location "$LIVE_URL/api/robinhood/execution/state" --output /tmp/pre-execution.json
+          cat /tmp/pre-execution.json
+
+          node - <<'NODE'
+          const fs=require('fs');
+          const x=JSON.parse(fs.readFileSync('/tmp/pre-execution.json','utf8'));
+          const s=x.state||{};
+          if(s.owned!==null) throw new Error('PREDEPLOY_OWNED_POSITION_PRESENT');
+          if(s.reconciliation!=='FLAT') throw new Error('PREDEPLOY_RECONCILIATION_NOT_FLAT');
+          if(s.entryIntent!==null) throw new Error('PREDEPLOY_ENTRY_INTENT_PRESENT');
+          if(s.exitIntent!==null) throw new Error('PREDEPLOY_EXIT_INTENT_PRESENT');
+          console.log('PREDEPLOY durable lifecycle flat PASS',JSON.stringify({armed:s.armed,state:s.state,owned:s.owned,reconciliation:s.reconciliation}));
+          NODE
+
+          curl --fail --silent --show-error --location "$LIVE_URL/api/robinhood/crypto/holdings" --output /tmp/pre-holdings.json
+          curl --fail --silent --show-error --get "$LIVE_URL/api/robinhood/crypto/orders" --data-urlencode "state=open" --output /tmp/pre-orders.json
+          node - <<'NODE'
+          const fs=require('fs');
+          const h=JSON.parse(fs.readFileSync('/tmp/pre-holdings.json','utf8'));
+          const o=JSON.parse(fs.readFileSync('/tmp/pre-orders.json','utf8'));
+          if((h.results||[]).length!==0) throw new Error('PREDEPLOY_PROVIDER_POSITION_PRESENT');
+          if((o.results||[]).length!==0) throw new Error('PREDEPLOY_PROVIDER_OPEN_ORDER_PRESENT');
+          console.log('PREDEPLOY provider flat PASS',JSON.stringify({positions:(h.results||[]).length,openOrders:(o.results||[]).length}));
+          NODE
+
+          if node -e "const x=require('/tmp/pre-execution.json');process.exit(x.state?.armed===true?0:1)"; then
+            echo "Pre-deploy durable state is ARMED; issuing authorized DISARM only."
+            curl --fail --silent --show-error --location -X POST -H 'content-type: application/json' --data '{}' "$LIVE_URL/api/robinhood/execution/disarm" --output /tmp/pre-disarm.json
+            cat /tmp/pre-disarm.json
+          fi
+
+          curl --fail --silent --show-error --location "$LIVE_URL/api/robinhood/execution/state" --output /tmp/pre-final-state.json
+          node - <<'NODE'
+          const fs=require('fs');
+          const x=JSON.parse(fs.readFileSync('/tmp/pre-final-state.json','utf8'));
+          const s=x.state||{};
+          if(s.armed!==false||s.state!=='DISARMED') throw new Error('PREDEPLOY_DISARM_NOT_AUTHORITATIVE');
+          if(s.owned!==null||s.reconciliation!=='FLAT'||s.entryIntent!==null||s.exitIntent!==null) throw new Error('PREDEPLOY_LIFECYCLE_NOT_CLEAN');
+          console.log('PREDEPLOY authoritative DISARMED PASS',JSON.stringify({armed:s.armed,state:s.state,owned:s.owned,reconciliation:s.reconciliation}));
+          NODE
+
       - name: Ensure dedicated SI V0-A D1 exists
         id: d1
         shell: bash
@@ -196,12 +243,17 @@ jobs:
           if(x.publicWorkerLiveRead!==true) throw new Error('ROBINHOOD_LIVE_READ_NOT_ENABLED');
           if(x.providerState!=='FRESH') throw new Error('ROBINHOOD_PROVIDER_STATE_NOT_FRESH');
           if(x.executionSurface!=='CONNECTED') throw new Error('ROBINHOOD_EXECUTION_SURFACE_NOT_CONNECTED');
-          if(x.robinhoodExecution!=='DISARMED'||x.fireAuthority!=='ZERO') throw new Error('ROBINHOOD_EXECUTION_AUTHORITY_EXPANDED');
+          if(x.robinhoodExecution!=='DISARMED'||x.armed!==false||x.fireAuthority!=='ZERO') throw new Error('ROBINHOOD_EXECUTION_AUTHORITY_EXPANDED');
           if(!x.freshProviderTimestamp) throw new Error('ROBINHOOD_FRESH_PROVIDER_TIMESTAMP_MISSING');
           if(!x.account||!x.account.account_number_masked) throw new Error('ROBINHOOD_FRESH_ACCOUNT_STATE_MISSING');
           if(!x.quote||!x.quote.symbol||x.quote.bid==null||x.quote.ask==null) throw new Error('ROBINHOOD_FRESH_QUOTE_MISSING');
           if(x.credentialBindings?.apiKeyPresent!==true||x.credentialBindings?.privateKeyPresent!==true) throw new Error('ROBINHOOD_CREDENTIAL_BINDINGS_NOT_PRESENT');
-          console.log('VERIFY Robinhood production connector FRESH PASS',JSON.stringify({status:x.status,providerState:x.providerState,executionSurface:x.executionSurface,freshProviderTimestamp:x.freshProviderTimestamp,symbol:x.quote.symbol,bid:x.quote.bid,ask:x.quote.ask,account:x.account.account_number_masked,execution:x.robinhoodExecution,fireAuthority:x.fireAuthority}));
+          if(x.candidate?.status!=='READY') throw new Error('FIRST_SPECIMEN_CANDIDATE_NOT_READY');
+          if(x.candidate?.mode!=='FIRST_SPECIMEN_RANK_ONLY_NO_THRESHOLD'||x.candidate?.firstSpecimenOnly!==true) throw new Error('FIRST_SPECIMEN_QUALIFICATION_MODE_MISMATCH');
+          if(x.candidate?.qualificationThreshold!==null) throw new Error('PERMANENT_THRESHOLD_WAS_INVENTED');
+          if(!x.candidate?.leader?.symbol||!Number.isFinite(Number(x.candidate?.leader?.score))||x.candidate?.leader?.isApiTradable!==true) throw new Error('VALID_SI_RANKED_LEADER_MISSING');
+          if(x.candidate.leader.symbol!==x.quote.symbol) throw new Error('FRESH_LOCK_SYMBOL_DOES_NOT_MATCH_RANKED_LEADER');
+          console.log('VERIFY Robinhood production connector + first-specimen qualification PASS',JSON.stringify({status:x.status,providerState:x.providerState,executionSurface:x.executionSurface,freshProviderTimestamp:x.freshProviderTimestamp,symbol:x.quote.symbol,bid:x.quote.bid,ask:x.quote.ask,account:x.account.account_number_masked,execution:x.robinhoodExecution,armed:x.armed,fireAuthority:x.fireAuthority,qualificationMode:x.candidate.mode,qualificationThreshold:x.candidate.qualificationThreshold,leader:x.candidate.leader}));
           NODE
           curl --fail --silent --show-error --location "$LIVE_URL/api/robinhood/crypto/status" --output /tmp/rh-read-status
           cat /tmp/rh-read-status
