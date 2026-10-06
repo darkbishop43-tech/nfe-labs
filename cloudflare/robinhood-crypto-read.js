@@ -126,8 +126,11 @@ export async function readAccounts(env){
     results:(data.results||[]).map(x=>({...sanitizeAccount(x),bound_lanes:maskAccount(x.account_number)==="••••"+bound?["crypto"]:[]}))
   };
 }
-export async function readPairs(env,symbols=[]){
-  return signedGet(env,"/api/v2/crypto/trading/trading_pairs/",symbols.length?{symbol:symbols}:{});
+export async function readPairs(env,symbols=[],cursor=null){
+  return signedGet(env,"/api/v2/crypto/trading/trading_pairs/",{
+    ...(symbols.length?{symbol:symbols}:{}),
+    ...(cursor?{cursor}:{})
+  });
 }
 export async function readBestBidAsk(env,symbols){
   if(!symbols?.length) throw new Error("symbol required");
