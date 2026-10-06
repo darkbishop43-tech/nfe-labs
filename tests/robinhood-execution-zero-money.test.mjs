@@ -33,4 +33,42 @@ await ok('23 real BUY = 0',async()=>{assert.ok(true)});
 await ok('24 real SELL = 0',async()=>{assert.ok(true)});
 await ok('25 real CANCEL = 0',async()=>{assert.ok(true)});
 await ok('26 capital moved USD 0.00',async()=>{assert.equal(0,0)});
-console.log(`RESULT ${passed}/26 GREEN — MOCK ONLY — CAPITAL MOVED USD 0.00`);
+
+await ok('27 runtime candidate propagates through exact specimen fingerprint',async()=>{
+  const candidate='runtime-'+crypto.randomUUID();
+  const s=spec(); s.symbol=candidate;
+  const {engine,provider}=setup();
+  await engine.arm();
+  const locked=await engine.lock(s);
+  assert.equal(locked.specimen.symbol,candidate);
+  const previewed=await engine.preview({runtimeCandidate:candidate});
+  assert.equal(previewed.specimen.symbol,candidate);
+  const approved=await engine.approve({specimenFp:previewed.specimenFp,approvalId:'approval-'+crypto.randomUUID()});
+  assert.equal(approved.approval.specimenFp,approved.specimenFp);
+  assert.equal(approved.specimen.symbol,candidate);
+  assert.equal(provider.calls.length,0);
+});
+
+await ok('28 material runtime candidate change invalidates prior preview and approval',async()=>{
+  const candidateA='runtime-'+crypto.randomUUID();
+  const candidateB='runtime-'+crypto.randomUUID();
+  assert.notEqual(candidateA,candidateB);
+  const a=spec(); a.symbol=candidateA;
+  const b=spec(); b.symbol=candidateB;
+  const {engine,provider}=setup();
+  await engine.arm();
+  await engine.lock(a);
+  const previewA=await engine.preview({runtimeCandidate:candidateA});
+  const approvedA=await engine.approve({specimenFp:previewA.specimenFp,approvalId:'approval-'+crypto.randomUUID()});
+  const oldFp=approvedA.approval.specimenFp;
+  const lockedB=await engine.lock(b);
+  assert.equal(lockedB.specimen.symbol,candidateB);
+  assert.equal(lockedB.approval,null);
+  assert.notEqual(lockedB.specimenFp,oldFp);
+  const previewB=await engine.preview({runtimeCandidate:candidateB});
+  await assert.rejects(()=>engine.approve({specimenFp:oldFp,approvalId:'approval-'+crypto.randomUUID()}),/MISMATCH/);
+  assert.equal(previewB.specimen.symbol,candidateB);
+  assert.equal(provider.calls.length,0);
+});
+
+console.log(`RESULT ${passed}/28 GREEN — MOCK ONLY — CAPITAL MOVED USD 0.00`);
