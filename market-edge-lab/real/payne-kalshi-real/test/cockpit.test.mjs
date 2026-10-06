@@ -124,13 +124,19 @@ function providerMarket(asset,ticker,series,yesBid='0.47',yesAsk='0.49',exchange
   };
 }
 
-function installKalshiFetch({btcExchangeIndex=2,index2Balance=15.91,index3Balance=0}={}){
+function installKalshiFetch({btcExchangeIndex=2,index2Balance=15.91,index3Balance=0,spotSequences={}}={}){
   const original=globalThis.fetch;
-  const urls=[];
+  const urls=[]; const spotNo={};
   globalThis.fetch=async (url,options={})=>{
     urls.push(String(url));
     const u=String(url);
-    if(u.includes('api.exchange.coinbase.com/products/') && u.includes('/ticker')) return jsonResponse({price:'100'});
+    if(u.includes('api.exchange.coinbase.com/products/') && u.includes('/ticker')){
+      const m=/products\/([^/]+)-USD\/ticker/.exec(u);
+      const asset=m?.[1]||'BTC';
+      const seq=Array.isArray(spotSequences?.[asset])?spotSequences[asset]:[100];
+      const i=spotNo[asset]||0; spotNo[asset]=i+1;
+      return jsonResponse({price:String(seq[Math.min(i,seq.length-1)])});
+    }
     if(u.includes('/portfolio/balance')) return jsonResponse({balance_breakdown:[
       {exchange_index:0,balance:0},
       {exchange_index:2,balance:index2Balance},
@@ -232,7 +238,7 @@ test('authoritative Payne feature read uses PAYNE-owned direct source and no Bas
     assert.equal(out.transport,'PAYNE_KALSHI_READ');
     assert.equal(out.binding,'PAYNE_KALSHI_STATE');
     assert.equal(out.baselineStateRead,false);
-    assert.equal(out.opportunities.find(x=>x.asset==='BTC'&&x.outcomeSide==='YES').move,.003);
+    assert.ok(Math.abs(out.opportunities.find(x=>x.asset==='BTC'&&x.outcomeSide==='YES').move-.003)<1e-12);
     assert.equal(out.opportunities.find(x=>x.asset==='BTC'&&x.outcomeSide==='YES').edge,.054);
     assert.equal(out.opportunities.find(x=>x.asset==='BTC'&&x.outcomeSide==='YES').score,.716);
   } finally { io.restore(); }
@@ -301,7 +307,7 @@ test('cockpit calculates authentic Payne fields, decisions, clocks, exact reread
     assert.equal(out.selected.ticker,'KXBTC15M-TEST');
     assert.equal(out.selected.direction,'UP');
     assert.equal(out.payne.source,'KALSHI_AUTHORITATIVE');
-    assert.equal(out.payne.move,.003);
+    assert.ok(Math.abs(out.payne.move-.003)<1e-12);
     assert.equal(out.payne.fair,.544);
     assert.equal(out.payne.edge,.054);
     assert.equal(out.payne.score,.716);
@@ -439,39 +445,44 @@ test('zero-money preview blocks when matching Index 2 funding is insufficient',a
   } finally { io.restore(); }
 });
 
-test('stale Baseline feature observation stays UNKNOWN and cannot produce FIRE plan',async()=>{
+test('stale Baseline shadow is ignored by PAYNE direct live qualification',async()=>{
   const stale=baselineShadow({
     lastRunAt:'2026-10-02T05:00:00Z',
-    opportunities:[{marketTicker:'KXBTC15M-TEST',outcomeSide:'YES',direction:'UP',asset:'BTC',move:.01,fair:.9,edge:.4,score:1,openTime:'2026-10-02T06:00:00Z',closeTime:'2026-10-02T06:15:00Z'}],
+    opportunities:[{marketTicker:'KXBTC15M-TEST',outcomeSide:'YES',direction:'UP',asset:'BTC',move:0,fair:.5,edge:0,score:.5,openTime:'2026-10-02T05:45:00Z',closeTime:'2026-10-02T06:00:00Z'}],
   });
   const env=await authEnv(stale);
+  // Seed direct source independently to the accepted .003 raw move.
+  await env.PAYNE_KALSHI_STATE.put('payne-kalshi:feature-shadow:v1',JSON.stringify({
+    prices:{BTC:100/1.003,ETH:100/1.001},referencePrices:{BTC:100/1.003,ETH:100/1.001},priceSources:{BTC:'COINBASE',ETH:'COINBASE'}
+  }));
   const io=installKalshiFetch();
   try{
     const out=await buildCockpitData(env,Date.parse('2026-10-02T06:05:00Z'));
-    assert.equal(out.payne.available,false);
-    assert.equal(out.payne.state,'UNKNOWN');
-    assert.equal(out.pipeline.pullTrigger,'NOT_REACHED');
-    assert.equal(out.pipeline.finalDecision,'FEATURES_UNAVAILABLE');
-    assert.equal(out.zeroMoneyPreview.status,'NOT_REACHED');
+    assert.equal(out.payne.available,true);
+    assert.equal(out.featureProvenance.source,'KALSHI_AUTHORITATIVE');
+    assert.equal(out.featureProvenance.baselineStateRead,false);
+    assert.equal(out.pipeline.finalDecision,'PULL_QUALIFIED_ZERO_MONEY_FIRE_READY');
+    assert.equal(out.zeroMoneyPreview.status,'FIRE_READY');
     assert.equal(out.providerWrites,0);
   } finally { io.restore(); }
 });
 
-test('window mismatch is recorded truthfully and blocks zero-money FIRE preview',async()=>{
+test('mismatched Baseline shadow window is not live PAYNE qualification authority',async()=>{
   const mismatch=baselineShadow({
-    opportunities:[
-      {marketTicker:'KXBTC15M-TEST',outcomeSide:'YES',direction:'UP',asset:'BTC',move:.003,fair:.554,edge:.054,score:.716,openTime:'2026-10-02T06:00:00Z',closeTime:'2026-10-02T06:30:00Z',durationMs:1800000,horizon:'30m'},
-    ],
+    opportunities:[{marketTicker:'OLD-TICKER',outcomeSide:'YES',direction:'UP',asset:'BTC',move:0,fair:.5,edge:0,score:.5,openTime:'2026-10-02T05:45:00Z',closeTime:'2026-10-02T06:00:00Z'}],
   });
   const env=await authEnv(mismatch);
+  await env.PAYNE_KALSHI_STATE.put('payne-kalshi:feature-shadow:v1',JSON.stringify({
+    prices:{BTC:100/1.003,ETH:100/1.001},referencePrices:{BTC:100/1.003,ETH:100/1.001},priceSources:{BTC:'COINBASE',ETH:'COINBASE'}
+  }));
   const io=installKalshiFetch();
   try{
     const out=await buildCockpitData(env,Date.parse('2026-10-02T06:05:00Z'));
-    assert.equal(out.clocks.consistency.windowConsistency,false);
-    assert.equal(out.clocks.consistency.diagnostic,'WINDOW_MISMATCH');
-    assert.equal(out.pipeline.finalDecision,'WINDOW_MISMATCH');
-    assert.equal(out.zeroMoneyPreview.status,'BLOCKED');
-    assert.equal(out.zeroMoneyPreview.reason,'WINDOW_MISMATCH');
+    assert.equal(out.clocks.consistency.windowConsistency,true);
+    assert.equal(out.clocks.consistency.diagnostic,'WINDOW_CONSISTENT');
+    assert.equal(out.featureProvenance.baselineStateRead,false);
+    assert.equal(out.pipeline.finalDecision,'PULL_QUALIFIED_ZERO_MONEY_FIRE_READY');
+    assert.equal(out.zeroMoneyPreview.status,'FIRE_READY');
     assert.equal(out.providerWrites,0);
     assert.equal(out.orders,0);
     assert.equal(out.capitalMovedUsd,0);
@@ -543,7 +554,7 @@ test('scheduled disarmed maintenance terminalizes only a clean stale config-mism
 
 test('each scheduled scan updates current observation while history remains bounded-cadence',async()=>{
   const env=await authEnv();
-  const io=installKalshiFetch();
+  const io=installKalshiFetch({spotSequences:{BTC:[100,100.3],ETH:[100,100.1]}});
   try{
     const first=await runReadOnlyScan(env,'SCHEDULED_CRON',Date.parse('2026-10-02T06:05:00Z'));
     assert.equal(first.ok,true);
