@@ -1,0 +1,96 @@
+name: Verify PAYNE legacy quarantine read-only
+
+on:
+  push:
+    branches:
+      - market-edge-payne-kalshi-real-step1
+    paths:
+      - ".github/workflows/verify-payne-legacy-quarantine.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify live legacy quarantine with GET only
+        shell: bash
+        run: |
+          set -euo pipefail
+          base='https://market-edge-payne-kalshi-real.darkbishop43.workers.dev'
+          legacy='568186d7-57a8-42b0-80ed-db0429786fe2'
+
+          quarantined=0
+          for i in $(seq 1 36); do
+            curl -fsS --max-time 30 "$base/real-state" -o /tmp/real-state.json
+            if jq -e --arg legacy "$legacy" '
+              .schema == "PAYNE_REAL_STATE_V1" and
+              .control.armed == false and
+              .control.providerPostAuthority == "BUILT_INACTIVE_DISARMED" and
+              .series.seriesId == $legacy and
+              .series.status == "TERMINAL_LEGACY_ACCOUNTING_QUARANTINED" and
+              .series.legacyQuarantined == true and
+              .series.accountingSemantics == "LEGACY_PRE_PROVIDER_BOUNDARY_V0" and
+              .series.attemptsStarted == 4 and
+              .series.attemptTarget == 5 and
+              .series.unresolvedEntry == false and
+              (.series.position == null) and
+              .providerWrites == 0 and
+              .ordersSubmittedByThisRead == 0 and
+              .capitalMovedUsd == 0
+            ' /tmp/real-state.json >/dev/null; then
+              quarantined=1
+              break
+            fi
+            sleep 5
+          done
+          test "$quarantined" = "1"
+
+          curl -fsS --max-time 30 "$base/real-history?seriesId=$legacy" -o /tmp/history.json
+          jq -e --arg legacy "$legacy" '
+            .ok == true and
+            .readOnly == true and
+            .seriesId == $legacy and
+            .attemptTarget == 5 and
+            .legacyQuarantined == true and
+            .accountingSemantics == "LEGACY_PRE_PROVIDER_BOUNDARY_V0" and
+            .providerWrites == 0 and
+            .ordersSubmittedByThisRead == 0 and
+            .capitalMovedUsd == 0
+          ' /tmp/history.json >/dev/null
+
+          curl -fsS --max-time 30 "$base/ui-state" -o /tmp/ui-state.json
+          jq -e '
+            .control.armed == false and
+            .providerWrites == 0 and
+            .orders == 0 and
+            .capitalMovedUsd == 0 and
+            (.realExecution.executionIntents | type == "number") and
+            (.realExecution.providerOrderAttempts | type == "number") and
+            (.realExecution.filled | type == "number") and
+            (.realExecution.noFill | type == "number") and
+            (.realExecution.noProviderExecution | type == "number") and
+            (.realExecution.invalidatedBeforePost | type == "number") and
+            (.realExecution.unknown | type == "number")
+          ' /tmp/ui-state.json >/dev/null
+
+          echo "LEGACY_SERIES_ID=$(jq -r '.series.seriesId' /tmp/real-state.json)"
+          echo "LEGACY_STATUS=$(jq -r '.series.status' /tmp/real-state.json)"
+          echo "LEGACY_COUNTS=$(jq -r '(.series.attemptsStarted|tostring)+"/"+(.series.attemptTarget|tostring)' /tmp/real-state.json)"
+          echo "LEGACY_ACCOUNTING=$(jq -r '.series.accountingSemantics' /tmp/real-state.json)"
+          echo "LEGACY_QUARANTINED=$(jq -r '.series.legacyQuarantined' /tmp/real-state.json)"
+          echo "PAYNE_ARMED=$(jq -r '.control.armed' /tmp/real-state.json)"
+          echo "UNRESOLVED_ENTRY=$(jq -r '.series.unresolvedEntry' /tmp/real-state.json)"
+          echo "POSITION=$(jq -c '.series.position' /tmp/real-state.json)"
+          echo "EXECUTION_INTENTS=$(jq -r '.realExecution.executionIntents' /tmp/ui-state.json)"
+          echo "PROVIDER_ORDER_ATTEMPTS=$(jq -r '.realExecution.providerOrderAttempts' /tmp/ui-state.json)"
+          echo "FILLED=$(jq -r '.realExecution.filled' /tmp/ui-state.json)"
+          echo "NO_FILL=$(jq -r '.realExecution.noFill' /tmp/ui-state.json)"
+          echo "NO_PROVIDER_EXECUTION=$(jq -r '.realExecution.noProviderExecution' /tmp/ui-state.json)"
+          echo "INVALIDATED_BEFORE_POST=$(jq -r '.realExecution.invalidatedBeforePost' /tmp/ui-state.json)"
+          echo "UNKNOWN=$(jq -r '.realExecution.unknown' /tmp/ui-state.json)"
+          echo "providerWrites=0"
+          echo "orders=0"
+          echo "capitalMovedUsd=0"
