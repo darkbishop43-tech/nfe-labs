@@ -2,7 +2,7 @@ import { D1ExecutionStore, ExecutionEngine } from "./robinhood-execution-core.js
 import { createRobinhoodExecutionProvider } from "./robinhood-execution-provider.js";
 import { readBestBidAsk, readEstimatedPrice, resolveBoundAccount } from "./robinhood-crypto-read.js";
 
-export const LIVE_WRITES_ENABLED = false;
+export const LIVE_WRITES_ENABLED = true;
 
 function maskAccount(v){
   const s = String(v || "");
