@@ -43,6 +43,22 @@ function baselineShadow({score=.716,move=.003,edge=.054,close='2026-10-02T06:15:
   };
 }
 
+function moveForScore(score){
+  return (Number(score)-0.5)/72;
+}
+async function seedPaynePriorSpot(e,shadow=baselineShadow()){
+  const yes=(shadow?.opportunities||[]).find(x=>x?.asset==='BTC'&&x?.outcomeSide==='YES');
+  const move=Number.isFinite(Number(yes?.score))?moveForScore(yes.score):Number(yes?.move||0);
+  const prior=100/(1+move);
+  await e.PAYNE_KALSHI_STATE.put('payne-kalshi:feature-shadow:v1',JSON.stringify({
+    schema:'PAYNE_OWNED_KALSHI_FEATURE_STATE_V1',
+    savedAt:'2026-10-02T06:04:00Z',
+    prices:{BTC:prior},
+    referencePrices:{BTC:prior},
+    priceSources:{BTC:'COINBASE'}
+  }));
+}
+
 function baselineService(shadow=baselineShadow(),autoPositions=[]){
   return {async fetch(request){
     const url=new URL(request.url);
@@ -63,7 +79,9 @@ async function credentials(){
 }
 
 async function env({shadow=baselineShadow(),autoPositions=[]}={}){
-  return {PAYNE_KALSHI_STATE:new MemoryKV(),BASELINE_REAL_READ:baselineService(shadow,autoPositions),...(await credentials())};
+  const e={PAYNE_KALSHI_STATE:new MemoryKV(),BASELINE_REAL_READ:baselineService(shadow,autoPositions),...(await credentials())};
+  await seedPaynePriorSpot(e,shadow);
+  return e;
 }
 
 function providerMarket({status='open',close='2026-10-02T06:15:00Z',exchangeIndex=2,yesBid=.48,yesAsk=.50}={}){
@@ -80,6 +98,7 @@ function installProvider({index3=0,index2=15.91,position='ABSENT',exactSequence=
   globalThis.fetch=async (url,options={})=>{
     calls.push({url:String(url),method:options.method||'GET',body:options.body||null});
     const u=String(url);
+    if(u.includes('api.exchange.coinbase.com/products/BTC-USD/ticker')) return jsonResponse({price:'100'});
     if(u.includes('/portfolio/balance')) return jsonResponse({balance_breakdown:[{exchange_index:0,balance:0},{exchange_index:2,balance:index2},{exchange_index:3,balance:index3}]});
     if(u.includes('series_ticker=KXBTC15M')) return jsonResponse({markets:[providerMarket()]});
     if(u.includes('/trade-api/v2/markets?series_ticker=')) return jsonResponse({markets:[]});
