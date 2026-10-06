@@ -1,5 +1,6 @@
 import { readConnectorStatus, readAccounts, readPairs, readBestBidAsk, readEstimatedPrice, readBoundHoldings, readBoundOrders } from "./robinhood-crypto-read.js";
 import { calculateNV0, calculateFullSIV0, calculateSICoreV0A, N_VERSION, SI_VERSION } from "./si-n-v0.js";
+import { handleExecutionRequest } from "./robinhood-execution-routes.js";
 const SECURITY_HEADERS = {
   "Content-Security-Policy": "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'none'",
   "Permissions-Policy": "camera=(), microphone=(), geolocation=()",
@@ -576,10 +577,18 @@ export default {
     ctx.waitUntil(runScheduledCollection(env));
   },
   async fetch(request, env) {
+    const url=new URL(request.url);
+    if (url.pathname.startsWith("/api/robinhood/execution/")) {
+      try {
+        const handled = await handleExecutionRequest(request, env);
+        return json(handled.body, handled.status);
+      } catch (e) {
+        return json({ status: "ERROR", message: String(e?.message || e), execution: "DISARMED", liveWritesEnabled: false, fireAuthority: "ZERO", fabricatedValues: false }, 503);
+      }
+    }
     if (request.method !== "GET" && request.method !== "HEAD") {
       return new Response("Method Not Allowed", {status:405,headers:{"Allow":"GET, HEAD",...SECURITY_HEADERS}});
     }
-    const url=new URL(request.url);
     try {
       if (url.pathname === "/api/v0a/mapping") return json(await mappingResponse(env));
       if (url.pathname === "/api/v0a/research") return json({status:"SPLIT ROUTES REQUIRED",routes:["/api/v0a/momentum","/api/v0a/features","/api/v0a/book"],reason:"V0-A stateless runtime uses bounded component routes."},409);

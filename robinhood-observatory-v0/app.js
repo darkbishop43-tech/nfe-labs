@@ -145,9 +145,9 @@ function renderOperational(){
    <div class="preview-box"><b>Captured preview</b><span>${money(l.previewAmount)} ${l.previewType} · ${l.previewQuantity} · ${money(l.previewPrice,2)} preview unit price · ${money(l.previewFee)} estimated fee</span><small>Preview captured ${fmtTime(l.previewCapturedAt)}. Fresh LOCK quote is newer.</small></div>`;
 
  el('managePanel').innerHTML=`
-   <div class="hero-symbol">${p.state}</div>
+   <div class="hero-symbol">${D.executionState?.state?.state||p.state}</div>
    <div class="state">${m.state}</div>
-   <div class="kv"><span>Owned quantity</span><b>0 — NO POSITION</b><span>Entry</span><b>N/A — NO POSITION</b><span>Current bid</span><b>${money(p.currentBid,8)}</b><span>Current ask</span><b>${money(p.currentAsk,8)}</b><span>Current mark</span><b>${money(p.currentMark,8)}</b><span>Position value</span><b>${money(p.currentValue)}</b><span>Unrealized P&L</span><b>${money(p.unrealizedPnlUsd)} · N/A — NO POSITION</b><span>Realized P&L</span><b>N/A — NO COMPLETED LIFECYCLE</b><span>Position age</span><b>N/A — NO POSITION</b><span>Last reconciliation</span><b>${fmtTime(p.lastProviderReconciliation)}</b><span>Next governed action</span><b>${p.nextGovernedAction}</b><span>Exit authority</span><b>${p.exitAuthority}</b></div>`;
+   <div class="kv"><span>Durable control</span><b>${D.executionState?.state?.state||'NOT LOADED'}</b><span>Live writes</span><b>DISABLED</b><span>Owned quantity</span><b>${D.executionState?.state?.owned?.quantity??'0 — NO POSITION'}</b><span>Entry</span><b>${D.executionState?.state?.owned?.entryProviderId||'N/A — NO POSITION'}</b><span>Current bid</span><b>${money(p.currentBid,8)}</b><span>Current ask</span><b>${money(p.currentAsk,8)}</b><span>Current mark</span><b>${money(p.currentMark,8)}</b><span>Position value</span><b>${money(p.currentValue)}</b><span>Unrealized P&L</span><b>${money(p.unrealizedPnlUsd)} · N/A — NO POSITION</b><span>Realized P&L</span><b>N/A — NO COMPLETED LIFECYCLE</b><span>Position age</span><b>N/A — NO POSITION</b><span>Last reconciliation</span><b>${D.executionState?.state?.reconciliation||fmtTime(p.lastProviderReconciliation)}</b><span>Next governed action</span><b>${p.nextGovernedAction}</b><span>Exit authority</span><b>${D.executionState?.state?.owned?'OWNED — SELL REFUSED WHILE DISARMED':p.exitAuthority}</b></div>`;
 
  el('lifecycle').innerHTML=o.lifecycle.map((x,i)=>`<span class="life-step ${i<o.currentLifecycleIndex?'done':i===o.currentLifecycleIndex?'active':''}">${x}</span>`).join('<span class="life-arrow">→</span>');
 
@@ -166,13 +166,38 @@ function renderOperational(){
  el('inspectLeader').onclick=()=>{if(governed!=='NONE')inspectedCrypto=governed;renderCryptoUniverse(true);showControlReason(`Inspecting ${governed} from the current D1 research observation plus last captured Robinhood snapshot. This is not a fresh Robinhood read.`)};
  el('pauseRadar').onclick=()=>{radarViewPaused=!radarViewPaused;renderOperational()};
  el('viewPreview').onclick=()=>{el('lockPanel').scrollIntoView({behavior:'smooth',block:'center'});showControlReason('Showing the latest captured preview evidence only. It is stale until a new governed Robinhood preview is run through a provider-capable path.')};
- el('armBlocked').onclick=()=>showControlReason('BLOCKED: Builder is not authorized to ARM. Founder authority plus fresh LOCK/requalification and a separate real-money order are required.');
- el('disarmState').onclick=()=>showControlReason('Execution is already DISARMED. No provider mutation is required.');
- el('startProviderScan').onclick=async()=>{providerScanState='CHECKING';renderOperational();const j=await requestRobinhoodCapability('start_provider_scan');providerScanState=j?.publicWorkerLiveRead?'RUNNING':'BLOCKED';renderOperational()};
+ el('armBlocked').onclick=async()=>{await postExecution('arm')};
+ el('disarmState').onclick=async()=>{await postExecution('disarm')};
+ el('startProviderScan').onclick=async()=>{providerScanState='CHECKING';renderOperational();const j=await requestRobinhoodCapability('start_provider_scan');providerScanState=j?.publicWorkerLiveRead?'RUNNING':'BLOCKED';await refreshExecutionState();renderOperational()};
  el('pauseProviderScan').onclick=()=>{providerScanState='STOPPED';showControlReason('Provider scan state is STOPPED. No live Cloudflare Robinhood scan was running.');renderOperational()};
- el('freshPreview').onclick=async()=>{const cfg=readTestConfig();if(!cfg?.frozen)return showControlReason('BLOCKED: freeze an exact Founder-selected dollar amount, entry type, and exit plan first. No default stake/order type will be invented.');await requestRobinhoodCapability('fresh_nonexecuting_preview')};
- el('founderApprove').onclick=()=>showControlReason('BLOCKED: Founder approval is not accepted through this read-only public shell and this mission grants zero order authority.');
- el('exitReview').onclick=()=>{if(p.state!=='FLAT')showControlReason('Position exists in snapshot; a fresh provider management reread is required before any exit review.');else showControlReason('NO POSITION: exit review is not applicable. Fresh Robinhood provider read currently shows the Agentic account flat.')};
+ el('freshPreview').onclick=async()=>{const cfg=readTestConfig();if(!cfg?.frozen)return showControlReason('BLOCKED: freeze an exact Founder-selected dollar amount, entry type, and exit plan first. No default stake/order type will be invented.');const symbol=D.liveLedger?.latestObservation?.robinhood_symbol||inspectedCrypto;if(!symbol)return showControlReason('BLOCKED: no current SI-ranked leader is available. No symbol was invented.');const locked=await postExecution('lock',{symbol,side:'buy',type:cfg.entryType,maxDebit:String(cfg.stake),orderConfig:{quote_amount:String(cfg.stake)},frozenConfiguration:cfg});if(!locked)return;await postExecution('preview',{previewEvidence:{nonExecuting:true,source:'founder-frozen-config',maxDebit:String(cfg.stake),symbol,note:'Quantity not invented. Official estimate requires an authoritative asset quantity.'}})};
+ el('founderApprove').onclick=async()=>{const st=await refreshExecutionState();const fp=st?.state?.specimenFp;if(!fp)return showControlReason('BLOCKED: no frozen specimen fingerprint is present. Approval cannot be blanket.');await postExecution('approve',{specimenFp:fp})};
+ el('exitReview').onclick=async()=>{const st=await refreshExecutionState();if(st?.state?.owned)showControlReason('Owned position is present in durable state. Exit review is available; provider sell remains refused while DISARMED.');else showControlReason('NO POSITION: exit review is not applicable. Durable execution state has no owned position.')};
+}
+
+async function refreshExecutionState(){
+  try{
+    const r=await fetch('/api/robinhood/execution/state',{cache:'no-store'});
+    const j=await r.json();
+    D.executionState=j;
+    return j;
+  }catch(e){
+    showControlReason('Durable execution state unavailable: '+String(e.message||e));
+    return null;
+  }
+}
+async function postExecution(action,body={}){
+  try{
+    const r=await fetch('/api/robinhood/execution/'+action,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)});
+    const j=await r.json();
+    D.executionState=j;
+    const st=j.state?.state||j.error||j.status||'UNKNOWN';
+    showControlReason(`${action}: ${st}. Execution remains DISARMED. Live writes ${j.liveWritesEnabled===false?'disabled':'not confirmed'}. ${j.reason||j.message||''}`);
+    return r.ok?j:null;
+  }catch(e){
+    showControlReason(action+' failed: '+String(e.message||e));
+    return null;
+  }
 }
 
 async function requestRobinhoodCapability(action,targetId='controlReason'){
