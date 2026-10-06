@@ -53,6 +53,21 @@ function baselineShadow(overrides={}){
   };
 }
 
+async function seedPaynePriorSpot(env,body=baselineShadow()){
+  const prices={};
+  for(const row of body?.opportunities||[]){
+    if(prices[row.asset]!==undefined) continue;
+    const move=Number(row?.move);
+    if(Number.isFinite(move) && 1+move>0) prices[row.asset]=100/(1+move);
+  }
+  await env.PAYNE_KALSHI_STATE.put('payne-kalshi:feature-shadow:v1',JSON.stringify({
+    schema:'PAYNE_OWNED_KALSHI_FEATURE_STATE_V1',
+    savedAt:'2026-10-02T06:04:00Z',
+    prices,
+    priceSources:Object.fromEntries(Object.keys(prices).map(a=>[a,'COINBASE']))
+  }));
+}
+
 function baselineService(body=baselineShadow(),status=200){
   return {
     async fetch(request){
@@ -83,12 +98,14 @@ async function authEnv(body=baselineShadow(),status=200){
   const der=new Uint8Array(await crypto.subtle.exportKey('pkcs8',pair.privateKey));
   let binary=''; for(const b of der) binary+=String.fromCharCode(b);
   const base64=btoa(binary).match(/.{1,64}/g).join('\n');
-  return {
+  const out={
     PAYNE_KALSHI_STATE:new MemoryKV(),
     BASELINE_REAL_READ:baselineService(body,status),
     KALSHI_EXECUTION_KEY_ID:'TEST_KEY_ID_SENTINEL',
     KALSHI_EXECUTION_PRIVATE_KEY:`-----BEGIN PRIVATE KEY-----\n${base64}\n-----END PRIVATE KEY-----`,
   };
+  await seedPaynePriorSpot(out,body);
+  return out;
 }
 
 function providerMarket(asset,ticker,series,yesBid='0.47',yesAsk='0.49',exchangeIndex=2){
@@ -113,6 +130,7 @@ function installKalshiFetch({btcExchangeIndex=2,index2Balance=15.91,index3Balanc
   globalThis.fetch=async (url,options={})=>{
     urls.push(String(url));
     const u=String(url);
+    if(u.includes('api.exchange.coinbase.com/products/') && u.includes('/ticker')) return jsonResponse({price:'100'});
     if(u.includes('/portfolio/balance')) return jsonResponse({balance_breakdown:[
       {exchange_index:0,balance:0},
       {exchange_index:2,balance:index2Balance},
@@ -203,29 +221,34 @@ test('series-scoped discovery preserves nine-asset authenticated GET architectur
   } finally { io.restore(); }
 });
 
-test('authoritative Payne feature read uses exact GET-only Baseline service binding',async()=>{
+test('authoritative Payne feature read uses PAYNE-owned direct source and no Baseline shadow authority',async()=>{
   const env=await authEnv();
-  const out=await readAuthoritativePayneFeatures(env,Date.parse('2026-10-02T06:05:00Z'));
-  assert.equal(out.ok,true);
-  assert.equal(out.fresh,true);
-  assert.equal(out.transport,'SERVICE_BINDING');
-  assert.equal(out.binding,'BASELINE_REAL_READ');
-  assert.equal(out.endpoint,'/shadow-state');
-  assert.equal(out.httpStatus,200);
-  assert.equal(out.opportunities[0].move,.003);
-  assert.equal(out.opportunities[0].fair,.554);
-  assert.equal(out.opportunities[0].edge,.054);
-  assert.equal(out.opportunities[0].score,.716);
+  const io=installKalshiFetch();
+  try{
+    const markets=await discoverCockpitMarkets(env,{nowMs:Date.parse('2026-10-02T06:05:00Z')});
+    const out=await readAuthoritativePayneFeatures(env,markets.markets,Date.parse('2026-10-02T06:05:00Z'));
+    assert.equal(out.fresh,true);
+    assert.equal(out.source,'KALSHI_AUTHORITATIVE');
+    assert.equal(out.transport,'PAYNE_KALSHI_READ');
+    assert.equal(out.binding,'PAYNE_KALSHI_STATE');
+    assert.equal(out.baselineStateRead,false);
+    assert.equal(out.opportunities.find(x=>x.asset==='BTC'&&x.outcomeSide==='YES').move,.003);
+    assert.equal(out.opportunities.find(x=>x.asset==='BTC'&&x.outcomeSide==='YES').edge,.054);
+    assert.equal(out.opportunities.find(x=>x.asset==='BTC'&&x.outcomeSide==='YES').score,.716);
+  } finally { io.restore(); }
 });
 
-test('missing Baseline service binding fails closed without fabricating Payne fields',async()=>{
+test('missing Baseline service binding does not prevent PAYNE direct qualification inputs',async()=>{
   const env=await authEnv();
   delete env.BASELINE_REAL_READ;
-  const out=await readAuthoritativePayneFeatures(env,Date.parse('2026-10-02T06:05:00Z'));
-  assert.equal(out.ok,false);
-  assert.equal(out.fresh,false);
-  assert.equal(out.error,'BASELINE_REAL_SERVICE_BINDING_UNBOUND');
-  assert.deepEqual(out.opportunities,[]);
+  const io=installKalshiFetch();
+  try{
+    const markets=await discoverCockpitMarkets(env,{nowMs:Date.parse('2026-10-02T06:05:00Z')});
+    const out=await readAuthoritativePayneFeatures(env,markets.markets,Date.parse('2026-10-02T06:05:00Z'));
+    assert.equal(out.fresh,true);
+    assert.equal(out.baselineStateRead,false);
+    assert.ok(out.opportunities.length>0);
+  } finally { io.restore(); }
 });
 
 test('Payne decision evidence explains advancement and rejection truthfully',()=>{
@@ -277,9 +300,9 @@ test('cockpit calculates authentic Payne fields, decisions, clocks, exact reread
     assert.equal(out.financials.providerFinancialStatus,'FRESH');
     assert.equal(out.selected.ticker,'KXBTC15M-TEST');
     assert.equal(out.selected.direction,'UP');
-    assert.equal(out.payne.source,'BASELINE_REAL_SERVICE_BINDING_READ_ONLY');
+    assert.equal(out.payne.source,'KALSHI_AUTHORITATIVE');
     assert.equal(out.payne.move,.003);
-    assert.equal(out.payne.fair,.554);
+    assert.equal(out.payne.fair,.544);
     assert.equal(out.payne.edge,.054);
     assert.equal(out.payne.score,.716);
     assert.equal(out.payne.state,'PULL_TRIGGER');
@@ -713,7 +736,7 @@ test('cockpit HTML exposes clocks, decision evidence, automatic refresh, and no 
   assert.match(html,/next cron time not fabricated/);
   assert.match(html,/CYCLE CLOCKS/);
   assert.match(html,/KALSHI WINDOW/);
-  assert.match(html,/BASELINE WINDOW/);
+  assert.match(html,/PAYNE FEATURE WINDOW/);
   assert.match(html,/PAYNE OBSERVATION/);
   assert.match(html,/WINDOW CONSISTENCY/);
   assert.match(html,/WINDOW POSITION/);
