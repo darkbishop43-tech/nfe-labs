@@ -3584,22 +3584,28 @@ export async function runPayneRealExecutionCycle(env,{postImpl=kalshiPayneOrderP
     return invalidateFireSpecimen(env,series,'HOLD_INDEX2_FUNDING_INSUFFICIENT',{identityMatch:'PASS',freshLock:'PASS',preSubmit:'PASS'},nowMs);
   }
 
-  const attemptNo=started+1;
+  const providerAttemptNoCandidate=started+1;
+  const intentNo=Number(series.executionIntentsStarted||0)+1;
   const seriesId=series.seriesId||crypto.randomUUID();
-  const attemptId=seriesId+'-'+attemptNo;
-  const clientOrderId=payneClientOrderId(seriesId,attemptNo,'entry');
+  const attemptId=seriesId+'-intent-'+intentNo;
+  const clientOrderId=payneClientOrderId(seriesId,providerAttemptNoCandidate,'entry');
   const payload=kalshiV2EntryPayload({marketTicker:candidate.ticker,outcomeSide:candidate.outcomeSide,yes:ask},sizing,clientOrderId);
   if(!payload) return invalidateFireSpecimen(env,series,'HOLD_ENTRY_PAYLOAD_INVALID',{identityMatch:'PASS',freshLock:'PASS',preSubmit:'PASS'},nowMs);
 
-  const attempt={
-    schema:'PAYNE_REAL_ATTEMPT_V1',owner:REAL_OWNER,seriesId,attemptId,attemptNo,status:'SUBMITTING',
+  let attempt={
+    schema:'PAYNE_REAL_ATTEMPT_V1',owner:REAL_OWNER,seriesId,attemptId,intentNo,
+    attemptNo:null,providerAttemptNo:null,providerAttemptNoCandidate,providerAttemptCounted:false,
+    status:'EXECUTION_INTENT',writerInvoked:false,providerPostStarted:false,providerHttpStatus:null,providerOrderId:null,providerResponseState:null,
     fireSpecimenId:series.fireLatch?.specimenId||null,
     fireIdentityFingerprint:series.fireLatch?.identityFingerprint||null,
     asset:candidate.asset,marketTicker:candidate.ticker,outcomeSide:candidate.outcomeSide,direction:candidate.direction,
     exchangeIndex:2,score:finalFeature.score,move:finalFeature.move,edge:finalFeature.edge,threshold:cfg.threshold,
     observedAt:series.fireLatch?.fireObservedAt||new Date(nowMs).toISOString(),freshLockAt:freshLock.readAt,preSubmitAt:preSubmit.readAt,
-    freshLockPrice:candidate.outcomeSide==='YES'?freshLock.market.yesAsk:freshLock.market.noAsk,
-    preSubmitPrice:ask,
+    freshLockResult:'PASS',freshLockPrice:candidate.outcomeSide==='YES'?freshLock.market.yesAsk:freshLock.market.noAsk,
+    preSubmitResult:'PASS',preSubmitPrice:ask,
+    finalFeatureRequalification:'PASS',
+    feeSafeSizingResult:'PASS',
+    fundingResult:'PASS',
     fireBookEvidence:series.fireLatch?.fireBookEvidence||null,
     freshLockBookEvidence,
     preSubmitBookEvidence,
@@ -3609,79 +3615,142 @@ export async function runPayneRealExecutionCycle(env,{postImpl=kalshiPayneOrderP
     estimatedEntryPremiumUsd:sizing.premiumUsd,estimatedEntryDebitUsd:sizing.totalDebitUsd,
     intendedLimitPrice:ask,clientOrderId,payload:{...payload},
   };
-  series={...series,seriesId,status:'ENTRY_SUBMITTING',attemptsStarted:attemptNo,unresolvedEntry:true,currentAttempt:attempt,fireLatch:{...series.fireLatch,state:'PROVIDER_POST_PENDING',identityMatch:'PASS',freshLock:'PASS',preSubmit:'PASS',providerPost:'PENDING',providerOrderId:null,finalResult:null}};
-  await persistAttempt(env,{runId:seriesId,attemptId,attemptNo,result:'SUBMITTING',...attempt});
-  await appendRealLedger(env,'ENTRY_PRE_SUBMIT_LATCHED',{...attempt,providerWritePlanned:true});
+  series={
+    ...series,seriesId,status:'LOCAL_EXECUTION_INTENT',
+    executionIntentsStarted:intentNo,
+    attemptsStarted:started,
+    unresolvedEntry:true,currentAttempt:attempt,
+    fireLatch:{...series.fireLatch,state:'PRE_PROVIDER_VALIDATION',identityMatch:'PASS',freshLock:'PASS',preSubmit:'PASS',providerPost:'NOT_STARTED',providerOrderId:null,finalResult:null}
+  };
+  await persistAttempt(env,{runId:seriesId,result:'EXECUTION_INTENT',...attempt});
+  await appendRealLedger(env,'ENTRY_PRE_SUBMIT_LATCHED',{
+    ...attempt,providerWritePlanned:true,writerInvoked:false,providerPostStarted:false,
+    providerAttemptCounted:false,providerAttemptsBefore:started
+  });
   await saveRealSeriesState(env,series);
 
   control=await loadControl(env);
   if(!control.armed || Number(control.attemptTarget)!==cfg.attemptTarget || Number(control.maxEntryDebitUsd)!==cfg.maxEntryDebitUsd || Number(control.activeThreshold)!==cfg.threshold || Number(control.requiredExchangeIndex)!==2){
+    const reconciledAt=new Date(nowMs).toISOString();
     series.status='ENTRY_AUTHORITY_REVOKED_AFTER_LATCH';
     series.unresolvedEntry=false;
     series.fireLatch={...series.fireLatch,state:'INVALIDATED_BEFORE_POST',providerPost:'NO',providerOrderId:null,finalResult:'INVALIDATED_BEFORE_POST',invalidationReason:'ENTRY_AUTHORITY_REVOKED_AFTER_LATCH'};
-    series.currentAttempt={...attempt,status:'INVALIDATED_BEFORE_POST',providerResult:{state:'INVALIDATED_BEFORE_POST',reason:'ENTRY_AUTHORITY_REVOKED_AFTER_LATCH',clientOrderId}};
-    await persistAttempt(env,{runId:seriesId,attemptId,attemptNo,result:'INVALIDATED_BEFORE_POST',...series.currentAttempt});
-    await appendRealLedger(env,'FIRE_SPECIMEN_INVALIDATED_BEFORE_POST',{seriesId,attemptId,specimenId:series.fireLatch?.specimenId||null,ticker:candidate.ticker,reason:'ENTRY_AUTHORITY_REVOKED_AFTER_LATCH',providerPost:false,providerOrderId:null});
-    await closeRealSeriesControl(env,attemptNo,0);
+    attempt={...attempt,status:'INVALIDATED_BEFORE_POST',providerResponseState:'NO_PROVIDER_EXECUTION',terminalClassification:'INVALIDATED_BEFORE_POST',providerResult:{state:'INVALIDATED_BEFORE_POST',reason:'ENTRY_AUTHORITY_REVOKED_AFTER_LATCH',clientOrderId},reconciledAt};
+    series.currentAttempt=attempt;
+    await persistAttempt(env,{runId:seriesId,result:'INVALIDATED_BEFORE_POST',...attempt});
+    await appendRealLedger(env,'FIRE_SPECIMEN_INVALIDATED_BEFORE_POST',{
+      seriesId,attemptId,intentNo,attemptNo:null,specimenId:series.fireLatch?.specimenId||null,ticker:candidate.ticker,
+      reason:'ENTRY_AUTHORITY_REVOKED_AFTER_LATCH',writerInvoked:false,providerPostStarted:false,providerAttemptCounted:false,providerOrderId:null
+    });
+    await closeRealSeriesControl(env,started,0);
     return saveRealSeriesState(env,series);
   }
 
-  let response,proof;
+  let response,proof,writerInvoked=false,providerPostStarted=false;
   try{
-    const out=await postImpl(env,'ENTRY',payload,payneRealScope(control,series,'ENTRY',null,{attemptsBefore:attemptNo-1,priorAttemptClean:interlock.clear,entryDebitUsd:sizing.totalDebitUsd}));
-    response=out.response; proof=out.proof;
+    const out=await postImpl(env,'ENTRY',payload,payneRealScope(control,series,'ENTRY',null,{attemptsBefore:started,priorAttemptClean:interlock.clear,entryDebitUsd:sizing.totalDebitUsd}));
+    response=out?.response; proof=out?.proof;
+    writerInvoked=out?.writerInvoked===true;
+    providerPostStarted=out?.providerPostStarted===true;
   }catch(error){
-    const providerPostStarted=error?.payneProviderPostStarted===true;
+    writerInvoked=error?.payneWriterInvoked===true;
+    providerPostStarted=error?.payneProviderPostStarted===true;
     if(!providerPostStarted){
       const reconciledAt=new Date(nowMs).toISOString();
       const providerResult={state:'INVALIDATED_BEFORE_POST',reason:'LOCAL_PRE_PROVIDER_REJECTED',clientOrderId,error:String(error?.message||error)};
       series.unresolvedEntry=false;
       series.position=null;
       series.fireLatch={...series.fireLatch,state:'INVALIDATED_BEFORE_POST',providerPost:'NO',providerOrderId:null,finalResult:'INVALIDATED_BEFORE_POST',invalidationReason:'LOCAL_PRE_PROVIDER_REJECTED',invalidatedAt:reconciledAt};
-      series.currentAttempt={...attempt,status:'INVALIDATED_BEFORE_POST',providerResult,reconciledAt};
-      if(seriesTerminal(series)){series.status='COMPLETE_INVALIDATED_BEFORE_POST';series.completedAt=reconciledAt;}
-      else {series.status='ARMED_FISHING';}
-      await persistAttempt(env,{runId:seriesId,attemptId,attemptNo,result:'INVALIDATED_BEFORE_POST',...series.currentAttempt});
-      await appendRealLedger(env,'ENTRY_LOCAL_PRE_PROVIDER_REJECTED',{seriesId,attemptId,attemptNo,specimenId:series.fireLatch?.specimenId||null,ticker:candidate.ticker,clientOrderId,error:String(error?.message||error),providerPostStarted:false,finalResult:'INVALIDATED_BEFORE_POST'});
+      attempt={...attempt,status:'INVALIDATED_BEFORE_POST',writerInvoked,providerPostStarted:false,providerResponseState:'NO_PROVIDER_EXECUTION',terminalClassification:'LOCAL_PRE_PROVIDER_REJECTED',providerResult,reconciledAt};
+      series.currentAttempt=attempt;
+      series.status='ARMED_FISHING';
+      await persistAttempt(env,{runId:seriesId,result:'INVALIDATED_BEFORE_POST',...attempt});
+      await appendRealLedger(env,'ENTRY_LOCAL_PRE_PROVIDER_REJECTED',{
+        seriesId,attemptId,intentNo,attemptNo:null,specimenId:series.fireLatch?.specimenId||null,ticker:candidate.ticker,clientOrderId,
+        error:String(error?.message||error),writerInvoked,providerPostStarted:false,providerAttemptCounted:false,finalResult:'INVALIDATED_BEFORE_POST'
+      });
       await settleSeriesControl(env,series,0);
       return saveRealSeriesState(env,series);
     }
+
+    const attemptNo=providerAttemptNoCandidate;
+    attempt={...attempt,attemptNo,providerAttemptNo:attemptNo,providerAttemptCounted:true,status:'WRITE_ERROR_UNKNOWN',writerInvoked:true,providerPostStarted:true,providerResponseState:'UNKNOWN',error:String(error?.message||error)};
+    series.attemptsStarted=attemptNo;
     series.status='ENTRY_RECONCILIATION_REQUIRED';
     series.unresolvedEntry=true;
     series.fireLatch={...series.fireLatch,state:'PROVIDER_POST_UNKNOWN',providerPost:'UNKNOWN',providerOrderId:null,finalResult:'UNKNOWN'};
-    series.currentAttempt={...attempt,status:'WRITE_ERROR_UNKNOWN',error:String(error?.message||error),providerPostStarted:true};
-    await persistAttempt(env,{runId:seriesId,attemptId,attemptNo,result:'UNKNOWN',...series.currentAttempt});
-    await appendRealLedger(env,'ENTRY_WRITE_ERROR_UNKNOWN',{seriesId,attemptId,attemptNo,ticker:candidate.ticker,clientOrderId,error:String(error?.message||error),providerPostStarted:true});
+    series.currentAttempt=attempt;
+    await persistAttempt(env,{runId:seriesId,result:'UNKNOWN',...attempt});
+    await appendRealLedger(env,'ENTRY_PROVIDER_POST_STARTED',{seriesId,attemptId,intentNo,attemptNo,ticker:candidate.ticker,clientOrderId,writerInvoked:true,providerPostStarted:true,providerAttemptCounted:true});
+    await appendRealLedger(env,'ENTRY_WRITE_ERROR_UNKNOWN',{seriesId,attemptId,intentNo,attemptNo,ticker:candidate.ticker,clientOrderId,error:String(error?.message||error),writerInvoked:true,providerPostStarted:true,providerAttemptCounted:true});
     await settleSeriesControl(env,series,0);
     return saveRealSeriesState(env,series);
   }
+
+  if(!writerInvoked || !providerPostStarted || !response){
+    const reconciledAt=new Date(nowMs).toISOString();
+    const providerResult={state:'INVALIDATED_BEFORE_POST',reason:'PROVIDER_POST_BOUNDARY_NOT_PROVEN',clientOrderId};
+    series.unresolvedEntry=false;
+    series.position=null;
+    series.fireLatch={...series.fireLatch,state:'INVALIDATED_BEFORE_POST',providerPost:'NO',providerOrderId:null,finalResult:'INVALIDATED_BEFORE_POST',invalidationReason:'PROVIDER_POST_BOUNDARY_NOT_PROVEN',invalidatedAt:reconciledAt};
+    attempt={...attempt,status:'INVALIDATED_BEFORE_POST',writerInvoked,providerPostStarted:false,providerResponseState:'NO_PROVIDER_EXECUTION',terminalClassification:'PROVIDER_POST_BOUNDARY_NOT_PROVEN',providerResult,reconciledAt};
+    series.currentAttempt=attempt;
+    series.status='ARMED_FISHING';
+    await persistAttempt(env,{runId:seriesId,result:'INVALIDATED_BEFORE_POST',...attempt});
+    await appendRealLedger(env,'ENTRY_LOCAL_PRE_PROVIDER_REJECTED',{
+      seriesId,attemptId,intentNo,attemptNo:null,ticker:candidate.ticker,clientOrderId,
+      error:'PROVIDER_POST_BOUNDARY_NOT_PROVEN',writerInvoked,providerPostStarted:false,providerAttemptCounted:false,finalResult:'INVALIDATED_BEFORE_POST'
+    });
+    await settleSeriesControl(env,series,0);
+    return saveRealSeriesState(env,series);
+  }
+
+  const attemptNo=providerAttemptNoCandidate;
+  attempt={...attempt,attemptNo,providerAttemptNo:attemptNo,providerAttemptCounted:true,status:'PROVIDER_POST_STARTED',writerInvoked:true,providerPostStarted:true,providerResponseState:'AWAITING_RESPONSE'};
+  series.attemptsStarted=attemptNo;
+  series.unresolvedEntry=true;
+  series.currentAttempt=attempt;
+  series.fireLatch={...series.fireLatch,state:'PROVIDER_POST_STARTED',providerPost:'YES',providerOrderId:null,finalResult:null};
+  await persistAttempt(env,{runId:seriesId,result:'PROVIDER_POST_STARTED',...attempt});
+  await appendRealLedger(env,'ENTRY_PROVIDER_POST_STARTED',{seriesId,attemptId,intentNo,attemptNo,ticker:candidate.ticker,clientOrderId,writerInvoked:true,providerPostStarted:true,providerAttemptCounted:true,proof});
+  await saveRealSeriesState(env,series);
+
   const body=await response.json().catch(()=>({}));
   if(!response.ok){
     series.status='ENTRY_RECONCILIATION_REQUIRED';
     series.unresolvedEntry=true;
     series.fireLatch={...series.fireLatch,state:'PROVIDER_POST_CREATED',providerPost:'YES',providerOrderId:null,finalResult:'REJECTED_OR_UNKNOWN'};
-    series.currentAttempt={...attempt,status:'PROVIDER_REJECTED_OR_UNKNOWN',providerHttpStatus:response.status};
-    await appendRealLedger(env,'ENTRY_PROVIDER_REJECTED_OR_UNKNOWN',{seriesId,attemptId,ticker:candidate.ticker,httpStatus:response.status,proof});
+    attempt={...attempt,status:'PROVIDER_REJECTED_OR_UNKNOWN',providerHttpStatus:response.status,providerResponseState:'HTTP_REJECTED_OR_UNKNOWN',terminalClassification:'PROVIDER_REJECTED_OR_UNKNOWN'};
+    series.currentAttempt=attempt;
+    await persistAttempt(env,{runId:seriesId,result:'PROVIDER_REJECTED_OR_UNKNOWN',...attempt});
+    await appendRealLedger(env,'ENTRY_PROVIDER_REJECTED_OR_UNKNOWN',{seriesId,attemptId,intentNo,attemptNo,ticker:candidate.ticker,httpStatus:response.status,writerInvoked:true,providerPostStarted:true,providerAttemptCounted:true,proof});
     await settleSeriesControl(env,series,0);
     return saveRealSeriesState(env,series);
   }
 
   const result=interpretPayneOrderResponse(body);
   series.fireLatch={...series.fireLatch,state:'PROVIDER_RESULT',providerPost:'YES',providerOrderId:result.orderId||null,providerSubmittedPrice:attempt.preSubmitPrice??null,providerStatus:result.state,finalResult:result.state};
-  series.currentAttempt={...attempt,status:result.state,providerResult:result,providerProof:proof};
+  attempt={...attempt,status:result.state,providerHttpStatus:response.status,providerOrderId:result.orderId||null,providerResponseState:result.state,providerResult:result,providerProof:proof};
+  series.currentAttempt=attempt;
+
   if(result.state==='NO_FILL'){
     series.unresolvedEntry=false;
+    attempt={...attempt,terminalClassification:'NO_FILL'};
+    series.currentAttempt=attempt;
     if(seriesTerminal(series)){series.status='COMPLETE_NO_FILL';series.completedAt=new Date().toISOString();}
     else {series.status='ARMED_FISHING';}
-    await persistAttempt(env,{runId:seriesId,attemptId,attemptNo,result:'NO_FILL',...series.currentAttempt});
-    await appendRealLedger(env,'ENTRY_NO_FILL',{seriesId,attemptId,attemptNo,ticker:candidate.ticker,result,proof});
+    await persistAttempt(env,{runId:seriesId,result:'NO_FILL',...attempt});
+    await appendRealLedger(env,'ENTRY_NO_FILL',{seriesId,attemptId,intentNo,attemptNo,ticker:candidate.ticker,result,writerInvoked:true,providerPostStarted:true,providerAttemptCounted:true,proof});
     await settleSeriesControl(env,series,0);
     return saveRealSeriesState(env,series);
   }
+
   if(result.state==='UNKNOWN'){
     series.status='ENTRY_RECONCILIATION_REQUIRED';series.unresolvedEntry=true;
-    await persistAttempt(env,{runId:seriesId,attemptId,attemptNo,result:'UNKNOWN',...series.currentAttempt});
-    await appendRealLedger(env,'ENTRY_RESULT_UNKNOWN',{seriesId,attemptId,attemptNo,ticker:candidate.ticker,result,proof});
+    attempt={...attempt,terminalClassification:'UNKNOWN'};
+    series.currentAttempt=attempt;
+    await persistAttempt(env,{runId:seriesId,result:'UNKNOWN',...attempt});
+    await appendRealLedger(env,'ENTRY_RESULT_UNKNOWN',{seriesId,attemptId,intentNo,attemptNo,ticker:candidate.ticker,result,writerInvoked:true,providerPostStarted:true,providerAttemptCounted:true,proof});
     await settleSeriesControl(env,series,0);
     return saveRealSeriesState(env,series);
   }
@@ -3695,10 +3764,12 @@ export async function runPayneRealExecutionCycle(env,{postImpl=kalshiPayneOrderP
     entryTime:new Date(nowMs).toISOString(),freshLockAt:freshLock.readAt,preSubmitAt:preSubmit.readAt,
     fillState:result.state,exitFilledTotal:0,exitAttempt:0,reconciliationState:'OPEN_PENDING_PROVIDER_RECONCILIATION',
   };
+  attempt={...attempt,terminalClassification:'FILLED'};
+  series.currentAttempt=attempt;
   series.position=position;series.unresolvedEntry=false;series.status=seriesTerminal(series)?'ATTEMPT_LIMIT_REACHED_MANAGING_POSITION':'MANAGING_POSITION_SERIES_CONTINUES';
-  await persistAttempt(env,{runId:seriesId,attemptId,attemptNo,result:result.state,...series.currentAttempt});
+  await persistAttempt(env,{runId:seriesId,result:result.state,...attempt});
   await persistPosition(env,{positionId:attemptId,...position});
-  await appendRealLedger(env,'POSITION_OWNERSHIP_ESTABLISHED',{seriesId,attemptId,attemptNo,ticker:candidate.ticker,entryOrderId:position.entryOrderId,clientOrderId:position.entryClientOrderId,exchangeIndex:2,filledCount:position.filledCount,fillState:result.state});
+  await appendRealLedger(env,'POSITION_OWNERSHIP_ESTABLISHED',{seriesId,attemptId,intentNo,attemptNo,ticker:candidate.ticker,entryOrderId:position.entryOrderId,clientOrderId:position.entryClientOrderId,exchangeIndex:2,filledCount:position.filledCount,fillState:result.state,writerInvoked:true,providerPostStarted:true,providerAttemptCounted:true});
   await settleSeriesControl(env,series,1);
   return saveRealSeriesState(env,series);
 }
