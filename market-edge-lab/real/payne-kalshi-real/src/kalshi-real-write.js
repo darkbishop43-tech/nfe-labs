@@ -54,13 +54,17 @@ export function payneOrderWriteProof(kind,payload,scope){
 }
 
 export async function kalshiPayneOrderPost(env,kind,payload,scope,{fetchImpl=fetch}={}){
-  let providerPostStarted=false;
+  let writerInvoked=false,providerPostStarted=false;
   try{
     const proof=payneOrderWriteProof(kind,payload,scope);
+    writerInvoked=true;
     const response=await kalshiExecutionOrderPost(env,payload,{fetchImpl,onProviderPostStart:()=>{providerPostStarted=true;}});
-    return {response,proof};
+    return {response,proof,writerInvoked,providerPostStarted};
   }catch(error){
-    if(error&&typeof error==='object')error.payneProviderPostStarted=providerPostStarted;
+    if(error&&typeof error==='object'){
+      error.payneWriterInvoked=writerInvoked;
+      error.payneProviderPostStarted=providerPostStarted;
+    }
     throw error;
   }
 }
