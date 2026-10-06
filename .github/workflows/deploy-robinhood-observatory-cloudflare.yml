@@ -165,7 +165,8 @@ jobs:
           set -euo pipefail
           curl --fail --silent --show-error --location --dump-header /tmp/headers "$LIVE_URL/" --output /tmp/body
           grep -q 'NFE-OS Robinhood Observatory' /tmp/body && echo "VERIFY title PASS"
-          grep -q 'EXECUTION DISARMED' /tmp/body && echo "VERIFY execution badge PASS"
+          if grep -q 'EXECUTION DISARMED' /tmp/body; then echo "Static execution authority remains in shell"; exit 1; fi
+          grep -q 'id="executionBadge"' /tmp/body && echo "VERIFY execution badge runtime slot PASS"
           grep -q 'Live Trader Cockpit' /tmp/body && echo "VERIFY cockpit PASS"
           grep -q 'Crypto Radar Universe' /tmp/body && echo "VERIFY universe PASS"
           grep -q 'NFE-OS SI Crypto V0' /tmp/body && echo "VERIFY SI Crypto V0 PASS"
@@ -230,6 +231,10 @@ jobs:
           grep -q 'LIVE QUALIFICATION THRESHOLD: NOT YET FOUNDER APPROVED' /tmp/app-js && echo "VERIFY no qualification threshold invention PASS"
           grep -q 'Fresh live execution connectivity' /tmp/app-js && echo "VERIFY research/provider freshness separation PASS"
           grep -q 'Start provider scan' /tmp/app-js && grep -q 'Run fresh order preview' /tmp/app-js && echo "VERIFY governed button behavior wiring PASS"
+          if grep -q 'Execution remains DISARMED' /tmp/app-js; then echo "Stale execution-state message remains"; exit 1; fi
+          grep -q 'STALE PREVIEW WITHHELD — RUNTIME SPECIMEN DOES NOT MATCH CAPTURED SPECIMEN' /tmp/app-js && echo "VERIFY stale preview cannot cross specimen PASS"
+          grep -q "const lockSymbol=runtimeSymbol" /tmp/app-js && grep -q "scan.quote.symbol===runtimeSymbol" /tmp/app-js && echo "VERIFY runtime candidate drives same-specimen LOCK presentation PASS"
+          grep -q "executionBadge').textContent=durableState" /tmp/app-js && echo "VERIFY durable execution state drives shell badge PASS"
           grep -q 'STALE / SNAPSHOT' /tmp/app-js && grep -q 'FRESH LOCK REQUIRED' /tmp/app-js && echo "VERIFY crypto radar stale-provider semantics PASS"
           for i in 1 2 3 4 5 6; do
             if curl --fail --silent --show-error --location "$LIVE_URL/api/robinhood/provider-capability?action=start_provider_scan" --output /tmp/rh-capability; then break; fi
@@ -259,9 +264,8 @@ jobs:
           cat /tmp/rh-read-status
           grep -q '"readOnlyConnector": true' /tmp/rh-read-status
           grep -q '"writeRoutesPresent": false' /tmp/rh-read-status
-          grep -q '"execution": "DISARMED"' /tmp/rh-read-status
-          grep -q '"fireAuthority": "ZERO"' /tmp/rh-read-status
-          echo "VERIFY Robinhood read-only connector shell PASS"
+          if grep -q '"execution":' /tmp/rh-read-status || grep -q '"fireAuthority":' /tmp/rh-read-status; then echo "Read connector must not publish execution authority"; exit 1; fi
+          echo "VERIFY Robinhood read connector is authority-neutral PASS"
           curl --fail --silent --show-error --location "$LIVE_URL/api/v0a/mapping" --output /tmp/v0a-mapping.json
           SCORE_SYMBOL="$(node - <<'NODE'
           const fs=require('fs');
@@ -298,8 +302,8 @@ jobs:
           const s=JSON.parse(fs.readFileSync('/tmp/rh-status.json','utf8'));
           if(s.apiKeyPresent!==true||s.privateKeyPresent!==true) throw new Error('Robinhood Crypto Worker secrets not both present');
           if(s.readOnlyConnector!==true||s.writeRoutesPresent!==false) throw new Error('Connector authority boundary mismatch');
-          if(s.execution!=='DISARMED'||s.fireAuthority!=='ZERO') throw new Error('Execution authority expanded');
-          console.log('VERIFY Robinhood encrypted credential bindings present PASS',JSON.stringify({apiKeyPresent:s.apiKeyPresent,privateKeyPresent:s.privateKeyPresent,readOnlyConnector:s.readOnlyConnector,writeRoutesPresent:s.writeRoutesPresent,execution:s.execution,fireAuthority:s.fireAuthority}));
+          if('execution' in s||'fireAuthority' in s) throw new Error('Read connector must not publish execution authority');
+          console.log('VERIFY Robinhood encrypted credential bindings present PASS',JSON.stringify({apiKeyPresent:s.apiKeyPresent,privateKeyPresent:s.privateKeyPresent,readOnlyConnector:s.readOnlyConnector,writeRoutesPresent:s.writeRoutesPresent}));
           NODE
 
           curl --fail --silent --show-error --location "$LIVE_URL/api/robinhood/crypto/accounts" --output /tmp/rh-accounts.json
