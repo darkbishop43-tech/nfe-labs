@@ -520,34 +520,88 @@ async function runScheduledCollection(env) {
   return {sampledAt:nowIso,spreadSamplesInserted:spreadStatements.length,governedSymbol,observationId,reconciled,featureState};
 }
 
-async function robinhoodProviderCapability(env, action) {
-  const requestedAt = new Date().toISOString();
-  const latest=env.V0A_DB
-    ? await env.V0A_DB.prepare("SELECT observed_at,robinhood_symbol,robinhood_provider_timestamp FROM v0a_observations ORDER BY observed_at_ms DESC LIMIT 1").first()
-    : null;
+async function readExecutionControl(env){
+  if(!env.V0A_DB) return {armed:false,state:"DISARMED",owned:null,reconciliation:"FLAT",entryIntent:null,exitIntent:null};
+  const row=await env.V0A_DB.prepare("SELECT state_json FROM robinhood_execution_control WHERE singleton_id=1").first();
+  if(!row?.state_json) return {armed:false,state:"DISARMED",owned:null,reconciliation:"FLAT",entryIntent:null,exitIntent:null};
+  try{return JSON.parse(row.state_json)}catch{return {armed:false,state:"DISARMED",owned:null,reconciliation:"FLAT",entryIntent:null,exitIntent:null}}
+}
 
-  const [status, accounts, pairs] = await Promise.all([
+async function rankFirstSpecimenCandidate(env, mappingState, allBooks, freshPairs){
+  const bookMap=new Map((Array.isArray(allBooks)?allBooks:[]).map(x=>[x.symbol,x]));
+  const mapped=(mappingState.rows||[]).filter(x=>x.mappingStatus==="MAPPED"&&x.robinhoodTradable);
+  const scored=await Promise.all(mapped.map(async m=>{
+    try{
+      const b=bookMap.get(m.binanceSymbol);
+      if(!b) return {symbol:m.robinhoodSymbol,status:"INCOMPLETE",reason:"RESEARCH_BOOK_UNAVAILABLE"};
+      const bid=Number(b.bidPrice),ask=Number(b.askPrice),mark=(bid+ask)/2;
+      if(!(bid>0&&ask>0&&mark>0)) return {symbol:m.robinhoodSymbol,status:"INCOMPLETE",reason:"INVALID_RESEARCH_BOOK"};
+      const f=await computeShadowFeatureSet(env,m.robinhoodSymbol,m,{bid,ask,mark,spreadPct:(ask-bid)/mark});
+      const complete=[f.M,f.T,f.V,f.Q,f.F,f.SI_CORE_V0A].every(Number.isFinite);
+      return {
+        symbol:m.robinhoodSymbol,
+        researchSymbol:m.binanceSymbol,
+        status:complete?"VALID":"INCOMPLETE",
+        score:f.SI_CORE_V0A,
+        components:{M:f.M,T:f.T,V:f.V,Q:f.Q,F:f.F},
+        priorSpreadSamples:f.priorSpreadSamples
+      };
+    }catch(e){
+      return {symbol:m.robinhoodSymbol,status:"INCOMPLETE",reason:String(e?.message||e)};
+    }
+  }));
+  const ranked=scored.filter(x=>x.status==="VALID"&&Number.isFinite(x.score)).sort((a,b)=>b.score-a.score);
+  for(const x of ranked){
+    let pair=(freshPairs||[]).find(p=>p.symbol===x.symbol);
+    if(!pair){
+      const exact=await readPairs(env,[x.symbol]);
+      pair=(exact.results||[]).find(p=>p.symbol===x.symbol)||null;
+    }
+    if(pair?.is_api_tradable===true){
+      return {
+        status:"READY",
+        mode:"FIRST_SPECIMEN_RANK_ONLY_NO_THRESHOLD",
+        firstSpecimenOnly:true,
+        qualificationThreshold:null,
+        leader:{...x,rank:1,isApiTradable:true},
+        validScores:ranked.map((r,i)=>({symbol:r.symbol,score:r.score,rank:i+1})),
+        incomplete:scored.filter(x=>x.status!=="VALID").map(x=>({symbol:x.symbol,reason:x.reason||"SI_COMPONENT_INCOMPLETE"}))
+      };
+    }
+  }
+  return {
+    status:ranked.length?"BLOCKED_NO_FRESH_TRADABLE_SI_LEADER":"BLOCKED_NO_VALID_SI_SCORE",
+    mode:"FIRST_SPECIMEN_RANK_ONLY_NO_THRESHOLD",
+    firstSpecimenOnly:true,
+    qualificationThreshold:null,
+    leader:null,
+    validScores:ranked.map((r,i)=>({symbol:r.symbol,score:r.score,rank:i+1})),
+    incomplete:scored.filter(x=>x.status!=="VALID").map(x=>({symbol:x.symbol,reason:x.reason||"SI_COMPONENT_INCOMPLETE"}))
+  };
+}
+
+async function robinhoodProviderCapability(env, action) {
+  const requestedAt=new Date().toISOString();
+  const [execution,status,accounts,pairs,mappingState,allBooks]=await Promise.all([
+    readExecutionControl(env),
     readConnectorStatus(env),
     readAccounts(env),
-    readPairs(env, [])
+    readPairs(env,[]),
+    mappingResponse(env),
+    publicGet("/api/v3/ticker/bookTicker")
   ]);
-
+  const candidateState=await rankFirstSpecimenCandidate(env,mappingState,allBooks,pairs.results||[]);
   const bound=(accounts.results||[]).find(x=>Array.isArray(x.bound_lanes)&&x.bound_lanes.includes("crypto"))||null;
-  const governedSymbol=latest?.robinhood_symbol||null;
+  const governedSymbol=candidateState.leader?.symbol||null;
   let quote=null;
   if(governedSymbol){
     const q=await readBestBidAsk(env,[governedSymbol]);
     quote=(q.results||[])[0]||null;
   }
-
-  const providerTimestamp =
-    quote?.timestamp ??
-    quote?.updated_at ??
-    quote?.updatedAt ??
-    requestedAt;
-
+  const providerTimestamp=quote?.timestamp??quote?.updated_at??quote?.updatedAt??requestedAt;
+  const ready=candidateState.status==="READY"&&quote?.bid!=null&&quote?.ask!=null;
   return {
-    status:"CONNECTED_FRESH",
+    status:ready?"CONNECTED_FRESH":candidateState.status,
     action:action||"status",
     provider:"Robinhood Crypto Trading API v2",
     providerPath:"Cloudflare Worker signed REST client",
@@ -555,15 +609,14 @@ async function robinhoodProviderCapability(env, action) {
     publicWorkerPreview:true,
     publicWorkerExecution:true,
     executionSurface:"CONNECTED",
-    providerState:"FRESH",
-    robinhoodExecution:"DISARMED",
+    providerState:ready?"FRESH":"CONNECTED_NO_QUALIFIED_CANDIDATE",
+    robinhoodExecution:execution.state||"DISARMED",
+    armed:execution.armed===true,
     liveWritesEnabled:true,
-    fireAuthority:"ZERO",
+    fireAuthority:execution.armed===true?"FOUNDER_GOVERNED":"ZERO",
     requestedAt,
-    freshProviderTimestamp:providerTimestamp,
-    researchObservation:latest?.observed_at||null,
+    freshProviderTimestamp:ready?providerTimestamp:null,
     robinhoodSymbol:governedSymbol,
-    lastRobinhoodProviderSnapshot:latest?.robinhood_provider_timestamp||null,
     account:bound?{
       account_number_masked:bound.account_number_masked,
       status:bound.status,
@@ -573,6 +626,7 @@ async function robinhoodProviderCapability(env, action) {
       is_api_tradable:bound.is_api_tradable
     }:null,
     pairCount:(pairs.results||[]).length,
+    candidate:candidateState,
     quote:quote?{
       symbol:quote.symbol??governedSymbol,
       bid:quote.bid??null,
@@ -584,14 +638,15 @@ async function robinhoodProviderCapability(env, action) {
       apiKeyPresent:status.apiKeyPresent===true,
       privateKeyPresent:status.privateKeyPresent===true
     },
-    blocker:null,
+    blocker:ready?null:candidateState.status,
     fabricatedValues:false
   };
 }
 
 async function ledgerStatus(env) {
   if(!env.V0A_DB) return {status:"D1_BINDING_MISSING"};
-  const [obs,spreads,outcomes,pending,reconciled,lastObs,lastSpread]=await Promise.all([
+  const [execution,obs,spreads,outcomes,pending,reconciled,lastObs,lastSpread]=await Promise.all([
+    readExecutionControl(env),
     env.V0A_DB.prepare("SELECT COUNT(*) AS n FROM v0a_observations").first(),
     env.V0A_DB.prepare("SELECT COUNT(*) AS n FROM v0a_spread_samples").first(),
     env.V0A_DB.prepare("SELECT COUNT(*) AS n FROM v0a_outcomes").first(),
@@ -613,9 +668,10 @@ async function ledgerStatus(env) {
     latestSpreadSample:lastSpread||null,
     versions:{n:N_VERSION,si:SI_VERSION},
     nPolicy:{missingData:"FAIL_CLOSED_NO_DEFAULT",marketDataDoubleCountPrevented:true},
-    robinhoodExecution:"DISARMED",
+    robinhoodExecution:execution.state||"DISARMED",
+    armed:execution.armed===true,
     binanceExecutionAuthority:"NONE",
-    fireAuthority:"ZERO"
+    fireAuthority:execution.armed===true?"FOUNDER_GOVERNED":"ZERO"
   };
 }
 
