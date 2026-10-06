@@ -227,3 +227,10 @@ if(/rows\.length!==1/.test(rhRead))throw new Error('Legacy exactly-one-account a
 if(!/resolveBoundAccount\(env,"crypto"\)/.test(rhRead))throw new Error('Crypto holdings/orders are not explicitly bound');
 if(!/bound_lanes/.test(rhRead))throw new Error('Discovered account registry does not preserve lane-binding visibility');
 console.log('PASS multiple Robinhood accounts are valid discovery state with explicit crypto binding 4142');
+
+
+if(!/\/api\/v0a\/score/.test(text))throw new Error('Read-only SI score endpoint missing');
+if(!/qualificationThreshold:"NOT SET"/.test(worker)||!/fireAuthority:"ZERO"/.test(worker))throw new Error('SI score endpoint invented authority or threshold');
+if(!/readPairs\(env,url\.searchParams\.getAll\("symbol"\),url\.searchParams\.get\("cursor"\)\)/.test(worker))throw new Error('Robinhood pair pagination cursor not wired');
+console.log('PASS read-only per-symbol SI scoring endpoint has zero FIRE authority and no threshold');
+console.log('PASS Robinhood dynamic pair pagination is wired read-only');
