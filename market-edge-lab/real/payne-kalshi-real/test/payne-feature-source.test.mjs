@@ -103,12 +103,15 @@ test('exact ticker, side, and window identity fail closed on mismatch',()=>{
   assert.equal(payneFeatureIdentity({...row,closeTime:'2026-10-06T06:15:00.000Z'},m,'YES').pass,false);
 });
 
-test('stale feature calculation is marked not fresh',async()=>{
-  const now=Date.now()-121_000;
+test('unavailable current raw spot input fails closed without reusing old feature authority',async()=>{
+  const now=Date.now();
   const m=market('KXBTC15M-STALE',new Date(now-60_000).toISOString(),new Date(now+14*60_000).toISOString());
   const env={PAYNE_KALSHI_STATE:kvMock()};
-  const state=await buildPayneOwnedFeatureState(env,[m],now,{fetchImpl:fetchSpot({BTC:100})});
+  const state=await buildPayneOwnedFeatureState(env,[m],now,{fetchImpl:fetchSpot({})});
   assert.equal(state.fresh,false);
+  assert.equal(state.ok,false);
+  assert.equal(state.error,'PAYNE_FRESH_FEATURE_INPUTS_UNAVAILABLE');
+  assert.deepEqual(state.opportunities,[]);
 });
 
 test('baseline independence: qualification source does not request Baseline service state',async()=>{
