@@ -189,11 +189,20 @@ jobs:
             sleep 5
           done
           cat /tmp/rh-capability
-          grep -q '"status": "BLOCKED_NO_CLOUD_ROBINHOOD_CONNECTOR"' /tmp/rh-capability && echo "VERIFY Robinhood public cloud connector blocker PASS"
-          grep -q '"publicWorkerLiveRead": false' /tmp/rh-capability
-          grep -q '"publicWorkerPreview": false' /tmp/rh-capability
-          grep -q '"robinhoodExecution": "DISARMED"' /tmp/rh-capability
-          grep -q '"fireAuthority": "ZERO"' /tmp/rh-capability
+          node - <<'NODE'
+          const fs=require('fs');
+          const x=JSON.parse(fs.readFileSync('/tmp/rh-capability','utf8'));
+          if(x.status!=='CONNECTED_FRESH') throw new Error('ROBINHOOD_PROVIDER_SCAN_NOT_CONNECTED');
+          if(x.publicWorkerLiveRead!==true) throw new Error('ROBINHOOD_LIVE_READ_NOT_ENABLED');
+          if(x.providerState!=='FRESH') throw new Error('ROBINHOOD_PROVIDER_STATE_NOT_FRESH');
+          if(x.executionSurface!=='CONNECTED') throw new Error('ROBINHOOD_EXECUTION_SURFACE_NOT_CONNECTED');
+          if(x.robinhoodExecution!=='DISARMED'||x.fireAuthority!=='ZERO') throw new Error('ROBINHOOD_EXECUTION_AUTHORITY_EXPANDED');
+          if(!x.freshProviderTimestamp) throw new Error('ROBINHOOD_FRESH_PROVIDER_TIMESTAMP_MISSING');
+          if(!x.account||!x.account.account_number_masked) throw new Error('ROBINHOOD_FRESH_ACCOUNT_STATE_MISSING');
+          if(!x.quote||!x.quote.symbol||x.quote.bid==null||x.quote.ask==null) throw new Error('ROBINHOOD_FRESH_QUOTE_MISSING');
+          if(x.credentialBindings?.apiKeyPresent!==true||x.credentialBindings?.privateKeyPresent!==true) throw new Error('ROBINHOOD_CREDENTIAL_BINDINGS_NOT_PRESENT');
+          console.log('VERIFY Robinhood production connector FRESH PASS',JSON.stringify({status:x.status,providerState:x.providerState,executionSurface:x.executionSurface,freshProviderTimestamp:x.freshProviderTimestamp,symbol:x.quote.symbol,bid:x.quote.bid,ask:x.quote.ask,account:x.account.account_number_masked,execution:x.robinhoodExecution,fireAuthority:x.fireAuthority}));
+          NODE
           curl --fail --silent --show-error --location "$LIVE_URL/api/robinhood/crypto/status" --output /tmp/rh-read-status
           cat /tmp/rh-read-status
           grep -q '"readOnlyConnector": true' /tmp/rh-read-status
