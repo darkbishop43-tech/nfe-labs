@@ -923,8 +923,8 @@ async function baselineReadOnlyPath(env, path) {
   }
 }
 
-export async function readAuthoritativePayneFeatures(env, markets = [], nowMs = Date.now()) {
-  return buildPayneOwnedFeatureState(env,markets,nowMs);
+export async function readAuthoritativePayneFeatures(env, markets = [], nowMs = Date.now(), options = {}) {
+  return buildPayneOwnedFeatureState(env,markets,nowMs,options);
 }
 
 export function payneDecisionEvidence(candidate, activeThreshold = PAYNE_CONFIG.defaultThreshold, frozenEffectiveLock = null) {
@@ -1664,7 +1664,7 @@ async function synchronizeFireFeatureEpoch(env,series,snapshot,nowMs=Date.now())
   const cfg=frozenSeriesConfig(series);
   const selected=snapshot?.selected||null;
   if(!cfg.ok || !selected?.ticker) return {ok:false,reason:'FIRE_REFRESH_IDENTITY_UNAVAILABLE',series};
-  const state=await readAuthoritativePayneFeatures(env,[selected],nowMs);
+  const state=await readAuthoritativePayneFeatures(env,[selected],nowMs,{forceRefresh:true});
   const feature=featureForCandidate(state,selected.ticker,selected.outcomeSide,selected.asset,cfg.threshold,selected);
   const evidence=payneFeatureBoundaryEvidence(feature,cfg.threshold,cfg.effectiveLockThreshold,'FIRE');
   const windowMatch=String(feature?.baselineOpenTime||'')===String(selected?.openTime||'')
@@ -3458,7 +3458,7 @@ async function managePayneRealPosition(env,control,series,postImpl=kalshiPayneOr
   }
 
   const quote=await exactMarketRead(env,position.marketTicker,position.asset);
-  const featureState=await readAuthoritativePayneFeatures(env,quote?.market?[quote.market]:[],nowMs);
+  const featureState=await readAuthoritativePayneFeatures(env,quote?.market?[quote.market]:[],nowMs,{forceRefresh:true});
   const feature=featureForCandidate(featureState,position.marketTicker,position.outcomeSide,position.asset,Number(series.threshold),quote?.market||null);
   const bid=position.outcomeSide==='YES'?Number(quote?.market?.yesBid):Number(quote?.market?.noBid);
   const ageMs=nowMs-Date.parse(position.entryTime||position.filledAt||'');
@@ -3638,7 +3638,7 @@ export async function runPayneRealExecutionCycle(env,{postImpl=kalshiPayneOrderP
     candidate.outcomeSide==='YES'?preSubmit.market.yesAsk:preSubmit.market.noAsk,preSubmit.readAt);
   series.fireLatch={...series.fireLatch,preSubmit:'PASS',preSubmitAt:preSubmit.readAt,preSubmitBookEvidence};
 
-  const features=await readAuthoritativePayneFeatures(env,preSubmit?.market?[preSubmit.market]:[],nowMs);
+  const features=await readAuthoritativePayneFeatures(env,preSubmit?.market?[preSubmit.market]:[],nowMs,{forceRefresh:true});
   const finalFeature=featureForCandidate(features,candidate.ticker,candidate.outcomeSide,candidate.asset,cfg.threshold,preSubmit?.market||null);
   const finalGate=payneStage(finalFeature,cfg.threshold,cfg.effectiveLockThreshold);
   const finalFeatureEvidence=payneFeatureBoundaryEvidence(finalFeature,cfg.threshold,cfg.effectiveLockThreshold,'FINAL');
