@@ -157,8 +157,9 @@ export async function buildPayneOwnedFeatureState(env,markets,nowMs=Date.now(),{
   }
 
   const calculatedAt=new Date(nowMs).toISOString();
-  const ageMs=Math.max(0,Date.now()-nowMs);
+  const ageMs=0;
   const state={
+    ok:opportunities.length>0,
     schema:'PAYNE_OWNED_KALSHI_FEATURE_STATE_V1',
     source:'KALSHI_AUTHORITATIVE',
     transport:'PAYNE_KALSHI_READ',
