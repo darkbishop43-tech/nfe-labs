@@ -7,9 +7,10 @@ let D, selected='SPY', inspectedCrypto=null, radarViewPaused=false, providerScan
 
 Promise.all([
   fetch('./data/snapshot.json',{cache:'no-store'}).then(r=>{if(!r.ok)throw Error(`snapshot ${r.status}`);return r.json()}),
-  fetch('/api/v0a/ledger-status',{cache:'no-store'}).then(r=>r.ok?r.json():null).catch(()=>null)
+  fetch('/api/v0a/ledger-status',{cache:'no-store'}).then(r=>r.ok?r.json():null).catch(()=>null),
+  fetch('/api/robinhood/execution/state',{cache:'no-store'}).then(r=>r.ok?r.json():null).catch(()=>null)
 ])
-.then(([d,ledger])=>{D=d;D.liveLedger=ledger;inspectedCrypto=D.operationalCockpit?.lock?.symbol||D.cryptoUniverse?.rows?.[0]?.symbol||null;render()})
+.then(([d,ledger,execution])=>{D=d;D.liveLedger=ledger;D.executionState=execution;inspectedCrypto=D.operationalCockpit?.lock?.symbol||D.cryptoUniverse?.rows?.[0]?.symbol||null;render()})
 .catch(e=>{document.body.innerHTML=`<main><div class="panel"><h2 class="error">🔴 SNAPSHOT LOAD ERROR</h2><p>No values were fabricated.</p><code>${String(e.message)}</code></div></main>`});
 
 function render(){
@@ -58,7 +59,7 @@ function renderSiCrypto(){
 
  el('shadowLane').innerHTML=`
    <div class="hero-symbol">${s.shadow.state}</div>
-   <div class="kv"><span>Authority</span><b>${s.shadow.authority}</b><span>Recorded evaluations</span><b>${s.shadow.records.length}</b><span>Current market score</span><b>${liveCore==null?'INCOMPLETE':num(liveCore,4)}</b><span>Would-fire</span><b>BLOCKED — NO FOUNDER-APPROVED SI QUALIFICATION THRESHOLD</b><span>Outcome horizons</span><b>${s.shadow.horizons.join(' · ')}</b><span>Excursion metrics</span><b>${s.shadow.excursionMetrics.join(' · ')}</b></div>
+   <div class="kv"><span>Authority</span><b>${s.shadow.authority}</b><span>Recorded evaluations</span><b>${s.shadow.records.length}</b><span>Current market score</span><b>${liveCore==null?'INCOMPLETE':num(liveCore,4)}</b><span>First-specimen qualification</span><b>${D.liveProviderScan?.candidate?.leader?'READY — CURRENT VALID SI-RANKED LEADER / NO PERMANENT THRESHOLD':'PENDING FRESH PROVIDER SCAN + VALID SI RANK'}</b><span>Outcome horizons</span><b>${s.shadow.horizons.join(' · ')}</b><span>Excursion metrics</span><b>${s.shadow.excursionMetrics.join(' · ')}</b></div>
    <p class="sub">Shadow may observe, score, record, and reconcile outcomes. It has zero real-money authority.</p>`;
 
  el('liveLane').innerHTML=`
@@ -126,23 +127,27 @@ function renderAccount(){
 
 function renderOperational(){
  const o=D.operationalCockpit,r=o.radar,l=o.lock,p=o.position,m=o.manage,live=D.liveLedger?.latestObservation||null,scan=D.liveProviderScan||null;
+ const durable=D.executionState?.state||null;
+ const durableState=durable?.state||o.execution.state;
+ const durableArmed=durable?.armed===true;
+ const candidate=scan?.candidate?.leader||null;
  const providerFresh=scan?.publicWorkerLiveRead===true&&scan?.providerState==='FRESH';
  const freshQuote=providerFresh&&scan?.quote&&(!l.symbol||scan.quote.symbol===l.symbol)?scan.quote:null;
  const lockBid=freshQuote?.bid??l.bid, lockAsk=freshQuote?.ask??l.ask, lockMark=freshQuote?.mark??((lockBid!=null&&lockAsk!=null)?(Number(lockBid)+Number(lockAsk))/2:l.mark);
  const lockSpread=(lockBid!=null&&lockAsk!=null)?Number(lockAsk)-Number(lockBid):l.spread;
  const lockSpreadPct=(lockMark?lockSpread/Number(lockMark):l.spreadPct);
- el('quickState').innerHTML=`<div class="kv"><span>Current lifecycle</span><b>${o.lifecycle[o.currentLifecycleIndex]||'FLAT'}</b><span>Current candidate</span><b>${r.leader||l.symbol||'NONE'}</b><span>MARKET INTELLIGENCE SCORE</span><b>${live?.si_core_v0a==null?'INCOMPLETE':('SI_CORE_V0A '+num(live.si_core_v0a,4))}</b><span>NFE EVIDENCE RESEARCH</span><b>${live?.n_v0==null?'N_V0 INCOMPLETE / NON-BLOCKING':('N_V0 '+num(live.n_v0,4))}</b><span>Robinhood LOCK</span><b>${l.state} · ${l.symbol}</b><span>Execution authority</span><b>${o.execution.state}</b><span>Position state</span><b>${p.state}</b></div>`;
+ el('quickState').innerHTML=`<div class="kv"><span>Current lifecycle</span><b>${durableState}</b><span>Current candidate</span><b>${candidate?.symbol||r.leader||l.symbol||'NONE'}</b><span>Candidate SI_CORE_V0A</span><b>${candidate?.score==null?'NOT YET RANKED':num(candidate.score,4)}</b><span>Qualification mode</span><b>${candidate?'FIRST SPECIMEN — RANK ONLY / NO PERMANENT THRESHOLD':'START PROVIDER SCAN TO RANK'}</b><span>Robinhood LOCK</span><b>${l.state} · ${l.symbol}</b><span>Execution authority</span><b>${durableState}</b><span>Armed</span><b>${durableArmed?'YES':'NO'}</b><span>Position state</span><b>${durable?.owned?'OWNED':p.state}</b></div>`;
  el('executionStrip').innerHTML=`
-   <div><span>EXECUTION</span><strong class="stale">${o.execution.state}</strong><small>${providerFresh?'PROVIDER CONNECTED / FRESH':o.execution.reason}</small></div>
+   <div><span>EXECUTION</span><strong class="${durableArmed?'current':'stale'}">${durableState}</strong><small>${providerFresh?'PROVIDER CONNECTED / FRESH':o.execution.reason}</small></div>
    <div><span>RADAR</span><strong class="${providerFresh?'current':'stale'}">${providerFresh?'PROVIDER FRESH':r.state}</strong><small>${r.eligibleCount} eligible of ${r.universeSize} provider pairs · provider scan ${providerScanState}</small></div>
    <div><span>LOCK</span><strong class="${providerFresh?'current':'stale'}">${providerFresh?'FRESH PROVIDER EVIDENCE':l.state}</strong><small>${scan?.quote?.symbol||l.symbol} · ${providerFresh?fmtTime(scan.freshProviderTimestamp):l.freshness}</small></div>
    <div><span>POSITION</span><strong>${p.state}</strong><small>${p.orderState}</small></div>
    <div><span>MANAGE</span><strong>${m.state}</strong><small>${m.reason}</small></div>`;
 
  el('radarPanel').innerHTML=`
-   <div class="hero-symbol">${r.leader}</div>
-   <div class="state stale">NO SI-RANKED LEADER</div>
-   <p>${r.leaderBasis}</p>
+   <div class="hero-symbol">${candidate?.symbol||r.leader||'NONE'}</div>
+   <div class="state ${candidate?'current':'stale'}">${candidate?'FIRST-SPECIMEN SI-RANKED LEADER':'NO VALID SI-RANKED LEADER YET'}</div>
+   <p>${candidate?('SI_CORE_V0A '+num(candidate.score,4)+' · rank '+candidate.rank+' · fresh Robinhood tradability required and proven by scan'):r.leaderBasis}</p>
    <div class="kv"><span>Universe</span><b>${r.universeSize}</b><span>Eligible now</span><b>${r.eligibleCount}</b><span>Candidate pool</span><b>${r.candidateCount}</b><span>Last provider capture</span><b>${fmtTime(r.lastProviderUpdate)}</b></div>`;
 
  el('lockPanel').innerHTML=`
@@ -157,7 +162,7 @@ function renderOperational(){
 
  el('lifecycle').innerHTML=o.lifecycle.map((x,i)=>`<span class="life-step ${i<o.currentLifecycleIndex?'done':i===o.currentLifecycleIndex?'active':''}">${x}</span>`).join('<span class="life-arrow">→</span>');
 
- const governed=live?.robinhood_symbol||r.leader||l.symbol||inspectedCrypto||'NONE';
+ const governed=candidate?.symbol||live?.robinhood_symbol||r.leader||l.symbol||inspectedCrypto||'NONE';
  el('controls').innerHTML=`
    <button class="control-btn" id="inspectLeader">Inspect governed specimen</button>
    <button class="control-btn" id="pauseRadar">${radarViewPaused?'Resume':'Pause'} radar view</button>
@@ -176,7 +181,7 @@ function renderOperational(){
  el('disarmState').onclick=async()=>{await postExecution('disarm')};
  el('startProviderScan').onclick=async()=>{providerScanState='CHECKING';renderOperational();const j=await requestRobinhoodCapability('start_provider_scan');D.liveProviderScan=j||null;providerScanState=j?.publicWorkerLiveRead?'RUNNING':'BLOCKED';await refreshExecutionState();renderOperational();renderV0A();renderCryptoUniverse(true)};
  el('pauseProviderScan').onclick=()=>{providerScanState='STOPPED';showControlReason('Provider scan state is STOPPED. No live Cloudflare Robinhood scan was running.');renderOperational()};
- el('freshPreview').onclick=async()=>{const cfg=readTestConfig();if(!cfg?.frozen)return showControlReason('BLOCKED: freeze an exact Founder-selected dollar amount, entry type, and exit plan first. No default stake/order type will be invented.');const symbol=D.liveLedger?.latestObservation?.robinhood_symbol||inspectedCrypto;if(!symbol)return showControlReason('BLOCKED: no current SI-ranked leader is available. No symbol was invented.');const locked=await postExecution('lock',{symbol,side:'buy',type:cfg.entryType,maxDebit:String(cfg.stake),orderConfig:{quote_amount:String(cfg.stake)},frozenConfiguration:cfg});if(!locked)return;await postExecution('preview',{previewEvidence:{nonExecuting:true,source:'founder-frozen-config',maxDebit:String(cfg.stake),symbol,note:'Quantity not invented. Official estimate requires an authoritative asset quantity.'}})};
+ el('freshPreview').onclick=async()=>{const cfg=readTestConfig();if(!cfg?.frozen)return showControlReason('BLOCKED: freeze the Founder-selected first-test configuration first. No default trading value will be invented.');const symbol=D.liveProviderScan?.candidate?.leader?.symbol;if(!symbol)return showControlReason('BLOCKED: run Start provider scan and obtain a valid first-specimen SI-ranked leader first.');const locked=await postExecution('lock',{symbol,side:'buy',type:cfg.entryType,maxDebit:String(cfg.stake),orderConfig:{quote_amount:String(cfg.stake)},frozenConfiguration:cfg});if(!locked)return;await postExecution('preview',{previewEvidence:{nonExecuting:true,source:'founder-frozen-config',maxDebit:String(cfg.stake),symbol,providerTimestamp:D.liveProviderScan?.freshProviderTimestamp||null,quote:D.liveProviderScan?.quote||null,qualification:{mode:'FIRST_SPECIMEN_RANK_ONLY_NO_THRESHOLD',score:D.liveProviderScan?.candidate?.leader?.score??null,rank:D.liveProviderScan?.candidate?.leader?.rank??null}}})};
  el('founderApprove').onclick=async()=>{const st=await refreshExecutionState();const fp=st?.state?.specimenFp;if(!fp)return showControlReason('BLOCKED: no frozen specimen fingerprint is present. Approval cannot be blanket.');await postExecution('approve',{specimenFp:fp})};
  el('exitReview').onclick=async()=>{const st=await refreshExecutionState();if(st?.state?.owned)showControlReason('Owned position is present in durable state. Exit review is available; provider sell remains refused while DISARMED.');else showControlReason('NO POSITION: exit review is not applicable. Durable execution state has no owned position.')};
 }
@@ -198,7 +203,7 @@ async function postExecution(action,body={}){
     const j=await r.json();
     D.executionState=j;
     const st=j.state?.state||j.error||j.status||'UNKNOWN';
-    showControlReason(`${action}: ${st}. Execution remains DISARMED. Live writes ${j.liveWritesEnabled===false?'disabled':'not confirmed'}. ${j.reason||j.message||''}`);
+    showControlReason(`${action}: ${st}. Durable armed=${j.state?.armed===true?'true':'false'}. Live writes ${j.liveWritesEnabled===true?'enabled / governed':'disabled'}. ${j.reason||j.message||''}`);
     return r.ok?j:null;
   }catch(e){
     showControlReason(action+' failed: '+String(e.message||e));
