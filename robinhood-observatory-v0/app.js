@@ -132,15 +132,24 @@ function renderOperational(){
  const durableArmed=durable?.armed===true;
  const candidate=scan?.candidate?.leader||null;
  const providerFresh=scan?.publicWorkerLiveRead===true&&scan?.providerState==='FRESH';
- const freshQuote=providerFresh&&scan?.quote&&(!l.symbol||scan.quote.symbol===l.symbol)?scan.quote:null;
- const lockBid=freshQuote?.bid??l.bid, lockAsk=freshQuote?.ask??l.ask, lockMark=freshQuote?.mark??((lockBid!=null&&lockAsk!=null)?(Number(lockBid)+Number(lockAsk))/2:l.mark);
- const lockSpread=(lockBid!=null&&lockAsk!=null)?Number(lockAsk)-Number(lockBid):l.spread;
- const lockSpreadPct=(lockMark?lockSpread/Number(lockMark):l.spreadPct);
- el('quickState').innerHTML=`<div class="kv"><span>Current lifecycle</span><b>${durableState}</b><span>Current candidate</span><b>${candidate?.symbol||r.leader||l.symbol||'NONE'}</b><span>Candidate SI_CORE_V0A</span><b>${candidate?.score==null?'NOT YET RANKED':num(candidate.score,4)}</b><span>Qualification mode</span><b>${candidate?'FIRST SPECIMEN — RANK ONLY / NO PERMANENT THRESHOLD':'START PROVIDER SCAN TO RANK'}</b><span>Robinhood LOCK</span><b>${l.state} · ${l.symbol}</b><span>Execution authority</span><b>${durableState}</b><span>Armed</span><b>${durableArmed?'YES':'NO'}</b><span>Position state</span><b>${durable?.owned?'OWNED':p.state}</b></div>`;
+ const runtimeSymbol=candidate?.symbol||null;
+ const freshQuote=providerFresh&&runtimeSymbol&&scan?.quote?.symbol===runtimeSymbol?scan.quote:null;
+ const lockSymbol=runtimeSymbol||durable?.specimen?.symbol||l.symbol||null;
+ const snapshotMatchesRuntime=Boolean(runtimeSymbol&&l.symbol===runtimeSymbol);
+ const durableSpecimenMatchesRuntime=Boolean(runtimeSymbol&&durable?.specimen?.symbol===runtimeSymbol);
+ const activePreview=durableSpecimenMatchesRuntime?durable?.specimen?.previewEvidence:null;
+ const lockBid=freshQuote?.bid??(snapshotMatchesRuntime?l.bid:null);
+ const lockAsk=freshQuote?.ask??(snapshotMatchesRuntime?l.ask:null);
+ const lockMark=freshQuote?.mark??((lockBid!=null&&lockAsk!=null)?(Number(lockBid)+Number(lockAsk))/2:(snapshotMatchesRuntime?l.mark:null));
+ const lockSpread=(lockBid!=null&&lockAsk!=null)?Number(lockAsk)-Number(lockBid):(snapshotMatchesRuntime?l.spread:null);
+ const lockSpreadPct=(lockMark&&lockSpread!=null)?lockSpread/Number(lockMark):(snapshotMatchesRuntime?l.spreadPct:null);
+ const previewState=durableSpecimenMatchesRuntime&&activePreview?'CURRENT SPECIMEN PREVIEW':(snapshotMatchesRuntime?l.previewState:'INVALID — DIFFERENT SPECIMEN');
+ const approvalState=durableSpecimenMatchesRuntime&&durable?.approval?.specimenFp===durable?.specimenFp?'BOUND TO CURRENT SPECIMEN':(snapshotMatchesRuntime?l.founderApproval:'INVALID — DIFFERENT SPECIMEN');
+ el('quickState').innerHTML=`<div class="kv"><span>Current lifecycle</span><b>${durableState}</b><span>Current candidate</span><b>${candidate?.symbol||r.leader||l.symbol||'NONE'}</b><span>Candidate SI_CORE_V0A</span><b>${candidate?.score==null?'NOT YET RANKED':num(candidate.score,4)}</b><span>Qualification mode</span><b>${candidate?'FIRST SPECIMEN — RANK ONLY / NO PERMANENT THRESHOLD':'START PROVIDER SCAN TO RANK'}</b><span>Robinhood LOCK</span><b>${providerFresh&&lockSymbol?'FRESH · '+lockSymbol:(l.state+' · '+(lockSymbol||'NONE'))}</b><span>Execution authority</span><b>${durableState}</b><span>Armed</span><b>${durableArmed?'YES':'NO'}</b><span>Position state</span><b>${durable?.owned?'OWNED':p.state}</b></div>`;
  el('executionStrip').innerHTML=`
    <div><span>EXECUTION</span><strong class="${durableArmed?'current':'stale'}">${durableState}</strong><small>${providerFresh?'PROVIDER CONNECTED / FRESH':o.execution.reason}</small></div>
    <div><span>RADAR</span><strong class="${providerFresh?'current':'stale'}">${providerFresh?'PROVIDER FRESH':r.state}</strong><small>${r.eligibleCount} eligible of ${r.universeSize} provider pairs · provider scan ${providerScanState}</small></div>
-   <div><span>LOCK</span><strong class="${providerFresh?'current':'stale'}">${providerFresh?'FRESH PROVIDER EVIDENCE':l.state}</strong><small>${scan?.quote?.symbol||l.symbol} · ${providerFresh?fmtTime(scan.freshProviderTimestamp):l.freshness}</small></div>
+   <div><span>LOCK</span><strong class="${providerFresh&&freshQuote?'current':'stale'}">${providerFresh&&freshQuote?'FRESH PROVIDER EVIDENCE':l.state}</strong><small>${lockSymbol||'NONE'} · ${providerFresh&&freshQuote?fmtTime(scan.freshProviderTimestamp):l.freshness}</small></div>
    <div><span>POSITION</span><strong>${p.state}</strong><small>${p.orderState}</small></div>
    <div><span>MANAGE</span><strong>${m.state}</strong><small>${m.reason}</small></div>`;
 
@@ -151,9 +160,9 @@ function renderOperational(){
    <div class="kv"><span>Universe</span><b>${r.universeSize}</b><span>Eligible now</span><b>${r.eligibleCount}</b><span>Candidate pool</span><b>${r.candidateCount}</b><span>Last provider capture</span><b>${fmtTime(r.lastProviderUpdate)}</b></div>`;
 
  el('lockPanel').innerHTML=`
-   <div class="hero-symbol">${l.symbol} · ${l.side}</div>
-   <div class="kv"><span>Bid</span><b>${money(lockBid,8)}</b><span>Ask</span><b>${money(lockAsk,8)}</b><span>Mark</span><b>${money(lockMark,8)}</b><span>Spread <em class="calc">NFE</em></span><b>${money(lockSpread,8)} · ${pct(lockSpreadPct)}</b><span>Move vs provider reference <em class="calc">NFE</em></span><b>${pct(l.changePct)}</b><span>Provider capture</span><b>${fmtTime(providerFresh?scan.freshProviderTimestamp:l.providerTimestamp)}</b><span>Provider state</span><b class="${providerFresh?'current':'stale'}">${providerFresh?'FRESH / CONNECTED':'STALE / SNAPSHOT-BACKED'}</b><span>Preview</span><b class="stale">${l.previewState}</b><span>Founder approval</span><b class="stale">${l.founderApproval}</b></div>
-   <div class="preview-box"><b>Captured preview</b><span>${money(l.previewAmount)} ${l.previewType} · ${l.previewQuantity} · ${money(l.previewPrice,2)} preview unit price · ${money(l.previewFee)} estimated fee</span><small>Preview captured ${fmtTime(l.previewCapturedAt)}. Fresh LOCK quote is newer.</small></div>`;
+   <div class="hero-symbol">${lockSymbol||'NONE'} · ${durableSpecimenMatchesRuntime?(durable?.specimen?.side||'—'):(snapshotMatchesRuntime?l.side:'—')}</div>
+   <div class="kv"><span>Bid</span><b>${money(lockBid,8)}</b><span>Ask</span><b>${money(lockAsk,8)}</b><span>Mark</span><b>${money(lockMark,8)}</b><span>Spread <em class="calc">NFE</em></span><b>${money(lockSpread,8)} · ${lockSpreadPct==null?'N/A':pct(lockSpreadPct)}</b><span>Provider capture</span><b>${fmtTime(providerFresh&&freshQuote?scan.freshProviderTimestamp:(snapshotMatchesRuntime?l.providerTimestamp:null))}</b><span>Provider state</span><b class="${providerFresh&&freshQuote?'current':'stale'}">${providerFresh&&freshQuote?'FRESH / CONNECTED':'FRESH LOCK REQUIRED'}</b><span>Preview</span><b class="${previewState.startsWith('INVALID')?'error':'stale'}">${previewState}</b><span>Founder approval</span><b class="${approvalState.startsWith('INVALID')?'error':'stale'}">${approvalState}</b></div>
+   <div class="preview-box"><b>${activePreview?'Current specimen preview':'Preview authority'}</b><span>${activePreview?escapeHtml(JSON.stringify(activePreview)):(snapshotMatchesRuntime?(money(l.previewAmount)+' '+l.previewType+' · '+l.previewQuantity+' · '+money(l.previewPrice,2)+' preview unit price · '+money(l.previewFee)+' estimated fee'):'STALE PREVIEW WITHHELD — RUNTIME SPECIMEN DOES NOT MATCH CAPTURED SPECIMEN')}</span><small>${activePreview?'Bound to durable specimen fingerprint.':(snapshotMatchesRuntime?('Preview captured '+fmtTime(l.previewCapturedAt)+'. Fresh LOCK must still match the current specimen.'):'A preview or approval for another symbol cannot authorize the current runtime candidate.')}</small></div>`;
 
  el('managePanel').innerHTML=`
    <div class="hero-symbol">${D.executionState?.state?.state||p.state}</div>
@@ -204,6 +213,7 @@ async function postExecution(action,body={}){
     D.executionState=j;
     const st=j.state?.state||j.error||j.status||'UNKNOWN';
     showControlReason(`${action}: ${st}. Durable armed=${j.state?.armed===true?'true':'false'}. Live writes ${j.liveWritesEnabled===true?'enabled / governed':'disabled'}. ${j.reason||j.message||''}`);
+    renderOperational();
     return r.ok?j:null;
   }catch(e){
     showControlReason(action+' failed: '+String(e.message||e));
@@ -218,7 +228,7 @@ async function requestRobinhoodCapability(action,targetId='controlReason'){
     const r=await fetch('/api/robinhood/provider-capability?action='+encodeURIComponent(action),{cache:'no-store'});
     const j=await r.json();
     const msg=j.publicWorkerLiveRead
-      ? `${j.status}: Robinhood provider ${j.providerState||'FRESH'} via ${j.providerPath||j.provider}. ${j.quote?.symbol||j.robinhoodSymbol||'NO SYMBOL'} bid ${j.quote?.bid??'N/A'} ask ${j.quote?.ask??'N/A'} at ${j.freshProviderTimestamp||'N/A'}. Execution remains DISARMED.`
+      ? `${j.status}: Robinhood provider ${j.providerState||'FRESH'} via ${j.providerPath||j.provider}. ${j.quote?.symbol||j.robinhoodSymbol||'NO SYMBOL'} bid ${j.quote?.bid??'N/A'} ask ${j.quote?.ask??'N/A'} at ${j.freshProviderTimestamp||'N/A'}. Execution ${j.robinhoodExecution||'UNKNOWN'}; armed=${j.armed===true?'true':'false'}.`
       : `${j.status}: ${j.blocker} Last Robinhood provider snapshot: ${j.lastRobinhoodProviderSnapshot||'unavailable'}.`;
     if(target) target.textContent=msg;
     return j;
