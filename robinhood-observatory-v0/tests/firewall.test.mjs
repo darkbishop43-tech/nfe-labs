@@ -229,7 +229,8 @@ if(!/bound_lanes/.test(rhRead))throw new Error('Discovered account registry does
 console.log('PASS multiple Robinhood accounts are valid discovery state with explicit crypto binding 4142');
 
 
-if(!/\/api\/v0a\/score/.test(text))throw new Error('Read-only SI score endpoint missing');
+const worker=fs.readFileSync(new URL('../../cloudflare/worker.js',import.meta.url),'utf8');
+if(!/\/api\/v0a\/score/.test(worker))throw new Error('Read-only SI score endpoint missing');
 if(!/qualificationThreshold:"NOT SET"/.test(worker)||!/fireAuthority:"ZERO"/.test(worker))throw new Error('SI score endpoint invented authority or threshold');
 if(!/readPairs\(env,url\.searchParams\.getAll\("symbol"\),url\.searchParams\.get\("cursor"\)\)/.test(worker))throw new Error('Robinhood pair pagination cursor not wired');
 console.log('PASS read-only per-symbol SI scoring endpoint has zero FIRE authority and no threshold');
