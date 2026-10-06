@@ -591,7 +591,7 @@ export default {
       if (url.pathname === "/api/robinhood/provider-capability") return json(await robinhoodProviderCapability(env,url.searchParams.get("action")));
       if (url.pathname === "/api/robinhood/crypto/status") return json(await readConnectorStatus(env));
       if (url.pathname === "/api/robinhood/crypto/accounts") return json(await readAccounts(env));
-      if (url.pathname === "/api/robinhood/crypto/pairs") return json(await readPairs(env,url.searchParams.getAll("symbol")));
+      if (url.pathname === "/api/robinhood/crypto/pairs") return json(await readPairs(env,url.searchParams.getAll("symbol"),url.searchParams.get("cursor")));
       if (url.pathname === "/api/robinhood/crypto/quote") return json(await readBestBidAsk(env,url.searchParams.getAll("symbol")));
       if (url.pathname === "/api/robinhood/crypto/estimate") return json(await readEstimatedPrice(env,{symbol:url.searchParams.get("symbol"),side:url.searchParams.get("side"),quantity:url.searchParams.get("quantity")}));
       if (url.pathname === "/api/robinhood/crypto/holdings") return json(await readBoundHoldings(env,url.searchParams.getAll("asset_code")));
