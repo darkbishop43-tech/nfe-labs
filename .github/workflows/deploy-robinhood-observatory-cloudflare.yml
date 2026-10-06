@@ -213,11 +213,17 @@ jobs:
           const fs=require('fs');
           const a=JSON.parse(fs.readFileSync('/tmp/rh-accounts.json','utf8'));
           const rows=a.results||[];
-          if(rows.length!==1) throw new Error('ACCOUNT_BINDING_REQUIRES_EXACTLY_ONE_API_ACCOUNT count='+rows.length);
-          const x=rows[0];
-          if(!/^••••\d{4}$/.test(String(x.account_number_masked||''))) throw new Error('Masked account proof missing');
-          if('account_number' in x) throw new Error('Raw account number exposed');
-          console.log('VERIFY Robinhood account binding PASS',JSON.stringify({accountCount:1,account_number_masked:x.account_number_masked,status:x.status,buying_power:x.buying_power,buying_power_currency:x.buying_power_currency,account_type:x.account_type,is_api_tradable:x.is_api_tradable}));
+          if(rows.length<1) throw new Error('No Robinhood crypto accounts returned');
+          for(const x of rows){
+            if(!/^••••\d{4}$/.test(String(x.account_number_masked||''))) throw new Error('Masked account proof missing');
+            if('account_number' in x) throw new Error('Raw account number exposed');
+          }
+          const matches=rows.filter(x=>Array.isArray(x.bound_lanes)&&x.bound_lanes.includes('crypto'));
+          if(matches.length!==1) throw new Error('CRYPTO_BINDING_NOT_UNIQUE matchCount='+matches.length);
+          const x=matches[0];
+          if(x.account_number_masked!=='••••4142') throw new Error('CRYPTO_BINDING_MASK_MISMATCH '+x.account_number_masked);
+          if(a.accountRegistry?.cryptoBinding?.account_number_masked!=='••••4142') throw new Error('Registry crypto binding mismatch');
+          console.log('VERIFY Robinhood multi-account discovery + explicit crypto binding PASS',JSON.stringify({accountCount:rows.length,cryptoBinding:x.account_number_masked,status:x.status,buying_power:x.buying_power,buying_power_currency:x.buying_power_currency,account_type:x.account_type,is_api_tradable:x.is_api_tradable,otherAccounts:rows.filter(v=>v!==x).map(v=>v.account_number_masked)}));
           NODE
 
           curl --fail --silent --show-error --location "$LIVE_URL/api/robinhood/crypto/pairs" --output /tmp/rh-pairs.json
@@ -259,7 +265,7 @@ jobs:
           node - <<'NODE'
           const fs=require('fs');
           const h=JSON.parse(fs.readFileSync('/tmp/rh-holdings.json','utf8'));
-          if(!h.account||!/^••••\d{4}$/.test(String(h.account.account_number_masked||''))) throw new Error('Bound holdings account proof missing');
+          if(!h.account||h.account.account_number_masked!=='••••4142'||h.account.binding?.lane!=='crypto') throw new Error('Bound holdings account proof missing or wrong lane');
           for(const x of (h.results||[])) if(x.account_number) throw new Error('Raw holdings account number exposed');
           console.log('VERIFY Robinhood holdings PASS',JSON.stringify({account_number_masked:h.account.account_number_masked,holdingCount:(h.results||[]).length,holdings:(h.results||[]).map(x=>({asset_code:x.asset_code,total_quantity:x.total_quantity,quantity_available_for_trading:x.quantity_available_for_trading}))}));
           NODE
@@ -269,7 +275,7 @@ jobs:
           node - <<'NODE'
           const fs=require('fs');
           const o=JSON.parse(fs.readFileSync('/tmp/rh-orders.json','utf8'));
-          if(!o.account||!/^••••\d{4}$/.test(String(o.account.account_number_masked||''))) throw new Error('Bound order-history account proof missing');
+          if(!o.account||o.account.account_number_masked!=='••••4142'||o.account.binding?.lane!=='crypto') throw new Error('Bound order-history account proof missing or wrong lane');
           for(const x of (o.results||[])) if(x.account_number) throw new Error('Raw order account number exposed');
           console.log('VERIFY Robinhood order history PASS',JSON.stringify({account_number_masked:o.account.account_number_masked,orderCount:(o.results||[]).length,orders:(o.results||[]).map(x=>({id:x.id,symbol:x.symbol,side:x.side,type:x.type,state:x.state,average_price:x.average_price,filled_asset_quantity:x.filled_asset_quantity,created_at:x.created_at,updated_at:x.updated_at}))}));
           NODE
