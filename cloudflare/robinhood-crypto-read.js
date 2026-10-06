@@ -109,9 +109,7 @@ export async function readConnectorStatus(env){
     apiKeyPresent:Boolean(env.ROBINHOOD_CRYPTO_API_KEY),
     privateKeyPresent:Boolean(env.ROBINHOOD_CRYPTO_PRIVATE_KEY),
     readOnlyConnector:true,
-    writeRoutesPresent:false,
-    execution:"DISARMED",
-    fireAuthority:"ZERO"
+    writeRoutesPresent:false
   };
 }
 export async function readAccounts(env){
@@ -121,7 +119,7 @@ export async function readAccounts(env){
     ...data,
     accountRegistry:{
       discoveryCount:(data.results||[]).length,
-      cryptoBinding:{account_number_masked:"••••"+bound,authority:ACCOUNT_BINDINGS.crypto.authority,execution:"DISARMED"}
+      cryptoBinding:{account_number_masked:"••••"+bound,authority:ACCOUNT_BINDINGS.crypto.authority}
     },
     results:(data.results||[]).map(x=>({...sanitizeAccount(x),bound_lanes:maskAccount(x.account_number)==="••••"+bound?["crypto"]:[]}))
   };
