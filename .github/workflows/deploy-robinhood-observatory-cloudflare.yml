@@ -146,6 +146,22 @@ jobs:
           grep -qi '^x-content-type-options: nosniff' /tmp/headers
           grep -qi '^x-frame-options: DENY' /tmp/headers
           echo "PUBLIC_LOAD_PASS $LIVE_URL"
+          curl --fail --silent --show-error --location "$LIVE_URL/api/robinhood/execution/state" --output /tmp/rh-execution-state.json
+          cat /tmp/rh-execution-state.json
+          node - <<'NODE'
+          const fs=require('fs');
+          const x=JSON.parse(fs.readFileSync('/tmp/rh-execution-state.json','utf8'));
+          const s=x.state||{};
+          if(x.liveWritesEnabled!==true) throw new Error('LIVE_WRITE_CAPABILITY_NOT_ENABLED');
+          if(x.execution!=='DISARMED') throw new Error('EXECUTION_NOT_DISARMED');
+          if(s.armed!==false) throw new Error('ARMED_STATE_NOT_FALSE');
+          if(s.state!=='DISARMED') throw new Error('DURABLE_STATE_NOT_DISARMED');
+          if(s.owned!==null) throw new Error('OWNED_POSITION_PRESENT');
+          if(s.reconciliation!=='FLAT') throw new Error('RECONCILIATION_NOT_FLAT');
+          if(s.entryIntent!==null) throw new Error('ENTRY_INTENT_PRESENT');
+          if(s.exitIntent!==null) throw new Error('EXIT_INTENT_PRESENT');
+          console.log('VERIFY governed live-write capability enabled while DISARMED PASS',JSON.stringify({liveWritesEnabled:x.liveWritesEnabled,execution:x.execution,armed:s.armed,state:s.state,owned:s.owned,reconciliation:s.reconciliation,entryIntent:s.entryIntent,exitIntent:s.exitIntent}));
+          NODE
           curl --fail --silent --show-error --location "$LIVE_URL/api/v0a/ledger-status" --output /tmp/v0a-ledger-status
           grep -q '"database": "nfe-os-robinhood-si-v0a-ledger"' /tmp/v0a-ledger-status && echo "VERIFY dedicated D1 binding PASS"
           grep -q '"authority": "RESEARCH_ONLY"' /tmp/v0a-ledger-status && echo "VERIFY D1 research-only authority PASS"
