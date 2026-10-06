@@ -185,6 +185,24 @@ jobs:
           grep -q '"execution": "DISARMED"' /tmp/rh-read-status
           grep -q '"fireAuthority": "ZERO"' /tmp/rh-read-status
           echo "VERIFY Robinhood read-only connector shell PASS"
+          curl --fail --silent --show-error --location "$LIVE_URL/api/v0a/mapping" --output /tmp/v0a-mapping.json
+          SCORE_SYMBOL="$(node - <<'NODE'
+          const fs=require('fs');
+          const m=JSON.parse(fs.readFileSync('/tmp/v0a-mapping.json','utf8'));
+          const x=(m.rows||[]).find(r=>r.mappingStatus==='MAPPED'&&r.robinhoodTradable);
+          if(!x) process.exit(2);
+          process.stdout.write(x.robinhoodSymbol);
+          NODE
+          )"
+          curl --fail --silent --show-error --get "$LIVE_URL/api/v0a/score" --data-urlencode "symbol=$SCORE_SYMBOL" --output /tmp/v0a-score.json
+          node - <<'NODE'
+          const fs=require('fs');
+          const s=JSON.parse(fs.readFileSync('/tmp/v0a-score.json','utf8'));
+          if(!['VALID','INCOMPLETE'].includes(s.status)) throw new Error('Unexpected score status '+s.status);
+          if(s.qualificationThreshold!=='NOT SET'||s.fireAuthority!=='ZERO') throw new Error('Score endpoint authority boundary mismatch');
+          if(!s.symbol) throw new Error('Score specimen symbol missing');
+          console.log('VERIFY read-only SI score endpoint PASS',JSON.stringify({symbol:s.symbol,status:s.status,score:s.score?.value??null,qualificationThreshold:s.qualificationThreshold,fireAuthority:s.fireAuthority}));
+          NODE
           if grep -q 'INCOMPLETE — SPREAD HISTORY REQUIRED' /tmp/app-js; then echo "Stale conflicting Q presentation remains"; exit 1; fi
           echo "V0A_MAPPING_SUMMARY"
           node -e "const fs=require('fs');const m=JSON.parse(fs.readFileSync('/tmp/v0a-mapping'));const mo=JSON.parse(fs.readFileSync('/tmp/v0a-momentum'));const f=JSON.parse(fs.readFileSync('/tmp/v0a-features'));const b=JSON.parse(fs.readFileSync('/tmp/v0a-book'));console.log(JSON.stringify({robinhoodPairs:m.robinhoodPairs,mapped:m.mapped,unmapped:m.unmapped,mappedAssets:m.rows.filter(x=>x.mappingStatus==='MAPPED').map(x=>x.robinhoodSymbol),unmappedAssets:m.rows.filter(x=>x.mappingStatus!=='MAPPED').map(x=>x.robinhoodSymbol)}));console.log(JSON.stringify({mapping:mo.mapping,M:mo.M,T:f.T,V:f.V,F:f.F,qLiquidity:f.qLiquidity,Q:b.Q,researchBook:b.researchBook,depthSummary:b.depthSummary,featureConfig:f.configuration,momentumConfig:mo.configuration}))"
