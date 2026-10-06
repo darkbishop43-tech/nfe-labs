@@ -70,7 +70,8 @@ jobs:
             .orders == 0 and
             .capitalMovedUsd == 0 and
             (.realExecution.executionIntents | type == "number") and
-            (.realExecution.providerOrderAttempts | type == "number") and
+            .realExecution.providerOrderAttempts == null and
+            .realExecution.providerOrderAttemptsKnown == false and
             (.realExecution.filled | type == "number") and
             (.realExecution.noFill | type == "number") and
             (.realExecution.noProviderExecution | type == "number") and
@@ -88,6 +89,7 @@ jobs:
           echo "POSITION=$(jq -c '.series.position' /tmp/real-state.json)"
           echo "EXECUTION_INTENTS=$(jq -r '.realExecution.executionIntents' /tmp/ui-state.json)"
           echo "PROVIDER_ORDER_ATTEMPTS=$(jq -r '.realExecution.providerOrderAttempts' /tmp/ui-state.json)"
+          echo "PROVIDER_ORDER_ATTEMPTS_KNOWN=$(jq -r '.realExecution.providerOrderAttemptsKnown' /tmp/ui-state.json)"
           echo "FILLED=$(jq -r '.realExecution.filled' /tmp/ui-state.json)"
           echo "NO_FILL=$(jq -r '.realExecution.noFill' /tmp/ui-state.json)"
           echo "NO_PROVIDER_EXECUTION=$(jq -r '.realExecution.noProviderExecution' /tmp/ui-state.json)"
