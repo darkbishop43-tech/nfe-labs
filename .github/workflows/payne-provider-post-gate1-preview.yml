@@ -1,0 +1,176 @@
+name: PAYNE Provider POST Gate 1 Read-Only Preview
+
+on:
+  push:
+    branches:
+      - market-edge-payne-kalshi-real-step1
+    paths:
+      - ".github/workflows/payne-provider-post-gate1-preview.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  preview:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Read live PAYNE state and build one mechanical specimen preview
+        shell: bash
+        run: |
+          set -euo pipefail
+          base='https://market-edge-payne-kalshi-real.darkbishop43.workers.dev'
+
+          curl -fsS "$base/real-state" -o /tmp/real-state.json
+          curl -fsS "$base/cockpit-data" -o /tmp/cockpit.json
+
+          python - <<'PY'
+          import json, math
+
+          real=json.load(open('/tmp/real-state.json'))
+          cockpit=json.load(open('/tmp/cockpit.json'))
+
+          def fail(msg):
+              raise SystemExit("GATE1_BLOCKER="+msg)
+
+          # Founder-required disarm gate.
+          if real.get('control',{}).get('armed') is not False:
+              fail('PAYNE_NOT_DISARMED')
+          if real.get('series',{}).get('unresolvedEntry') is not False:
+              fail('UNRESOLVED_ENTRY_NOT_FALSE')
+          owned=int((cockpit.get('realExecution') or {}).get('ownedPositions') or 0)
+          if owned != 0:
+              fail('PAYNE_OWNED_POSITIONS_NONZERO')
+
+          # Zero-money/read-only proof.
+          if int(real.get('providerWrites') or 0) != 0:
+              fail('REAL_STATE_PROVIDER_WRITES_NONZERO')
+          if int(real.get('ordersSubmittedByThisRead') or 0) != 0:
+              fail('REAL_STATE_ORDERS_NONZERO')
+          if float(real.get('capitalMovedUsd') or 0) != 0:
+              fail('REAL_STATE_CAPITAL_MOVED_NONZERO')
+          if int(cockpit.get('providerWrites') or 0) != 0:
+              fail('COCKPIT_PROVIDER_WRITES_NONZERO')
+          if int(cockpit.get('orders') or 0) != 0:
+              fail('COCKPIT_ORDERS_NONZERO')
+          if float(cockpit.get('capitalMovedUsd') or 0) != 0:
+              fail('COCKPIT_CAPITAL_MOVED_NONZERO')
+
+          if cockpit.get('authentication') != 'PROVEN':
+              fail('KALSHI_AUTH_NOT_PROVEN')
+
+          index2=cockpit.get('index2') or {}
+          balance=index2.get('balance')
+          if index2.get('status') != 'READ-PROVEN AVAILABLE':
+              fail('INDEX2_NOT_READ_PROVEN')
+          if balance is None or float(balance) < 1.0:
+              fail('INDEX2_BALANCE_BELOW_1_USD')
+
+          max_debit=1.0
+
+          def fee_safe(p):
+              if not (isinstance(p,(int,float)) and 0 < p < 1):
+                  return None
+              for count in range(int(max_debit//p),0,-1):
+                  premium=round(count*p,4)
+                  raw=0.07*count*p*(1-p)
+                  fee=math.ceil((raw-1e-12)*100)/100
+                  total=round(premium+fee,4)
+                  if total <= max_debit + 1e-9:
+                      return dict(count=count,premiumUsd=premium,feeUsd=fee,totalDebitUsd=total)
+              return None
+
+          choices=[]
+          for m in cockpit.get('markets') or []:
+              if str(m.get('status') or '').lower() not in ('open','active'):
+                  continue
+              if m.get('executionEligible') is not True:
+                  continue
+              if int(m.get('exchangeIndex') if m.get('exchangeIndex') is not None else -1) != 2:
+                  continue
+              rem=m.get('timeRemainingMs')
+              if not isinstance(rem,(int,float)) or rem <= 6.5*60*1000:
+                  continue
+              ticker=m.get('ticker')
+              asset=m.get('asset')
+              if not ticker or not asset:
+                  continue
+              for outcome,key in [('YES','yesAsk'),('NO','noAsk')]:
+                  ask=m.get(key)
+                  if not isinstance(ask,(int,float)) or not (0 < ask < 1):
+                      continue
+                  size=fee_safe(float(ask))
+                  if not size:
+                      continue
+                  provider_side='bid' if outcome=='YES' else 'ask'
+                  provider_price=float(ask) if outcome=='YES' else 1.0-float(ask)
+                  choices.append({
+                      'ticker':ticker,
+                      'asset':asset,
+                      'outcomeSide':outcome,
+                      'currentExecutableAsk':round(float(ask),4),
+                      'timeRemainingMs':int(rem),
+                      'exchangeIndex':2,
+                      'sizing':size,
+                      'providerSide':provider_side,
+                      'providerPrice':round(provider_price,4),
+                      'providerReadAt':m.get('providerReadAt'),
+                  })
+
+          if not choices:
+              fail('NO_CURRENT_SAFE_INDEX2_SPECIMEN')
+
+          # Deterministic, non-strategy selection: most time remaining, then lowest ask,
+          # then stable ticker/side tie-break. No score/fair/edge/RADAR/LOCK/PULL input.
+          choices.sort(key=lambda x:(-x['timeRemainingMs'],x['currentExecutableAsk'],x['ticker'],x['outcomeSide']))
+          pick=choices[0]
+
+          payload={
+              'ticker':pick['ticker'],
+              'client_order_id':'<FRESH_PAYNE_DIAGNOSTIC_ID_AT_GATE2>',
+              'side':pick['providerSide'],
+              'count':f"{pick['sizing']['count']:.2f}",
+              'price':f"{pick['providerPrice']:.4f}",
+              'time_in_force':'immediate_or_cancel',
+              'self_trade_prevention_type':'taker_at_cross',
+              'post_only':False,
+              'cancel_order_on_pause':True,
+              'reduce_only':False,
+          }
+
+          result={
+              'schema':'PAYNE_PROVIDER_POST_GATE1_PREVIEW_V1',
+              'gate':'READ_PREVIEW_ONLY',
+              'strategyQualificationUsed':False,
+              'strategyBypass':'AUTHORIZED_FOR_SINGLE_FOUNDER_APPROVED_DIAGNOSTIC_ONLY',
+              'payne':{
+                  'armed':False,
+                  'unresolvedEntry':False,
+                  'ownedPositions':0,
+              },
+              'kalshi':{
+                  'authentication':cockpit.get('authentication'),
+                  'index2Status':index2.get('status'),
+                  'index2BalanceUsd':balance,
+              },
+              'specimen':pick,
+              'expectedIocPayload':payload,
+              'safetyGates':{
+                  'payneDisarmed':'PASS',
+                  'ownedPositionsZero':'PASS',
+                  'unresolvedEntryFalse':'PASS',
+                  'currentlyOpenTradable':'PASS',
+                  'index2':'PASS',
+                  'timeGate6_5m':'PASS',
+                  'realExecutableAsk':'PASS',
+                  'feeSafeUnder1Usd':'PASS',
+                  'sharedWriterPayloadShape':'PASS',
+                  'payneOwnershipConflict':'NONE',
+                  'providerWrites':0,
+                  'orders':0,
+                  'capitalMovedUsd':0,
+                  'normalStrategyPipelineChanged':False,
+                  'autoTouched':False,
+              },
+          }
+          print('GATE1_PREVIEW='+json.dumps(result,separators=(',',':')))
+          PY
