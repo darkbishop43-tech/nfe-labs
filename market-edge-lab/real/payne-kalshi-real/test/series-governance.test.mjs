@@ -731,7 +731,8 @@ test('LEGACY QUARANTINE A/B/C: old 4/5 accounting is terminalized without rewrit
     const legacyObs=summarizeRealExecutionState({control:await loadControl(e),series:quarantined,ledger:await listRealLedger(e,1000)});
     assert.equal(legacyObs.attempted,4);                 // preserved OLD-semantic historical count
     assert.equal(legacyObs.executionIntents,4);         // old local/intention evidence remains visible
-    assert.equal(legacyObs.providerOrderAttempts,0);    // never relabel old 4/5 as authenticated provider POSTs
+    assert.equal(legacyObs.providerOrderAttempts,null); // pre-repair provider-attempt count is not knowable
+    assert.equal(legacyObs.providerOrderAttemptsKnown,false);
 
     const history=await buildHistoricalSeriesReport(e,LEGACY_ID);
     assert.equal(history.seriesId,LEGACY_ID);
@@ -757,6 +758,7 @@ test('LEGACY QUARANTINE A/B/C: old 4/5 accounting is terminalized without rewrit
     const obs=summarizeRealExecutionState({control:await loadControl(e),series:fresh,ledger:await listRealLedger(e,1000)});
     assert.equal(obs.executionIntents,0);
     assert.equal(obs.providerOrderAttempts,0);
+    assert.equal(obs.providerOrderAttemptsKnown,true);
     assert.equal(obs.filled,0);
     assert.equal(obs.noFill,0);
     assert.equal(obs.noProviderExecution,0);

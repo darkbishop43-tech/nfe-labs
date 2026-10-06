@@ -2898,7 +2898,7 @@ export function summarizeRealExecutionState({control={},series={},ledger=[],asOf
     Number.isFinite(Number(control?.attempts))?Math.max(0,Math.trunc(Number(control.attempts))):0
   );
   const providerOrderAttempts=legacyAccounting
-    ? providerAttemptIds.size
+    ? null
     : Math.max(historicalAttempted,providerAttemptIds.size);
   // Backward-compatible attempted remains the preserved historical series count for legacy records;
   // providerOrderAttempts is the truthful authenticated-provider boundary count.
@@ -2971,6 +2971,7 @@ export function summarizeRealExecutionState({control={},series={},ledger=[],asOf
     armed:control?.armed===true,
     executionIntents,
     providerOrderAttempts,
+    providerOrderAttemptsKnown:!legacyAccounting,
     attempted,target,remaining,
     filled:filledIds.size,
     noFill:noFillIds.size,
