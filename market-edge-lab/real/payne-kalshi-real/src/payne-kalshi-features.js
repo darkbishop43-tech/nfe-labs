@@ -91,7 +91,7 @@ export function payneFeatureIdentity(row,market,outcomeSide){
   };
 }
 
-export async function buildPayneOwnedFeatureState(env,markets,nowMs=Date.now(),{fetchImpl=fetch}={}){
+export async function buildPayneOwnedFeatureState(env,markets,nowMs=Date.now(),{fetchImpl=fetch,forceRefresh=false}={}){
   const currentMarkets=Array.isArray(markets)?markets.filter(Boolean):[];
   const prior=await loadPrior(env);
   const epochMs=Math.floor(Number(nowMs)/FEATURE_EPOCH_MS)*FEATURE_EPOCH_MS;
@@ -100,12 +100,15 @@ export async function buildPayneOwnedFeatureState(env,markets,nowMs=Date.now(),{
   const currentIds=new Set(currentMarkets.map(m=>[String(m?.ticker||''),String(m?.openTime||''),String(m?.closeTime||'')].join('|')));
   const cachedIds=new Set(priorRows.map(r=>[String(r?.marketTicker||''),String(r?.openTime||''),String(r?.closeTime||'')].join('|')));
   const exactWindowSet=currentIds.size>0 && currentIds.size===cachedIds.size && [...currentIds].every(x=>cachedIds.has(x));
-  if(sameEpoch && exactWindowSet && prior?.featureState){
+  if(!forceRefresh && sameEpoch && exactWindowSet && prior?.featureState){
     const cached=prior.featureState;
     const ageMs=Math.max(0,Number(nowMs)-Date.parse(cached?.calculationAt||cached?.lastRunAt||''));
     return {...cached,ageMs,fresh:ageMs<=FEATURE_MAX_AGE_MS && Array.isArray(cached?.opportunities) && cached.opportunities.length>0};
   }
   const assets=[...new Set(currentMarkets.map(m=>m?.asset).filter(a=>ASSET_PRICE_META[a]))];
+  const referencePrices=sameEpoch
+    ? (prior?.referencePrices||prior?.prices||{})
+    : (prior?.prices||prior?.referencePrices||{});
 
   const spotRows=await Promise.all(assets.map(async asset=>{
     try{return {asset,ok:true,...await assetSpot(asset,fetchImpl)};}
@@ -123,7 +126,7 @@ export async function buildPayneOwnedFeatureState(env,markets,nowMs=Date.now(),{
     const asset=market?.asset;
     const currentPrice=Number(prices[asset]);
     if(!Number.isFinite(currentPrice)||currentPrice<=0) continue;
-    const previousPrice=Number(prior?.prices?.[asset]);
+    const previousPrice=Number(referencePrices?.[asset]);
     const move=payneMoveParity(currentPrice,previousPrice);
     for(const side of ['YES','NO']){
       const ask=side==='YES'?Number(market?.yesAsk):Number(market?.noAsk);
@@ -184,6 +187,7 @@ export async function buildPayneOwnedFeatureState(env,markets,nowMs=Date.now(),{
     savedAt:calculatedAt,
     epochMs,
     prices,
+    referencePrices,
     priceSources,
     markets:currentMarkets.map(m=>({ticker:m?.ticker||null,asset:m?.asset||null,openTime:m?.openTime||null,closeTime:m?.closeTime||null,providerReadAt:m?.providerReadAt||null})),
     opportunities,
