@@ -1,0 +1,116 @@
+name: Robinhood Zero-Money Fire Readiness Ranking
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/robinhood-fire-readiness-zero-money.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  rank:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Discover and rank current Robinhood crypto universe
+        env:
+          LIVE_URL: https://nfe-os-robinhood-observatory.darkbishop43.workers.dev
+        run: |
+          set -euo pipefail
+          node - <<'NODE'
+          const fs=require('fs');
+          const base=process.env.LIVE_URL;
+          const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+          async function getJson(url,retries=3){
+            let last;
+            for(let i=0;i<retries;i++){
+              try{
+                const r=await fetch(url,{headers:{accept:'application/json'}});
+                const text=await r.text();
+                let j; try{j=JSON.parse(text)}catch{throw new Error('NON_JSON '+r.status+' '+text.slice(0,200))}
+                if(!r.ok) throw new Error('HTTP_'+r.status+' '+JSON.stringify(j).slice(0,400));
+                return j;
+              }catch(e){last=e;if(i<retries-1)await sleep(1200*(i+1));}
+            }
+            throw last;
+          }
+
+          const all=[],seen=new Set();
+          let cursor=null;
+          for(let page=0;page<20;page++){
+            const u=new URL(base+'/api/robinhood/crypto/pairs');
+            if(cursor)u.searchParams.set('cursor',cursor);
+            const j=await getJson(u);
+            for(const x of (j.results||[])){
+              if(x?.symbol&&!seen.has(x.symbol)){seen.add(x.symbol);all.push(x);}
+            }
+            if(!j.next)break;
+            try{
+              const nu=new URL(j.next);
+              cursor=nu.searchParams.get('cursor')||j.next;
+            }catch{cursor=String(j.next);}
+            if(!cursor)break;
+          }
+
+          const eligible=all.filter(x=>x.status==='tradable'&&x.is_api_tradable===true);
+          const scored=[],failed=[];
+          let index=0;
+          async function worker(){
+            while(true){
+              const i=index++;
+              if(i>=eligible.length)return;
+              const p=eligible[i];
+              const u=new URL(base+'/api/v0a/score');
+              u.searchParams.set('symbol',p.symbol);
+              try{
+                const s=await getJson(u,2);
+                if(s.status==='VALID'&&Number.isFinite(Number(s.score?.value))){
+                  scored.push({
+                    symbol:p.symbol,
+                    providerPair:{status:p.status,is_api_tradable:p.is_api_tradable,min_order_amount:p.min_order_amount??null,asset_increment:p.asset_increment??null},
+                    capturedAt:s.capturedAt,
+                    researchSymbol:s.researchSymbol,
+                    mappingConfidence:s.mappingConfidence,
+                    components:s.components,
+                    score:Number(s.score.value),
+                    evidence:s.evidence,
+                    provenance:s.provenance,
+                    qualificationThreshold:s.qualificationThreshold,
+                    fireAuthority:s.fireAuthority
+                  });
+                }else{
+                  failed.push({symbol:p.symbol,status:s.status,score:s.score?.value??null});
+                }
+              }catch(e){failed.push({symbol:p.symbol,error:String(e.message||e)});}
+            }
+          }
+          await Promise.all([worker(),worker(),worker()]);
+          scored.sort((a,b)=>b.score-a.score||a.symbol.localeCompare(b.symbol));
+          const result={
+            capturedAt:new Date().toISOString(),
+            discovery:{totalPairs:all.length,apiTradablePairs:eligible.length,validScored:scored.length,unscoredOrFailed:failed.length},
+            qualificationThreshold:'NOT SET',
+            selectionRule:'Highest current valid SI_CORE_V0A among dynamically discovered API-tradable pairs with authentic research mapping and complete M/T/V/Q/F. This is research ranking only, not FIRE qualification.',
+            top:scored.slice(0,10),
+            leader:scored[0]||null,
+            failures:failed,
+            execution:'DISARMED',
+            fireAuthority:'ZERO'
+          };
+          fs.writeFileSync('/tmp/fire-readiness-ranking.json',JSON.stringify(result,null,2));
+          console.log('RANKING_RESULT '+JSON.stringify(result));
+          if(!result.leader)throw new Error('NO_VALID_SI_CANDIDATE');
+          if(result.leader.qualificationThreshold!=='NOT SET'||result.leader.fireAuthority!=='ZERO')throw new Error('AUTHORITY_BOUNDARY_MISMATCH');
+          console.log('VERIFY dynamic universe ranking PASS',JSON.stringify({discovery:result.discovery,leader:{symbol:result.leader.symbol,score:result.leader.score,components:result.leader.components,capturedAt:result.leader.capturedAt}}));
+          NODE
+
+      - name: Confirm zero-money boundary
+        run: |
+          echo "EXECUTION=DISARMED"
+          echo "FIRE=ZERO"
+          echo "REAL_ORDERS=0"
+          echo "CAPITAL_MOVED=USD 0.00"
