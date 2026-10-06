@@ -672,7 +672,7 @@ test('observability fixture: generic mixed 5/10 run has correct remaining and ou
 });
 
 test('observability invariant: NO_FILL ledger evidence forces consumed attempt count',()=>{
-  const x=summarizeRealExecutionState({control:{armed:true,attempts:0,attemptTarget:1},series:{seriesId:'INVARIANT',status:'ARMED_FISHING',attemptsStarted:0,attemptTarget:1,unresolvedEntry:false},ledger:[{type:'ENTRY_NO_FILL',seriesId:'INVARIANT',attemptId:'INVARIANT-1',at:'2026-10-03T01:10:00Z',ticker:'T4'}]});
+  const x=summarizeRealExecutionState({control:{armed:true,attempts:0,attemptTarget:1},series:{seriesId:'INVARIANT',status:'ARMED_FISHING',accountingSemantics:'PROVIDER_POST_BOUNDARY_V1',attemptsStarted:0,attemptTarget:1,unresolvedEntry:false},ledger:[{type:'ENTRY_NO_FILL',seriesId:'INVARIANT',attemptId:'INVARIANT-1',at:'2026-10-03T01:10:00Z',ticker:'T4'}]});
   assert.equal(x.attempted,1); assert.equal(x.remaining,0); assert.equal(x.noFill,1); assert.equal(x.lastAttempt.result,'NO_FILL');
 });
 
