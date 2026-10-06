@@ -1,5 +1,6 @@
 const FEATURE_STATE_KEY='payne-kalshi:feature-shadow:v1';
 const FEATURE_MAX_AGE_MS=120000;
+const FEATURE_EPOCH_MS=60000;
 
 const ASSET_PRICE_META=Object.freeze({
   BTC:{coinbase:'BTC-USD',coingecko:'bitcoin'},
@@ -93,6 +94,17 @@ export function payneFeatureIdentity(row,market,outcomeSide){
 export async function buildPayneOwnedFeatureState(env,markets,nowMs=Date.now(),{fetchImpl=fetch}={}){
   const currentMarkets=Array.isArray(markets)?markets.filter(Boolean):[];
   const prior=await loadPrior(env);
+  const epochMs=Math.floor(Number(nowMs)/FEATURE_EPOCH_MS)*FEATURE_EPOCH_MS;
+  const sameEpoch=Number(prior?.epochMs)===epochMs;
+  const priorRows=Array.isArray(prior?.opportunities)?prior.opportunities:[];
+  const currentIds=new Set(currentMarkets.map(m=>[String(m?.ticker||''),String(m?.openTime||''),String(m?.closeTime||'')].join('|')));
+  const cachedIds=new Set(priorRows.map(r=>[String(r?.marketTicker||''),String(r?.openTime||''),String(r?.closeTime||'')].join('|')));
+  const exactWindowSet=currentIds.size>0 && currentIds.size===cachedIds.size && [...currentIds].every(x=>cachedIds.has(x));
+  if(sameEpoch && exactWindowSet && prior?.featureState){
+    const cached=prior.featureState;
+    const ageMs=Math.max(0,Number(nowMs)-Date.parse(cached?.calculationAt||cached?.lastRunAt||''));
+    return {...cached,ageMs,fresh:ageMs<=FEATURE_MAX_AGE_MS && Array.isArray(cached?.opportunities) && cached.opportunities.length>0};
+  }
   const assets=[...new Set(currentMarkets.map(m=>m?.asset).filter(a=>ASSET_PRICE_META[a]))];
 
   const spotRows=await Promise.all(assets.map(async asset=>{
@@ -170,9 +182,12 @@ export async function buildPayneOwnedFeatureState(env,markets,nowMs=Date.now(),{
   await saveCurrent(env,{
     schema:state.schema,
     savedAt:calculatedAt,
+    epochMs,
     prices,
     priceSources,
     markets:currentMarkets.map(m=>({ticker:m?.ticker||null,asset:m?.asset||null,openTime:m?.openTime||null,closeTime:m?.closeTime||null,providerReadAt:m?.providerReadAt||null})),
+    opportunities,
+    featureState:state,
   });
   return state;
 }
