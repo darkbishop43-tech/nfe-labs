@@ -190,6 +190,90 @@ jobs:
           node -e "const fs=require('fs');const m=JSON.parse(fs.readFileSync('/tmp/v0a-mapping'));const mo=JSON.parse(fs.readFileSync('/tmp/v0a-momentum'));const f=JSON.parse(fs.readFileSync('/tmp/v0a-features'));const b=JSON.parse(fs.readFileSync('/tmp/v0a-book'));console.log(JSON.stringify({robinhoodPairs:m.robinhoodPairs,mapped:m.mapped,unmapped:m.unmapped,mappedAssets:m.rows.filter(x=>x.mappingStatus==='MAPPED').map(x=>x.robinhoodSymbol),unmappedAssets:m.rows.filter(x=>x.mappingStatus!=='MAPPED').map(x=>x.robinhoodSymbol)}));console.log(JSON.stringify({mapping:mo.mapping,M:mo.M,T:f.T,V:f.V,F:f.F,qLiquidity:f.qLiquidity,Q:b.Q,researchBook:b.researchBook,depthSummary:b.depthSummary,featureConfig:f.configuration,momentumConfig:mo.configuration}))"
 
 
+      - name: Verify authenticated Robinhood Crypto read surfaces
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          curl --fail --silent --show-error --location "$LIVE_URL/api/robinhood/crypto/status" --output /tmp/rh-status.json
+          node - <<'NODE'
+          const fs=require('fs');
+          const s=JSON.parse(fs.readFileSync('/tmp/rh-status.json','utf8'));
+          if(s.apiKeyPresent!==true||s.privateKeyPresent!==true) throw new Error('Robinhood Crypto Worker secrets not both present');
+          if(s.readOnlyConnector!==true||s.writeRoutesPresent!==false) throw new Error('Connector authority boundary mismatch');
+          if(s.execution!=='DISARMED'||s.fireAuthority!=='ZERO') throw new Error('Execution authority expanded');
+          console.log('VERIFY Robinhood encrypted credential bindings present PASS',JSON.stringify({apiKeyPresent:s.apiKeyPresent,privateKeyPresent:s.privateKeyPresent,readOnlyConnector:s.readOnlyConnector,writeRoutesPresent:s.writeRoutesPresent,execution:s.execution,fireAuthority:s.fireAuthority}));
+          NODE
+
+          curl --fail --silent --show-error --location "$LIVE_URL/api/robinhood/crypto/accounts" --output /tmp/rh-accounts.json
+          cat /tmp/rh-accounts.json
+          node - <<'NODE'
+          const fs=require('fs');
+          const a=JSON.parse(fs.readFileSync('/tmp/rh-accounts.json','utf8'));
+          const rows=a.results||[];
+          if(rows.length!==1) throw new Error('ACCOUNT_BINDING_REQUIRES_EXACTLY_ONE_API_ACCOUNT count='+rows.length);
+          const x=rows[0];
+          if(!/^••••\d{4}$/.test(String(x.account_number_masked||''))) throw new Error('Masked account proof missing');
+          if('account_number' in x) throw new Error('Raw account number exposed');
+          console.log('VERIFY Robinhood account binding PASS',JSON.stringify({accountCount:1,account_number_masked:x.account_number_masked,status:x.status,buying_power:x.buying_power,buying_power_currency:x.buying_power_currency,account_type:x.account_type,is_api_tradable:x.is_api_tradable}));
+          NODE
+
+          curl --fail --silent --show-error --location "$LIVE_URL/api/robinhood/crypto/pairs" --output /tmp/rh-pairs.json
+          node - <<'NODE'
+          const fs=require('fs');
+          const p=JSON.parse(fs.readFileSync('/tmp/rh-pairs.json','utf8'));
+          const rows=p.results||[];
+          const tradable=rows.find(x=>x.is_api_tradable===true && x.symbol && x.asset_increment);
+          if(!tradable) throw new Error('No API-tradable pair with provider asset_increment');
+          fs.writeFileSync('/tmp/rh-pair-proof.json',JSON.stringify({symbol:tradable.symbol,asset_code:tradable.asset_code,asset_increment:tradable.asset_increment,max_order_size:tradable.max_order_size,min_order_amount:tradable.min_order_amount,status:tradable.status,is_api_tradable:tradable.is_api_tradable}));
+          console.log('VERIFY Robinhood trading-pair discovery PASS',JSON.stringify({pairCount:rows.length,proofPair:tradable.symbol,status:tradable.status,is_api_tradable:tradable.is_api_tradable,asset_increment:tradable.asset_increment}));
+          NODE
+
+          SYMBOL="$(node -e "const x=require('/tmp/rh-pair-proof.json');process.stdout.write(String(x.symbol))")"
+          QUANTITY="$(node -e "const x=require('/tmp/rh-pair-proof.json');process.stdout.write(String(x.asset_increment))")"
+
+          curl --fail --silent --show-error --get "$LIVE_URL/api/robinhood/crypto/quote" --data-urlencode "symbol=$SYMBOL" --output /tmp/rh-quote.json
+          cat /tmp/rh-quote.json
+          node - <<'NODE'
+          const fs=require('fs');
+          const q=JSON.parse(fs.readFileSync('/tmp/rh-quote.json','utf8'));
+          const x=(q.results||[])[0];
+          if(!x||!x.symbol||x.bid==null||x.ask==null) throw new Error('Best bid/ask proof missing');
+          console.log('VERIFY Robinhood best bid/ask PASS',JSON.stringify({symbol:x.symbol,bid:x.bid,ask:x.ask}));
+          NODE
+
+          curl --fail --silent --show-error --get "$LIVE_URL/api/robinhood/crypto/estimate" --data-urlencode "symbol=$SYMBOL" --data-urlencode "side=both" --data-urlencode "quantity=$QUANTITY" --output /tmp/rh-estimate.json
+          cat /tmp/rh-estimate.json
+          node - <<'NODE'
+          const fs=require('fs');
+          const e=JSON.parse(fs.readFileSync('/tmp/rh-estimate.json','utf8'));
+          const x=(e.results||[])[0];
+          if(!x||!x.symbol||x.quantity==null) throw new Error('Estimated-price proof missing');
+          console.log('VERIFY Robinhood estimated price PASS',JSON.stringify({symbol:x.symbol,side:x.side,quantity:x.quantity,timestamp:x.timestamp,bid:x.bid,ask:x.ask,fee_ratio:x.fee_ratio,est_fee:x.est_fee,est_total_cost:x.est_total_cost,est_total_credit:x.est_total_credit}));
+          NODE
+
+          curl --fail --silent --show-error --location "$LIVE_URL/api/robinhood/crypto/holdings" --output /tmp/rh-holdings.json
+          cat /tmp/rh-holdings.json
+          node - <<'NODE'
+          const fs=require('fs');
+          const h=JSON.parse(fs.readFileSync('/tmp/rh-holdings.json','utf8'));
+          if(!h.account||!/^••••\d{4}$/.test(String(h.account.account_number_masked||''))) throw new Error('Bound holdings account proof missing');
+          for(const x of (h.results||[])) if(x.account_number) throw new Error('Raw holdings account number exposed');
+          console.log('VERIFY Robinhood holdings PASS',JSON.stringify({account_number_masked:h.account.account_number_masked,holdingCount:(h.results||[]).length,holdings:(h.results||[]).map(x=>({asset_code:x.asset_code,total_quantity:x.total_quantity,quantity_available_for_trading:x.quantity_available_for_trading}))}));
+          NODE
+
+          curl --fail --silent --show-error --location "$LIVE_URL/api/robinhood/crypto/orders" --output /tmp/rh-orders.json
+          cat /tmp/rh-orders.json
+          node - <<'NODE'
+          const fs=require('fs');
+          const o=JSON.parse(fs.readFileSync('/tmp/rh-orders.json','utf8'));
+          if(!o.account||!/^••••\d{4}$/.test(String(o.account.account_number_masked||''))) throw new Error('Bound order-history account proof missing');
+          for(const x of (o.results||[])) if(x.account_number) throw new Error('Raw order account number exposed');
+          console.log('VERIFY Robinhood order history PASS',JSON.stringify({account_number_masked:o.account.account_number_masked,orderCount:(o.results||[]).length,orders:(o.results||[]).map(x=>({id:x.id,symbol:x.symbol,side:x.side,type:x.type,state:x.state,average_price:x.average_price,filled_asset_quantity:x.filled_asset_quantity,created_at:x.created_at,updated_at:x.updated_at}))}));
+          NODE
+
+          echo "VERIFY ROBINHOOD READ-ONLY ACCOUNT-BINDING GATE GREEN"
+
       - name: Verify scheduled persistence evidence
         shell: bash
         env:
