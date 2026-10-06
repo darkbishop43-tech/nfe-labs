@@ -262,9 +262,16 @@ export async function persistRun(env, run) {
 }
 
 export async function persistAttempt(env, attempt) {
-  const key = `${ATTEMPT_PREFIX}${attempt.runId}:${attempt.attemptNo}`;
+  const intentNo=Number.isFinite(Number(attempt?.intentNo))?Math.max(1,Math.trunc(Number(attempt.intentNo))):null;
+  const attemptNo=Number.isFinite(Number(attempt?.attemptNo))?Math.max(1,Math.trunc(Number(attempt.attemptNo))):null;
+  const identity=intentNo!==null?'intent:'+intentNo:'attempt:'+(attemptNo??'unknown');
+  const key = `${ATTEMPT_PREFIX}${attempt.runId}:${identity}`;
   await kvPutJson(env, key, attempt);
-  await appendEvent(env, 'ATTEMPT_PERSISTED', { runId:attempt.runId, attemptId:attempt.attemptId, attemptNo:attempt.attemptNo, result:attempt.result ?? 'ZERO_MONEY' });
+  await appendEvent(env, 'ATTEMPT_PERSISTED', {
+    runId:attempt.runId, attemptId:attempt.attemptId,
+    intentNo, attemptNo, providerAttemptNo:attempt?.providerAttemptNo??attemptNo,
+    result:attempt.result ?? 'ZERO_MONEY'
+  });
 }
 
 export async function persistPosition(env, position) {
@@ -2597,6 +2604,7 @@ export function defaultRealSeriesState() {
     seriesId:null,
     status:'READY_DISARMED',
     attemptsStarted:0,
+    executionIntentsStarted:0,
     attemptTarget:1,
     threshold:.70,
     effectiveLockThreshold:.65,
@@ -2623,6 +2631,9 @@ export async function loadRealSeriesState(env) {
     owner:REAL_OWNER,
     requiredExchangeIndex:2,
     attemptsStarted:Number.isFinite(Number(saved?.attemptsStarted))?Math.max(0,Math.trunc(Number(saved.attemptsStarted))):0,
+    executionIntentsStarted:Number.isFinite(Number(saved?.executionIntentsStarted))
+      ?Math.max(0,Math.trunc(Number(saved.executionIntentsStarted)))
+      :Math.max(0,Math.trunc(Number(saved?.attemptsStarted||0))),
   };
 }
 
@@ -2656,7 +2667,11 @@ export async function listRealAttemptsForSeries(env,seriesId) {
   const page=await kv.list({prefix:ATTEMPT_PREFIX+id+':',limit:1000});
   const rows=[];
   for(const item of page?.keys||[]){const x=await kvGetJson(env,item.name);if(x)rows.push(x);}
-  return rows.sort((a,b)=>Number(a?.attemptNo||0)-Number(b?.attemptNo||0));
+  return rows.sort((a,b)=>{
+    const ai=Number.isFinite(Number(a?.intentNo))?Number(a.intentNo):Number(a?.attemptNo||0);
+    const bi=Number.isFinite(Number(b?.intentNo))?Number(b.intentNo):Number(b?.attemptNo||0);
+    return ai-bi;
+  });
 }
 
 function latestAttemptClassification(attempt,rows=[]) {
@@ -2669,7 +2684,7 @@ function latestAttemptClassification(attempt,rows=[]) {
     } else if(type==='ENTRY_LOCAL_PRE_PROVIDER_REJECTED' || type==='FIRE_SPECIMEN_INVALIDATED_BEFORE_POST'){
       classification='INVALIDATED_BEFORE_POST'; terminalReason=type;
     } else if(type==='ENTRY_RECONCILED_NO_EXECUTION'){
-      classification='PROVIDER_RECONCILED_NO_EXECUTION'; terminalReason=type;
+      classification='NO_PROVIDER_EXECUTION'; terminalReason=type;
     } else if(type==='ENTRY_RECONCILED_OWNED' || type==='ENTRY_RECONCILED_SETTLED_FLAT' || type==='POSITION_OWNERSHIP_ESTABLISHED'){
       classification='FILLED'; terminalReason=type;
     } else if(['ENTRY_RESULT_UNKNOWN','ENTRY_PROVIDER_REJECTED_OR_UNKNOWN','ENTRY_WRITE_ERROR_UNKNOWN','ENTRY_RECONCILIATION_STILL_UNKNOWN'].includes(type)){
@@ -2681,7 +2696,7 @@ function latestAttemptClassification(attempt,rows=[]) {
     if(state==='FILLED'||state==='PARTIAL') classification='FILLED';
     else if(state==='NO_FILL') classification='NO_FILL';
     else if(state==='INVALIDATED_BEFORE_POST') classification='INVALIDATED_BEFORE_POST';
-    else if(state==='PROVIDER_RECONCILED_NO_EXECUTION') classification='PROVIDER_RECONCILED_NO_EXECUTION';
+    else if(state==='NO_PROVIDER_EXECUTION'||state==='PROVIDER_RECONCILED_NO_EXECUTION') classification='NO_PROVIDER_EXECUTION';
     else if(state==='UNKNOWN'||state.includes('UNKNOWN')) classification='UNKNOWN';
   }
   return {classification:classification||'UNKNOWN',terminalReason};
@@ -2717,12 +2732,15 @@ export function summarizeHistoricalAttempt({attempt={},ledgerRows=[],position=nu
   const exitFee=Number.isFinite(Number(exitResult?.result?.averageFeePaid))?Number(exitResult.result.averageFeePaid):
     Number.isFinite(Number(position?.exitAverageFeePaid))?Number(position.exitAverageFeePaid):null;
   const netRealized=latestFiniteLedgerValue(rows,'realizedPnlUsd');
-  const terminalNoEconomicExecution=['NO_FILL','PROVIDER_RECONCILED_NO_EXECUTION','INVALIDATED_BEFORE_POST'].includes(classification.classification);
+  const terminalNoEconomicExecution=['NO_FILL','NO_PROVIDER_EXECUTION','INVALIDATED_BEFORE_POST'].includes(classification.classification);
   const netPnlUsd=netRealized!==null?netRealized:(terminalNoEconomicExecution?0:null);
   const totalFees=(entryFee!==null||exitFee!==null)?Number(((entryFee||0)+(exitFee||0)).toFixed(4)):(terminalNoEconomicExecution?0:null);
   const grossRealizedPnlUsd=netPnlUsd!==null&&totalFees!==null?Number((netPnlUsd+totalFees).toFixed(4)):null;
   return {
+    intentNo:Number.isFinite(Number(attempt?.intentNo))?Number(attempt.intentNo):null,
     attemptNo:Number.isFinite(Number(attempt?.attemptNo))?Number(attempt.attemptNo):null,
+    providerAttemptNo:Number.isFinite(Number(attempt?.providerAttemptNo))?Number(attempt.providerAttemptNo):
+      (Number.isFinite(Number(attempt?.attemptNo))?Number(attempt.attemptNo):null),
     attemptId,
     asset:attempt?.asset||preSubmit?.asset||position?.asset||null,
     ticker:attempt?.marketTicker||preSubmit?.marketTicker||preSubmit?.ticker||position?.marketTicker||null,
@@ -2736,7 +2754,10 @@ export function summarizeHistoricalAttempt({attempt={},ledgerRows=[],position=nu
     payloadSide:attempt?.payload?.side??preSubmit?.payload?.side??null,
     payloadPrice:attempt?.payload?.price??preSubmit?.payload?.price??null,
     clientOrderId:attempt?.clientOrderId??preSubmit?.clientOrderId??entryResult?.clientOrderId??null,
+    writerInvoked:attempt?.writerInvoked===true,
+    providerPostStarted:attempt?.providerPostStarted===true,
     providerOrderId:entryResult?.orderId??ownership?.entryOrderId??position?.entryOrderId??null,
+    providerResponseState:attempt?.providerResponseState??entryResult?.state??null,
     httpStatus:attempt?.providerHttpStatus??latestEventByType(rows,'ENTRY_PROVIDER_REJECTED_OR_UNKNOWN')?.httpStatus??null,
     fillCount:Number.isFinite(Number(entryResult?.fillCount))?Number(entryResult.fillCount):
       Number.isFinite(Number(ownership?.filledCount))?Number(ownership.filledCount):null,
