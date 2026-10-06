@@ -1,4 +1,7 @@
 const BASE_URL="https://trading.robinhood.com";
+const ACCOUNT_BINDINGS=Object.freeze({
+  crypto:Object.freeze({authorizedLast4:"4142",authority:"FOUNDER_AUTHORIZED_2026-10-06"})
+});
 
 function b64ToBytes(s){
   const bin=atob(String(s||"").trim());
@@ -113,7 +116,15 @@ export async function readConnectorStatus(env){
 }
 export async function readAccounts(env){
   const data=await signedGet(env,"/api/v2/crypto/trading/accounts/");
-  return {...data,results:(data.results||[]).map(sanitizeAccount)};
+  const bound=ACCOUNT_BINDINGS.crypto.authorizedLast4;
+  return {
+    ...data,
+    accountRegistry:{
+      discoveryCount:(data.results||[]).length,
+      cryptoBinding:{account_number_masked:"••••"+bound,authority:ACCOUNT_BINDINGS.crypto.authority,execution:"DISARMED"}
+    },
+    results:(data.results||[]).map(x=>({...sanitizeAccount(x),bound_lanes:maskAccount(x.account_number)==="••••"+bound?["crypto"]:[]}))
+  };
 }
 export async function readPairs(env,symbols=[]){
   return signedGet(env,"/api/v2/crypto/trading/trading_pairs/",symbols.length?{symbol:symbols}:{});
@@ -136,24 +147,33 @@ export async function readOrders(env,accountNumber,params={}){
   const data=await signedGet(env,"/api/v2/crypto/trading/orders/",{account_number:accountNumber,...params});
   return {...data,results:(data.results||[]).map(sanitizeOrder)};
 }
-export async function resolveSingleAccount(env){
+export async function resolveBoundAccount(env,lane="crypto"){
   requireReadSecrets(env);
-  const raw=await signedGet(env,"/api/v2/crypto/trading/accounts/");
-  const rows=raw.results||[];
-  if(rows.length!==1){
-    const e=new Error("ROBINHOOD_ACCOUNT_BINDING_AMBIGUOUS");
-    e.accountCount=rows.length;
+  const binding=ACCOUNT_BINDINGS[lane];
+  if(!binding){
+    const e=new Error("ROBINHOOD_ACCOUNT_LANE_UNBOUND");
+    e.lane=lane;
     throw e;
   }
-  return rows[0];
+  const raw=await signedGet(env,"/api/v2/crypto/trading/accounts/");
+  const rows=raw.results||[];
+  const matches=rows.filter(x=>String(x.account_number||"").endsWith(binding.authorizedLast4));
+  if(matches.length!==1){
+    const e=new Error("ROBINHOOD_AUTHORIZED_ACCOUNT_BINDING_NOT_PROVEN");
+    e.accountCount=rows.length;
+    e.matchCount=matches.length;
+    e.authorizedMask="••••"+binding.authorizedLast4;
+    throw e;
+  }
+  return matches[0];
 }
 export async function readBoundHoldings(env,assetCodes=[]){
-  const a=await resolveSingleAccount(env);
+  const a=await resolveBoundAccount(env,"crypto");
   const data=await readHoldings(env,a.account_number,assetCodes);
-  return {account:sanitizeAccount(a),...data};
+  return {account:{...sanitizeAccount(a),binding:{lane:"crypto",authority:ACCOUNT_BINDINGS.crypto.authority}},...data};
 }
 export async function readBoundOrders(env,params={}){
-  const a=await resolveSingleAccount(env);
+  const a=await resolveBoundAccount(env,"crypto");
   const data=await readOrders(env,a.account_number,params);
-  return {account:sanitizeAccount(a),...data};
+  return {account:{...sanitizeAccount(a),binding:{lane:"crypto",authority:ACCOUNT_BINDINGS.crypto.authority}},...data};
 }
