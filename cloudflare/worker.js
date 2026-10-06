@@ -686,7 +686,8 @@ export default {
         const handled = await handleExecutionRequest(request, env);
         return json(handled.body, handled.status);
       } catch (e) {
-        return json({ status: "ERROR", message: String(e?.message || e), execution: "DISARMED", liveWritesEnabled: false, fireAuthority: "ZERO", fabricatedValues: false }, 503);
+        const control=await readExecutionControl(env);
+        return json({ status: "ERROR", message: String(e?.message || e), execution: control.state||"DISARMED", armed:control.armed===true, fabricatedValues: false }, 503);
       }
     }
     if (request.method !== "GET" && request.method !== "HEAD") {
