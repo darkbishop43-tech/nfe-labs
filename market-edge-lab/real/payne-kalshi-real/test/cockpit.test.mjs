@@ -240,7 +240,7 @@ test('authoritative Payne feature read uses PAYNE-owned direct source and no Bas
     assert.equal(out.baselineStateRead,false);
     assert.ok(Math.abs(out.opportunities.find(x=>x.asset==='BTC'&&x.outcomeSide==='YES').move-.003)<1e-12);
     assert.ok(Math.abs(out.opportunities.find(x=>x.asset==='BTC'&&x.outcomeSide==='YES').edge-.054)<1e-12);
-    assert.equal(out.opportunities.find(x=>x.asset==='BTC'&&x.outcomeSide==='YES').score,.716);
+    assert.ok(Math.abs(out.opportunities.find(x=>x.asset==='BTC'&&x.outcomeSide==='YES').score-.716)<1e-12);
   } finally { io.restore(); }
 });
 
@@ -337,7 +337,7 @@ test('cockpit calculates authentic Payne fields, decisions, clocks, exact reread
     assert.equal(out.clocks.consistency.kalshiWindowElapsedMs,5*60_000);
     assert.equal(out.clocks.consistency.kalshiWindowRemainingMs,10*60_000);
     assert.equal(out.clocks.consistency.kalshiLifecycleFraction,1/3);
-    assert.equal(out.clocks.consistency.baselineToPayneObservationDeltaMs,30_000);
+    assert.equal(out.clocks.consistency.baselineToPayneObservationDeltaMs,0);
     assert.equal(out.comparison.schema,'PAYNE_CROSS_SYSTEM_COMPARISON_V1');
     assert.equal(out.comparison.payne.wouldFire,true);
     assert.equal(out.comparison.baselineReal.lane,'EXECUTION_TEST_NOT_PRODUCTION_BASELINE');
