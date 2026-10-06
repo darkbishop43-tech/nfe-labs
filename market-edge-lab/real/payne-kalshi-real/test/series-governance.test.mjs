@@ -120,7 +120,7 @@ function postFixture(resultBody,status=200){
   const calls=[];
   const fn=async (env,kind,payload,scope)=>{
     calls.push({kind,payload:structuredClone(payload),scope:structuredClone(scope)});
-    return {response:jsonResponse(resultBody,status),proof:payneOrderWriteProof(kind,payload,scope)};
+    return {response:jsonResponse(resultBody,status),proof:payneOrderWriteProof(kind,payload,scope),writerInvoked:true,providerPostStarted:true};
   };
   return {calls,fn};
 }
@@ -496,7 +496,8 @@ test('GOV 2/4/13/14/15: target 5 progresses sequentially on resolved NO_FILL, st
       assert.equal(entries(post).length,n);
       const sc=entries(post)[n-1].scope;
       assert.equal(sc.attemptsBefore,n-1); assert.equal(sc.attemptTarget,5);
-      assert.equal(out.currentAttempt.attemptId,seriesId+'-'+n);
+      assert.equal(out.currentAttempt.attemptId,seriesId+'-intent-'+n);
+      assert.equal(out.currentAttempt.providerAttemptNo,n);
       if(n<5){ assert.equal(out.status,'ARMED_FISHING'); assert.equal((await loadControl(e)).armed,true); } // armed ONCE, keeps fishing
       else { assert.equal(out.status,'COMPLETE_NO_FILL'); assert.equal((await loadControl(e)).armed,false); assert.equal(seriesTerminal(out),true); }
     }
