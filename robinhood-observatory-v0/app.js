@@ -28,6 +28,8 @@ function clearTestConfig(){sessionStorage.removeItem('nfeSiCryptoTestConfig')}
 
 function renderSiCrypto(){
  const s=D.siCryptoV0, c=s.components, cfg=readTestConfig(), live=D.liveLedger?.latestObservation||null;
+ const durableState=D.executionState?.state?.state||s.live.state;
+ const durableArmed=D.executionState?.state?.armed===true;
  const liveMap=live?{M:live.m,T:live.t,V:live.v,Q:live.q,F:live.f}:{};
  const liveCore=live?.si_core_v0a??null;
  const nValue=live?.n_v0??null;
@@ -63,9 +65,9 @@ function renderSiCrypto(){
    <p class="sub">Shadow may observe, score, record, and reconcile outcomes. It has zero real-money authority.</p>`;
 
  el('liveLane').innerHTML=`
-   <div class="hero-symbol">${s.live.state}</div>
-   <div class="kv"><span>Authority</span><b>${s.live.authority}</b><span>Execution adapter</span><b>${s.live.executionCapability}</b><span>Positions</span><b>${s.live.providerReconciliation.positions}</b><span>Open orders</span><b>${s.live.providerReconciliation.openOrders}</b><span>Crypto buying power</span><b>${money(s.live.providerReconciliation.cryptoBuyingPower)}</b><span>Last provider requalification</span><b>${fmtTime(s.live.providerReconciliation.lastChecked)}</b></div>
-   <p class="sub">FIRE remains blocked. A numeric SI_CORE_V0A is measurement only; fresh Robinhood LOCK, an approved qualification rule, Founder authority, and all existing safety gates are still required.</p>`;
+   <div class="hero-symbol">${durableState}</div>
+   <div class="kv"><span>Armed</span><b>${durableArmed?'YES':'NO'}</b><span>Live writes</span><b>${D.executionState?.liveWritesEnabled===true?'ENABLED — GOVERNED':'DISABLED'}</b><span>Execution adapter</span><b>${s.live.executionCapability}</b><span>Positions</span><b>${D.executionState?.state?.owned?'OWNED':'FLAT'}</b><span>Reconciliation</span><b>${D.executionState?.state?.reconciliation||'UNKNOWN'}</b><span>Last provider requalification</span><b>${fmtTime(D.liveProviderScan?.freshProviderTimestamp||s.live.providerReconciliation.lastChecked)}</b></div>
+   <p class="sub">Execution authority comes from durable control. Candidate qualification, fresh same-specimen LOCK, exact preview, Founder approval, and all existing safety gates remain separate requirements.</p>`;
 
  const frozen=cfg?.frozen===true;
  el('testConfig').innerHTML=`
@@ -93,7 +95,7 @@ function renderSiCrypto(){
    writeTestConfig({stake,entryType,exitCondition,exitValue,exitType,frozen:true,frozenAt:new Date().toISOString()});
    renderSiCrypto(); showConfigStatus('Test configuration frozen locally. This does NOT arm or submit anything.');
  };
- el('clearConfig').onclick=()=>{clearTestConfig();renderSiCrypto();showConfigStatus('Frozen local test configuration cleared. Execution remains DISARMED.')};
+ el('clearConfig').onclick=()=>{clearTestConfig();renderSiCrypto();showConfigStatus('Frozen local test configuration cleared. Execution '+(D.executionState?.state?.state||'UNKNOWN')+'.')};
 }
 
 function showConfigStatus(msg){el('configStatus').textContent=msg||''}
@@ -167,7 +169,7 @@ function renderOperational(){
  el('managePanel').innerHTML=`
    <div class="hero-symbol">${D.executionState?.state?.state||p.state}</div>
    <div class="state">${m.state}</div>
-   <div class="kv"><span>Durable control</span><b>${D.executionState?.state?.state||'NOT LOADED'}</b><span>Live writes</span><b>${D.executionState?.liveWritesEnabled===true?'ENABLED — GOVERNED':'DISABLED'}</b><span>Provider surface</span><b>${providerFresh?'CONNECTED / FRESH':'NOT CONNECTED / SNAPSHOT'}</b><span>Owned quantity</span><b>${D.executionState?.state?.owned?.quantity??'0 — NO POSITION'}</b><span>Entry</span><b>${D.executionState?.state?.owned?.entryProviderId||'N/A — NO POSITION'}</b><span>Current bid</span><b>${money(p.currentBid,8)}</b><span>Current ask</span><b>${money(p.currentAsk,8)}</b><span>Current mark</span><b>${money(p.currentMark,8)}</b><span>Position value</span><b>${money(p.currentValue)}</b><span>Unrealized P&L</span><b>${money(p.unrealizedPnlUsd)} · N/A — NO POSITION</b><span>Realized P&L</span><b>N/A — NO COMPLETED LIFECYCLE</b><span>Position age</span><b>N/A — NO POSITION</b><span>Last reconciliation</span><b>${D.executionState?.state?.reconciliation||fmtTime(p.lastProviderReconciliation)}</b><span>Next governed action</span><b>${p.nextGovernedAction}</b><span>Exit authority</span><b>${D.executionState?.state?.owned?'OWNED — SELL REFUSED WHILE DISARMED':p.exitAuthority}</b></div>`;
+   <div class="kv"><span>Durable control</span><b>${D.executionState?.state?.state||'NOT LOADED'}</b><span>Live writes</span><b>${D.executionState?.liveWritesEnabled===true?'ENABLED — GOVERNED':'DISABLED'}</b><span>Provider surface</span><b>${providerFresh?'CONNECTED / FRESH':'NOT CONNECTED / SNAPSHOT'}</b><span>Owned quantity</span><b>${D.executionState?.state?.owned?.quantity??'0 — NO POSITION'}</b><span>Entry</span><b>${D.executionState?.state?.owned?.entryProviderId||'N/A — NO POSITION'}</b><span>Current bid</span><b>${money(p.currentBid,8)}</b><span>Current ask</span><b>${money(p.currentAsk,8)}</b><span>Current mark</span><b>${money(p.currentMark,8)}</b><span>Position value</span><b>${money(p.currentValue)}</b><span>Unrealized P&L</span><b>${money(p.unrealizedPnlUsd)} · N/A — NO POSITION</b><span>Realized P&L</span><b>N/A — NO COMPLETED LIFECYCLE</b><span>Position age</span><b>N/A — NO POSITION</b><span>Last reconciliation</span><b>${D.executionState?.state?.reconciliation||fmtTime(p.lastProviderReconciliation)}</b><span>Next governed action</span><b>${p.nextGovernedAction}</b><span>Exit authority</span><b>${D.executionState?.state?.owned?'OWNED — GOVERNED MANAGEMENT / EXIT PATH PRESERVED':p.exitAuthority}</b></div>`;
 
  el('lifecycle').innerHTML=o.lifecycle.map((x,i)=>`<span class="life-step ${i<o.currentLifecycleIndex?'done':i===o.currentLifecycleIndex?'active':''}">${x}</span>`).join('<span class="life-arrow">→</span>');
 
@@ -192,7 +194,7 @@ function renderOperational(){
  el('pauseProviderScan').onclick=()=>{providerScanState='STOPPED';showControlReason('Provider scan state is STOPPED. No live Cloudflare Robinhood scan was running.');renderOperational()};
  el('freshPreview').onclick=async()=>{const cfg=readTestConfig();if(!cfg?.frozen)return showControlReason('BLOCKED: freeze an exact Founder-selected dollar amount, entry type, and exit plan first. No default trading value will be invented.');const symbol=D.liveProviderScan?.candidate?.leader?.symbol;if(!symbol)return showControlReason('BLOCKED: run Start provider scan and obtain a valid first-specimen SI-ranked leader first.');const locked=await postExecution('lock',{symbol,side:'buy',type:cfg.entryType,maxDebit:String(cfg.stake),orderConfig:{quote_amount:String(cfg.stake)},frozenConfiguration:cfg});if(!locked)return;await postExecution('preview',{previewEvidence:{nonExecuting:true,source:'founder-frozen-config',maxDebit:String(cfg.stake),symbol,providerTimestamp:D.liveProviderScan?.freshProviderTimestamp||null,quote:D.liveProviderScan?.quote||null,qualification:{mode:'FIRST_SPECIMEN_RANK_ONLY_NO_THRESHOLD',score:D.liveProviderScan?.candidate?.leader?.score??null,rank:D.liveProviderScan?.candidate?.leader?.rank??null}}})};
  el('founderApprove').onclick=async()=>{const st=await refreshExecutionState();const fp=st?.state?.specimenFp;if(!fp)return showControlReason('BLOCKED: no frozen specimen fingerprint is present. Approval cannot be blanket.');await postExecution('approve',{specimenFp:fp})};
- el('exitReview').onclick=async()=>{const st=await refreshExecutionState();if(st?.state?.owned)showControlReason('Owned position is present in durable state. Exit review is available; provider sell remains refused while DISARMED.');else showControlReason('NO POSITION: exit review is not applicable. Durable execution state has no owned position.')};
+ el('exitReview').onclick=async()=>{const st=await refreshExecutionState();if(st?.state?.owned)showControlReason('Owned position is present in durable state. Existing governed management / exit semantics remain active even if new-entry authority is disarmed.');else showControlReason('NO POSITION: exit review is not applicable. Durable execution state has no owned position.')};
 }
 
 async function refreshExecutionState(){
