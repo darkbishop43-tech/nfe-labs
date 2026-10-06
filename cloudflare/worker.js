@@ -356,6 +356,48 @@ async function computeShadowFeatureSet(env, robinhoodSymbol, mapping, currentBoo
   };
 }
 
+async function scoreSymbolResponse(env, request) {
+  if(!env.V0A_DB) return json({status:"D1_BINDING_MISSING",fireAuthority:"ZERO"},503);
+  const url=new URL(request.url);
+  const robinhoodSymbol=url.searchParams.get("symbol");
+  if(!robinhoodSymbol) return json({status:"ERROR",error:"symbol is required",fireAuthority:"ZERO"},400);
+  const [mappingState,allBooks]=await Promise.all([
+    mappingResponse(env),
+    publicGet("/api/v3/ticker/bookTicker")
+  ]);
+  const mapping=(mappingState.rows||[]).find(x=>x.robinhoodSymbol===robinhoodSymbol && x.mappingStatus==="MAPPED" && x.robinhoodTradable);
+  if(!mapping) return json({status:"RESEARCH DATA UNAVAILABLE",symbol:robinhoodSymbol,fireAuthority:"ZERO"},404);
+  const b=(Array.isArray(allBooks)?allBooks:[]).find(x=>x.symbol===mapping.binanceSymbol);
+  if(!b) return json({status:"RESEARCH BOOK UNAVAILABLE",symbol:robinhoodSymbol,researchSymbol:mapping.binanceSymbol,fireAuthority:"ZERO"},404);
+  const bid=Number(b.bidPrice),ask=Number(b.askPrice),mark=(bid+ask)/2;
+  if(!(bid>0&&ask>0&&mark>0)) return json({status:"INVALID RESEARCH BOOK",symbol:robinhoodSymbol,fireAuthority:"ZERO"},422);
+  const currentBook={bid,ask,mark,spreadPct:(ask-bid)/mark};
+  const f=await computeShadowFeatureSet(env,robinhoodSymbol,mapping,currentBook);
+  const complete=[f.M,f.T,f.V,f.Q,f.F,f.SI_CORE_V0A].every(Number.isFinite);
+  return json({
+    status:complete?"VALID":"INCOMPLETE",
+    capturedAt:new Date().toISOString(),
+    symbol:robinhoodSymbol,
+    researchSymbol:mapping.binanceSymbol,
+    mappingConfidence:mapping.mappingConfidence,
+    components:{M:f.M,T:f.T,V:f.V,Q:f.Q,F:f.F},
+    score:{name:"SI_CORE_V0A",value:f.SI_CORE_V0A},
+    evidence:{
+      returns:f.returns,
+      ema9:f.ema9,ema20:f.ema20,ema50:f.ema50,
+      atr14:f.atr14,atrPercentile:f.atrPercentile,
+      volume:f.volume,relativeVolume:f.relativeVolume,quoteVolume:f.quoteVolume,
+      takerBuyBaseVolume:f.takerBuyBaseVolume,takerBuyQuoteVolume:f.takerBuyQuoteVolume,
+      tradeCount:f.tradeCount,dollarVolume:f.dollarVolume,
+      qSpread:f.qSpread,qLiquidity:f.qLiquidity,priorSpreadSamples:f.priorSpreadSamples,
+      researchBook:currentBook
+    },
+    provenance:{researchSource:"BINANCE.US_PUBLIC + D1 PROSPECTIVE SPREAD HISTORY",lockAuthority:"ROBINHOOD MCP ONLY"},
+    qualificationThreshold:"NOT SET",
+    fireAuthority:"ZERO"
+  });
+}
+
 async function reconcileOutcomes(env, nowMs) {
   const pending=await env.V0A_DB.prepare(
     `SELECT o.id,o.observation_id,o.horizon_minutes,o.due_at_ms,o.start_mark,
@@ -544,6 +586,7 @@ export default {
       if (url.pathname === "/api/v0a/momentum") return await momentumResponse(env,request);
       if (url.pathname === "/api/v0a/features") return await featureResponse(env,request);
       if (url.pathname === "/api/v0a/book") return await bookResponse(env,request);
+      if (url.pathname === "/api/v0a/score") return await scoreSymbolResponse(env,request);
       if (url.pathname === "/api/v0a/ledger-status") return json(await ledgerStatus(env));
       if (url.pathname === "/api/robinhood/provider-capability") return json(await robinhoodProviderCapability(env,url.searchParams.get("action")));
       if (url.pathname === "/api/robinhood/crypto/status") return json(await readConnectorStatus(env));
