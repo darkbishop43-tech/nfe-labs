@@ -42,13 +42,13 @@ class MemoryKV {
 
 function jsonResponse(body,status=200){return new Response(JSON.stringify(body),{status,headers:{'content-type':'application/json'}});}
 
-function baselineShadow({score=.716,move=.003,edge=.054,close='2026-10-02T06:15:00Z'}={}){
+function baselineShadow({score=.86,move=.005,edge=.09,close='2026-10-02T06:15:00Z'}={}){
   return {
     ok:true,mode:'REAL_KALSHI_SHADOW',status:'LIVE_KALSHI_SHADOW',startedAt:'2026-10-02T06:00:00Z',lastRunAt:'2026-10-02T06:04:30Z',
     priceSources:{BTC:'COINBASE'},
     opportunities:[
-      {marketTicker:'KXBTC15M-REALTEST',outcomeSide:'YES',direction:'UP',asset:'BTC',move,fair:.554,edge,score,openTime:'2026-10-02T06:00:00Z',closeTime:close,durationMs:Date.parse(close)-Date.parse('2026-10-02T06:00:00Z'),horizon:'15m'},
-      {marketTicker:'KXBTC15M-REALTEST',outcomeSide:'NO',direction:'DOWN',asset:'BTC',move,fair:.446,edge:-Math.abs(edge),score:.284,openTime:'2026-10-02T06:00:00Z',closeTime:close,durationMs:Date.parse(close)-Date.parse('2026-10-02T06:00:00Z'),horizon:'15m'},
+      {marketTicker:'KXBTC15M-REALTEST',outcomeSide:'YES',direction:'UP',asset:'BTC',move,fair:.59,edge,score,openTime:'2026-10-02T06:00:00Z',closeTime:close,durationMs:Date.parse(close)-Date.parse('2026-10-02T06:00:00Z'),horizon:'15m'},
+      {marketTicker:'KXBTC15M-REALTEST',outcomeSide:'NO',direction:'DOWN',asset:'BTC',move,fair:.41,edge:-Math.abs(edge),score:.14,openTime:'2026-10-02T06:00:00Z',closeTime:close,durationMs:Date.parse(close)-Date.parse('2026-10-02T06:00:00Z'),horizon:'15m'},
     ],
   };
 }
@@ -61,8 +61,8 @@ async function seedPaynePriorSpot(e,shadow=baselineShadow()){
   const yes=(shadow?.opportunities||[]).find(x=>x?.asset==='BTC'&&x?.outcomeSide==='YES');
   const move=Number.isFinite(Number(yes?.score))?moveForScore(yes.score):Number(yes?.move||0);
   const prior=100/(1+move);
-  await e.PAYNE_KALSHI_STATE.put('payne-kalshi:feature-shadow:v1',JSON.stringify({
-    schema:'PAYNE_OWNED_KALSHI_FEATURE_STATE_V1',
+  await e.PAYNE_KALSHI_STATE.put('payne-kalshi:feature-shadow:v2-paper-brain',JSON.stringify({
+    schema:'PAYNE_PAPER_BRAIN_KALSHI_FEATURE_STATE_V1',
     savedAt:'2026-10-02T06:04:00Z',
     prices:{BTC:prior},
     referencePrices:{BTC:prior},
@@ -177,7 +177,7 @@ const cycle=async(e,post,ms=T0)=>{
 };
 const cycleNoScan=(e,post,ms=T0)=>runPayneRealExecutionCycle(e,{postImpl:post.fn,nowMs:ms});
 const frozenSeries=async(e,over={})=>{
-  const threshold=over.threshold??.70;
+  const threshold=over.threshold??.80;
   return saveRealSeriesState(e,{...defaultRealSeriesState(),seriesId:'GOV-S',status:'ARMED_FISHING',attemptsStarted:1,attemptTarget:5,threshold,effectiveLockThreshold:over.effectiveLockThreshold??effectiveLockThreshold(threshold),maxEntryDebitUsd:1,configFrozen:true,...over});
 };
 const armedControl=async(e)=>{ // put control in a legitimately armed, matching state without calling live ARM semantics twice
@@ -185,42 +185,33 @@ const armedControl=async(e)=>{ // put control in a legitimately armed, matching 
 };
 const cleanPosition=(over={})=>({schema:'PAYNE_REAL_POSITION_V1',owner:'PAYNE_KALSHI_REAL',seriesId:'GOV-S',attemptId:'GOV-S-1',attemptNo:1,status:'CLOSED',asset:'BTC',marketTicker:'KXBTC15M-REALTEST',outcomeSide:'YES',exchangeIndex:2,entryOrderId:'E',entryClientOrderId:'CID',filledCount:1,entryAverageFillPrice:.5,entryTime:'2026-10-02T06:04:00Z',reconciliationState:'FLAT',...over});
 
-test('Founder numeric threshold validator accepts approved range and rejects invalid precision/range',()=>{
-  for(const raw of ['.50','.55','.64','.65','.70','1.00']) {
-    const out=parseFounderThreshold(raw); assert.equal(out.ok,true,raw);
-  }
-  for(const raw of ['.49','1.01','.555','abc','NaN','Infinity']) {
+test('promoted Paper PULL validator accepts only source-proven .80',()=>{
+  assert.deepEqual(parseFounderThreshold('.80'),{ok:true,value:.80});
+  for(const raw of ['.50','.55','.64','.65','.70','.75','.85','1.00','.49','1.01','.555','abc','NaN','Infinity']){
     assert.equal(parseFounderThreshold(raw).ok,false,raw);
   }
 });
 
-test('diagnostic lower-lock rule derives and freezes the approved effective LOCK',async()=>{
-  assert.equal(effectiveLockThreshold(.50),.50);
-  assert.equal(effectiveLockThreshold(.55),.55);
-  assert.equal(effectiveLockThreshold(.64),.64);
-  assert.equal(effectiveLockThreshold(.65),.65);
-  assert.equal(effectiveLockThreshold(.70),.65);
-
-  for(const [threshold,lock] of [[.50,.50],[.55,.55],[.64,.64],[.65,.65],[.70,.65]]){
-    const e=await env(),io=installProvider();
-    try{
-      await configure(e,{threshold,stake:1,target:1});
-      await arm(e);
-      const series=await loadRealSeriesState(e);
-      assert.equal(series.threshold,threshold);
-      assert.equal(series.effectiveLockThreshold,lock);
-      assert.equal(frozenSeriesConfig(series).effectiveLockThreshold,lock);
-    }finally{io.restore();}
-  }
+test('promoted Paper LOCK is fixed at .65 independent of PULL input',async()=>{
+  for(const input of [.50,.65,.80,1.00]) assert.equal(effectiveLockThreshold(input),.65);
+  const e=await env(),io=installProvider();
+  try{
+    await configure(e,{threshold:.80,stake:1,target:1});
+    await arm(e);
+    const series=await loadRealSeriesState(e);
+    assert.equal(series.threshold,.80);
+    assert.equal(series.effectiveLockThreshold,.65);
+    assert.equal(frozenSeriesConfig(series).effectiveLockThreshold,.65);
+  }finally{io.restore();}
 });
 
-test('diagnostic lower-lock PULL semantics preserve radar, move and edge gates',()=>{
-  assert.equal(payneStage({score:.55,edge:.05,move:.003},.55,.55).pullTrigger,true);
-  assert.equal(payneStage({score:.55,edge:.05,move:.003},.60,.60).pullTrigger,false);
-  assert.equal(payneStage({score:.60,edge:.05,move:.003},.50,.50).pullTrigger,true);
-  assert.equal(payneStage({score:.49,edge:.05,move:.003},.50,.50).radar,false);
-  assert.equal(payneStage({score:.60,edge:.05,move:.001},.50,.50).pullTrigger,false);
-  assert.equal(payneStage({score:.60,edge:0,move:.003},.50,.50).pullTrigger,false);
+test('promoted Paper PULL semantics preserve radar lock edge move gates',()=>{
+  assert.equal(payneStage({score:.50,edge:.05,move:.003},.80).stage,'RADAR');
+  assert.equal(payneStage({score:.65,edge:.05,move:.003},.80).stage,'LOCK_IN');
+  assert.equal(payneStage({score:.80,edge:.05,move:.003},.80).pullTrigger,true);
+  assert.equal(payneStage({score:.79,edge:.05,move:.003},.80).pullTrigger,false);
+  assert.equal(payneStage({score:.80,edge:.05,move:.001},.80).pullTrigger,false);
+  assert.equal(payneStage({score:.80,edge:0,move:.003},.80).pullTrigger,false);
 });
 
 // ---------- FIRE→EXECUTION exact-specimen latch proof ----------
@@ -268,7 +259,7 @@ test('FEATURE EPOCH 1: epoch A qualifies but fresher PAYNE spot epoch B invalida
   const e=await env();
   const io=installProvider({spotSequence:[100,spotForScores(.716,.50)]});
   try{
-    await configure(e,{threshold:.70,stake:1,target:5}); await arm(e);
+    await configure(e,{threshold:.80,stake:1,target:5}); await arm(e);
     await runReadOnlyScan(e,'FEATURE_EPOCH_TEST',T0);
     const out=await loadRealSeriesState(e);
     assert.equal(out.attemptsStarted,0);
@@ -289,7 +280,7 @@ test('FEATURE EPOCH 2: fresher same-specimen PAYNE spot epoch that still qualifi
   const e=await env();
   const io=installProvider({spotSequence:[100,spotForScores(.716,.74)]});
   try{
-    await configure(e,{threshold:.70,target:1}); await arm(e);
+    await configure(e,{threshold:.80,target:1}); await arm(e);
     await runReadOnlyScan(e,'FEATURE_EPOCH_TEST',T0);
     const out=await loadRealSeriesState(e);
     assert.equal(out.fireLatch.state,'LATCHED');
@@ -309,7 +300,7 @@ test('FEATURE EPOCH 3/9/10: valid direct FIRE refresh + valid final refresh reac
     return kalshiPayneOrderPost(env,kind,payload,scope,{fetchImpl:async()=>jsonResponse(NOFILL)});
   };
   try{
-    await configure(e,{threshold:.70,target:1}); await arm(e);
+    await configure(e,{threshold:.80,target:1}); await arm(e);
     await runReadOnlyScan(e,'FEATURE_EPOCH_TEST',T0);
     const latched=await loadRealSeriesState(e);
     assert.equal(latched.fireLatch.state,'LATCHED');
@@ -329,11 +320,11 @@ test('FEATURE EPOCH 3/9/10: valid direct FIRE refresh + valid final refresh reac
 });
 
 test('FEATURE EPOCH 4-8: exact final feature failure labels use existing PAYNE predicates only',()=>{
-  const threshold=.70, lock=.65;
-  assert.ok(payneFeatureFailureReasons({available:true,score:.69,edge:.05,move:.003},threshold,lock,'FINAL').includes('FINAL_SCORE_BELOW_THRESHOLD'));
+  const threshold=.80, lock=.65;
+  assert.ok(payneFeatureFailureReasons({available:true,score:.79,edge:.05,move:.003},threshold,lock,'FINAL').includes('FINAL_SCORE_BELOW_THRESHOLD'));
   assert.ok(payneFeatureFailureReasons({available:true,score:.64,edge:.05,move:.003},threshold,lock,'FINAL').includes('FINAL_SCORE_BELOW_EFFECTIVE_LOCK'));
-  assert.ok(payneFeatureFailureReasons({available:true,score:.72,edge:0,move:.003},threshold,lock,'FINAL').includes('FINAL_EDGE_NOT_POSITIVE'));
-  assert.ok(payneFeatureFailureReasons({available:true,score:.72,edge:.05,move:.001},threshold,lock,'FINAL').includes('FINAL_MOVE_BELOW_MINIMUM'));
+  assert.ok(payneFeatureFailureReasons({available:true,score:.82,edge:0,move:.003},threshold,lock,'FINAL').includes('FINAL_EDGE_NOT_POSITIVE'));
+  assert.ok(payneFeatureFailureReasons({available:true,score:.82,edge:.05,move:.001},threshold,lock,'FINAL').includes('FINAL_MOVE_BELOW_MINIMUM'));
   assert.deepEqual(payneFeatureFailureReasons({available:false},threshold,lock,'FINAL'),['FINAL_FEATURE_NOT_AVAILABLE']);
 });
 
@@ -341,7 +332,7 @@ test('FEATURE EPOCH 9: Fresh LOCK and pre-submit may pass while final direct fea
   const e=await env();
   const io=installProvider({spotSequence:[100,spotForScores(.716,.74),spotForScores(.716,.69)]}),post=postFixture(NOFILL);
   try{
-    await configure(e,{threshold:.70,target:1}); await arm(e);
+    await configure(e,{threshold:.80,target:1}); await arm(e);
     await runReadOnlyScan(e,'FEATURE_EPOCH_TEST',T0);
     const out=await cycleNoScan(e,post,T0);
     assert.equal(entries(post).length,0);
@@ -355,7 +346,7 @@ test('FEATURE EPOCH 9: Fresh LOCK and pre-submit may pass while final direct fea
 });
 
 test('FEATURE EPOCH 11: known PAYNE rejection states are explicit NOT_REACHED rather than fabricated UNKNOWN',()=>{
-  const d=payneFeatureBoundaryEvidence({available:true,score:.49,edge:.05,move:.003},.70,.65,'FIRE');
+  const d=payneFeatureBoundaryEvidence({available:true,score:.49,edge:.05,move:.003},.80,.65,'FIRE');
   assert.equal(d.radar,'FAIL');
   assert.equal(d.lock,'NOT_REACHED');
   assert.equal(d.pull,'NOT_REACHED');
@@ -364,23 +355,23 @@ test('FEATURE EPOCH 11: known PAYNE rejection states are explicit NOT_REACHED ra
 });
 
 test('FIRE LATCH 1/6: FIRE-ready BTC remains execution specimen even after a different global feature leader appears; no second discovery occurs',async()=>{
-  const e=await env({shadow:baselineShadow({score:.83,move:.004,edge:.08})});
-  const mutable=mutableBaseline(baselineShadow({score:.83,move:.004,edge:.08}));
+  const e=await env({shadow:baselineShadow({score:.86,move:.005,edge:.09})});
+  const mutable=mutableBaseline(baselineShadow({score:.86,move:.005,edge:.09}));
   e.BASELINE_REAL_READ=mutable.binding;
   const io=installProvider(),post=postFixture(NOFILL);
   try{
-    await configure(e,{threshold:.60,stake:1,target:1}); await arm(e);
+    await configure(e,{threshold:.80,stake:1,target:1}); await arm(e);
     await runReadOnlyScan(e,'FIRE_LATCH_TEST',T0);
     const latched=await loadRealSeriesState(e);
     assert.equal(latched.fireLatch.state,'LATCHED');
     assert.equal(latched.fireLatch.ticker,'KXBTC15M-REALTEST');
     assert.equal(latched.fireLatch.outcomeSide,'YES');
-    assert.equal(latched.fireLatch.threshold,.60);
-    assert.equal(latched.fireLatch.effectiveLockThreshold,.60);
+    assert.equal(latched.fireLatch.threshold,.80);
+    assert.equal(latched.fireLatch.effectiveLockThreshold,.65);
     assert.equal(latched.fireLatch.identityFingerprint,fireSpecimenFingerprint(latched.fireLatch));
 
     // Global evidence now has another higher-scoring leader. The execution engine must NOT rediscover/reselect it.
-    mutable.set(shadowWithCompetingLeader({btcScore:.83,zecScore:.99}));
+    mutable.set(shadowWithCompetingLeader({btcScore:.86,zecScore:.99}));
     io.forbidDiscovery();
     const out=await cycleNoScan(e,post,T0);
     assert.equal(entries(post).length,1);
@@ -391,9 +382,9 @@ test('FIRE LATCH 1/6: FIRE-ready BTC remains execution specimen even after a dif
 });
 
 test('FIRE LATCH 2: same latched specimen passing fresh LOCK + pre-submit reaches provider POST path',async()=>{
-  const e=await env({shadow:baselineShadow({score:.83,move:.004,edge:.08})}),io=installProvider(),post=postFixture(NOFILL);
+  const e=await env({shadow:baselineShadow({score:.86,move:.005,edge:.09})}),io=installProvider(),post=postFixture(NOFILL);
   try{
-    await configure(e,{threshold:.60,target:1}); await arm(e);
+    await configure(e,{threshold:.80,target:1}); await arm(e);
     await runReadOnlyScan(e,'FIRE_LATCH_TEST',T0);
     const before=await loadRealSeriesState(e); assert.equal(before.fireLatch.state,'LATCHED');
     const out=await cycleNoScan(e,post,T0);
@@ -405,7 +396,7 @@ test('FIRE LATCH 2: same latched specimen passing fresh LOCK + pre-submit reache
 });
 
 test('FIRE LATCH 3: same specimen fresh LOCK failure invalidates before POST without consuming a provider NO_FILL',async()=>{
-  const e=await env({shadow:baselineShadow({score:.83,move:.004,edge:.08})});
+  const e=await env({shadow:baselineShadow({score:.86,move:.005,edge:.09})});
   const io=installProvider({exactSequence:[
     {status:200,market:providerMarket()}, {status:200,market:providerMarket()}, // scan
     {status:200,market:providerMarket()},                                      // FIRE feature exact reread
@@ -413,7 +404,7 @@ test('FIRE LATCH 3: same specimen fresh LOCK failure invalidates before POST wit
   ]});
   const post=postFixture(NOFILL);
   try{
-    await configure(e,{threshold:.60,target:1}); await arm(e);
+    await configure(e,{threshold:.80,target:1}); await arm(e);
     await runReadOnlyScan(e,'FIRE_LATCH_TEST',T0);
     const out=await cycleNoScan(e,post,T0);
     assert.equal(entries(post).length,0);
@@ -427,9 +418,9 @@ test('FIRE LATCH 3: same specimen fresh LOCK failure invalidates before POST wit
 });
 
 test('FIRE LATCH 4: time gate may kill the latched specimen before POST',async()=>{
-  const e=await env({shadow:baselineShadow({score:.83,move:.004,edge:.08})}),io=installProvider(),post=postFixture(NOFILL);
+  const e=await env({shadow:baselineShadow({score:.86,move:.005,edge:.09})}),io=installProvider(),post=postFixture(NOFILL);
   try{
-    await configure(e,{threshold:.60,target:1}); await arm(e);
+    await configure(e,{threshold:.80,target:1}); await arm(e);
     await runReadOnlyScan(e,'FIRE_LATCH_TEST',T0); // 10m remains; latch valid
     const out=await cycleNoScan(e,post,T0+4*60*1000); // 6m remains; 6.5m gate must fail
     assert.equal(entries(post).length,0);
@@ -439,7 +430,7 @@ test('FIRE LATCH 4: time gate may kill the latched specimen before POST',async()
 });
 
 test('FIRE LATCH 5: pre-submit exact-market failure invalidates same specimen before provider POST',async()=>{
-  const e=await env({shadow:baselineShadow({score:.83,move:.004,edge:.08})});
+  const e=await env({shadow:baselineShadow({score:.86,move:.005,edge:.09})});
   const io=installProvider({exactSequence:[
     {status:200,market:providerMarket()}, {status:200,market:providerMarket()}, // scan
     {status:200,market:providerMarket()},                                      // FIRE feature exact reread
@@ -448,7 +439,7 @@ test('FIRE LATCH 5: pre-submit exact-market failure invalidates same specimen be
   ]});
   const post=postFixture(NOFILL);
   try{
-    await configure(e,{threshold:.60,target:1}); await arm(e);
+    await configure(e,{threshold:.80,target:1}); await arm(e);
     await runReadOnlyScan(e,'FIRE_LATCH_TEST',T0);
     const out=await cycleNoScan(e,post,T0);
     assert.equal(entries(post).length,0);
@@ -458,9 +449,9 @@ test('FIRE LATCH 5: pre-submit exact-market failure invalidates same specimen be
 });
 
 test('FIRE LATCH 6/8: one latched specimen cannot be posted twice without a new FIRE latch',async()=>{
-  const e=await env({shadow:baselineShadow({score:.83,move:.004,edge:.08})}),io=installProvider(),post=postFixture(NOFILL);
+  const e=await env({shadow:baselineShadow({score:.86,move:.005,edge:.09})}),io=installProvider(),post=postFixture(NOFILL);
   try{
-    await configure(e,{threshold:.60,target:5}); await arm(e);
+    await configure(e,{threshold:.80,target:5}); await arm(e);
     await runReadOnlyScan(e,'FIRE_LATCH_TEST',T0);
     const first=await cycleNoScan(e,post,T0);
     assert.equal(entries(post).length,1);
@@ -473,9 +464,9 @@ test('FIRE LATCH 6/8: one latched specimen cannot be posted twice without a new 
 
 test('FIRE LATCH 7: AUTO/Baseline state remains read-only and independent during latch handoff',async()=>{
   baselineMethods.length=0;
-  const e=await env({shadow:baselineShadow({score:.83,move:.004,edge:.08})}),io=installProvider(),post=postFixture(NOFILL);
+  const e=await env({shadow:baselineShadow({score:.86,move:.005,edge:.09})}),io=installProvider(),post=postFixture(NOFILL);
   try{
-    await configure(e,{threshold:.60,target:1}); await arm(e);
+    await configure(e,{threshold:.80,target:1}); await arm(e);
     await runReadOnlyScan(e,'FIRE_LATCH_TEST',T0);
     await cycleNoScan(e,post,T0);
     assert.equal(baselineMethods.every(m=>m==='GET'),true);
@@ -490,7 +481,7 @@ test('GOV 1/3/16: target 1 retains behaviour; ARM snapshots config with attempts
     await arm(e);
     const s0=await loadRealSeriesState(e);
     assert.equal(s0.attemptsStarted,0); assert.equal(s0.configFrozen,true);
-    assert.deepEqual([s0.attemptTarget,s0.threshold,s0.maxEntryDebitUsd,s0.requiredExchangeIndex],[1,.70,1,2]);
+    assert.deepEqual([s0.attemptTarget,s0.threshold,s0.maxEntryDebitUsd,s0.requiredExchangeIndex],[1,.80,1,2]);
     const out=await cycle(e,post);
     assert.equal(out.status,'COMPLETE_NO_FILL'); assert.equal(out.attemptsStarted,1);
     assert.equal(entries(post).length,1);
@@ -640,7 +631,7 @@ test('GOV 17/18/19: different threshold / stake / attemptTarget freeze into sepa
   try{
     await arm(e); await cycle(e,post);                                   // series A: .70 x1 @ $1 -> terminal
     const A=await loadRealSeriesState(e);
-    await configure(e,{threshold:.75,stake:2,target:5}); await arm(e);   // series B
+    await configure(e,{threshold:.80,stake:2,target:5}); await arm(e);   // series B
     const B=await loadRealSeriesState(e);
     assert.notEqual(B.seriesId,A.seriesId);
     assert.deepEqual([B.threshold,B.maxEntryDebitUsd,B.attemptTarget,B.attemptsStarted],[.75,2,5,0]);
@@ -652,8 +643,8 @@ test('GOV 17/18/19: different threshold / stake / attemptTarget freeze into sepa
     // stake-cap enforced against the already-computed fee-safe debit, not complementary provider book price
     assert.throws(()=>payneOrderWriteProof('ENTRY',{...p},{...sc,maxEntryDebitUsd:1,seriesConfigFrozen:true,priorAttemptClean:true,entryDebitUsd:sc.entryDebitUsd}),/PAYNE_ENTRY_EXCEEDS_SERIES_STAKE_CAP/);
     // series C: .85 frozen -> shadow score .80 must NOT fire (threshold really comes from the frozen series)
-    await frozenSeries(e,{seriesId:'C',attemptsStarted:0,attemptTarget:10,threshold:.85,maxEntryDebitUsd:1,position:null,status:'ARMED_WAITING'});
-    await e.PAYNE_KALSHI_STATE.put('payne-kalshi:control:v1',JSON.stringify({...(await loadControl(e)),armed:true,activeThreshold:.85,maxEntryDebitUsd:1,attemptTarget:10}));
+    await frozenSeries(e,{seriesId:'C',attemptsStarted:0,attemptTarget:10,threshold:.80,maxEntryDebitUsd:1,position:null,status:'ARMED_WAITING'});
+    await e.PAYNE_KALSHI_STATE.put('payne-kalshi:control:v1',JSON.stringify({...(await loadControl(e)),armed:true,activeThreshold:.80,maxEntryDebitUsd:1,attemptTarget:10}));
     const before=entries(post).length; const outC=await cycle(e,post);
     assert.equal(entries(post).length,before); assert.equal(outC.status,'ARMED_FISHING');
   }finally{io.restore();}
@@ -663,20 +654,20 @@ test('GOV 17/18/19: different threshold / stake / attemptTarget freeze into sepa
 test('GOV 20: mid-run control changes cannot mutate the active series snapshot',async()=>{
   const e=await env(),io=installProvider(),post=postFixture(NOFILL);
   try{
-    await configure(e,{threshold:.75,stake:2,target:5}); await arm(e);
+    await configure(e,{threshold:.80,stake:2,target:5}); await arm(e);
     const snap=structuredClone(await loadRealSeriesState(e));
     await assert.rejects(updateFounderControl(e,'SET_THRESHOLD',.80),/PAYNE_REAL_CONFIG_LOCKED_WHILE_ARMED/);
     await assert.rejects(updateFounderControl(e,'SET_STAKE',5),/PAYNE_REAL_CONFIG_LOCKED_WHILE_ARMED/);
     await assert.rejects(updateFounderControl(e,'SET_ATTEMPT_TARGET',30),/PAYNE_REAL_CONFIG_LOCKED_WHILE_ARMED/);
     // even a tampered control record cannot change the series; engine fails closed, no order
     const c=await loadControl(e);
-    await e.PAYNE_KALSHI_STATE.put('payne-kalshi:control:v1',JSON.stringify({...c,activeThreshold:.70,maxEntryDebitUsd:5,attemptTarget:30}));
+    await e.PAYNE_KALSHI_STATE.put('payne-kalshi:control:v1',JSON.stringify({...c,activeThreshold:.80,maxEntryDebitUsd:5,attemptTarget:30}));
     const out=await cycle(e,post);
     assert.equal(out.status,'ARMED_CONFIGURATION_INVALID_FAIL_CLOSED'); assert.equal(entries(post).length,0);
     const after=await loadRealSeriesState(e);
     for(const k of ['threshold','maxEntryDebitUsd','attemptTarget','seriesId','configFrozen']) assert.equal(after[k],snap[k]);
     // Clean + disarmed + changed next-run config explicitly terminalizes the old frozen series before a new ARM.
-    await frozenSeries(e,{seriesId:snap.seriesId,attemptsStarted:2,attemptTarget:5,threshold:.75,maxEntryDebitUsd:2,position:null,currentAttempt:{status:'NO_FILL'}});
+    await frozenSeries(e,{seriesId:snap.seriesId,attemptsStarted:2,attemptTarget:5,threshold:.80,maxEntryDebitUsd:2,position:null,currentAttempt:{status:'NO_FILL'}});
     await e.PAYNE_KALSHI_STATE.put('payne-kalshi:control:v1',JSON.stringify({...c,armed:false,activeThreshold:.80,maxEntryDebitUsd:2,attemptTarget:5}));
     const reconciled=await cycle(e,post);
     assert.equal(reconciled.status,'TERMINAL_DISARMED_CONFIG_SUPERSEDED');
@@ -701,28 +692,28 @@ test('GOV 20: mid-run control changes cannot mutate the active series snapshot',
 
 // ---------- 21,22,23 existing checks preserved ----------
 
-test('LEGACY QUARANTINE A/B/C: old 4/5 accounting is terminalized without rewriting history and next .70 x5 $1 ARM creates a fresh repaired 0/5 series',async()=>{
+test('LEGACY QUARANTINE A/B/C: old 4/5 accounting is terminalized without rewriting history and next promoted .80 x5 $1 ARM creates a fresh repaired 0/5 series',async()=>{
   const LEGACY_ID='568186d7-57a8-42b0-80ed-db0429786fe2';
   const e=await env(),io=installProvider();
   try{
-    await configure(e,{threshold:.70,stake:1,target:5});
+    await configure(e,{threshold:.80,stake:1,target:5});
     const legacy={
       schema:'PAYNE_REAL_SERIES_V1',owner:'PAYNE_KALSHI_REAL',seriesId:LEGACY_ID,
       status:'SERIES_PAUSED_DISARMED',attemptsStarted:4,attemptTarget:5,
-      threshold:.70,effectiveLockThreshold:.65,maxEntryDebitUsd:1,requiredExchangeIndex:2,
+      threshold:.80,effectiveLockThreshold:.65,maxEntryDebitUsd:1,requiredExchangeIndex:2,
       configFrozen:true,frozenAt:'2026-10-05T00:00:00.000Z',unresolvedEntry:false,
       fireLatch:null,currentAttempt:{attemptId:LEGACY_ID+'-4',attemptNo:4,status:'NO_FILL'},position:null,completedAt:null,
     };
     // Directly seed pre-marker persisted state to represent the actual old-accounting compatibility case.
     await e.PAYNE_KALSHI_STATE.put('payne-kalshi:real-series:v1',JSON.stringify(legacy));
     await e.PAYNE_KALSHI_STATE.put('payne-kalshi:run:'+LEGACY_ID,JSON.stringify({
-      runId:LEGACY_ID,threshold:.70,effectiveLockThreshold:.65,maxEntryDebitUsd:1,attemptTarget:5,requiredExchangeIndex:2,frozenAt:legacy.frozenAt
+      runId:LEGACY_ID,threshold:.80,effectiveLockThreshold:.65,maxEntryDebitUsd:1,attemptTarget:5,requiredExchangeIndex:2,frozenAt:legacy.frozenAt
     }));
     for(let n=1;n<=4;n++){
       await e.PAYNE_KALSHI_STATE.put('payne-kalshi:attempt:'+LEGACY_ID+':attempt:'+n,JSON.stringify({
         schema:'PAYNE_REAL_ATTEMPT_V1',owner:'PAYNE_KALSHI_REAL',runId:LEGACY_ID,seriesId:LEGACY_ID,
         attemptId:LEGACY_ID+'-'+n,attemptNo:n,asset:'BTC',marketTicker:'KXBTC15M-REALTEST',outcomeSide:'YES',
-        score:.71,threshold:.70,status:'NO_FILL',result:'NO_FILL'
+        score:.71,threshold:.80,status:'NO_FILL',result:'NO_FILL'
       }));
     }
 
@@ -767,7 +758,7 @@ test('LEGACY QUARANTINE A/B/C: old 4/5 accounting is terminalized without rewrit
     assert.equal(fresh.attemptsStarted,0);
     assert.equal(fresh.executionIntentsStarted,0);
     assert.equal(fresh.attemptTarget,5);
-    assert.equal(fresh.threshold,.70);
+    assert.equal(fresh.threshold,.80);
     assert.equal(fresh.maxEntryDebitUsd,1);
     const obs=summarizeRealExecutionState({control:await loadControl(e),series:fresh,ledger:await listRealLedger(e,1000)});
     assert.equal(obs.executionIntents,0);
@@ -787,7 +778,7 @@ test('LEGACY QUARANTINE A/B/C: old 4/5 accounting is terminalized without rewrit
 test('LEGACY QUARANTINE D: legitimate repaired-semantic unfinished series still resumes with same identity and provider-attempt count',async()=>{
   const e=await env(),io=installProvider();
   try{
-    await configure(e,{threshold:.70,stake:1,target:5});
+    await configure(e,{threshold:.80,stake:1,target:5});
     const repaired=await saveRealSeriesState(e,{
       ...defaultRealSeriesState(),
       seriesId:'REPAIRED-RESUME',
@@ -795,7 +786,7 @@ test('LEGACY QUARANTINE D: legitimate repaired-semantic unfinished series still 
       attemptsStarted:2,
       executionIntentsStarted:3,
       attemptTarget:5,
-      threshold:.70,
+      threshold:.80,
       effectiveLockThreshold:.65,
       maxEntryDebitUsd:1,
       requiredExchangeIndex:2,
@@ -822,15 +813,15 @@ test('LEGACY QUARANTINE D: legitimate repaired-semantic unfinished series still 
 test('ARM blocker regression: clean disarmed 1/5 @ .70 is superseded for Founder .60 x1 without provider writes',async()=>{
   const e=await env(),io=installProvider(),post=postFixture(NOFILL);
   try{
-    await frozenSeries(e,{seriesId:'LIVE-STALE',status:'ARMED_FISHING',attemptsStarted:1,attemptTarget:5,threshold:.70,maxEntryDebitUsd:1,position:null,currentAttempt:{status:'NO_FILL'},unresolvedEntry:false});
+    await frozenSeries(e,{seriesId:'LIVE-STALE',status:'ARMED_FISHING',attemptsStarted:1,attemptTarget:5,threshold:.80,maxEntryDebitUsd:1,position:null,currentAttempt:{status:'NO_FILL'},unresolvedEntry:false});
     const c=await loadControl(e);
-    await e.PAYNE_KALSHI_STATE.put('payne-kalshi:control:v1',JSON.stringify({...c,armed:false,activeThreshold:.60,maxEntryDebitUsd:1,attemptTarget:1,requiredExchangeIndex:2}));
+    await e.PAYNE_KALSHI_STATE.put('payne-kalshi:control:v1',JSON.stringify({...c,armed:false,activeThreshold:.80,maxEntryDebitUsd:1,attemptTarget:1,requiredExchangeIndex:2}));
 
     const before=await loadRealSeriesState(e);
     assert.equal(before.status,'ARMED_FISHING');
     assert.equal(before.attemptsStarted,1);
     assert.equal(before.attemptTarget,5);
-    assert.equal(before.threshold,.70);
+    assert.equal(before.threshold,.80);
 
     const repaired=await cycle(e,post);
     assert.equal(repaired.status,'TERMINAL_DISARMED_CONFIG_SUPERSEDED');
@@ -846,8 +837,8 @@ test('ARM blocker regression: clean disarmed 1/5 @ .70 is superseded for Founder
     assert.notEqual(fresh.seriesId,'LIVE-STALE');
     assert.equal(fresh.attemptsStarted,0);
     assert.equal(fresh.attemptTarget,1);
-    assert.equal(fresh.threshold,.60);
-    assert.equal(fresh.effectiveLockThreshold,.60);
+    assert.equal(fresh.threshold,.80);
+    assert.equal(fresh.effectiveLockThreshold,.65);
     assert.equal(fresh.configFrozen,true);
     assert.equal(entries(post).length,0);
     assert.equal(providerPosts(io),0);
@@ -912,11 +903,12 @@ test('GOV 24/25/26: AUTO is only read (GET), zero provider POSTs, zero capital m
   }finally{io.restore();}
 });
 
-test('GOV: no hard-coded run-shape - frozenSeriesConfig accepts any validated combination, rejects unfrozen/invalid',()=>{
-  for(const [t,th,st] of [[1,.70,1],[5,.70,1],[10,.75,1],[10,.80,2],[30,.65,1],[7,.91,3]]){
-    assert.equal(frozenSeriesConfig({configFrozen:true,attemptTarget:t,threshold:th,effectiveLockThreshold:effectiveLockThreshold(th),maxEntryDebitUsd:st,requiredExchangeIndex:2}).ok,true);
+test('GOV: promoted Paper threshold is fixed while target and stake remain configurable',()=>{
+  for(const [t,st] of [[1,1],[5,1],[10,2],[30,1],[7,3]]){
+    assert.equal(frozenSeriesConfig({configFrozen:true,attemptTarget:t,threshold:.80,effectiveLockThreshold:.65,maxEntryDebitUsd:st,requiredExchangeIndex:2}).ok,true);
   }
-  assert.equal(frozenSeriesConfig({configFrozen:false,attemptTarget:5,threshold:.7,effectiveLockThreshold:.65,maxEntryDebitUsd:1,requiredExchangeIndex:2}).ok,false);
-  assert.equal(frozenSeriesConfig({configFrozen:true,attemptTarget:0,threshold:.7,effectiveLockThreshold:.65,maxEntryDebitUsd:1,requiredExchangeIndex:2}).ok,false);
-  assert.equal(frozenSeriesConfig({configFrozen:true,attemptTarget:5,threshold:.7,effectiveLockThreshold:.65,maxEntryDebitUsd:1,requiredExchangeIndex:3}).ok,false);
+  assert.equal(frozenSeriesConfig({configFrozen:true,attemptTarget:5,threshold:.70,effectiveLockThreshold:.65,maxEntryDebitUsd:1,requiredExchangeIndex:2}).ok,false);
+  assert.equal(frozenSeriesConfig({configFrozen:false,attemptTarget:5,threshold:.80,effectiveLockThreshold:.65,maxEntryDebitUsd:1,requiredExchangeIndex:2}).ok,false);
+  assert.equal(frozenSeriesConfig({configFrozen:true,attemptTarget:0,threshold:.80,effectiveLockThreshold:.65,maxEntryDebitUsd:1,requiredExchangeIndex:2}).ok,false);
+  assert.equal(frozenSeriesConfig({configFrozen:true,attemptTarget:5,threshold:.80,effectiveLockThreshold:.65,maxEntryDebitUsd:1,requiredExchangeIndex:3}).ok,false);
 });
