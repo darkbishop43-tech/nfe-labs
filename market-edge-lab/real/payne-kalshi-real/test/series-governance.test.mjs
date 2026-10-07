@@ -264,7 +264,7 @@ test('FEATURE EPOCH 1: same five-minute Paper epoch is stable across FIRE synchr
     const out=await loadRealSeriesState(e);
     assert.equal(out.attemptsStarted,0);
     assert.equal(out.fireLatch.state,'LATCHED');
-    assert.equal(out.fireLatch.fireFeatureEvidence.score,.86);
+    assert.ok(Math.abs(out.fireLatch.fireFeatureEvidence.score-.86)<1e-12);
     assert.deepEqual(out.fireLatch.fireFeatureEvidence.failureReasons,[]);
     assert.equal(providerPosts(io),0);
   }finally{io.restore();}
@@ -333,7 +333,7 @@ test('FEATURE EPOCH 9: Fresh LOCK and pre-submit use real books while Paper feat
     assert.equal(out.fireLatch.freshLock,'PASS');
     assert.equal(out.fireLatch.preSubmit,'PASS');
     assert.equal(out.fireLatch.finalFeature,'PASS');
-    assert.equal(out.fireLatch.finalFeatureEvidence.score,.86);
+    assert.ok(Math.abs(out.fireLatch.finalFeatureEvidence.score-.86)<1e-12);
     assert.equal(out.attemptsStarted,1);
   }finally{io.restore();}
 });
