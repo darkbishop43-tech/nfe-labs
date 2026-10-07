@@ -998,12 +998,12 @@ function featureForCandidate(featureState, ticker, outcomeSide, asset, activeThr
       windowConsistency:identity?.windowMatch??false,
     };
   }
-  const move=Number(row.move), fair=Number(row.fair), edge=Number(row.edge), score=Number(row.score);
+  const move=Number(row.move), directionalMove=Number(row.directionalMove), fair=Number(row.fair), edge=Number(row.edge), score=Number(row.score);
   const gate=payneStage({move,fair,edge,score},activeThreshold);
   return {
     source:featureState?.source||'KALSHI_AUTHORITATIVE',
     available:true,
-    move,fair,edge,score,
+    move,directionalMove:Number.isFinite(directionalMove)?directionalMove:null,fair,edge,score,
     state:gate.pullTrigger?'PULL_TRIGGER':gate.lockIn?'LOCK_IN':gate.radar?'RADAR':'NOT_QUALIFIED',
     reason:null,
     direction:row?.direction||null,
