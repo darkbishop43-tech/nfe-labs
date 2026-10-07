@@ -43,7 +43,7 @@ const candidate = (overrides={}) => ({
   asset:'BTC',
   direction:'UP',
   outcomeSide:'YES',
-  score:.72,
+  score:.82,
   edge:.04,
   move:.003,
   executionEligible:true,
@@ -67,13 +67,13 @@ const index2Balance = (balance=10) => ({
   ]
 });
 
-test('01 qualifying .70 candidate reaches PULL_TRIGGER', ()=>{
-  assert.equal(payneStage(candidate(),.70).stage,'PULL_TRIGGER');
+test('01 qualifying Paper .80 candidate reaches PULL_TRIGGER', ()=>{
+  assert.equal(payneStage(candidate(),.80).stage,'PULL_TRIGGER');
 });
 
 test('02 non-PULL candidate cannot reach FIRE path', async ()=>{
   const e=makeEnv(); await initializeDisarmed(e); let gets=0;
-  const out=await evaluateStep2ZeroMoneyCandidate(e,candidate({score:.69}),{
+  const out=await evaluateStep2ZeroMoneyCandidate(e,candidate({score:.79}),{
     providerGet:async()=>{gets++; return quote();},
     balanceBody:index2Balance(),
   });
@@ -211,12 +211,12 @@ test('19 exact settlement can certify FLAT only after complete omission context'
   assert.equal(out.reason,'EXACT_TICKER_SETTLEMENT_CONFIRMED');
 });
 
-test('20 .20 SCORE_EXIT remains exact', ()=>{
-  assert.deepEqual(managementDecision({score:.20,heldMs:1000,owned:true}),{action:'EXIT',reason:'SCORE_EXIT'});
+test('20 Paper decision_exit remains exact', ()=>{
+  assert.deepEqual(managementDecision({heldMs:1000,owned:true,marketPresent:true,decisionLabel:'LOCK IN'}),{action:'EXIT',reason:'decision_exit'});
 });
 
-test('21 five-minute MAX_HOLD_EXIT remains exact', ()=>{
-  assert.deepEqual(managementDecision({score:.60,heldMs:300000,owned:true}),{action:'EXIT',reason:'MAX_HOLD_EXIT'});
+test('21 five-minute Paper max_hold remains exact', ()=>{
+  assert.deepEqual(managementDecision({heldMs:300000,owned:true,marketPresent:true,decisionLabel:'PULL TRIGGER'}),{action:'EXIT',reason:'max_hold'});
 });
 
 test('22 exit payload is reduce-only and same ticker', ()=>{
