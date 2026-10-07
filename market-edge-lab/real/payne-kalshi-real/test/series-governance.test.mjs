@@ -517,25 +517,31 @@ test('GOV 2/4/13/14/15: target 5 progresses sequentially on resolved NO_FILL, st
 });
 
 // ---------- 5 FILLED + CLOSED permits next ----------
-test('GOV 5: resolved FILLED + provider-FLAT CLOSED permits the next attempt (attempt 2)',async()=>{
+test('GOV 5: resolved FILLED + provider-FLAT closes ownership and Paper cooldown blocks exact immediate re-entry',async()=>{
   const e=await env(),post=postFixture(FILL);
   let io=installProvider({position:'ABSENT'});
   try{
     await configure(e,{target:5}); await arm(e);
     const a1=await cycle(e,post);
-    assert.equal(a1.status,'MANAGING_POSITION_SERIES_CONTINUES'); assert.equal(a1.position.status,'OPEN');
+    assert.equal(a1.status,'MANAGING_POSITION_SERIES_CONTINUES');
+    assert.equal(a1.position.status,'OPEN');
     assert.equal((await loadControl(e)).armed,true);
-    // while OPEN the next attempt is blocked
+
     io.restore(); io=installProvider({position:'OPEN'});
-    await cycle(e,post); assert.equal(entries(post).length,1);
-    // provider proves FLAT -> position CLOSED -> series continues
+    await cycle(e,post);
+    assert.equal(entries(post).length,1);
+
     io.restore(); io=installProvider({position:'FLAT'});
     const closed=await cycle(e,post);
-    assert.equal(closed.position.status,'CLOSED'); assert.equal(closed.status,'ARMED_FISHING');
+    assert.equal(closed.position.status,'CLOSED');
+    assert.equal(closed.status,'ARMED_FISHING');
     assert.equal(seriesInterlock(closed).clear,true);
-    const a2=await cycle(e,post);
-    assert.equal(a2.attemptsStarted,2); assert.equal(entries(post).length,2);
-    assert.equal(entries(post)[1].scope.attemptsBefore,1);
+
+    const immediate=await cycle(e,post);
+    assert.equal(immediate.attemptsStarted,1);
+    assert.equal(entries(post).length,1);
+    const ledger=await listRealLedger(e,1000);
+    assert.ok(ledger.some(x=>x.type==='PAYNE_PAPER_BRAIN_EXIT_CLOSED'));
     assert.equal(providerPosts(io),0);
   }finally{io.restore();}
 });
@@ -619,27 +625,32 @@ test('GOV 10b: unknown provider result self-reconciles before any next attempt',
 });
 
 // ---------- 17,18,19 separate series carry separate frozen config ----------
-test('GOV 17/18/19: different threshold / stake / attemptTarget freeze into separate series; no combination-specific code',async()=>{
-  const e=await env({shadow:baselineShadow({score:.80})}),io=installProvider(),post=postFixture(NOFILL);
+test('GOV 17/18/19: Paper threshold stays fixed while Real stake and attemptTarget freeze into separate series',async()=>{
+  const e=await env({shadow:baselineShadow({score:.86,move:.005,edge:.09})}),io=installProvider(),post=postFixture(NOFILL);
   try{
-    await arm(e); await cycle(e,post);                                   // series A: .70 x1 @ $1 -> terminal
+    await arm(e);
+    await cycle(e,post); // series A: Paper .80 x1 @ $1 -> terminal
     const A=await loadRealSeriesState(e);
-    await configure(e,{threshold:.80,stake:2,target:5}); await arm(e);   // series B
+    assert.equal(A.threshold,.80);
+    assert.equal(A.maxEntryDebitUsd,1);
+    assert.equal(A.attemptTarget,1);
+
+    await configure(e,{stake:2,target:5});
+    await arm(e);
     const B=await loadRealSeriesState(e);
     assert.notEqual(B.seriesId,A.seriesId);
-    assert.deepEqual([B.threshold,B.maxEntryDebitUsd,B.attemptTarget,B.attemptsStarted],[.75,2,5,0]);
-    assert.deepEqual([A.threshold,A.maxEntryDebitUsd,A.attemptTarget],[.70,1,1]);
+    assert.deepEqual([B.threshold,B.maxEntryDebitUsd,B.attemptTarget,B.attemptsStarted],[.80,2,5,0]);
     await cycle(e,post);
     const sc=entries(post)[1].scope;
-    assert.equal(sc.maxEntryDebitUsd,2); assert.equal(sc.attemptTarget,5);
-    const p=entries(post)[1].payload; assert.ok(Number(sc.entryDebitUsd)<=2); assert.ok(Number(sc.entryDebitUsd)>1);
-    // stake-cap enforced against the already-computed fee-safe debit, not complementary provider book price
+    assert.equal(sc.maxEntryDebitUsd,2);
+    assert.equal(sc.attemptTarget,5);
+    const p=entries(post)[1].payload;
+    assert.ok(Number(sc.entryDebitUsd)<=2);
+    assert.ok(Number(sc.entryDebitUsd)>1);
     assert.throws(()=>payneOrderWriteProof('ENTRY',{...p},{...sc,maxEntryDebitUsd:1,seriesConfigFrozen:true,priorAttemptClean:true,entryDebitUsd:sc.entryDebitUsd}),/PAYNE_ENTRY_EXCEEDS_SERIES_STAKE_CAP/);
-    // series C: .85 frozen -> shadow score .80 must NOT fire (threshold really comes from the frozen series)
-    await frozenSeries(e,{seriesId:'C',attemptsStarted:0,attemptTarget:10,threshold:.80,maxEntryDebitUsd:1,position:null,status:'ARMED_WAITING'});
-    await e.PAYNE_KALSHI_STATE.put('payne-kalshi:control:v1',JSON.stringify({...(await loadControl(e)),armed:true,activeThreshold:.80,maxEntryDebitUsd:1,attemptTarget:10}));
-    const before=entries(post).length; const outC=await cycle(e,post);
-    assert.equal(entries(post).length,before); assert.equal(outC.status,'ARMED_FISHING');
+
+    await updateFounderControl(e,'DISARM');
+    await assert.rejects(updateFounderControl(e,'SET_THRESHOLD',.85),/PAYNE_PAPER_PULL_THRESHOLD_FIXED_0_80/);
   }finally{io.restore();}
 });
 
@@ -661,7 +672,7 @@ test('GOV 20: mid-run control changes cannot mutate the active series snapshot',
     for(const k of ['threshold','maxEntryDebitUsd','attemptTarget','seriesId','configFrozen']) assert.equal(after[k],snap[k]);
     // Clean + disarmed + changed next-run config explicitly terminalizes the old frozen series before a new ARM.
     await frozenSeries(e,{seriesId:snap.seriesId,attemptsStarted:2,attemptTarget:5,threshold:.80,maxEntryDebitUsd:2,position:null,currentAttempt:{status:'NO_FILL'}});
-    await e.PAYNE_KALSHI_STATE.put('payne-kalshi:control:v1',JSON.stringify({...c,armed:false,activeThreshold:.80,maxEntryDebitUsd:2,attemptTarget:5}));
+    await e.PAYNE_KALSHI_STATE.put('payne-kalshi:control:v1',JSON.stringify({...c,armed:false,activeThreshold:.80,maxEntryDebitUsd:1,attemptTarget:5}));
     const reconciled=await cycle(e,post);
     assert.equal(reconciled.status,'TERMINAL_DISARMED_CONFIG_SUPERSEDED');
     assert.ok(reconciled.completedAt);
@@ -671,12 +682,13 @@ test('GOV 20: mid-run control changes cannot mutate the active series snapshot',
     assert.notEqual(fresh.seriesId,snap.seriesId);
     assert.equal(fresh.attemptsStarted,0);
     assert.equal(fresh.threshold,.80);
+    assert.equal(fresh.maxEntryDebitUsd,1);
     assert.equal(fresh.attemptTarget,5);
 
     // Same-config clean disarmed series remains resumable; count and identity are preserved.
     await updateFounderControl(e,'DISARM');
-    await frozenSeries(e,{seriesId:'RESUME-SAME',attemptsStarted:2,attemptTarget:5,threshold:.80,maxEntryDebitUsd:2,position:null,currentAttempt:{status:'NO_FILL'}});
-    await e.PAYNE_KALSHI_STATE.put('payne-kalshi:control:v1',JSON.stringify({...c,armed:false,activeThreshold:.80,maxEntryDebitUsd:2,attemptTarget:5}));
+    await frozenSeries(e,{seriesId:'RESUME-SAME',attemptsStarted:2,attemptTarget:5,threshold:.80,maxEntryDebitUsd:1,position:null,currentAttempt:{status:'NO_FILL'}});
+    await e.PAYNE_KALSHI_STATE.put('payne-kalshi:control:v1',JSON.stringify({...c,armed:false,activeThreshold:.80,maxEntryDebitUsd:1,attemptTarget:5}));
     await updateFounderControl(e,'ARM');
     const resumed=await loadRealSeriesState(e);
     assert.equal(resumed.attemptsStarted,2); assert.equal(resumed.seriesId,'RESUME-SAME');
