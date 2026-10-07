@@ -1081,6 +1081,26 @@ export function payneBookEvidence(market, outcomeSide, selectedPrice=null, obser
   };
 }
 
+function paperCandidateAvailability(candidate,series,ledger,nowMs=Date.now()) {
+  const candidateKey=paperCandidateKey(candidate);
+  if(!candidateKey) return {available:false,candidateKey:null,reason:'PAPER_CANDIDATE_KEY_UNAVAILABLE'};
+  const position=series?.position||null;
+  const activeKey=position?.paperCandidateKey||paperCandidateKey({
+    ticker:position?.marketTicker,
+    outcomeSide:position?.outcomeSide,
+    direction:position?.direction,
+  });
+  if(position&&SERIES_BLOCKING_POSITION_STATUSES.includes(String(position?.status||''))&&activeKey===candidateKey) {
+    return {available:false,candidateKey,reason:'PAPER_DUPLICATE_ACTIVE'};
+  }
+  const exits=(Array.isArray(ledger)?ledger:[])
+    .filter(row=>String(row?.type||'')==='PAYNE_PAPER_BRAIN_EXIT_CLOSED'&&String(row?.candidateKey||'')===candidateKey)
+    .sort((a,b)=>Date.parse(a?.at||0)-Date.parse(b?.at||0));
+  const last=exits.length?exits[exits.length-1]:null;
+  if(last&&paperCooldownActive(last.at,nowMs)) return {available:false,candidateKey,lastExitAt:last.at,reason:'PAPER_COOLDOWN_ACTIVE'};
+  return {available:true,candidateKey,lastExitAt:last?.at||null,reason:'PAPER_CANDIDATE_AVAILABLE'};
+}
+
 function buildCandidateViews(markets, featureState, activeThreshold) {
   const out=[];
   for (const market of markets||[]) {
