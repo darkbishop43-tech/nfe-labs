@@ -2,6 +2,15 @@ import { kalshiReadOnlyProof, kalshiGetOnly } from './kalshi-get-only.js';
 import { kalshiPayneOrderPost, PAYNE_WRITE_CONTRACT } from './kalshi-real-write.js';
 import { cockpitHtml } from './cockpit-html.js';
 import { buildPayneOwnedFeatureState, payneFeatureIdentity } from './payne-kalshi-features.js';
+import {
+  PAYNE_PAPER_RULES,
+  PAYNE_PAPER_SOURCE,
+  paperCandidateKey,
+  paperCooldownActive,
+  paperDecision,
+  paperManagementDecision,
+  paperRankCandidates,
+} from './payne-paper-brain.js';
 
 const SERVICE_ID = 'market-edge-payne-kalshi-real';
 const STATE_BINDING = 'PAYNE_KALSHI_STATE';
@@ -14,7 +23,7 @@ const POSITION_PREFIX = 'payne-kalshi:position:';
 const SCAN_HISTORY_PREFIX = 'payne-kalshi:scan-history:';
 const REAL_SERIES_KEY = 'payne-kalshi:real-series:v1';
 const REAL_LEDGER_PREFIX = 'payne-kalshi:real-ledger:';
-const REAL_CONTROL_SCHEMA = 'PAYNE_REAL_CONTROL_V1';
+const REAL_CONTROL_SCHEMA = 'PAYNE_REAL_CONTROL_V2_PAPER_BRAIN';
 const REAL_OWNER = 'PAYNE_KALSHI_REAL';
 const PROVIDER_ATTEMPT_ACCOUNTING_SEMANTICS = 'PROVIDER_POST_BOUNDARY_V1';
 const LEGACY_ATTEMPT_ACCOUNTING_SEMANTICS = 'LEGACY_PRE_PROVIDER_BOUNDARY_V0';
@@ -41,18 +50,21 @@ export function parseFounderThreshold(rawValue) {
 }
 
 export function effectiveLockThreshold(activeThreshold) {
-  const threshold=Number(activeThreshold);
-  if(!Number.isFinite(threshold)) return PAYNE_CONFIG.lockScore;
-  return threshold<PAYNE_CONFIG.lockScore?threshold:PAYNE_CONFIG.lockScore;
+  // PAYNE Paper LOCK is fixed at .65. PULL threshold does not lower LOCK.
+  return PAYNE_PAPER_RULES.lockScore;
 }
 
 export const PAYNE_CONFIG = Object.freeze({
-  radarScore: 0.50,
-  lockScore: 0.65,
-  defaultThreshold: 0.70,
-  minAbsMove: 0.002,
-  exitScore: 0.20,
-  maxHoldMs: 5 * 60 * 1000,
+  radarScore: PAYNE_PAPER_RULES.radarScore,
+  lockScore: PAYNE_PAPER_RULES.lockScore,
+  defaultThreshold: PAYNE_PAPER_RULES.pullScore,
+  minAbsMove: PAYNE_PAPER_RULES.minAbsMove,
+  maxHoldMs: PAYNE_PAPER_RULES.maxHoldMs,
+  paperCooldownMs: PAYNE_PAPER_RULES.cooldownMs,
+  paperSourceCadenceMs: PAYNE_PAPER_RULES.sourceCadenceMs,
+  paperSourceAssets: PAYNE_PAPER_RULES.sourceAssets,
+  // Real discovery remains broader than the Paper source. Only source-proven
+  // Paper assets receive authoritative Paper-brain features.
   executableAssets: Object.freeze(['BTC','ETH','SOL','XRP','HYPE','ZEC','DOGE','BNB','NEAR']),
   providerWritesEnabled: false,
   realExecutionEnabled: false,
@@ -155,9 +167,9 @@ export async function initializeDisarmed(env) {
   const existing = await kvGetJson(env, CONTROL_KEY);
   const state=normalizeControlState(existing);
   if (!existing || existing?.realControlSchema!==REAL_CONTROL_SCHEMA) {
-    const disarmed={...state,armed:false,attempts:0,openPositions:0,attemptTarget:1,maxEntryDebitUsd:1,activeThreshold:.70,providerWriteAuthority:'BUILT_INACTIVE_DISARMED',providerPostAuthority:'BUILT_INACTIVE_DISARMED',realExecution:'BUILT_INACTIVE_DISARMED',fundingAuthority:'INDEX2_ONLY_INACTIVE_DISARMED',requiredExchangeIndex:2};
+    const disarmed={...state,armed:false,attempts:0,openPositions:0,attemptTarget:1,maxEntryDebitUsd:1,activeThreshold:PAYNE_CONFIG.defaultThreshold,providerWriteAuthority:'BUILT_INACTIVE_DISARMED',providerPostAuthority:'BUILT_INACTIVE_DISARMED',realExecution:'BUILT_INACTIVE_DISARMED',fundingAuthority:'INDEX2_ONLY_INACTIVE_DISARMED',requiredExchangeIndex:2};
     await kvPutJson(env, CONTROL_KEY, disarmed);
-    await appendEvent(env, 'REAL_CONTROL_INITIALIZED_DISARMED', { armed:false, attempts:0, attemptTarget:1, maxEntryDebitUsd:1, activeThreshold:.70, requiredExchangeIndex:2 });
+    await appendEvent(env, 'REAL_CONTROL_INITIALIZED_DISARMED', { armed:false, attempts:0, attemptTarget:1, maxEntryDebitUsd:1, activeThreshold:PAYNE_CONFIG.defaultThreshold, requiredExchangeIndex:2 });
     return disarmed;
   }
   return state;
