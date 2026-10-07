@@ -2011,13 +2011,19 @@ async function buildWouldFireForensic(env,{checkpointLimit=59}={}){
       const cand=forensicCandidateAt(x,sel.ticker,sel.outcomeSide);
       if(!cand)continue;
       const ms=forensicTimeMs(x.at);
-      if(forensicNumber(cand.score)!==null&&forensicNumber(cand.score)<=PAYNE_CONFIG.exitScore){
-        exitEvidence={reason:'SCORE_EXIT',at:x.at,price:forensicNumber(cand.liveBid),score:forensicNumber(cand.score),timingDeltaMs:Number.isFinite(ms)&&Number.isFinite(deadlineMs)?ms-deadlineMs:null};break;
+      const paperNow=paperDecision({
+        score:forensicNumber(cand.score),
+        edge:forensicNumber(cand.edge),
+        move:forensicNumber(cand.move),
+        threshold:PAYNE_PAPER_RULES.pullScore,
+      });
+      if(paperNow.label!=='PULL TRIGGER'){
+        exitEvidence={reason:'decision_exit',at:x.at,price:forensicNumber(cand.liveBid),score:forensicNumber(cand.score),timingDeltaMs:Number.isFinite(ms)&&Number.isFinite(deadlineMs)?ms-deadlineMs:null};break;
       }
     }
     if(!exitEvidence&&Number.isFinite(deadlineMs)){
       const candidates=future.map(x=>({x,cand:forensicCandidateAt(x,sel.ticker,sel.outcomeSide),ms:forensicTimeMs(x?.at)})).filter(y=>y.cand&&Number.isFinite(y.ms)&&Math.abs(y.ms-deadlineMs)<=15_000).sort((a,b)=>Math.abs(a.ms-deadlineMs)-Math.abs(b.ms-deadlineMs));
-      if(candidates.length)exitEvidence={reason:'MAX_HOLD_EXIT',at:candidates[0].x.at,price:forensicNumber(candidates[0].cand.liveBid),score:forensicNumber(candidates[0].cand.score),timingDeltaMs:candidates[0].ms-deadlineMs};
+      if(candidates.length)exitEvidence={reason:'max_hold',at:candidates[0].x.at,price:forensicNumber(candidates[0].cand.liveBid),score:forensicNumber(candidates[0].cand.score),timingDeltaMs:candidates[0].ms-deadlineMs};
     }
     const marketRead=marketMap.get(sel.ticker)||{},market=marketRead.market||{};
     const marketResult=normalizeMarketOutcome(market);
@@ -2047,7 +2053,7 @@ async function buildWouldFireForensic(env,{checkpointLimit=59}={}){
       marketProviderStatus:market?.status||null,marketResult,marketSettlementValue:market?.settlementValue??null,marketSettlementTs:market?.settlementTs||null,
       directionalClassification,outcomeClassification,
       hypotheticalExitReason:exitEvidence?.reason||null,hypotheticalExitAt:exitEvidence?.at||null,hypotheticalExitPrice:exitPrice,
-      maxHoldDeadline:Number.isFinite(deadlineMs)?new Date(deadlineMs).toISOString():null,maxHoldQuoteDeltaMs:exitEvidence?.reason==='MAX_HOLD_EXIT'?exitEvidence?.timingDeltaMs:null,
+      maxHoldDeadline:Number.isFinite(deadlineMs)?new Date(deadlineMs).toISOString():null,maxHoldQuoteDeltaMs:exitEvidence?.reason==='max_hold'?exitEvidence?.timingDeltaMs:null,
       count,grossHypotheticalPnlUsd:gross,preFeeHypotheticalPnlUsd:gross,
       entryFeeEstimateUsd:z.estimatedFeeUsd??null,entryFeeSource:z.estimatedFeeUsd!=null?'PAYNE_FEE_SAFE_SIZING_ESTIMATE':null,
       exitFeeUsd:null,netHypotheticalPnlUsd:null,
@@ -2122,7 +2128,7 @@ async function buildWouldFireForensic(env,{checkpointLimit=59}={}){
     limitations:[
       'Baseline FIRE/submission time is not exposed; fill time remains separately labeled.',
       'Net hypothetical P/L is UNKNOWN because attributable hypothetical exit fees are not reconstructed.',
-      'Frozen PAYNE lifecycle P/L is calculated only when an authoritative same-ticker/side exit quote is present at SCORE_EXIT or within 15 seconds of the 5-minute deadline.',
+      'Promoted PAYNE Paper lifecycle P/L is calculated only when an authoritative same-ticker/side exit quote is present at decision_exit or within 15 seconds of the 5-minute max_hold deadline.',
       'Settlement correctness is reported separately from financial profitability.',
       'Historical opposite-side Baseline attempts cannot be inferred when persisted comparison did not expose them.',
     ],
