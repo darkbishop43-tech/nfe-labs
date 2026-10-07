@@ -38,16 +38,16 @@ test('Paper move is current versus prior collector price',()=>{
 test('Paper ABOVE feature formula reproduces directional move fair edge score',()=>{
   const x=paperFeatureMath({marketPrice:.50,move:.01,direction:'ABOVE'});
   assert.equal(x.directionalMove,.01);
-  assert.equal(x.fair,.68);
-  assert.equal(x.edge,.18);
+  assert.ok(Math.abs(x.fair-.68)<1e-12);
+  assert.ok(Math.abs(x.edge-.18)<1e-12);
   assert.equal(x.score,1);
 });
 
 test('Paper BELOW feature formula reverses move without fabricating market price',()=>{
   const x=paperFeatureMath({marketPrice:.40,move:.01,direction:'BELOW'});
   assert.equal(x.directionalMove,-.01);
-  assert.equal(x.fair,.22);
-  assert.equal(x.edge,-.18);
+  assert.ok(Math.abs(x.fair-.22)<1e-12);
+  assert.ok(Math.abs(x.edge+.18)<1e-12);
   assert.ok(Math.abs(x.score-0)<1e-12);
 });
 
@@ -55,7 +55,7 @@ test('Paper feature formula clamps fair and score exactly',()=>{
   const hi=paperFeatureMath({marketPrice:.95,move:.10,direction:'ABOVE'});
   const lo=paperFeatureMath({marketPrice:.05,move:.10,direction:'BELOW'});
   assert.equal(hi.fair,.98);
-  assert.equal(hi.score,.62);
+  assert.ok(Math.abs(hi.score-.62)<1e-12);
   assert.equal(lo.fair,.02);
   assert.equal(lo.score,.38);
 });
