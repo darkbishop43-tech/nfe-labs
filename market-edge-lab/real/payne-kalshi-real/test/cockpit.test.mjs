@@ -45,8 +45,8 @@ function baselineShadow(overrides={}){
     lastRunAt:'2026-10-02T06:04:30Z',
     priceSources:{BTC:'COINBASE',ETH:'COINBASE'},
     opportunities:[
-      {marketTicker:'KXBTC15M-TEST',outcomeSide:'YES',direction:'UP',asset:'BTC',move:.003,fair:.554,edge:.054,score:.716,openTime:'2026-10-02T06:00:00Z',closeTime:'2026-10-02T06:15:00Z',durationMs:900000,horizon:'15m'},
-      {marketTicker:'KXBTC15M-TEST',outcomeSide:'NO',direction:'DOWN',asset:'BTC',move:.003,fair:.446,edge:-.054,score:.284,openTime:'2026-10-02T06:00:00Z',closeTime:'2026-10-02T06:15:00Z',durationMs:900000,horizon:'15m'},
+      {marketTicker:'KXBTC15M-TEST',outcomeSide:'YES',direction:'UP',asset:'BTC',move:.005,fair:.58,edge:.09,score:.86,openTime:'2026-10-02T06:00:00Z',closeTime:'2026-10-02T06:15:00Z',durationMs:900000,horizon:'15m'},
+      {marketTicker:'KXBTC15M-TEST',outcomeSide:'NO',direction:'DOWN',asset:'BTC',move:.005,fair:.42,edge:-.09,score:.14,openTime:'2026-10-02T06:00:00Z',closeTime:'2026-10-02T06:15:00Z',durationMs:900000,horizon:'15m'},
       {marketTicker:'KXETH15M-TEST',outcomeSide:'YES',direction:'UP',asset:'ETH',move:.001,fair:.508,edge:.018,score:.572,openTime:'2026-10-02T06:00:00Z',closeTime:'2026-10-02T06:15:00Z',durationMs:900000,horizon:'15m'},
     ],
     ...overrides,
@@ -60,8 +60,8 @@ async function seedPaynePriorSpot(env,body=baselineShadow()){
     const move=Number(row?.move);
     if(Number.isFinite(move) && 1+move>0) prices[row.asset]=100/(1+move);
   }
-  await env.PAYNE_KALSHI_STATE.put('payne-kalshi:feature-shadow:v1',JSON.stringify({
-    schema:'PAYNE_OWNED_KALSHI_FEATURE_STATE_V1',
+  await env.PAYNE_KALSHI_STATE.put('payne-kalshi:feature-shadow:v2-paper-brain',JSON.stringify({
+    schema:'PAYNE_PAPER_BRAIN_KALSHI_FEATURE_STATE_V1',
     savedAt:'2026-10-02T06:04:00Z',
     prices,
     priceSources:Object.fromEntries(Object.keys(prices).map(a=>[a,'COINBASE']))
@@ -234,13 +234,13 @@ test('authoritative Payne feature read uses PAYNE-owned direct source and no Bas
     const markets=await discoverCockpitMarkets(env,{nowMs:Date.parse('2026-10-02T06:05:00Z')});
     const out=await readAuthoritativePayneFeatures(env,markets.markets,Date.parse('2026-10-02T06:05:00Z'));
     assert.equal(out.fresh,true);
-    assert.equal(out.source,'KALSHI_AUTHORITATIVE');
+    assert.equal(out.source,'PAYNE_PAPER_BRAIN_ON_KALSHI_REALITY');
     assert.equal(out.transport,'PAYNE_KALSHI_READ');
     assert.equal(out.binding,'PAYNE_KALSHI_STATE');
     assert.equal(out.baselineStateRead,false);
-    assert.ok(Math.abs(out.opportunities.find(x=>x.asset==='BTC'&&x.outcomeSide==='YES').move-.003)<1e-12);
-    assert.ok(Math.abs(out.opportunities.find(x=>x.asset==='BTC'&&x.outcomeSide==='YES').edge-.054)<1e-12);
-    assert.ok(Math.abs(out.opportunities.find(x=>x.asset==='BTC'&&x.outcomeSide==='YES').score-.716)<1e-12);
+    assert.ok(Math.abs(out.opportunities.find(x=>x.asset==='BTC'&&x.outcomeSide==='YES').move-.005)<1e-12);
+    assert.ok(Math.abs(out.opportunities.find(x=>x.asset==='BTC'&&x.outcomeSide==='YES').edge-.09)<1e-12);
+    assert.ok(Math.abs(out.opportunities.find(x=>x.asset==='BTC'&&x.outcomeSide==='YES').score-.86)<1e-12);
   } finally { io.restore(); }
 });
 
@@ -257,29 +257,25 @@ test('missing Baseline service binding does not prevent PAYNE direct qualificati
   } finally { io.restore(); }
 });
 
-test('Payne decision evidence explains advancement and rejection truthfully',()=>{
-  assert.equal(payneDecisionEvidence({score:.49,edge:.2,move:.01},.70).decision,'RADAR_REJECT_SCORE_BELOW_0_50');
-  assert.equal(payneDecisionEvidence({score:.60,edge:.1,move:.01},.70).decision,'LOCK_REJECT_SCORE_BELOW_EFFECTIVE_LOCK');
-  assert.equal(payneDecisionEvidence({score:.55,edge:.1,move:.01},.55).decision,'PULL_QUALIFIED');
-  assert.equal(payneDecisionEvidence({score:.68,edge:.1,move:.01},.70).decision,'PULL_REJECTED_SCORE_BELOW_THRESHOLD');
-  assert.equal(payneDecisionEvidence({score:.72,edge:.1,move:.001},.70).decision,'PULL_REJECTED_MOVE_BELOW_0_002');
-  assert.equal(payneDecisionEvidence({score:.72,edge:.1,move:.003},.70).decision,'PULL_QUALIFIED');
+test('Payne Paper decision evidence explains advancement and rejection truthfully',()=>{
+  assert.equal(payneDecisionEvidence({score:.49,edge:.2,move:.01},.80).decision,'RADAR_REJECT');
+  assert.equal(payneDecisionEvidence({score:.60,edge:.1,move:.01},.80).decision,'LOCK_REJECT');
+  assert.equal(payneDecisionEvidence({score:.68,edge:.1,move:.01},.80).decision,'PULL_REJECTED');
+  assert.equal(payneDecisionEvidence({score:.80,edge:.1,move:.001},.80).decision,'PULL_REJECTED');
+  assert.equal(payneDecisionEvidence({score:.80,edge:.1,move:.003},.80).decision,'PULL_QUALIFIED');
 });
 
-test('cockpit exposes Founder numeric threshold input and diagnostic lock observability',()=>{
+test('cockpit exposes fixed source-proven Paper PULL and fixed LOCK observability',()=>{
   const html=cockpitHtml();
   assert.match(html,/id=\"threshold\" type=\"number\"/);
-  assert.match(html,/min=\"0\.50\"/);
-  assert.match(html,/max=\"1\.00\"/);
-  assert.match(html,/step=\"0\.01\"/);
-  assert.match(html,/DIAGNOSTIC LOWER-LOCK MODE/);
-  assert.match(html,/ARM freezes the Founder-selected PAYNE threshold into the active series for that run/);
+  assert.match(html,/PAYNE Paper default is \.80/);
+  assert.match(html,/LOCK remains fixed at \.65/);
   assert.match(html,/PAYNE funding route remains Index 2/);
   assert.doesNotMatch(html,/Index 3/);
-  assert.doesNotMatch(html,/configuration is exactly \.70 \/ \$1 \/ Index 3/);
-  assert.doesNotMatch(html,/select id=\"threshold\"/);
-  assert.equal(parseFounderThreshold('.50').value,.50);
-  assert.equal(effectiveLockThreshold(.70),.65);
+  assert.equal(parseFounderThreshold('.80').value,.80);
+  assert.equal(parseFounderThreshold('.70').ok,false);
+  assert.equal(effectiveLockThreshold(.50),.65);
+  assert.equal(effectiveLockThreshold(.80),.65);
 });
 
 test('cockpit calculates authentic Payne fields, decisions, clocks, exact rereads, and zero-money FIRE plan',async()=>{
@@ -489,54 +485,49 @@ test('mismatched Baseline shadow window is not live PAYNE qualification authorit
   } finally { io.restore(); }
 });
 
-test('Founder real controls default disarmed and ARM validates founder config against existing bounds, freezes it into the series, Index 2 required',async()=>{
+test('promoted controls default disarmed and freeze source-proven Paper .80 PULL, Index 2 required',async()=>{
   const env=await authEnv();
-  let c=await loadControl(env);
-  assert.equal(c.armed,false);
-  assert.equal(c.attemptTarget,1);
-  assert.equal(c.maxEntryDebitUsd,1);
-  assert.equal(c.activeThreshold,.70);
-  assert.equal(c.requiredExchangeIndex,2);
-  assert.equal(c.providerWriteAuthority,'BUILT_INACTIVE_DISARMED');
+  let ctl=await loadControl(env);
+  assert.equal(ctl.armed,false);
+  assert.equal(ctl.attemptTarget,1);
+  assert.equal(ctl.maxEntryDebitUsd,1);
+  assert.equal(ctl.activeThreshold,.80);
+  assert.equal(ctl.requiredExchangeIndex,2);
+  assert.equal(ctl.providerWriteAuthority,'BUILT_INACTIVE_DISARMED');
 
-  c=await updateFounderControl(env,'ARM');
-  assert.equal(c.armed,true);
-  assert.equal(c.providerWriteAuthority,'ENABLED_GOVERNED_PAYNE_ONLY');
-  assert.equal(c.providerPostAuthority,'ENABLED_GOVERNED_PAYNE_ONLY');
-  assert.equal(c.realExecution,'ENABLED_GOVERNED_PAYNE_ONLY');
-  assert.equal(c.fundingAuthority,'INDEX2_ONLY');
-  await assert.rejects(updateFounderControl(env,'SET_THRESHOLD',.75),/PAYNE_REAL_CONFIG_LOCKED_WHILE_ARMED/);
+  ctl=await updateFounderControl(env,'ARM');
+  assert.equal(ctl.armed,true);
+  assert.equal(ctl.providerWriteAuthority,'ENABLED_GOVERNED_PAYNE_ONLY');
+  assert.equal(ctl.providerPostAuthority,'ENABLED_GOVERNED_PAYNE_ONLY');
+  assert.equal(ctl.realExecution,'ENABLED_GOVERNED_PAYNE_ONLY');
+  assert.equal(ctl.fundingAuthority,'INDEX2_ONLY');
+  await assert.rejects(updateFounderControl(env,'SET_THRESHOLD',.80),/PAYNE_REAL_CONFIG_LOCKED_WHILE_ARMED/);
 
-  c=await updateFounderControl(env,'DISARM');
-  assert.equal(c.armed,false);
-  assert.equal(c.providerWriteAuthority,'BUILT_INACTIVE_DISARMED');
-  c=await updateFounderControl(env,'SET_THRESHOLD','.55');
-  assert.equal(c.activeThreshold,.55);
-  c=await updateFounderControl(env,'ARM');
-  assert.equal(c.armed,true);
+  ctl=await updateFounderControl(env,'DISARM');
+  assert.equal(ctl.armed,false);
+  await assert.rejects(updateFounderControl(env,'SET_THRESHOLD','.55'),/PAYNE_PAPER_PULL_THRESHOLD_FIXED_0_80/);
+  await assert.rejects(updateFounderControl(env,'SET_THRESHOLD','.70'),/PAYNE_PAPER_PULL_THRESHOLD_FIXED_0_80/);
+  ctl=await updateFounderControl(env,'SET_THRESHOLD','.80');
+  assert.equal(ctl.activeThreshold,.80);
+  const armed=await updateFounderControl(env,'ARM');
+  assert.equal(armed.armed,true);
   const frozen=await loadRealSeriesState(env);
-  assert.equal(frozen.threshold,.55);
-  assert.equal(frozen.effectiveLockThreshold,.55);
+  assert.equal(frozen.threshold,.80);
+  assert.equal(frozen.effectiveLockThreshold,.65);
   assert.equal(frozen.configFrozen,true);
-  c=await updateFounderControl(env,'DISARM');
-  c=await updateFounderControl(env,'SET_THRESHOLD','.70');
-  assert.equal(c.activeThreshold,.70);
-  await assert.rejects(updateFounderControl(env,'SET_THRESHOLD','.49'),/PAYNE_CONTROL_THRESHOLD_OUT_OF_RANGE/);
-  await assert.rejects(updateFounderControl(env,'SET_THRESHOLD','1.01'),/PAYNE_CONTROL_THRESHOLD_OUT_OF_RANGE/);
+  await updateFounderControl(env,'DISARM');
   await assert.rejects(updateFounderControl(env,'SET_THRESHOLD','.555'),/PAYNE_CONTROL_THRESHOLD_INVALID_PRECISION/);
   await assert.rejects(updateFounderControl(env,'SET_THRESHOLD','abc'),/PAYNE_CONTROL_THRESHOLD_INVALID_PRECISION/);
 });
-
 test('scheduled disarmed maintenance terminalizes only a clean stale config-mismatched series without orders',async()=>{
   const env=await authEnv();
   const io=installKalshiFetch();
   try{
     await saveRealSeriesState(env,{
       seriesId:'LIVE-STALE-SCHEDULED',status:'ARMED_FISHING',attemptsStarted:1,attemptTarget:5,
-      threshold:.70,effectiveLockThreshold:.65,maxEntryDebitUsd:1,requiredExchangeIndex:2,configFrozen:true,
+      threshold:.80,effectiveLockThreshold:.65,maxEntryDebitUsd:1,requiredExchangeIndex:2,configFrozen:true,
       frozenAt:'2026-10-04T04:00:00.000Z',unresolvedEntry:false,currentAttempt:{status:'NO_FILL'},position:null,completedAt:null,
     });
-    await updateFounderControl(env,'SET_THRESHOLD','.60');
     await updateFounderControl(env,'SET_ATTEMPT_TARGET',1);
     await payneWorker.scheduled({},env);
     const after=await loadRealSeriesState(env);
@@ -547,7 +538,7 @@ test('scheduled disarmed maintenance terminalizes only a clean stale config-mism
     assert.equal(io.urls.some(u=>u.includes('/orders') && /POST/i.test(u)),false);
     const c=await loadControl(env);
     assert.equal(c.armed,false);
-    assert.equal(c.activeThreshold,.60);
+    assert.equal(c.activeThreshold,.80);
     assert.equal(c.attemptTarget,1);
   } finally { io.restore(); }
 });
@@ -677,7 +668,7 @@ test('would-fire forensic route reconstructs persisted FIRE_READY evidence read-
   const env=await authEnv();
   const io=installKalshiFetch();
   try{
-    await updateFounderControl(env,'SET_THRESHOLD',.70);
+    await updateFounderControl(env,'SET_THRESHOLD',.80);
     await runReadOnlyScan(env,'SCHEDULED_CRON',Date.parse('2026-10-02T06:05:00Z'));
     const response=await payneWorker.fetch(new Request('https://payne.test/forensic/would-fire?checkpoint=59&format=json'),env);
     assert.equal(response.status,200);
