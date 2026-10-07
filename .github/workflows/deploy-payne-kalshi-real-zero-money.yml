@@ -169,22 +169,30 @@ jobs:
             .safety.providerPost == "BUILT_INACTIVE_DISARMED" and
             .safety.zeroMoneyProviderPost == "HARD_DISABLED" and
             .safety.secondIoc == "HOLD" and
-            .featureProvenance.source == "KALSHI_AUTHORITATIVE" and
+            .featureProvenance.source == "PAYNE_PAPER_BRAIN_ON_KALSHI_REALITY" and
             .featureProvenance.transport == "PAYNE_KALSHI_READ" and
             .featureProvenance.binding == "PAYNE_KALSHI_STATE" and
             .featureProvenance.baselineStateRead == false and
+            .featureProvenance.strategyAuthority == "PAYNE_PAPER" and
+            .featureProvenance.paperSourceCadenceMs == 300000 and
+            (.featureProvenance.paperSourceAssets == ["BTC","ETH"]) and
+            .control.threshold == 0.80 and
+            .control.effectiveLockThreshold == 0.65 and
             .clocks.consistency.standard == "NFE_OS_UNIVERSAL_MARKET_CLOCK_V1"
           ' /tmp/cockpit.json >/dev/null
 
           # PAYNE live qualification must now be sourced from PAYNE-owned current
           # Kalshi/spot reads, never Baseline shadow state.
           jq -e '
-            .featureProvenance.source == "KALSHI_AUTHORITATIVE" and
+            .featureProvenance.source == "PAYNE_PAPER_BRAIN_ON_KALSHI_REALITY" and
             .featureProvenance.transport == "PAYNE_KALSHI_READ" and
             .featureProvenance.spotTransport == "PAYNE_DIRECT_SPOT_READ" and
             .featureProvenance.binding == "PAYNE_KALSHI_STATE" and
             .featureProvenance.httpStatus == 200 and
-            .featureProvenance.baselineStateRead == false
+            .featureProvenance.baselineStateRead == false and
+            .featureProvenance.strategyAuthority == "PAYNE_PAPER" and
+            .control.threshold == 0.80 and
+            .control.effectiveLockThreshold == 0.65
           ' /tmp/cockpit.json >/dev/null
 
           scheduled=0
@@ -195,7 +203,7 @@ jobs:
               .providerWrites == 0 and
               .orders == 0 and
               .capitalMovedUsd == 0 and
-              .selected.payne.source == "KALSHI_AUTHORITATIVE" and
+              .selected.payne.source == "PAYNE_PAPER_BRAIN_ON_KALSHI_REALITY" and
               (.selected.payne.move != null) and
               (.selected.payne.fair != null) and
               (.selected.payne.edge != null) and
