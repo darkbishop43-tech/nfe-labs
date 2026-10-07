@@ -1,6 +1,8 @@
 <!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Kalshi Ledger Lab V1</title>
 <style>:root{--b:#071019;--p:#0c1722;--l:#213448;--t:#e8f1f8;--m:#8fa4b7;--g:#3ddc97;--r:#ff6b6b;--y:#ffc857;--a:#66b3ff;--u:#d39cff}*{box-sizing:border-box}body{margin:0;background:var(--b);color:var(--t);font:14px system-ui,-apple-system,Segoe UI,sans-serif}header{padding:16px;border-bottom:1px solid var(--l)}main{max-width:1500px;margin:auto;padding:12px}.sub,.note{color:var(--m);font-size:12px}.note{padding:10px;border-left:3px solid var(--y);background:#111a21;margin-bottom:10px}.grid{display:grid;gap:10px}.cards{grid-template-columns:repeat(auto-fit,minmax(150px,1fr));margin:12px 0}.two{grid-template-columns:repeat(auto-fit,minmax(390px,1fr))}.card,.panel{background:var(--p);border:1px solid var(--l);border-radius:9px;padding:11px}.k{font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:var(--m)}.v{font-size:22px;font-weight:750;margin-top:3px}.r{color:var(--r)}.g{color:var(--g)}.y{color:var(--y)}.u{color:var(--u)}h1{font-size:21px;margin:0 0 4px}h2{font-size:15px;margin:0 0 8px}h3{font-size:13px}svg{width:100%;height:250px;display:block}table{width:100%;border-collapse:collapse;font-size:12px}th,td{padding:7px 5px;border-bottom:1px solid #1d2c3b;text-align:left}th{color:#9fb2c4}.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}.badge{display:inline-block;padding:2px 7px;border:1px solid var(--l);border-radius:999px;margin-right:4px;font-size:11px}
 .mgmtHead{display:flex;align-items:flex-start;gap:10px;justify-content:space-between;flex-wrap:wrap}.mgmtTitle{font-size:18px;font-weight:800}.mgmtControls{display:flex;gap:7px;flex-wrap:wrap}.mgmtControls select{background:#08131e;color:var(--t);border:1px solid var(--l);border-radius:6px;padding:6px 8px;font-size:12px}.mgmtGrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px;margin-top:9px}.mgmtBox{background:#08131e;border:1px solid var(--l);border-radius:8px;padding:9px}.mgmtBox .big{font-size:19px;font-weight:800;margin-top:2px}.warnbox{border-left:3px solid var(--y);padding:9px;background:#121922;color:var(--m);font-size:12px}.okbox{border-left:3px solid var(--g);padding:9px;background:#0d1917;color:var(--m);font-size:12px}.scrollx{overflow-x:auto}.transition{margin:10px 0;padding:9px 10px;border:1px dashed var(--a);border-radius:8px;background:#08131e}.transition strong{color:var(--a)}.sampleNote{font-size:11px;color:var(--m);margin-top:6px}.mgmtTrend{height:220px}.unknownMetric{color:var(--y);font-weight:700}
+
+.txnCurve{height:240px}.txnLegend{display:flex;gap:12px;flex-wrap:wrap;margin:7px 0 0}.txnLegend span{font-size:11px;color:var(--m)}.txnDot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:5px}.txnMini{font-size:11px;color:var(--m);line-height:1.45}.txnStrong{font-weight:800}.txnCallout{border:1px solid var(--l);border-radius:8px;background:#08131e;padding:10px}.txnTable td:nth-child(n+2),.txnTable th:nth-child(n+2){white-space:nowrap}.txnTitle{font-size:18px;font-weight:800}.txnHead{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;flex-wrap:wrap}
 @media(max-width:600px){main{padding:7px}.two{grid-template-columns:1fr}.v{font-size:19px}table{font-size:11px}}</style></head><body>
 <header><h1>NFE-OS Market Edge — Kalshi Ledger Lab V1</h1><div class="sub">Provider-accounting refresh · 527 raw Kalshi rows · read only · source file (8) verified identical to prior (6)</div></header><main>
 <div class="note"><b>Integrity:</b> RAW PROVIDER ROWS = <b>527</b>. This does <b>not</b> mean 527 independent trades. TRADE EPISODES remain <b>UNKNOWN</b> globally because the provider export has no authoritative episode ID. Duplicate-looking rows remain preserved. The four proven Founder-manual NEAR rows remain excluded only from AUTO_BASELINE aggregates.</div>
@@ -44,10 +46,99 @@
 
   <section class="panel" style="margin-top:10px"><h2>Evidence / UNKNOWN coverage</h2><div class="okbox"><b>First authoritative observability boundary found:</b> live AUTO creates and persists <span class="mono">position.autoV1Management</span>, including a frozen <span class="mono">fiveMinuteCheckpoint</span>, and archives completed V1 lifecycles under <span class="mono">auto-exp-v1:lifecycle:*</span>. However, the public <span class="mono">GET /execution-test-state</span> serializer omits <span class="mono">autoV1Management</span>, <span class="mono">autoV1ArchiveKey</span>, and checkpoint/continuation fields. The Founder progress panel then cannot map what it never receives.</div><div class="warnbox" style="margin-top:8px"><b>Diagnosis:</b> primary boundary = <b>B. state exists but API does not expose it</b>. Secondary = <b>C. cockpit/progress panel does not map V1 evidence</b>. Historical rows before the V1 fields also satisfy <b>D</b>. Smallest proposed repair: additive read-only exposure of sanitized V1 management evidence/current archive summaries; no change to management or execution behavior.</div></section>
 </section>
+
+<section class="panel" style="margin-top:10px" id="transactionCostForensics">
+  <div class="txnHead"><div><div class="txnTitle">TRANSACTION COST FORENSICS</div><div class="sub">Fee burden across logical positions · AUTO_BASELINE governed sample · read-only analytics</div></div><div><span class="badge">402 LOGICAL POSITIONS</span><span class="badge y">FEES SEPARATED</span><span class="badge">NO EXECUTION CHANGE</span></div></div>
+
+  <div class="mgmtGrid">
+    <div class="mgmtBox"><div class="k">Total fees</div><div class="big y">$16.9994</div><div class="sub">AUTO_BASELINE logical positions</div></div>
+    <div class="mgmtBox"><div class="k">Fees / position</div><div class="big">$0.0423</div><div class="sub">average round-trip fee burden</div></div>
+    <div class="mgmtBox"><div class="k">Actual net P/L</div><div class="big r">-$41.6572</div><div class="sub">after fees</div></div>
+    <div class="mgmtBox"><div class="k">Zero-fee counterfactual</div><div class="big r">-$24.6578</div><div class="sub">gross before fees only</div></div>
+    <div class="mgmtBox"><div class="k">Gross → net delta</div><div class="big y">-$16.9994</div><div class="sub">exact fee drag</div></div>
+    <div class="mgmtBox"><div class="k">Fees on winners</div><div class="big">$7.4813</div><div class="sub">221 net winners · avg $0.0339</div></div>
+    <div class="mgmtBox"><div class="k">Fees on losers</div><div class="big y">$9.5181</div><div class="sub">181 net losers · avg $0.0526</div></div>
+    <div class="mgmtBox"><div class="k">Gross winners → net losers</div><div class="big y">10</div><div class="sub">+$0.2890 gross → -$0.1716 net</div></div>
+  </div>
+
+  <div class="note" style="margin-top:10px"><b>Integrity:</b> this panel uses the 402 AUTO_BASELINE provisional logical positions. The preserved Founder-manual/training episode remains excluded from this governed aggregate. All-history logical-position fees including that episode are <b>$17.1157</b>. Gross = realized P/L before fees; Net = realized P/L after fees. The zero-fee line is analytical only and does not assume identical fills under a different execution method.</div>
+
+  <div class="grid two">
+    <section class="panel"><h2>Fees by asset</h2><div id="txnAssetTable" class="scrollx"></div><div class="sampleNote">NEAR is the dominant fee source in the governed sample.</div></section>
+    <section class="panel"><h2>Fees by side</h2><div id="txnSideTable" class="scrollx"></div><div class="sampleNote">YES and NO have similar total fee burden; NO has the higher average fee per position.</div></section>
+    <section class="panel"><h2>Fees by entry price</h2><div id="txnEntryTable" class="scrollx"></div><div class="sampleNote">Entry price is contract price, not NFE score.</div></section>
+    <section class="panel"><h2>Fees by hold duration</h2><div id="txnHoldTable" class="scrollx"></div><div class="sampleNote">Duration is descriptive only; it does not establish causation or an optimal hold rule.</div></section>
+    <section class="panel"><h2>Fees on winners vs losers</h2><div id="txnOutcomeTable" class="scrollx"></div><div class="sampleNote">Net losers paid a materially higher average fee per position than net winners.</div></section>
+    <section class="panel"><h2>Gross winners turned net losers</h2><div class="txnCallout"><div class="k">Count</div><div class="v y">10 positions</div><div class="txnMini">Combined gross P/L: <b class="g">+$0.2890</b><br>Combined fees: <b class="y">$0.4606</b><br>Combined net P/L: <b class="r">-$0.1716</b></div></div><div id="txnTurnTable" class="scrollx" style="margin-top:8px"></div></section>
+  </div>
+
+  <section class="panel" style="margin-top:10px"><h2>Gross vs net equity curve</h2><div class="sub">Cumulative logical-position P/L by close date. The distance between gross and net is cumulative fee drag.</div><svg id="txnEquityCurve" class="txnCurve"></svg><div class="txnLegend"><span><i class="txnDot" style="background:#66b3ff"></i>Gross / zero-fee counterfactual</span><span><i class="txnDot" style="background:#ff6b6b"></i>Actual net</span><span><i class="txnDot" style="background:#ffc857"></i>Cumulative fees</span></div></section>
+
+  <div class="grid two" style="margin-top:10px">
+    <section class="panel"><h2>Zero-fee counterfactual</h2><div class="mgmtGrid"><div class="mgmtBox"><div class="k">Actual net</div><div class="big r">-$41.6572</div></div><div class="mgmtBox"><div class="k">Gross before fees</div><div class="big r">-$24.6578</div></div><div class="mgmtBox"><div class="k">Difference</div><div class="big g">+$16.9994</div></div></div><div class="warnbox" style="margin-top:8px"><b>COUNTERFACTUAL ONLY.</b> This isolates historical fee drag. It does not prove the same orders, fills, prices, or outcomes would occur under a different fee/execution mechanic.</div></section>
+    <section class="panel"><h2>Maker / IOC research comparison</h2><div class="warnbox"><b>RESEARCH EVIDENCE UNAVAILABLE.</b><br>A true Maker vs IOC comparison requires prospective shadow evidence for the same candidate: actual IOC result, hypothetical resting-limit fill, fill delay, price improvement, fee difference, missed fills, missed winners, and avoided losers. No such historical paired dataset is attached to this ledger.</div><div class="sampleNote">Until paired evidence exists, this panel intentionally does not estimate maker savings or fill-rate effects.</div></section>
+  </div>
+</section>
 <section class="panel" style="margin-top:10px"><h2>Best / worst provider records</h2><div class="grid two"><div id="best"></div><div id="worst"></div></div></section>
 <section class="panel" style="margin-top:10px"><h2>Research-layer status</h2><div class="sub"><span class="badge">Provider accounting: PROVEN</span><span class="badge">AUTO/PAYNE ownership: PARTIAL</span><span class="badge">NFE score join: UNKNOWN for many rows</span><span class="badge">M/T/V/Q/F: not historically joined</span><span class="badge">UMEO context: not joined</span></div><p class="sub">Next research layer is the Master Filled-Trade Forensic Ledger: TRADE ID / SYSTEM / provider proof + decision-time score/RADAR/LOCK + feature state + UMEO context + outcome cohort. Missing fields remain UNKNOWN rather than inferred.</p></section>
 </main>
 <script>
+
+
+const TXN_ASSET=[
+["NEAR",202,8.68251,.511,-14.65079,-23.3333],["ZEC",77,3.48946,.205,7.17876,3.6893],["DOGE",33,1.639,.096,-8.9392,-10.5782],["SOL",19,.8858,.052,-2.689,-3.5748],["HYPE",25,.8124,.048,2.0184,1.206],["XRP",29,.7032,.041,-6.553,-7.2562],["ETH",8,.3569,.021,.112,-.2449],["BTC",4,.2253,.013,-3.381,-3.6063],["BNB",5,.2048,.012,2.246,2.0412]
+];
+const TXN_SIDE=[
+["YES",216,8.55876,.0396239,-10.30584,-18.8646],["NO",186,8.44061,.0453796,-14.35199,-22.7926]
+];
+const TXN_ENTRY=[
+["$0.00–0.19",15,1.497233,.0998155,-6.0141,-7.511333],["$0.20–0.39",27,1.932717,.0715821,-5.21205,-7.144767],["$0.40–0.59",94,5.15912,.0548843,-5.36428,-10.5234],["$0.60–0.79",153,6.153633,.0402198,-4.8099,-10.963533],["$0.80–1.00",113,2.256667,.0199705,-3.2575,-5.514167]
+];
+const TXN_HOLD=[
+["<5m",29,1.298946,.0447912,-7.38604,-8.6849857],["5–6m",106,4.90109,.0462367,17.4811,12.58001],["6–7m",135,6.655346,.0492989,-8.51201,-15.16735629],["7–10m",73,3.08981,.0423262,-20.69818,-23.78799001],["10m+",59,1.054178,.0178674,-5.5427,-6.596878]
+];
+const TXN_OUTCOME=[
+["Net winners",221,7.481292,.033852,93.32412,85.842828],["Net losers",181,9.518078,.0525861,-117.98195,-127.500028]
+];
+const TXN_TURN=[
+["SOL","KXSOL15M-26OCT010515-15","NO",.08,.1395,-.0595],
+["NEAR","KXNEAR15M-26SEP290100-00","YES",.08,.1365,-.0565],
+["ZEC","KXZEC15M-26OCT011930-30","YES",.009,.0225,-.0135],
+["NEAR","KXNEAR15M-26SEP300400-00","YES",.02,.0311,-.0111],
+["DOGE","KXDOGE15M-26SEP280530-30","YES",.01,.0202,-.0102]
+];
+const TXN_DAILY=[
+["09-22",-0.353,.1265,-.4795],["09-23",-2.232,.2176,-2.4496],["09-24",-0.772,.8386,-1.6106],["09-25",-4.1229,.4882,-4.6111],["09-26",.415,.6858,-.2708],["09-27",-8.0166,1.6425,-9.6591],["09-28",-6.89078,3.49962,-10.3904],["09-29",-1.86984,2.74916,-4.619],["09-30",-.8271,3.4525,-4.2796],["10-01",.1429,1.2546,-1.1117],["10-02",-.19151,2.03289,-2.2244],["10-03",.06,.0114,.0486]
+];
+function renderTxnTable(el,rows,kind){
+ const heads=kind==='asset'?['Asset','Positions','Fees','Fee share','Gross','Net']:kind==='basic'?['Group','Positions','Fees','Avg fee / position','Gross','Net']:['Group','Positions','Fees','Avg fee / position','Gross','Net'];
+ el.innerHTML='<table class="txnTable"><thead><tr>'+heads.map(h=>'<th>'+h+'</th>').join('')+'</tr></thead><tbody>'+rows.map(x=>'<tr><td>'+x[0]+'</td><td>'+x[1]+'</td><td class="y">'+M(x[2])+'</td><td>'+(kind==='asset'?(x[3]*100).toFixed(1)+'%':M(x[3]))+'</td><td class="'+(x[4]>=0?'g':'r')+'">'+M(x[4])+'</td><td class="'+(x[5]>=0?'g':'r')+'">'+M(x[5])+'</td></tr>').join('')+'</tbody></table>';
+}
+function renderTxnTurn(){
+ txnTurnTable.innerHTML='<table class="txnTable"><thead><tr><th>Asset</th><th>Ticker</th><th>Side</th><th>Gross</th><th>Fees</th><th>Net</th></tr></thead><tbody>'+TXN_TURN.map(x=>'<tr><td>'+x[0]+'</td><td class="mono">'+x[1]+'</td><td>'+x[2]+'</td><td class="g">'+M(x[3])+'</td><td class="y">'+M(x[4])+'</td><td class="r">'+M(x[5])+'</td></tr>').join('')+'</tbody></table><div class="sampleNote">Five largest fee-sensitive examples shown; 10 positions total were gross-positive but net-negative.</div>';
+}
+function renderTxnCurve(){
+ const rows=[];let cg=0,cf=0,cn=0;TXN_DAILY.forEach(x=>{cg+=x[1];cf+=x[2];cn+=x[3];rows.push([x[0],cg,cf,cn])});
+ const el=txnEquityCurve,w=900,h=240,p=42,vals=rows.flatMap(x=>[x[1],x[3]]),mn=Math.min(0,...vals),mx=Math.max(0,...vals),sp=mx-mn||1,X=i=>p+i*(w-2*p)/(rows.length-1),Y=n=>h-p-(n-mn)*(h-2*p)/sp;
+ const grossPts=rows.map((x,i)=>X(i)+','+Y(x[1])).join(' '),netPts=rows.map((x,i)=>X(i)+','+Y(x[3])).join(' ');
+ const feeMax=Math.max(...rows.map(x=>x[2]),1),FY=n=>h-p-(n/feeMax)*(h-2*p);
+ let s='<line x1="'+p+'" y1="'+Y(0)+'" x2="'+(w-p)+'" y2="'+Y(0)+'" stroke="#35506c" stroke-dasharray="4 4"/>'+
+ '<polyline points="'+grossPts+'" fill="none" stroke="#66b3ff" stroke-width="2"/>'+
+ '<polyline points="'+netPts+'" fill="none" stroke="#ff6b6b" stroke-width="2"/>'+
+ '<polyline points="'+rows.map((x,i)=>X(i)+','+FY(x[2])).join(' ')+'" fill="none" stroke="#ffc857" stroke-width="1.6" stroke-dasharray="5 4"/>';
+ rows.forEach((x,i)=>{s+='<text x="'+X(i)+'" y="'+(h-8)+'" text-anchor="middle" fill="#8fa4b7" font-size="10">'+x[0]+'</text>'});
+ s+='<text x="'+p+'" y="16" fill="#8fa4b7" font-size="11">Gross '+M(rows.at(-1)[1])+' · Net '+M(rows.at(-1)[3])+' · Fees '+M(rows.at(-1)[2])+'</text>';
+ el.setAttribute('viewBox','0 0 '+w+' '+h);el.innerHTML=s;
+}
+function renderTxnForensics(){
+ renderTxnTable(txnAssetTable,TXN_ASSET,'asset');
+ renderTxnTable(txnSideTable,TXN_SIDE,'basic');
+ renderTxnTable(txnEntryTable,TXN_ENTRY,'basic');
+ renderTxnTable(txnHoldTable,TXN_HOLD,'basic');
+ renderTxnTable(txnOutcomeTable,TXN_OUTCOME,'basic');
+ renderTxnTurn();
+ renderTxnCurve();
+}
 
 const MGMT_VERSIONS={
   OLD_5MIN_CONTROL:{positions:402,wins:221,losses:181,winRate:.5497512438,gross:-24.65783,fees:16.99937,net:-41.6572,avgPl:-.1036248756,avgHold:7.1729684909,medianHold:6.0166666667},
@@ -120,6 +211,7 @@ bars(daily,DAILY.map(x=>[x[0],x[1]]));bars(dailypnl,DAILYPNL);bars(hours,HOURS.m
 function rec(a,title){return `<h3>${title}</h3><table><thead><tr><th>CSV row</th><th>Asset</th><th>Ticker</th><th>Side</th><th>Net</th></tr></thead><tbody>${a.map(x=>`<tr><td>${x[0]}</td><td>${x[1]}</td><td class="mono">${x[2]}</td><td>${x[3]}</td><td class="${x[4]>=0?'g':'r'}">${M(x[4])}</td></tr>`).join('')}</tbody></table>`}
 best.innerHTML=rec(BEST,'Best provider rows');worst.innerHTML=rec(WORST,'Worst provider rows');
 
+renderTxnForensics();
 renderMgmtVersions();
 renderHoldVersion();
 renderAssetMgmt();
