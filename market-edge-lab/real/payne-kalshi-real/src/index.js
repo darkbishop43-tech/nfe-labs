@@ -123,17 +123,22 @@ function normalizeControlState(saved) {
 }
 
 export function payneStage(candidate, activeThreshold = PAYNE_CONFIG.defaultThreshold, frozenEffectiveLock = null) {
-  const score = Number(candidate?.score);
-  const edge = Number(candidate?.edge);
-  const move = Number(candidate?.move);
-  const threshold = Number(activeThreshold);
-  const effectiveLock = frozenEffectiveLock!==null && frozenEffectiveLock!==undefined && Number.isFinite(Number(frozenEffectiveLock)) ? Number(frozenEffectiveLock) : effectiveLockThreshold(threshold);
-  const radar = Number.isFinite(score) && score >= PAYNE_CONFIG.radarScore;
-  const lockIn = radar && score >= effectiveLock && Number.isFinite(edge) && edge > 0;
-  const pullTrigger = lockIn && score >= threshold && Number.isFinite(move) && Math.abs(move) >= PAYNE_CONFIG.minAbsMove;
-  return { radar, lockIn, pullTrigger, effectiveLock, diagnosticLowerLockMode:threshold<PAYNE_CONFIG.lockScore, stage: pullTrigger ? 'PULL_TRIGGER' : lockIn ? 'LOCK_IN' : radar ? 'RADAR' : 'NO_ACTION' };
+  const d=paperDecision({
+    score:candidate?.score,
+    edge:candidate?.edge,
+    move:candidate?.move,
+    threshold:activeThreshold,
+  });
+  return {
+    radar:d.radar,
+    lockIn:d.lock,
+    pullTrigger:d.trigger,
+    effectiveLock:PAYNE_PAPER_RULES.lockScore,
+    diagnosticLowerLockMode:false,
+    stage:d.trigger?'PULL_TRIGGER':d.lock?'LOCK_IN':d.radar?'RADAR':'NO_ACTION',
+    paperLabel:d.label,
+  };
 }
-
 function binding(env) {
   const kv = env?.[STATE_BINDING];
   if (!kv || typeof kv.get !== 'function' || typeof kv.put !== 'function') throw new Error('PAYNE_KALSHI_STATE_UNBOUND');
@@ -662,11 +667,8 @@ export function reconcileFixture({ providerContextComplete, ownedPosition, settl
   return 'FLAT';
 }
 
-export function managementDecision({ score, heldMs, owned = true }) {
-  if (!owned) return { action:'HOLD', reason:'NO_AUTHENTICATED_OWNERSHIP' };
-  if (Number(score) <= PAYNE_CONFIG.exitScore) return { action:'EXIT', reason:'SCORE_EXIT' };
-  if (Number(heldMs) >= PAYNE_CONFIG.maxHoldMs) return { action:'EXIT', reason:'MAX_HOLD_EXIT' };
-  return { action:'HOLD', reason:'MANAGE' };
+export function managementDecision({ heldMs, owned = true, marketPresent = true, decisionLabel = 'PULL TRIGGER' }) {
+  return paperManagementDecision({heldMs,owned,marketPresent,decisionLabel});
 }
 
 export async function recordManagementObservation(env, observation) {
@@ -940,23 +942,22 @@ export async function readAuthoritativePayneFeatures(env, markets = [], nowMs = 
 }
 
 export function payneDecisionEvidence(candidate, activeThreshold = PAYNE_CONFIG.defaultThreshold, frozenEffectiveLock = null) {
-  const score=Number(candidate?.score), edge=Number(candidate?.edge), move=Number(candidate?.move);
-  if (![score,edge,move].every(Number.isFinite)) {
-    return {radar:'UNKNOWN',lock:'UNKNOWN',pull:'UNKNOWN',decision:'FEATURES_UNAVAILABLE'};
-  }
-  const threshold=Number(activeThreshold);
-  const effectiveLock=frozenEffectiveLock!==null && frozenEffectiveLock!==undefined && Number.isFinite(Number(frozenEffectiveLock))?Number(frozenEffectiveLock):effectiveLockThreshold(threshold);
-  const radar=score>=PAYNE_CONFIG.radarScore;
-  if (!radar) return {radar:'RADAR_REJECT',lock:'LOCK_NOT_REACHED',pull:'PULL_NOT_REACHED',decision:'RADAR_REJECT_SCORE_BELOW_0_50',effectiveLock};
-  const scoreLock=score>=effectiveLock;
-  const edgeLock=edge>0;
-  if (!scoreLock) return {radar:'RADAR_PASS',lock:'LOCK_REJECT',pull:'PULL_NOT_REACHED',decision:'LOCK_REJECT_SCORE_BELOW_EFFECTIVE_LOCK',effectiveLock};
-  if (!edgeLock) return {radar:'RADAR_PASS',lock:'LOCK_REJECT',pull:'PULL_NOT_REACHED',decision:'LOCK_REJECT_EDGE_NOT_POSITIVE',effectiveLock};
-  if (score<threshold) return {radar:'RADAR_PASS',lock:'LOCK_PASS',pull:'PULL_REJECTED',decision:'PULL_REJECTED_SCORE_BELOW_THRESHOLD',effectiveLock};
-  if (Math.abs(move)<PAYNE_CONFIG.minAbsMove) return {radar:'RADAR_PASS',lock:'LOCK_PASS',pull:'PULL_REJECTED',decision:'PULL_REJECTED_MOVE_BELOW_0_002',effectiveLock};
-  return {radar:'RADAR_PASS',lock:'LOCK_PASS',pull:'PULL_QUALIFIED',decision:'PULL_QUALIFIED',effectiveLock};
+  const d=paperDecision({
+    score:candidate?.score,
+    edge:candidate?.edge,
+    move:candidate?.move,
+    threshold:activeThreshold,
+  });
+  if(d.label==='UNAVAILABLE') return {radar:'UNKNOWN',lock:'UNKNOWN',pull:'UNKNOWN',decision:'FEATURES_UNAVAILABLE',paperLabel:d.label,effectiveLock:PAYNE_PAPER_RULES.lockScore};
+  return {
+    radar:d.radar?'RADAR_PASS':'RADAR_REJECT',
+    lock:d.lock?'LOCK_PASS':d.radar?'LOCK_REJECT':'LOCK_NOT_REACHED',
+    pull:d.trigger?'PULL_QUALIFIED':d.lock?'PULL_REJECTED':'PULL_NOT_REACHED',
+    decision:d.trigger?'PULL_QUALIFIED':d.lock?'PULL_REJECTED':d.radar?'LOCK_REJECT':'RADAR_REJECT',
+    paperLabel:d.label,
+    effectiveLock:PAYNE_PAPER_RULES.lockScore,
+  };
 }
-
 function featureForCandidate(featureState, ticker, outcomeSide, asset, activeThreshold, market = null) {
   if (!featureState?.fresh) {
     return {
@@ -2455,7 +2456,7 @@ export async function buildCockpitData(env, nowMs=Date.now()) {
       maxEntryDebitUsd:control.maxEntryDebitUsd,
       threshold:control.activeThreshold,
       effectiveLockThreshold:effectiveLockThreshold(control.activeThreshold),
-      diagnosticLowerLockMode:Number(control.activeThreshold)<PAYNE_CONFIG.lockScore,
+      diagnosticLowerLockMode:false,
       thresholdInput:{min:FOUNDER_THRESHOLD_MIN,max:FOUNDER_THRESHOLD_MAX,decimals:FOUNDER_THRESHOLD_DECIMALS},
       stakeOptions:CONTROL_STAKE_OPTIONS,
       attemptOptions:CONTROL_ATTEMPT_OPTIONS,
@@ -2655,8 +2656,8 @@ export function defaultRealSeriesState() {
     attemptsStarted:0,
     executionIntentsStarted:0,
     attemptTarget:1,
-    threshold:.70,
-    effectiveLockThreshold:.65,
+    threshold:PAYNE_CONFIG.defaultThreshold,
+    effectiveLockThreshold:PAYNE_PAPER_RULES.lockScore,
     maxEntryDebitUsd:1,
     requiredExchangeIndex:2,
     configFrozen:false,
