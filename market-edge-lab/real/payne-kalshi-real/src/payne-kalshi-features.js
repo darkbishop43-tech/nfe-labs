@@ -1,35 +1,32 @@
-const FEATURE_STATE_KEY='payne-kalshi:feature-shadow:v1';
-const FEATURE_MAX_AGE_MS=120000;
-const FEATURE_EPOCH_MS=60000;
+import {
+  PAYNE_PAPER_RULES,
+  PAYNE_PAPER_SOURCE,
+  paperFeatureMath,
+  paperMove,
+} from './payne-paper-brain.js';
 
+const FEATURE_STATE_KEY='payne-kalshi:feature-shadow:v2-paper-brain';
+const FEATURE_MAX_AGE_MS=PAYNE_PAPER_RULES.sourceCadenceMs;
+const FEATURE_EPOCH_MS=PAYNE_PAPER_RULES.sourceCadenceMs;
+
+// Paper source produced BTC/ETH opportunities only. Keep the direct read metadata
+// explicit so the promoted brain is not silently expanded to unproven assets.
 const ASSET_PRICE_META=Object.freeze({
   BTC:{coinbase:'BTC-USD',coingecko:'bitcoin'},
   ETH:{coinbase:'ETH-USD',coingecko:'ethereum'},
-  SOL:{coinbase:'SOL-USD',coingecko:'solana'},
-  XRP:{coinbase:'XRP-USD',coingecko:'ripple'},
-  HYPE:{coinbase:'HYPE-USD',coingecko:'hyperliquid'},
-  ZEC:{coinbase:'ZEC-USD'},
-  DOGE:{coinbase:'DOGE-USD'},
-  BNB:{coinbase:'BNB-USD'},
-  NEAR:{coinbase:'NEAR-USD'},
 });
 
-function clamp(v,lo,hi){return Math.max(lo,Math.min(hi,v));}
-
 export function payneMoveParity(current,previous){
-  const c=Number(current),p=Number(previous);
-  return Number.isFinite(c)&&c>0&&Number.isFinite(p)&&p>0 ? (c-p)/p : 0;
+  return paperMove(current,previous);
 }
 
 export function payneFeatureParity({ask,move,outcomeSide}){
-  const marketAsk=Number(ask), rawMove=Number(move);
-  if(!Number.isFinite(marketAsk)||!(marketAsk>0&&marketAsk<1)||!Number.isFinite(rawMove)) return null;
-  const bear=String(outcomeSide||'').toUpperCase()==='NO';
-  const directionalMove=bear?-rawMove:rawMove;
-  const fair=clamp(marketAsk+directionalMove*18,0.02,0.98);
-  const edge=fair-marketAsk;
-  const score=clamp(0.5+edge*4,0,1);
-  return {move:rawMove,fair,edge,score};
+  return paperFeatureMath({
+    marketPrice:ask,
+    move,
+    outcomeSide,
+    direction:String(outcomeSide||'').toUpperCase()==='NO'?'BELOW':'ABOVE',
+  });
 }
 
 function kv(env){return env?.PAYNE_KALSHI_STATE||null;}
@@ -61,7 +58,7 @@ async function coinbaseSpot(product,fetchImpl){
 
 async function assetSpot(asset,fetchImpl){
   const meta=ASSET_PRICE_META[asset];
-  if(!meta) throw new Error('UNSUPPORTED_ASSET');
+  if(!meta) throw new Error('PAYNE_PAPER_ASSET_NOT_SOURCE_PROVEN');
   try{
     return {price:await coinbaseSpot(meta.coinbase,fetchImpl),source:'COINBASE'};
   }catch(error){
@@ -91,8 +88,12 @@ export function payneFeatureIdentity(row,market,outcomeSide){
   };
 }
 
+function sourceProvenMarkets(markets){
+  return (Array.isArray(markets)?markets:[]).filter(m=>PAYNE_PAPER_RULES.sourceAssets.includes(String(m?.asset||'')));
+}
+
 export async function buildPayneOwnedFeatureState(env,markets,nowMs=Date.now(),{fetchImpl=fetch,forceRefresh=false}={}){
-  const currentMarkets=Array.isArray(markets)?markets.filter(Boolean):[];
+  const currentMarkets=sourceProvenMarkets(markets).filter(Boolean);
   const prior=await loadPrior(env);
   const epochMs=Math.floor(Number(nowMs)/FEATURE_EPOCH_MS)*FEATURE_EPOCH_MS;
   const sameEpoch=Number(prior?.epochMs)===epochMs;
@@ -100,15 +101,25 @@ export async function buildPayneOwnedFeatureState(env,markets,nowMs=Date.now(),{
   const currentIds=new Set(currentMarkets.map(m=>[String(m?.ticker||''),String(m?.openTime||''),String(m?.closeTime||'')].join('|')));
   const cachedIds=new Set(priorRows.map(r=>[String(r?.marketTicker||''),String(r?.openTime||''),String(r?.closeTime||'')].join('|')));
   const exactWindowSet=currentIds.size>0 && currentIds.size===cachedIds.size && [...currentIds].every(x=>cachedIds.has(x));
-  if(!forceRefresh && sameEpoch && exactWindowSet && prior?.featureState){
+
+  // Paper's authoritative collector ran every five minutes. Fresh-lock and
+  // pre-submit provider reads remain real-time, but the Paper brain itself does
+  // not invent sub-cadence feature epochs.
+  if(sameEpoch && exactWindowSet && prior?.featureState){
     const cached=prior.featureState;
     const ageMs=Math.max(0,Number(nowMs)-Date.parse(cached?.calculationAt||cached?.lastRunAt||''));
-    return {...cached,ageMs,fresh:ageMs<=FEATURE_MAX_AGE_MS && Array.isArray(cached?.opportunities) && cached.opportunities.length>0};
+    return {
+      ...cached,
+      ageMs,
+      fresh:ageMs<=FEATURE_MAX_AGE_MS && Array.isArray(cached?.opportunities) && cached.opportunities.length>0,
+      forceRefreshRequested:forceRefresh===true,
+      forceRefreshApplied:false,
+      forceRefreshReason:'PAPER_BRAIN_FIVE_MINUTE_EPOCH_PRESERVED',
+    };
   }
-  const assets=[...new Set(currentMarkets.map(m=>m?.asset).filter(a=>ASSET_PRICE_META[a]))];
-  const referencePrices=sameEpoch
-    ? (prior?.referencePrices||prior?.prices||{})
-    : (prior?.prices||prior?.referencePrices||{});
+
+  const assets=[...new Set(currentMarkets.map(m=>m?.asset).filter(a=>PAYNE_PAPER_RULES.sourceAssets.includes(a)))];
+  const referencePrices=prior?.prices||{};
 
   const spotRows=await Promise.all(assets.map(async asset=>{
     try{return {asset,ok:true,...await assetSpot(asset,fetchImpl)};}
@@ -126,18 +137,24 @@ export async function buildPayneOwnedFeatureState(env,markets,nowMs=Date.now(),{
     const asset=market?.asset;
     const currentPrice=Number(prices[asset]);
     if(!Number.isFinite(currentPrice)||currentPrice<=0) continue;
-    const previousPrice=Number(referencePrices?.[asset]);
-    const move=payneMoveParity(currentPrice,previousPrice);
+    const referencePrice=Number(referencePrices?.[asset]);
+    const move=paperMove(currentPrice,referencePrice);
     for(const side of ['YES','NO']){
       const ask=side==='YES'?Number(market?.yesAsk):Number(market?.noAsk);
       const bid=side==='YES'?Number(market?.yesBid):Number(market?.noBid);
-      const feature=payneFeatureParity({ask,move,outcomeSide:side});
+      const feature=paperFeatureMath({
+        marketPrice:ask,
+        move,
+        outcomeSide:side,
+        direction:side==='YES'?'ABOVE':'BELOW',
+      });
       if(!feature) continue;
       opportunities.push({
         marketTicker:String(market?.ticker||''),
         asset,
         outcomeSide:side,
         direction:side==='YES'?'UP':'DOWN',
+        paperDirection:side==='YES'?'ABOVE':'BELOW',
         openTime:market?.openTime||null,
         closeTime:market?.closeTime||null,
         durationMs:market?.durationMs??null,
@@ -149,7 +166,7 @@ export async function buildPayneOwnedFeatureState(env,markets,nowMs=Date.now(),{
         observedAsk:ask,
         observedBid:Number.isFinite(bid)?bid:null,
         underlyingSpot:currentPrice,
-        previousUnderlyingSpot:Number.isFinite(previousPrice)&&previousPrice>0?previousPrice:null,
+        previousUnderlyingSpot:Number.isFinite(referencePrice)&&referencePrice>0?referencePrice:null,
         underlyingPriceSource:priceSources[asset]||null,
         ...feature,
       });
@@ -160,8 +177,12 @@ export async function buildPayneOwnedFeatureState(env,markets,nowMs=Date.now(),{
   const ageMs=0;
   const state={
     ok:opportunities.length>0,
-    schema:'PAYNE_OWNED_KALSHI_FEATURE_STATE_V1',
-    source:'KALSHI_AUTHORITATIVE',
+    schema:'PAYNE_PAPER_BRAIN_KALSHI_FEATURE_STATE_V1',
+    source:'PAYNE_PAPER_BRAIN_ON_KALSHI_REALITY',
+    strategyAuthority:'PAYNE_PAPER',
+    sourceProof:PAYNE_PAPER_SOURCE,
+    sourceCadenceMs:PAYNE_PAPER_RULES.sourceCadenceMs,
+    sourceAssets:[...PAYNE_PAPER_RULES.sourceAssets],
     transport:'PAYNE_KALSHI_READ',
     spotTransport:'PAYNE_DIRECT_SPOT_READ',
     binding:'PAYNE_KALSHI_STATE',
@@ -171,12 +192,14 @@ export async function buildPayneOwnedFeatureState(env,markets,nowMs=Date.now(),{
     calculationAt:calculatedAt,
     ageMs,
     fresh:ageMs<=FEATURE_MAX_AGE_MS && opportunities.length>0,
-    status:spotReadFailures.length?'PAYNE_KALSHI_FEATURES_PARTIAL':'PAYNE_KALSHI_FEATURES_CURRENT',
+    status:spotReadFailures.length?'PAYNE_PAPER_BRAIN_FEATURES_PARTIAL':'PAYNE_PAPER_BRAIN_FEATURES_CURRENT',
+    epochMs,
     prices,
+    referencePrices,
     priceSources,
     spotReadFailures,
     opportunities,
-    error:opportunities.length?null:'PAYNE_FRESH_FEATURE_INPUTS_UNAVAILABLE',
+    error:opportunities.length?null:'PAYNE_PAPER_BRAIN_FEATURE_INPUTS_UNAVAILABLE',
     baselineStateRead:false,
     providerWrites:0,
     orders:0,
