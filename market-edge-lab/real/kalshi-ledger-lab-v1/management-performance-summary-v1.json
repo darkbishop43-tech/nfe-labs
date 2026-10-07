@@ -1,0 +1,34 @@
+{
+  "generated_for": "Kalshi Ledger Lab V1",
+  "source_export": "realized_pnl_2026-01-01_2027-01-01(8).csv",
+  "provider_rows": 527,
+  "logical_position_method": "exact market_ticker + side + open_timestamp + close_timestamp",
+  "provisional_logical_positions": 405,
+  "transition": {
+    "management_version_from": "OLD_5MIN_CONTROL",
+    "management_version_to": "DYNAMIC_V1",
+    "config_commit": "4ae1e89da908c7d82e31788fdaa2edbc6fe6fff7",
+    "config_commit_at": "2026-10-05T23:09:53Z",
+    "verification_commit": "59bf80cf87071e35247a888881ae81f5bd226b45",
+    "successful_deploy_run_id": 37386905089,
+    "successful_deploy_completed_at": "2026-10-05T23:10:48Z",
+    "authoritative_boundary": "Successful Deploy Baseline Real Worker run #239 completion"
+  },
+  "management_version_counts": {
+    "OLD_5MIN_CONTROL": 402,
+    "DYNAMIC_V1": 0,
+    "UNKNOWN": 3
+  },
+  "version_coverage": {
+    "known": 402,
+    "total": 405,
+    "known_percent": 99.2592592593,
+    "note": "The three UNKNOWN logical positions are the proven Founder-manual/training-mistake episode and are not assigned an AUTO management version."
+  },
+  "continuation_coverage": {
+    "dynamic_v1_positions_in_export": 0,
+    "five_minute_checkpoint_evidence_known": 0,
+    "continuation_outcome_known": 0,
+    "note": "Current provider export ends 2026-10-03, before DYNAMIC_V1 production activation on 2026-10-05."
+  }
+}
