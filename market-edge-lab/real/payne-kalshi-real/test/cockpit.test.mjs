@@ -302,11 +302,11 @@ test('cockpit calculates authentic Payne fields, decisions, clocks, exact reread
     assert.equal(out.financials.providerFinancialStatus,'FRESH');
     assert.equal(out.selected.ticker,'KXBTC15M-TEST');
     assert.equal(out.selected.direction,'UP');
-    assert.equal(out.payne.source,'KALSHI_AUTHORITATIVE');
-    assert.ok(Math.abs(out.payne.move-.003)<1e-12);
-    assert.ok(Math.abs(out.payne.fair-.544)<1e-12);
-    assert.ok(Math.abs(out.payne.edge-.054)<1e-12);
-    assert.ok(Math.abs(out.payne.score-.716)<1e-12);
+    assert.equal(out.payne.source,'PAYNE_PAPER_BRAIN_ON_KALSHI_REALITY');
+    assert.ok(Math.abs(out.payne.move-.005)<1e-12);
+    assert.ok(Math.abs(out.payne.fair-.58)<1e-12);
+    assert.ok(Math.abs(out.payne.edge-.09)<1e-12);
+    assert.ok(Math.abs(out.payne.score-.86)<1e-12);
     assert.equal(out.payne.state,'PULL_TRIGGER');
     assert.equal(out.selected.decision.radar,'RADAR_PASS');
     assert.equal(out.selected.decision.lock,'LOCK_PASS');
@@ -447,15 +447,15 @@ test('stale Baseline shadow is ignored by PAYNE direct live qualification',async
     opportunities:[{marketTicker:'KXBTC15M-TEST',outcomeSide:'YES',direction:'UP',asset:'BTC',move:0,fair:.5,edge:0,score:.5,openTime:'2026-10-02T05:45:00Z',closeTime:'2026-10-02T06:00:00Z'}],
   });
   const env=await authEnv(stale);
-  // Seed direct source independently to the accepted .003 raw move.
-  await env.PAYNE_KALSHI_STATE.put('payne-kalshi:feature-shadow:v1',JSON.stringify({
-    prices:{BTC:100/1.003,ETH:100/1.001},referencePrices:{BTC:100/1.003,ETH:100/1.001},priceSources:{BTC:'COINBASE',ETH:'COINBASE'}
+  // Seed direct source independently to the accepted .005 Paper raw move.
+  await env.PAYNE_KALSHI_STATE.put('payne-kalshi:feature-shadow:v2-paper-brain',JSON.stringify({
+    prices:{BTC:100/1.005,ETH:100/1.001},referencePrices:{BTC:100/1.005,ETH:100/1.001},priceSources:{BTC:'COINBASE',ETH:'COINBASE'}
   }));
   const io=installKalshiFetch();
   try{
     const out=await buildCockpitData(env,Date.parse('2026-10-02T06:05:00Z'));
     assert.equal(out.payne.available,true);
-    assert.equal(out.featureProvenance.source,'KALSHI_AUTHORITATIVE');
+    assert.equal(out.featureProvenance.source,'PAYNE_PAPER_BRAIN_ON_KALSHI_REALITY');
     assert.equal(out.featureProvenance.baselineStateRead,false);
     assert.equal(out.pipeline.finalDecision,'PULL_QUALIFIED_ZERO_MONEY_FIRE_READY');
     assert.equal(out.zeroMoneyPreview.status,'FIRE_READY');
@@ -468,8 +468,8 @@ test('mismatched Baseline shadow window is not live PAYNE qualification authorit
     opportunities:[{marketTicker:'OLD-TICKER',outcomeSide:'YES',direction:'UP',asset:'BTC',move:0,fair:.5,edge:0,score:.5,openTime:'2026-10-02T05:45:00Z',closeTime:'2026-10-02T06:00:00Z'}],
   });
   const env=await authEnv(mismatch);
-  await env.PAYNE_KALSHI_STATE.put('payne-kalshi:feature-shadow:v1',JSON.stringify({
-    prices:{BTC:100/1.003,ETH:100/1.001},referencePrices:{BTC:100/1.003,ETH:100/1.001},priceSources:{BTC:'COINBASE',ETH:'COINBASE'}
+  await env.PAYNE_KALSHI_STATE.put('payne-kalshi:feature-shadow:v2-paper-brain',JSON.stringify({
+    prices:{BTC:100/1.005,ETH:100/1.001},referencePrices:{BTC:100/1.005,ETH:100/1.001},priceSources:{BTC:'COINBASE',ETH:'COINBASE'}
   }));
   const io=installKalshiFetch();
   try{
