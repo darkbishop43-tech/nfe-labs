@@ -1101,21 +1101,30 @@ function paperCandidateAvailability(candidate,series,ledger,nowMs=Date.now()) {
   return {available:true,candidateKey,lastExitAt:last?.at||null,reason:'PAPER_CANDIDATE_AVAILABLE'};
 }
 
-function buildCandidateViews(markets, featureState, activeThreshold) {
+function buildCandidateViews(markets, featureState, activeThreshold, series=null, ledger=[], nowMs=Date.now()) {
   const out=[];
   for (const market of markets||[]) {
     for (const side of ['YES','NO']) {
       const feature=featureForCandidate(featureState,market.ticker,side,market.asset,activeThreshold,market);
       const decision=payneDecisionEvidence(feature,activeThreshold);
-      out.push({
+      const direction=side==='YES'?'UP':'DOWN';
+      const base={
         ...market,
         outcomeSide:side,
-        direction:side==='YES'?'UP':'DOWN',
+        direction,
         selectedBid:side==='YES'?market.yesBid:market.noBid,
         selectedAsk:side==='YES'?market.yesAsk:market.noAsk,
         payne:feature,
         decision,
-        paperCandidateKey:paperCandidateKey({ticker:market.ticker,outcomeSide:side,direction:side==='YES'?'UP':'DOWN'}),
+        paperCandidateKey:paperCandidateKey({ticker:market.ticker,outcomeSide:side,direction}),
+      };
+      const availability=paperCandidateAvailability(base,series,ledger,nowMs);
+      out.push({
+        ...base,
+        paperCandidateAvailable:availability.available,
+        paperCandidateReason:availability.reason,
+        paperCooldownLastExitAt:availability.lastExitAt||null,
+        paperReady:feature?.available===true && decision?.paperLabel==='PULL TRIGGER' && availability.available===true,
       });
     }
   }
@@ -2348,8 +2357,8 @@ export async function buildCockpitData(env, nowMs=Date.now()) {
     loadRealSeriesState(env),
     listRealLedger(env,1000),
   ]);
-  const candidates=buildCandidateViews(discovery.markets||[],featureState,control.activeThreshold);
-  const selected=candidates[0]||null;
+  const candidates=buildCandidateViews(discovery.markets||[],featureState,control.activeThreshold,realSeries,realLedger,nowMs);
+  const selected=candidates.find(x=>x.paperReady===true)||candidates[0]||null;
 
   let freshLock=null, preSubmit=null;
   if (selected?.ticker) {
