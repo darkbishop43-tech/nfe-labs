@@ -1,0 +1,812 @@
+{
+  "schema": "NFE_OS_MANAGEMENT_PERFORMANCE_DATA_V1",
+  "generated_at": "2026-10-07",
+  "source": {
+    "provider_rows": 527,
+    "provisional_logical_positions": 405,
+    "grouping": "market_ticker + side + open_timestamp + close_timestamp"
+  },
+  "transition": {
+    "from": "OLD_5MIN_CONTROL",
+    "to": "DYNAMIC_V1",
+    "config_commit": "4ae1e89da908c7d82e31788fdaa2edbc6fe6fff7",
+    "verification_commit": "59bf80cf87071e35247a888881ae81f5bd226b45",
+    "deploy_run_id": 37386905089,
+    "deploy_completed_at": "2026-10-05T23:10:48Z"
+  },
+  "coverage": {
+    "management_version_known": 402,
+    "total": 405,
+    "five_minute_checkpoint_known": 0,
+    "five_minute_checkpoint_eligible": 0,
+    "continuation_outcome_known": 0,
+    "dynamic_continued_positions": 0
+  },
+  "versions": {
+    "OLD_5MIN_CONTROL": {
+      "positions": 402,
+      "wins": 221,
+      "losses": 181,
+      "winRate": 0.5497512438,
+      "gross": -24.65783,
+      "fees": 16.99937,
+      "net": -41.6572,
+      "avgPl": -0.1036248756,
+      "avgHoldMin": 7.1729684909,
+      "medianHoldMin": 6.0166666667
+    },
+    "DYNAMIC_V1": {
+      "positions": 0,
+      "wins": 0,
+      "losses": 0,
+      "winRate": null,
+      "gross": null,
+      "fees": null,
+      "net": null,
+      "avgPl": null,
+      "avgHoldMin": null,
+      "medianHoldMin": null
+    },
+    "UNKNOWN": {
+      "positions": 3,
+      "wins": 0,
+      "losses": 3,
+      "winRate": 0,
+      "gross": -1.0475,
+      "fees": 0.1163,
+      "net": -1.1638,
+      "avgPl": -0.3879333333,
+      "avgHoldMin": 2.4888888889,
+      "medianHoldMin": 0.9
+    }
+  },
+  "holdByVersion": {
+    "OLD_5MIN_CONTROL": {
+      "<5m": {
+        "positions": 29,
+        "wins": 9,
+        "losses": 20,
+        "winRate": 0.3103448276,
+        "net": -8.6849857,
+        "avgHoldMin": 2.7431034483,
+        "medianHoldMin": 2.9666666667
+      },
+      "5–6m": {
+        "positions": 106,
+        "wins": 66,
+        "losses": 40,
+        "winRate": 0.6226415094,
+        "net": 12.58001,
+        "avgHoldMin": 5.6408805031,
+        "medianHoldMin": 5.8333333333
+      },
+      "6–7m": {
+        "positions": 135,
+        "wins": 75,
+        "losses": 60,
+        "winRate": 0.5555555556,
+        "net": -15.16735629,
+        "avgHoldMin": 6.2716049383,
+        "medianHoldMin": 6.0166666667
+      },
+      "7–10m": {
+        "positions": 73,
+        "wins": 38,
+        "losses": 35,
+        "winRate": 0.5205479452,
+        "net": -23.78799001,
+        "avgHoldMin": 7.8082191781,
+        "medianHoldMin": 7.7666666667
+      },
+      "10m+": {
+        "positions": 59,
+        "wins": 33,
+        "losses": 26,
+        "winRate": 0.5593220339,
+        "net": -6.596878,
+        "avgHoldMin": 13.3793785311,
+        "medianHoldMin": 13.95
+      }
+    },
+    "DYNAMIC_V1": {},
+    "UNKNOWN": {
+      "<5m": {
+        "positions": 3,
+        "wins": 0,
+        "losses": 3,
+        "winRate": 0,
+        "net": -1.1638,
+        "avgHoldMin": 2.4888888889,
+        "medianHoldMin": 0.9
+      }
+    }
+  },
+  "assetMgmt": {
+    "BNB": {
+      "OLD_5MIN_CONTROL": {
+        "YES": [
+          2,
+          2,
+          0,
+          1,
+          0.331,
+          0.1655,
+          null,
+          5.9333
+        ],
+        "NO": [
+          3,
+          3,
+          0,
+          1,
+          1.7102,
+          0.5700666667,
+          null,
+          6.3
+        ]
+      },
+      "DYNAMIC_V1": {
+        "YES": [
+          0,
+          0,
+          0,
+          null,
+          null,
+          null,
+          null,
+          null
+        ],
+        "NO": [
+          0,
+          0,
+          0,
+          null,
+          null,
+          null,
+          null,
+          null
+        ]
+      },
+      "UNKNOWN": {
+        "YES": [
+          0,
+          0,
+          0,
+          null,
+          null,
+          null,
+          null,
+          null
+        ],
+        "NO": [
+          0,
+          0,
+          0,
+          null,
+          null,
+          null,
+          null,
+          null
+        ]
+      }
+    },
+    "BTC": {
+      "OLD_5MIN_CONTROL": {
+        "YES": [
+          2,
+          0,
+          2,
+          0,
+          -1.8656,
+          null,
+          -0.9328,
+          10.5667
+        ],
+        "NO": [
+          2,
+          0,
+          2,
+          0,
+          -1.7407,
+          null,
+          -0.87035,
+          7.0667
+        ]
+      },
+      "DYNAMIC_V1": {
+        "YES": [
+          0,
+          0,
+          0,
+          null,
+          null,
+          null,
+          null,
+          null
+        ],
+        "NO": [
+          0,
+          0,
+          0,
+          null,
+          null,
+          null,
+          null,
+          null
+        ]
+      },
+      "UNKNOWN": {
+        "YES": [
+          0,
+          0,
+          0,
+          null,
+          null,
+          null,
+          null,
+          null
+        ],
+        "NO": [
+          0,
+          0,
+          0,
+          null,
+          null,
+          null,
+          null,
+          null
+        ]
+      }
+    },
+    "DOGE": {
+      "OLD_5MIN_CONTROL": {
+        "YES": [
+          19,
+          5,
+          14,
+          0.2631578947,
+          -8.8778,
+          0.11074,
+          -0.6736785714,
+          6.8351
+        ],
+        "NO": [
+          14,
+          8,
+          6,
+          0.5714285714,
+          -1.7004,
+          0.24765,
+          -0.6136,
+          7.6607
+        ]
+      },
+      "DYNAMIC_V1": {
+        "YES": [
+          0,
+          0,
+          0,
+          null,
+          null,
+          null,
+          null,
+          null
+        ],
+        "NO": [
+          0,
+          0,
+          0,
+          null,
+          null,
+          null,
+          null,
+          null
+        ]
+      },
+      "UNKNOWN": {
+        "YES": [
+          0,
+          0,
+          0,
+          null,
+          null,
+          null,
+          null,
+          null
+        ],
+        "NO": [
+          0,
+          0,
+          0,
+          null,
+          null,
+          null,
+          null,
+          null
+        ]
+      }
+    },
+    "ETH": {
+      "OLD_5MIN_CONTROL": {
+        "YES": [
+          5,
+          3,
+          2,
+          0.6,
+          0.0333,
+          0.2154666667,
+          -0.30655,
+          9.3833
+        ],
+        "NO": [
+          3,
+          1,
+          2,
+          0.3333333333,
+          -0.2782,
+          0.5771,
+          -0.42765,
+          5.7667
+        ]
+      },
+      "DYNAMIC_V1": {
+        "YES": [
+          0,
+          0,
+          0,
+          null,
+          null,
+          null,
+          null,
+          null
+        ],
+        "NO": [
+          0,
+          0,
+          0,
+          null,
+          null,
+          null,
+          null,
+          null
+        ]
+      },
+      "UNKNOWN": {
+        "YES": [
+          0,
+          0,
+          0,
+          null,
+          null,
+          null,
+          null,
+          null
+        ],
+        "NO": [
+          0,
+          0,
+          0,
+          null,
+          null,
+          null,
+          null,
+          null
+        ]
+      }
+    },
+    "HYPE": {
+      "OLD_5MIN_CONTROL": {
+        "YES": [
+          14,
+          8,
+          6,
+          0.5714285714,
+          -0.6094,
+          0.2238625,
+          -0.40005,
+          6.5702
+        ],
+        "NO": [
+          11,
+          8,
+          3,
+          0.7272727273,
+          1.8154,
+          0.5467375,
+          -0.8528333333,
+          8.547
+        ]
+      },
+      "DYNAMIC_V1": {
+        "YES": [
+          0,
+          0,
+          0,
+          null,
+          null,
+          null,
+          null,
+          null
+        ],
+        "NO": [
+          0,
+          0,
+          0,
+          null,
+          null,
+          null,
+          null,
+          null
+        ]
+      },
+      "UNKNOWN": {
+        "YES": [
+          0,
+          0,
+          0,
+          null,
+          null,
+          null,
+          null,
+          null
+        ],
+        "NO": [
+          0,
+          0,
+          0,
+          null,
+          null,
+          null,
+          null,
+          null
+        ]
+      }
+    },
+    "NEAR": {
+      "OLD_5MIN_CONTROL": {
+        "YES": [
+          99,
+          62,
+          37,
+          0.6262626263,
+          2.77210001,
+          0.4513198065,
+          -0.6813439997,
+          7.0726
+        ],
+        "NO": [
+          103,
+          54,
+          49,
+          0.5242718447,
+          -26.10540001,
+          0.3161574074,
+          -0.8811816329,
+          6.8181
+        ]
+      },
+      "DYNAMIC_V1": {
+        "YES": [
+          0,
+          0,
+          0,
+          null,
+          null,
+          null,
+          null,
+          null
+        ],
+        "NO": [
+          0,
+          0,
+          0,
+          null,
+          null,
+          null,
+          null,
+          null
+        ]
+      },
+      "UNKNOWN": {
+        "YES": [
+          3,
+          0,
+          3,
+          0,
+          -1.1638,
+          null,
+          -0.3879333333,
+          2.4889
+        ],
+        "NO": [
+          0,
+          0,
+          0,
+          null,
+          null,
+          null,
+          null,
+          null
+        ]
+      }
+    },
+    "SOL": {
+      "OLD_5MIN_CONTROL": {
+        "YES": [
+          9,
+          3,
+          6,
+          0.3333333333,
+          -4.2813,
+          0.1226333333,
+          -0.7748666667,
+          6.8407
+        ],
+        "NO": [
+          10,
+          6,
+          4,
+          0.6,
+          0.7065,
+          0.4578666667,
+          -0.510175,
+          8.76
+        ]
+      },
+      "DYNAMIC_V1": {
+        "YES": [
+          0,
+          0,
+          0,
+          null,
+          null,
+          null,
+          null,
+          null
+        ],
+        "NO": [
+          0,
+          0,
+          0,
+          null,
+          null,
+          null,
+          null,
+          null
+        ]
+      },
+      "UNKNOWN": {
+        "YES": [
+          0,
+          0,
+          0,
+          null,
+          null,
+          null,
+          null,
+          null
+        ],
+        "NO": [
+          0,
+          0,
+          0,
+          null,
+          null,
+          null,
+          null,
+          null
+        ]
+      }
+    },
+    "XRP": {
+      "OLD_5MIN_CONTROL": {
+        "YES": [
+          22,
+          8,
+          14,
+          0.3636363636,
+          -7.5752,
+          0.1784125,
+          -0.6430357143,
+          8.9417
+        ],
+        "NO": [
+          7,
+          6,
+          1,
+          0.8571428571,
+          0.319,
+          0.1576166667,
+          -0.6267,
+          7.0238
+        ]
+      },
+      "DYNAMIC_V1": {
+        "YES": [
+          0,
+          0,
+          0,
+          null,
+          null,
+          null,
+          null,
+          null
+        ],
+        "NO": [
+          0,
+          0,
+          0,
+          null,
+          null,
+          null,
+          null,
+          null
+        ]
+      },
+      "UNKNOWN": {
+        "YES": [
+          0,
+          0,
+          0,
+          null,
+          null,
+          null,
+          null,
+          null
+        ],
+        "NO": [
+          0,
+          0,
+          0,
+          null,
+          null,
+          null,
+          null,
+          null
+        ]
+      }
+    },
+    "ZEC": {
+      "OLD_5MIN_CONTROL": {
+        "YES": [
+          44,
+          22,
+          22,
+          0.5,
+          1.2083,
+          0.6337136364,
+          -0.5787909091,
+          7.2765
+        ],
+        "NO": [
+          33,
+          22,
+          11,
+          0.6666666667,
+          2.481,
+          0.4270136364,
+          -0.6284818182,
+          6.4394
+        ]
+      },
+      "DYNAMIC_V1": {
+        "YES": [
+          0,
+          0,
+          0,
+          null,
+          null,
+          null,
+          null,
+          null
+        ],
+        "NO": [
+          0,
+          0,
+          0,
+          null,
+          null,
+          null,
+          null,
+          null
+        ]
+      },
+      "UNKNOWN": {
+        "YES": [
+          0,
+          0,
+          0,
+          null,
+          null,
+          null,
+          null,
+          null
+        ],
+        "NO": [
+          0,
+          0,
+          0,
+          null,
+          null,
+          null,
+          null,
+          null
+        ]
+      }
+    }
+  },
+  "trend": [
+    [
+      "09-22",
+      "OLD_5MIN_CONTROL",
+      5,
+      -0.4795
+    ],
+    [
+      "09-23",
+      "OLD_5MIN_CONTROL",
+      13,
+      -2.4496
+    ],
+    [
+      "09-24",
+      "OLD_5MIN_CONTROL",
+      44,
+      -1.6106
+    ],
+    [
+      "09-25",
+      "OLD_5MIN_CONTROL",
+      21,
+      -4.6111
+    ],
+    [
+      "09-26",
+      "OLD_5MIN_CONTROL",
+      28,
+      -0.2708
+    ],
+    [
+      "09-27",
+      "OLD_5MIN_CONTROL",
+      34,
+      -9.6591
+    ],
+    [
+      "09-28",
+      "OLD_5MIN_CONTROL",
+      63,
+      -10.3904
+    ],
+    [
+      "09-29",
+      "OLD_5MIN_CONTROL",
+      53,
+      -4.619
+    ],
+    [
+      "09-30",
+      "OLD_5MIN_CONTROL",
+      67,
+      -4.2796
+    ],
+    [
+      "10-01",
+      "OLD_5MIN_CONTROL",
+      31,
+      -1.1117
+    ],
+    [
+      "10-02",
+      "OLD_5MIN_CONTROL",
+      42,
+      -2.2244
+    ],
+    [
+      "10-03",
+      "OLD_5MIN_CONTROL",
+      1,
+      0.0486
+    ]
+  ]
+}
