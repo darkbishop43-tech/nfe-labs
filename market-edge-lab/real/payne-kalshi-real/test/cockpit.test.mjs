@@ -651,6 +651,7 @@ test('fast UI-state route reads persisted state only and creates zero provider a
     assert.equal(body.orders,0);
     assert.equal(body.capitalMovedUsd,0);
     assert.equal(body.realExecution.schema,'PAYNE_REAL_OBSERVABILITY_V1');
+    assert.ok(Object.hasOwn(body,'pipeline'));
     assert.equal(providerFetches,0);
   } finally { globalThis.fetch=original; }
 });
@@ -775,6 +776,20 @@ test('cockpit HTML exposes clocks, decision evidence, automatic refresh, and no 
   assert.match(html,/featureAvailable=p\.available===true/);
   assert.match(html,/UNAVAILABLE/);
   assert.match(html,/v!==null&&v!==undefined/);
+  assert.match(html,/PAYNE FIRING \/ EXECUTION PIPELINE/);
+  assert.match(html,/CURRENT STAGE/);
+  assert.match(html,/CURRENT ASSET/);
+  assert.match(html,/CURRENT DIRECTION/);
+  assert.match(html,/FOUNDER THRESHOLD/);
+  assert.match(html,/EXECUTION INTENT/);
+  assert.match(html,/WRITER/);
+  assert.match(html,/PROVIDER ORDER ID/);
+  assert.match(html,/OWNERSHIP/);
+  assert.match(html,/MANAGEMENT/);
+  assert.match(html,/FINAL REQUALIFICATION/);
+  assert.ok(html.indexOf('PAYNE FIRING / EXECUTION PIPELINE') < html.indexOf('ACCOUNT / P&L'));
+  assert.equal((html.match(/id=\"pipeline\"/g)||[]).length,1);
+  assert.doesNotMatch(html,/PRE-FIRE PIPELINE/);
   assert.match(html,/CURRENT RUN/);
   assert.match(html,/LAST ATTEMPT/);
   assert.match(html,/ATTEMPTED \/ TARGET/);
