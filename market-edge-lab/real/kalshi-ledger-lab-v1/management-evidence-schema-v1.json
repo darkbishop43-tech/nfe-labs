@@ -1,0 +1,41 @@
+{
+  "schema": "NFE_OS_MANAGEMENT_EVIDENCE_V1",
+  "version": 1,
+  "scope": "READ_ONLY_ANALYTICS",
+  "management_version": {
+    "type": "string",
+    "enum": [
+      "OLD_5MIN_CONTROL",
+      "DYNAMIC_V1",
+      "UNKNOWN"
+    ],
+    "rule": "Classify only from authoritative deployment/version evidence and persisted trade/management evidence. Never infer from hold duration."
+  },
+  "fields": {
+    "management_version": "OLD_5MIN_CONTROL | DYNAMIC_V1 | UNKNOWN",
+    "management_mode": "string | UNKNOWN",
+    "management_state_at_entry": "string | UNKNOWN",
+    "management_state_at_5m": "string | UNKNOWN",
+    "management_state_at_exit": "string | UNKNOWN",
+    "five_minute_checkpoint_at": "timestamp | UNKNOWN",
+    "five_minute_mark_price": "number | UNKNOWN",
+    "five_minute_unrealized_pl": "number | UNKNOWN",
+    "five_minute_score": "number | UNKNOWN",
+    "continuation_decision": "string | UNKNOWN",
+    "continuation_reason": "string | UNKNOWN",
+    "final_exit_reason": "string | UNKNOWN",
+    "final_exit_at": "timestamp | UNKNOWN",
+    "final_realized_pl": "number | UNKNOWN"
+  },
+  "evidence_policy": {
+    "unknown_visible": true,
+    "no_hold_duration_inference": true,
+    "provider_rows_not_trade_episodes": true,
+    "ownership_lanes_separate": [
+      "AUTO",
+      "PAYNE",
+      "MANUAL"
+    ],
+    "management_versions_not_pooled_for_version_metrics": true
+  }
+}
