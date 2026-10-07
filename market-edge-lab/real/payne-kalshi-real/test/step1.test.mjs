@@ -15,7 +15,7 @@ class MemoryKV {
 }
 const env = (store = new Map()) => ({ PAYNE_KALSHI_STATE:new MemoryKV(store) });
 const futureClose = (minutes=15)=>new Date(Date.now()+minutes*60_000).toISOString();
-const qualifying = () => ({ marketTicker:'KXTEST-1', asset:'BTC', direction:'UP', score:.72, edge:.04, move:.003, executionEligible:true, closeTime:futureClose(), observedPrice:.61 });
+const qualifying = () => ({ marketTicker:'KXTEST-1', asset:'BTC', direction:'UP', score:.82, edge:.04, move:.003, executionEligible:true, closeTime:futureClose(), observedPrice:.61 });
 
 test('default state is disarmed and zero authority', ()=>{
   const s=defaultControlState();
@@ -27,8 +27,8 @@ test('Payne gate fixtures deterministic', ()=>{
   assert.equal(payneStage({score:.49,edge:.1,move:.01}).stage,'NO_ACTION');
   assert.equal(payneStage({score:.50,edge:.1,move:.01}).stage,'RADAR');
   assert.equal(payneStage({score:.65,edge:.01,move:.001}).stage,'LOCK_IN');
-  assert.equal(payneStage({score:.70,edge:.01,move:.002},.70).stage,'PULL_TRIGGER');
-  assert.equal(payneStage({score:.70,edge:0,move:.01},.70).pullTrigger,false);
+  assert.equal(payneStage({score:.80,edge:.01,move:.002},.80).stage,'PULL_TRIGGER');
+  assert.equal(payneStage({score:.80,edge:0,move:.01},.80).pullTrigger,false);
 });
 
 test('qualifying candidate reaches fresh lock twice then stops before POST', async ()=>{
@@ -41,7 +41,7 @@ test('qualifying candidate reaches fresh lock twice then stops before POST', asy
 
 test('non-pull candidate cannot reach provider GET or fire', async ()=>{
   const e=env(); await initializeDisarmed(e); let gets=0;
-  const c={...qualifying(),score:.69};
+  const c={...qualifying(),score:.79};
   const out=await evaluateZeroMoneyCandidate(e,c,{providerGet:async()=>{gets++; return {ok:true};}});
   assert.equal(gets,0); assert.equal(out.fired,false); assert.equal(out.stopReason,'NON_PULL_CANDIDATE');
 });
@@ -64,10 +64,10 @@ test('OPEN / FLAT / UNKNOWN reconciliation fixtures', ()=>{
   assert.equal(reconcileFixture({providerContextComplete:true,ownedPosition:false,settlementEvidence:true}),'FLAT');
 });
 
-test('.20 score exit and 5-minute max hold fixtures', ()=>{
-  assert.deepEqual(managementDecision({score:.20,heldMs:10_000,owned:true}),{action:'EXIT',reason:'SCORE_EXIT'});
-  assert.deepEqual(managementDecision({score:.60,heldMs:300_000,owned:true}),{action:'EXIT',reason:'MAX_HOLD_EXIT'});
-  assert.equal(managementDecision({score:.60,heldMs:299_999,owned:true}).action,'HOLD');
+test('Paper decision_exit and five-minute max_hold fixtures', ()=>{
+  assert.deepEqual(managementDecision({heldMs:10_000,owned:true,marketPresent:true,decisionLabel:'LOCK IN'}),{action:'EXIT',reason:'decision_exit'});
+  assert.deepEqual(managementDecision({heldMs:300_000,owned:true,marketPresent:true,decisionLabel:'PULL TRIGGER'}),{action:'EXIT',reason:'max_hold'});
+  assert.equal(managementDecision({heldMs:299_999,owned:true,marketPresent:true,decisionLabel:'PULL TRIGGER'}).action,'HOLD');
 });
 
 test('durable event ledger survives reload and is not rolling-state-only', async ()=>{
