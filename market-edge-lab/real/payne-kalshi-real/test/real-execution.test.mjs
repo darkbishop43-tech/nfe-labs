@@ -32,13 +32,13 @@ class MemoryKV {
 
 function jsonResponse(body,status=200){return new Response(JSON.stringify(body),{status,headers:{'content-type':'application/json'}});}
 
-function baselineShadow({score=.716,move=.003,edge=.054,close='2026-10-02T06:15:00Z'}={}){
+function baselineShadow({score=.86,move=.005,edge=.09,close='2026-10-02T06:15:00Z'}={}){
   return {
     ok:true,mode:'REAL_KALSHI_SHADOW',status:'LIVE_KALSHI_SHADOW',startedAt:'2026-10-02T06:00:00Z',lastRunAt:'2026-10-02T06:04:30Z',
     priceSources:{BTC:'COINBASE'},
     opportunities:[
-      {marketTicker:'KXBTC15M-REALTEST',outcomeSide:'YES',direction:'UP',asset:'BTC',move,fair:.554,edge,score,openTime:'2026-10-02T06:00:00Z',closeTime:close,durationMs:Date.parse(close)-Date.parse('2026-10-02T06:00:00Z'),horizon:'15m'},
-      {marketTicker:'KXBTC15M-REALTEST',outcomeSide:'NO',direction:'DOWN',asset:'BTC',move,fair:.446,edge:-Math.abs(edge),score:.284,openTime:'2026-10-02T06:00:00Z',closeTime:close,durationMs:Date.parse(close)-Date.parse('2026-10-02T06:00:00Z'),horizon:'15m'},
+      {marketTicker:'KXBTC15M-REALTEST',outcomeSide:'YES',direction:'UP',asset:'BTC',move,fair:.59,edge,score,openTime:'2026-10-02T06:00:00Z',closeTime:close,durationMs:Date.parse(close)-Date.parse('2026-10-02T06:00:00Z'),horizon:'15m'},
+      {marketTicker:'KXBTC15M-REALTEST',outcomeSide:'NO',direction:'DOWN',asset:'BTC',move,fair:.41,edge:-Math.abs(edge),score:.14,openTime:'2026-10-02T06:00:00Z',closeTime:close,durationMs:Date.parse(close)-Date.parse('2026-10-02T06:00:00Z'),horizon:'15m'},
     ],
   };
 }
@@ -50,8 +50,8 @@ async function seedPaynePriorSpot(e,shadow=baselineShadow()){
   const yes=(shadow?.opportunities||[]).find(x=>x?.asset==='BTC'&&x?.outcomeSide==='YES');
   const move=Number.isFinite(Number(yes?.score))?moveForScore(yes.score):Number(yes?.move||0);
   const prior=100/(1+move);
-  await e.PAYNE_KALSHI_STATE.put('payne-kalshi:feature-shadow:v1',JSON.stringify({
-    schema:'PAYNE_OWNED_KALSHI_FEATURE_STATE_V1',
+  await e.PAYNE_KALSHI_STATE.put('payne-kalshi:feature-shadow:v2-paper-brain',JSON.stringify({
+    schema:'PAYNE_PAPER_BRAIN_KALSHI_FEATURE_STATE_V1',
     savedAt:'2026-10-02T06:04:00Z',
     prices:{BTC:prior},
     referencePrices:{BTC:prior},
@@ -555,18 +555,18 @@ test('FILLED + DISARM still manages and constructs MAX_HOLD reduce-only EXIT',as
     assert.equal(post.calls[0].kind,'EXIT');
     assert.equal(post.calls[0].payload.reduce_only,true);
     assert.equal(post.calls[0].scope.ownedByPayne,true);
-    assert.equal(out.position.exitReason,'MAX_HOLD_EXIT');
+    assert.equal(out.position.exitReason,'max_hold');
   }finally{io.restore();}
 });
 
-test('score <= .20 produces governed SCORE_EXIT while wrong ownership produces no exit',async()=>{
-  const shadow=baselineShadow({score:.19,move:.003,edge:.02});
+test('Paper decision_exit governs management while wrong ownership produces no exit',async()=>{
+  const shadow=baselineShadow({score:.70,move:.001,edge:.02});
   const e=await env({shadow}),io=installProvider({position:'OPEN'}),post=postFixture({order_id:'EXIT-S',fill_count:1,remaining_count:0,average_fill_price:.55,average_fee_paid:.01});
   try{
-    await saveRealSeriesState(e,{...defaultRealSeriesState(),seriesId:'SCORE',attemptsStarted:1,position:{owner:'PAYNE_KALSHI_REAL',seriesId:'SCORE',attemptId:'SCORE-1',status:'OPEN',asset:'BTC',marketTicker:'KXBTC15M-REALTEST',outcomeSide:'YES',exchangeIndex:2,entryOrderId:'E',entryClientOrderId:'CID',filledCount:1,entryAverageFillPrice:.5,entryTime:'2026-10-02T06:04:30Z',exitFilledTotal:0}});
+    await saveRealSeriesState(e,{...defaultRealSeriesState(),seriesId:'DECISION',attemptsStarted:1,position:{owner:'PAYNE_KALSHI_REAL',seriesId:'DECISION',attemptId:'DECISION-1',status:'OPEN',asset:'BTC',marketTicker:'KXBTC15M-REALTEST',outcomeSide:'YES',direction:'UP',exchangeIndex:2,entryOrderId:'E',entryClientOrderId:'CID',filledCount:1,entryAverageFillPrice:.5,entryTime:'2026-10-02T06:04:30Z',exitFilledTotal:0}});
     const out=await runPayneRealExecutionCycle(e,{postImpl:post.fn,nowMs:Date.parse('2026-10-02T06:05:00Z')});
     assert.equal(post.calls[0].payload.reduce_only,true);
-    assert.equal(out.position.exitReason,'SCORE_EXIT');
+    assert.equal(out.position.exitReason,'decision_exit');
 
     const e2=await env({shadow});
     await saveRealSeriesState(e2,{...defaultRealSeriesState(),seriesId:'WRONG',attemptsStarted:1,position:{owner:'AUTO_BASELINE_REAL',status:'OPEN',marketTicker:'KXBTC15M-REALTEST',exchangeIndex:2,entryOrderId:'A',entryClientOrderId:'A',filledCount:1}});
