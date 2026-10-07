@@ -1,5 +1,7 @@
 <!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Kalshi Ledger Lab V1</title>
-<style>:root{--b:#071019;--p:#0c1722;--l:#213448;--t:#e8f1f8;--m:#8fa4b7;--g:#3ddc97;--r:#ff6b6b;--y:#ffc857;--a:#66b3ff;--u:#d39cff}*{box-sizing:border-box}body{margin:0;background:var(--b);color:var(--t);font:14px system-ui,-apple-system,Segoe UI,sans-serif}header{padding:16px;border-bottom:1px solid var(--l)}main{max-width:1500px;margin:auto;padding:12px}.sub,.note{color:var(--m);font-size:12px}.note{padding:10px;border-left:3px solid var(--y);background:#111a21;margin-bottom:10px}.grid{display:grid;gap:10px}.cards{grid-template-columns:repeat(auto-fit,minmax(150px,1fr));margin:12px 0}.two{grid-template-columns:repeat(auto-fit,minmax(390px,1fr))}.card,.panel{background:var(--p);border:1px solid var(--l);border-radius:9px;padding:11px}.k{font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:var(--m)}.v{font-size:22px;font-weight:750;margin-top:3px}.r{color:var(--r)}.g{color:var(--g)}.y{color:var(--y)}.u{color:var(--u)}h1{font-size:21px;margin:0 0 4px}h2{font-size:15px;margin:0 0 8px}h3{font-size:13px}svg{width:100%;height:250px;display:block}table{width:100%;border-collapse:collapse;font-size:12px}th,td{padding:7px 5px;border-bottom:1px solid #1d2c3b;text-align:left}th{color:#9fb2c4}.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}.badge{display:inline-block;padding:2px 7px;border:1px solid var(--l);border-radius:999px;margin-right:4px;font-size:11px}@media(max-width:600px){main{padding:7px}.two{grid-template-columns:1fr}.v{font-size:19px}table{font-size:11px}}</style></head><body>
+<style>:root{--b:#071019;--p:#0c1722;--l:#213448;--t:#e8f1f8;--m:#8fa4b7;--g:#3ddc97;--r:#ff6b6b;--y:#ffc857;--a:#66b3ff;--u:#d39cff}*{box-sizing:border-box}body{margin:0;background:var(--b);color:var(--t);font:14px system-ui,-apple-system,Segoe UI,sans-serif}header{padding:16px;border-bottom:1px solid var(--l)}main{max-width:1500px;margin:auto;padding:12px}.sub,.note{color:var(--m);font-size:12px}.note{padding:10px;border-left:3px solid var(--y);background:#111a21;margin-bottom:10px}.grid{display:grid;gap:10px}.cards{grid-template-columns:repeat(auto-fit,minmax(150px,1fr));margin:12px 0}.two{grid-template-columns:repeat(auto-fit,minmax(390px,1fr))}.card,.panel{background:var(--p);border:1px solid var(--l);border-radius:9px;padding:11px}.k{font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:var(--m)}.v{font-size:22px;font-weight:750;margin-top:3px}.r{color:var(--r)}.g{color:var(--g)}.y{color:var(--y)}.u{color:var(--u)}h1{font-size:21px;margin:0 0 4px}h2{font-size:15px;margin:0 0 8px}h3{font-size:13px}svg{width:100%;height:250px;display:block}table{width:100%;border-collapse:collapse;font-size:12px}th,td{padding:7px 5px;border-bottom:1px solid #1d2c3b;text-align:left}th{color:#9fb2c4}.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}.badge{display:inline-block;padding:2px 7px;border:1px solid var(--l);border-radius:999px;margin-right:4px;font-size:11px}
+.mgmtHead{display:flex;align-items:flex-start;gap:10px;justify-content:space-between;flex-wrap:wrap}.mgmtTitle{font-size:18px;font-weight:800}.mgmtControls{display:flex;gap:7px;flex-wrap:wrap}.mgmtControls select{background:#08131e;color:var(--t);border:1px solid var(--l);border-radius:6px;padding:6px 8px;font-size:12px}.mgmtGrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px;margin-top:9px}.mgmtBox{background:#08131e;border:1px solid var(--l);border-radius:8px;padding:9px}.mgmtBox .big{font-size:19px;font-weight:800;margin-top:2px}.warnbox{border-left:3px solid var(--y);padding:9px;background:#121922;color:var(--m);font-size:12px}.okbox{border-left:3px solid var(--g);padding:9px;background:#0d1917;color:var(--m);font-size:12px}.scrollx{overflow-x:auto}.transition{margin:10px 0;padding:9px 10px;border:1px dashed var(--a);border-radius:8px;background:#08131e}.transition strong{color:var(--a)}.sampleNote{font-size:11px;color:var(--m);margin-top:6px}.mgmtTrend{height:220px}.unknownMetric{color:var(--y);font-weight:700}
+@media(max-width:600px){main{padding:7px}.two{grid-template-columns:1fr}.v{font-size:19px}table{font-size:11px}}</style></head><body>
 <header><h1>NFE-OS Market Edge — Kalshi Ledger Lab V1</h1><div class="sub">Provider-accounting refresh · 527 raw Kalshi rows · read only · source file (8) verified identical to prior (6)</div></header><main>
 <div class="note"><b>Integrity:</b> RAW PROVIDER ROWS = <b>527</b>. This does <b>not</b> mean 527 independent trades. TRADE EPISODES remain <b>UNKNOWN</b> globally because the provider export has no authoritative episode ID. Duplicate-looking rows remain preserved. The four proven Founder-manual NEAR rows remain excluded only from AUTO_BASELINE aggregates.</div>
 <div id="cards" class="grid cards"></div>
@@ -18,10 +20,84 @@
 <section class="panel" style="margin-top:10px"><h2>Oct 2 forensic checkpoint</h2><div class="grid cards">
 <div class="card"><div class="k">Raw provider rows</div><div class="v">50</div></div><div class="card"><div class="k">Provisional logical positions</div><div class="v y">42</div></div><div class="card"><div class="k">Gross before fees</div><div class="v r">-$0.1915</div></div><div class="card"><div class="k">Fees</div><div class="v y">$2.0329</div></div><div class="card"><div class="k">Net</div><div class="v r">-$2.2244</div></div><div class="card"><div class="k">Logical W / L</div><div class="v">21 / 21</div></div><div class="card"><div class="k">Best logical position</div><div class="v g">+$7.2417</div><div class="sub">ZEC YES · .14 → .88</div></div><div class="card"><div class="k">Worst logical position</div><div class="v r">-$1.9095</div><div class="sub">NEAR YES · .62 → 0</div></div>
 </div><div class="sub">Grouping rule is conservative: same exact ticker + side + open timestamp + close timestamp. No provider rows are discarded. This grouping is analytical, not an authoritative provider trade ID.</div></section>
+
+<section class="panel" style="margin-top:10px" id="managementPerformance">
+  <div class="mgmtHead"><div><div class="mgmtTitle">MANAGEMENT PERFORMANCE</div><div class="sub">Version-aware forensic view · logical positions only · read-only analytics</div></div><div><span class="badge">OLD_5MIN_CONTROL</span><span class="badge">DYNAMIC_V1</span><span class="badge y">UNKNOWN VISIBLE</span></div></div>
+  <div class="mgmtGrid">
+    <div class="mgmtBox"><div class="k">Management version known</div><div class="big">402 / 405</div><div class="sub">99.3% of provisional logical positions</div></div>
+    <div class="mgmtBox"><div class="k">OLD_5MIN_CONTROL</div><div class="big">402</div><div class="sub">provider export sample</div></div>
+    <div class="mgmtBox"><div class="k">DYNAMIC_V1</div><div class="big y">0</div><div class="sub">current export ends before activation</div></div>
+    <div class="mgmtBox"><div class="k">UNKNOWN</div><div class="big y">3</div><div class="sub">Founder-manual logical positions</div></div>
+    <div class="mgmtBox"><div class="k">5m checkpoint evidence</div><div class="big y">0 / 0</div><div class="sub">no DYNAMIC_V1 position in this export</div></div>
+    <div class="mgmtBox"><div class="k">Continuation outcome known</div><div class="big y">0 / 0</div><div class="sub">no DYNAMIC_V1 continuation sample yet</div></div>
+  </div>
+  <div class="transition"><strong>MANAGEMENT TRANSITION</strong><br>OLD_5MIN_CONTROL → DYNAMIC_V1<br><span class="sub">Founder-authorized config commit 4ae1e89d… · successful Baseline deploy run #239 completed <b>2026-10-05 23:10:48Z</b>. The current provider export ends Oct 3, so it contains no post-activation DYNAMIC_V1 positions.</span></div>
+
+  <div class="grid two">
+    <section class="panel"><h2>Management version breakdown</h2><div id="mgmtVersionTable" class="scrollx"></div><div class="sampleNote">Manual/training positions remain UNKNOWN; they are not assigned an AUTO management version.</div></section>
+    <section class="panel"><h2>Hold duration × management version</h2><div class="mgmtControls"><label class="sub">Version <select id="holdVersion"><option>OLD_5MIN_CONTROL</option><option>DYNAMIC_V1</option><option>UNKNOWN</option></select></label></div><div id="holdVersionTable" class="scrollx"></div><div class="sampleNote">Duration never determines version. Version is assigned from deployment/ownership evidence first, then duration is analyzed inside that version.</div></section>
+    <section class="panel"><h2>Dynamic V1 continuation analysis</h2><div class="warnbox"><b>5M CHECKPOINT EVIDENCE UNAVAILABLE FOR THIS EXPORT.</b><br>The provider dataset ends before DYNAMIC_V1 activation. No 5-minute mark price, unrealized P/L, score, continuation decision, or continuation value is reconstructed.</div><div class="mgmtGrid"><div class="mgmtBox"><div class="k">V1 positions reaching 5:00</div><div class="big y">NO SAMPLE</div></div><div class="mgmtBox"><div class="k">Continued >5:00</div><div class="big y">NO SAMPLE</div></div><div class="mgmtBox"><div class="k">Average continuation value added</div><div class="big y">UNAVAILABLE</div></div><div class="mgmtBox"><div class="k">Total continuation value added</div><div class="big y">UNAVAILABLE</div></div></div></section>
+    <section class="panel"><h2>Asset × management analysis</h2><div class="mgmtControls"><label class="sub">Asset <select id="assetMgmtAsset"><option selected>NEAR</option><option>BNB</option><option>BTC</option><option>DOGE</option><option>ETH</option><option>HYPE</option><option>SOL</option><option>XRP</option><option>ZEC</option></select></label><label class="sub">Version <select id="assetMgmtVersion"><option>OLD_5MIN_CONTROL</option><option>DYNAMIC_V1</option><option>UNKNOWN</option></select></label></div><div id="assetMgmtTable" class="scrollx"></div><div class="sampleNote">NEAR defaults first because it has the largest sample. This panel is forensic only and creates no asset-specific trading rule.</div></section>
+  </div>
+
+  <section class="panel" style="margin-top:10px"><h2>Management performance trend over time</h2><div class="sub">Daily OLD_5MIN_CONTROL logical-position net P/L · sample size shown in tooltip. Transition marker is after the current export window.</div><svg id="mgmtTrend" class="mgmtTrend"></svg><div class="transition"><strong>DYNAMIC V1 ACTIVATED</strong> · 2026-10-05 23:10:48Z · no post-transition provider rows are present in this dataset.</div></section>
+
+  <section class="panel" style="margin-top:10px"><h2>Evidence / UNKNOWN coverage</h2><div class="okbox"><b>First authoritative observability boundary found:</b> live AUTO creates and persists <span class="mono">position.autoV1Management</span>, including a frozen <span class="mono">fiveMinuteCheckpoint</span>, and archives completed V1 lifecycles under <span class="mono">auto-exp-v1:lifecycle:*</span>. However, the public <span class="mono">GET /execution-test-state</span> serializer omits <span class="mono">autoV1Management</span>, <span class="mono">autoV1ArchiveKey</span>, and checkpoint/continuation fields. The Founder progress panel then cannot map what it never receives.</div><div class="warnbox" style="margin-top:8px"><b>Diagnosis:</b> primary boundary = <b>B. state exists but API does not expose it</b>. Secondary = <b>C. cockpit/progress panel does not map V1 evidence</b>. Historical rows before the V1 fields also satisfy <b>D</b>. Smallest proposed repair: additive read-only exposure of sanitized V1 management evidence/current archive summaries; no change to management or execution behavior.</div></section>
+</section>
 <section class="panel" style="margin-top:10px"><h2>Best / worst provider records</h2><div class="grid two"><div id="best"></div><div id="worst"></div></div></section>
 <section class="panel" style="margin-top:10px"><h2>Research-layer status</h2><div class="sub"><span class="badge">Provider accounting: PROVEN</span><span class="badge">AUTO/PAYNE ownership: PARTIAL</span><span class="badge">NFE score join: UNKNOWN for many rows</span><span class="badge">M/T/V/Q/F: not historically joined</span><span class="badge">UMEO context: not joined</span></div><p class="sub">Next research layer is the Master Filled-Trade Forensic Ledger: TRADE ID / SYSTEM / provider proof + decision-time score/RADAR/LOCK + feature state + UMEO context + outcome cohort. Missing fields remain UNKNOWN rather than inferred.</p></section>
 </main>
 <script>
+
+const MGMT_VERSIONS={
+  OLD_5MIN_CONTROL:{positions:402,wins:221,losses:181,winRate:.5497512438,gross:-24.65783,fees:16.99937,net:-41.6572,avgPl:-.1036248756,avgHold:7.1729684909,medianHold:6.0166666667},
+  DYNAMIC_V1:{positions:0,wins:0,losses:0,winRate:null,gross:null,fees:null,net:null,avgPl:null,avgHold:null,medianHold:null},
+  UNKNOWN:{positions:3,wins:0,losses:3,winRate:0,gross:-1.0475,fees:.1163,net:-1.1638,avgPl:-.3879333333,avgHold:2.4888888889,medianHold:.9}
+};
+const HOLD_MGMT={
+  OLD_5MIN_CONTROL:{
+    "<5m":[29,9,20,.3103448276,-8.6849857,2.7431,2.9667],
+    "5–6m":[106,66,40,.6226415094,12.58001,5.6409,5.8333],
+    "6–7m":[135,75,60,.5555555556,-15.16735629,6.2716,6.0167],
+    "7–10m":[73,38,35,.5205479452,-23.78799001,7.8082,7.7667],
+    "10m+":[59,33,26,.5593220339,-6.596878,13.3794,13.95]
+  },
+  DYNAMIC_V1:{},
+  UNKNOWN:{"<5m":[3,0,3,0,-1.1638,2.4889,.9]}
+};
+const ASSET_MGMT={
+BNB:{OLD_5MIN_CONTROL:{YES:[2,2,0,1,.331,.1655,null,5.9333],NO:[3,3,0,1,1.7102,.5700666667,null,6.3]},DYNAMIC_V1:{YES:[0,0,0,null,null,null,null,null],NO:[0,0,0,null,null,null,null,null]},UNKNOWN:{YES:[0,0,0,null,null,null,null,null],NO:[0,0,0,null,null,null,null,null]}},
+BTC:{OLD_5MIN_CONTROL:{YES:[2,0,2,0,-1.8656,null,-.9328,10.5667],NO:[2,0,2,0,-1.7407,null,-.87035,7.0667]},DYNAMIC_V1:{YES:[0,0,0,null,null,null,null,null],NO:[0,0,0,null,null,null,null,null]},UNKNOWN:{YES:[0,0,0,null,null,null,null,null],NO:[0,0,0,null,null,null,null,null]}},
+DOGE:{OLD_5MIN_CONTROL:{YES:[19,5,14,.2631578947,-8.8778,.11074,-.6736785714,6.8351],NO:[14,8,6,.5714285714,-1.7004,.24765,-.6136,7.6607]},DYNAMIC_V1:{YES:[0,0,0,null,null,null,null,null],NO:[0,0,0,null,null,null,null,null]},UNKNOWN:{YES:[0,0,0,null,null,null,null,null],NO:[0,0,0,null,null,null,null,null]}},
+ETH:{OLD_5MIN_CONTROL:{YES:[5,3,2,.6,.0333,.2154666667,-.30655,9.3833],NO:[3,1,2,.3333333333,-.2782,.5771,-.42765,5.7667]},DYNAMIC_V1:{YES:[0,0,0,null,null,null,null,null],NO:[0,0,0,null,null,null,null,null]},UNKNOWN:{YES:[0,0,0,null,null,null,null,null],NO:[0,0,0,null,null,null,null,null]}},
+HYPE:{OLD_5MIN_CONTROL:{YES:[14,8,6,.5714285714,-.6094,.2238625,-.40005,6.5702],NO:[11,8,3,.7272727273,1.8154,.5467375,-.8528333333,8.547]},DYNAMIC_V1:{YES:[0,0,0,null,null,null,null,null],NO:[0,0,0,null,null,null,null,null]},UNKNOWN:{YES:[0,0,0,null,null,null,null,null],NO:[0,0,0,null,null,null,null,null]}},
+NEAR:{OLD_5MIN_CONTROL:{YES:[99,62,37,.6262626263,2.77210001,.4513198065,-.6813439997,7.0726],NO:[103,54,49,.5242718447,-26.10540001,.3161574074,-.8811816329,6.8181]},DYNAMIC_V1:{YES:[0,0,0,null,null,null,null,null],NO:[0,0,0,null,null,null,null,null]},UNKNOWN:{YES:[3,0,3,0,-1.1638,null,-.3879333333,2.4889],NO:[0,0,0,null,null,null,null,null]}},
+SOL:{OLD_5MIN_CONTROL:{YES:[9,3,6,.3333333333,-4.2813,.1226333333,-.7748666667,6.8407],NO:[10,6,4,.6,.7065,.4578666667,-.510175,8.76]},DYNAMIC_V1:{YES:[0,0,0,null,null,null,null,null],NO:[0,0,0,null,null,null,null,null]},UNKNOWN:{YES:[0,0,0,null,null,null,null,null],NO:[0,0,0,null,null,null,null,null]}},
+XRP:{OLD_5MIN_CONTROL:{YES:[22,8,14,.3636363636,-7.5752,.1784125,-.6430357143,8.9417],NO:[7,6,1,.8571428571,.319,.1576166667,-.6267,7.0238]},DYNAMIC_V1:{YES:[0,0,0,null,null,null,null,null],NO:[0,0,0,null,null,null,null,null]},UNKNOWN:{YES:[0,0,0,null,null,null,null,null],NO:[0,0,0,null,null,null,null,null]}},
+ZEC:{OLD_5MIN_CONTROL:{YES:[44,22,22,.5,1.2083,.6337136364,-.5787909091,7.2765],NO:[33,22,11,.6666666667,2.481,.4270136364,-.6284818182,6.4394]},DYNAMIC_V1:{YES:[0,0,0,null,null,null,null,null],NO:[0,0,0,null,null,null,null,null]},UNKNOWN:{YES:[0,0,0,null,null,null,null,null],NO:[0,0,0,null,null,null,null,null]}}
+};
+const MGMT_TREND=[["09-22",5,-.4795],["09-23",13,-2.4496],["09-24",44,-1.6106],["09-25",21,-4.6111],["09-26",28,-.2708],["09-27",34,-9.6591],["09-28",63,-10.3904],["09-29",53,-4.619],["09-30",67,-4.2796],["10-01",31,-1.1117],["10-02",42,-2.2244],["10-03",1,.0486]];
+const FMT=v=>v===null||v===undefined?'UNAVAILABLE':v;
+const PCT=v=>v===null||v===undefined?'UNAVAILABLE':(v*100).toFixed(1)+'%';
+const MIN=v=>v===null||v===undefined?'UNAVAILABLE':v.toFixed(2)+'m';
+function renderMgmtVersions(){
+ const a=Object.entries(MGMT_VERSIONS);
+ mgmtVersionTable.innerHTML='<table><thead><tr><th>Version</th><th>Positions</th><th>W</th><th>L</th><th>Win rate</th><th>Gross</th><th>Fees</th><th>Net</th><th>Avg P/L</th><th>Avg hold</th><th>Median hold</th></tr></thead><tbody>'+a.map(([k,x])=>'<tr><td>'+k+'</td><td>'+x.positions+'</td><td>'+x.wins+'</td><td>'+x.losses+'</td><td>'+PCT(x.winRate)+'</td><td>'+(x.gross===null?'UNAVAILABLE':M(x.gross))+'</td><td>'+(x.fees===null?'UNAVAILABLE':M(x.fees))+'</td><td class="'+(x.net!==null&&x.net>=0?'g':'r')+'">'+(x.net===null?'UNAVAILABLE':M(x.net))+'</td><td>'+(x.avgPl===null?'UNAVAILABLE':M(x.avgPl))+'</td><td>'+MIN(x.avgHold)+'</td><td>'+MIN(x.medianHold)+'</td></tr>').join('')+'</tbody></table>';
+}
+function renderHoldVersion(){
+ const v=holdVersion.value,d=HOLD_MGMT[v]||{},entries=Object.entries(d);
+ holdVersionTable.innerHTML=entries.length?'<table><thead><tr><th>Duration</th><th>Positions</th><th>W</th><th>L</th><th>Win rate</th><th>Net</th><th>Avg hold</th><th>Median hold</th></tr></thead><tbody>'+entries.map(([b,x])=>'<tr><td>'+b+'</td><td>'+x[0]+'</td><td>'+x[1]+'</td><td>'+x[2]+'</td><td>'+PCT(x[3])+'</td><td class="'+(x[4]>=0?'g':'r')+'">'+M(x[4])+'</td><td>'+MIN(x[5])+'</td><td>'+MIN(x[6])+'</td></tr>').join('')+'</tbody></table>':'<div class="warnbox">NO SAMPLE FOR '+v+' IN CURRENT PROVIDER EXPORT.</div>';
+}
+function renderAssetMgmt(){
+ const a=assetMgmtAsset.value,v=assetMgmtVersion.value,d=ASSET_MGMT[a]?.[v]||{};
+ const sides=['YES','NO'];
+ assetMgmtTable.innerHTML='<table><thead><tr><th>Asset / side</th><th>Positions</th><th>W</th><th>L</th><th>Win rate</th><th>Net P/L</th><th>Avg winner</th><th>Avg loser</th><th>Avg hold</th></tr></thead><tbody>'+sides.map(s=>{const x=d[s]||[0,0,0,null,null,null,null,null];return '<tr><td>'+a+' / '+(s==='YES'?'UP / YES':'DOWN / NO')+'</td><td>'+x[0]+'</td><td>'+x[1]+'</td><td>'+x[2]+'</td><td>'+PCT(x[3])+'</td><td class="'+(x[4]!==null&&x[4]>=0?'g':'r')+'">'+(x[4]===null?'UNAVAILABLE':M(x[4]))+'</td><td>'+(x[5]===null?'UNAVAILABLE':M(x[5]))+'</td><td>'+(x[6]===null?'UNAVAILABLE':M(x[6]))+'</td><td>'+MIN(x[7])+'</td></tr>'}).join('')+'</tbody></table>';
+}
+function renderMgmtTrend(){
+ let el=mgmtTrend,w=900,h=220,p=38,vals=MGMT_TREND.map(x=>x[2]),mn=Math.min(0,...vals),mx=Math.max(0,...vals),sp=mx-mn||1,bw=(w-2*p)/MGMT_TREND.length,Y=n=>h-p-(n-mn)*(h-2*p)/sp,z=Y(0),s='<line x1="'+p+'" y1="'+z+'" x2="'+(w-p)+'" y2="'+z+'" stroke="#35506c"/>';
+ MGMT_TREND.forEach((x,i)=>{let xx=p+i*bw+5,yy=Y(x[2]),bh=Math.max(1,Math.abs(yy-z));s+='<rect x="'+xx+'" y="'+Math.min(z,yy)+'" width="'+Math.max(5,bw-10)+'" height="'+bh+'" fill="'+(x[2]>=0?'#3c7a63':'#80505a')+'"><title>'+x[0]+' · n='+x[1]+' · '+M(x[2])+' · OLD_5MIN_CONTROL</title></rect><text x="'+(xx+(bw-10)/2)+'" y="'+(h-10)+'" text-anchor="middle" fill="#8fa4b7" font-size="10">'+x[0]+'</text>'});
+ el.setAttribute('viewBox','0 0 '+w+' '+h);el.innerHTML=s;
+}
 const M=n=>new Intl.NumberFormat('en-US',{style:'currency',currency:'USD',minimumFractionDigits:2,maximumFractionDigits:4}).format(n);
 const DAILY=[["09-22",5,-0.4795],["09-23",16,-2.4496],["09-24",49,-1.6106],["09-25",24,-4.6111],["09-26",28,-0.2708],["09-27",49,-9.6591],["09-28",89,-10.3904],["09-29",80,-5.7828],["09-30",97,-4.2796],["10-01",39,-1.1117],["10-02",50,-2.2244],["10-03",1,0.0486]];
 const DAILYPNL=DAILY.map(x=>[x[0],x[2]]);
@@ -43,4 +119,13 @@ bars(daily,DAILY.map(x=>[x[0],x[1]]));bars(dailypnl,DAILYPNL);bars(hours,HOURS.m
 {let el=cum,w=800,h=230,p=30,v=CUM.map(x=>x[1]),mn=Math.min(0,...v),mx=Math.max(0,...v),sp=mx-mn||1,X=i=>p+i*(w-2*p)/(CUM.length-1),Y=n=>h-p-(n-mn)*(h-2*p)/sp,pts=CUM.map((x,i)=>`${X(i)},${Y(x[1])}`).join(' ');el.setAttribute('viewBox',`0 0 ${w} ${h}`);el.innerHTML=`<line x1="${p}" y1="${Y(0)}" x2="${w-p}" y2="${Y(0)}" stroke="#6c7d90" stroke-dasharray="4 4"/><polyline points="${pts}" fill="none" stroke="#66b3ff" stroke-width="2"/><text x="${p}" y="16" fill="#8fa4b7" font-size="11">dataset end ${M(CUM[CUM.length-1][1])}</text>`}
 function rec(a,title){return `<h3>${title}</h3><table><thead><tr><th>CSV row</th><th>Asset</th><th>Ticker</th><th>Side</th><th>Net</th></tr></thead><tbody>${a.map(x=>`<tr><td>${x[0]}</td><td>${x[1]}</td><td class="mono">${x[2]}</td><td>${x[3]}</td><td class="${x[4]>=0?'g':'r'}">${M(x[4])}</td></tr>`).join('')}</tbody></table>`}
 best.innerHTML=rec(BEST,'Best provider rows');worst.innerHTML=rec(WORST,'Worst provider rows');
+
+renderMgmtVersions();
+renderHoldVersion();
+renderAssetMgmt();
+renderMgmtTrend();
+holdVersion.addEventListener('change',renderHoldVersion);
+assetMgmtAsset.addEventListener('change',renderAssetMgmt);
+assetMgmtVersion.addEventListener('change',renderAssetMgmt);
+
 </script></body></html>
