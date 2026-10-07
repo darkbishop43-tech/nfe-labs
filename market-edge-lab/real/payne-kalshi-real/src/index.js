@@ -3483,7 +3483,16 @@ async function managePayneRealPosition(env,control,series,postImpl=kalshiPayneOr
   const feature=featureForCandidate(featureState,position.marketTicker,position.outcomeSide,position.asset,Number(series.threshold),quote?.market||null);
   const bid=position.outcomeSide==='YES'?Number(quote?.market?.yesBid):Number(quote?.market?.noBid);
   const ageMs=nowMs-Date.parse(position.entryTime||position.filledAt||'');
-  const decision=managementDecision({score:feature?.score,heldMs:ageMs,owned:true});
+  const currentPaperDecision=feature?.available
+    ? paperDecision({score:feature.score,edge:feature.edge,move:feature.move,threshold:Number(series.threshold)})
+    : {label:'MISSING'};
+  const decision=managementDecision({
+    heldMs:ageMs,
+    owned:true,
+    marketPresent:quote?.ok===true,
+    decisionLabel:currentPaperDecision.label,
+  });
+  position.currentPaperDecision=currentPaperDecision.label;
   position.currentScore=feature?.available?feature.score:null;
   position.currentMarketPrice=Number.isFinite(bid)?bid:null;
   position.holdDurationMs=Number.isFinite(ageMs)?ageMs:null;
