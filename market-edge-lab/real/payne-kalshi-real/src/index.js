@@ -3075,6 +3075,7 @@ async function buildFastUiState(env) {
     payneObservationAt:latestPersistent?.at||latestPersistent?.clocks?.payne?.observationAt||null,
     decisions:latestPersistent?.decisions||[],
     selected:latestPersistent?.selected||null,
+    pipeline:latestPersistent?.pipeline||null,
     realExecution,
   };
 }
