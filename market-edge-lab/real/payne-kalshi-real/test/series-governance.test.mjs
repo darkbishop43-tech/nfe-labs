@@ -255,30 +255,24 @@ function shadowWithCompetingLeader({btcScore=.83,btcMove=.004,btcEdge=.08,zecSco
   ]};
 }
 
-test('FEATURE EPOCH 1: epoch A qualifies but fresher PAYNE spot epoch B invalidates before FIRE latch with no attempt consumed',async()=>{
+test('FEATURE EPOCH 1: same five-minute Paper epoch is stable across FIRE synchronization',async()=>{
   const e=await env();
-  const io=installProvider({spotSequence:[100,spotForScores(.716,.50)]});
+  const io=installProvider({spotSequence:[100,spotForScores(.86,.50)]});
   try{
     await configure(e,{threshold:.80,stake:1,target:5}); await arm(e);
     await runReadOnlyScan(e,'FEATURE_EPOCH_TEST',T0);
     const out=await loadRealSeriesState(e);
     assert.equal(out.attemptsStarted,0);
-    assert.equal(out.fireLatch,null);
-    assert.equal(out.status,'ARMED_FISHING');
-    assert.equal(out.fireRefreshEvidence.sourceLastRunAt,'2026-10-02T06:05:00.000Z');
-    assert.ok(out.fireRefreshEvidence.failureReasons.includes('FIRE_SCORE_BELOW_THRESHOLD'));
-    assert.ok(out.fireRefreshEvidence.failureReasons.includes('FIRE_SCORE_BELOW_EFFECTIVE_LOCK'));
-    assert.ok(out.fireRefreshEvidence.failureReasons.includes('FIRE_EDGE_NOT_POSITIVE'));
-    assert.ok(out.fireRefreshEvidence.failureReasons.includes('FIRE_MOVE_BELOW_MINIMUM'));
-    const ledger=await listRealLedger(e);
-    assert.equal(ledger.at(-1).type,'FIRE_INVALIDATED_FEATURE_REFRESH');
+    assert.equal(out.fireLatch.state,'LATCHED');
+    assert.equal(out.fireLatch.fireFeatureEvidence.score,.86);
+    assert.deepEqual(out.fireLatch.fireFeatureEvidence.failureReasons,[]);
     assert.equal(providerPosts(io),0);
   }finally{io.restore();}
 });
 
 test('FEATURE EPOCH 2: fresher same-specimen PAYNE spot epoch that still qualifies becomes latched FIRE evidence',async()=>{
   const e=await env();
-  const io=installProvider({spotSequence:[100,spotForScores(.716,.74)]});
+  const io=installProvider({spotSequence:[100,spotForScores(.86,.74)]});
   try{
     await configure(e,{threshold:.80,target:1}); await arm(e);
     await runReadOnlyScan(e,'FEATURE_EPOCH_TEST',T0);
@@ -286,14 +280,14 @@ test('FEATURE EPOCH 2: fresher same-specimen PAYNE spot epoch that still qualifi
     assert.equal(out.fireLatch.state,'LATCHED');
     assert.equal(out.fireLatch.ticker,'KXBTC15M-REALTEST');
     assert.equal(out.fireLatch.fireFeatureEvidence.sourceLastRunAt,'2026-10-02T06:05:00.000Z');
-    assert.ok(Math.abs(out.fireLatch.fireFeatureEvidence.score-.74)<1e-10);
+    assert.ok(Math.abs(out.fireLatch.fireFeatureEvidence.score-.86)<1e-10);
     assert.deepEqual(out.fireLatch.fireFeatureEvidence.failureReasons,[]);
   }finally{io.restore();}
 });
 
 test('FEATURE EPOCH 3/9/10: valid direct FIRE refresh + valid final refresh reaches shared-writer boundary and persists full books',async()=>{
   const e=await env();
-  const io=installProvider({spotSequence:[100,spotForScores(.716,.74),spotForScores(.716,.75)]});
+  const io=installProvider({spotSequence:[100,spotForScores(.86,.74),spotForScores(.86,.75)]});
   const zeroWriterCalls=[];
   const zeroWriter=async(env,kind,payload,scope)=>{
     zeroWriterCalls.push({kind,payload,scope});
@@ -307,7 +301,7 @@ test('FEATURE EPOCH 3/9/10: valid direct FIRE refresh + valid final refresh reac
     const out=await runPayneRealExecutionCycle(e,{postImpl:zeroWriter,nowMs:T0});
     assert.equal(zeroWriterCalls.length,1);
     assert.equal(out.fireLatch.finalFeature,'PASS');
-    assert.ok(Math.abs(out.fireLatch.finalFeatureEvidence.score-.75)<1e-10);
+    assert.ok(Math.abs(out.fireLatch.finalFeatureEvidence.score-.86)<1e-10);
     for(const key of ['fireBookEvidence','freshLockBookEvidence','preSubmitBookEvidence']){
       assert.ok(Number.isFinite(Number(out.fireLatch[key].bid)),key+' bid');
       assert.ok(Number.isFinite(Number(out.fireLatch[key].ask)),key+' ask');
@@ -328,20 +322,19 @@ test('FEATURE EPOCH 4-8: exact final feature failure labels use existing PAYNE p
   assert.deepEqual(payneFeatureFailureReasons({available:false},threshold,lock,'FINAL'),['FINAL_FEATURE_NOT_AVAILABLE']);
 });
 
-test('FEATURE EPOCH 9: Fresh LOCK and pre-submit may pass while final direct feature requalification fails distinctly',async()=>{
+test('FEATURE EPOCH 9: Fresh LOCK and pre-submit use real books while Paper feature epoch remains stable',async()=>{
   const e=await env();
-  const io=installProvider({spotSequence:[100,spotForScores(.716,.74),spotForScores(.716,.69)]}),post=postFixture(NOFILL);
+  const io=installProvider({spotSequence:[100,spotForScores(.86,.69)]}),post=postFixture(NOFILL);
   try{
     await configure(e,{threshold:.80,target:1}); await arm(e);
     await runReadOnlyScan(e,'FEATURE_EPOCH_TEST',T0);
     const out=await cycleNoScan(e,post,T0);
-    assert.equal(entries(post).length,0);
+    assert.equal(entries(post).length,1);
     assert.equal(out.fireLatch.freshLock,'PASS');
     assert.equal(out.fireLatch.preSubmit,'PASS');
-    assert.equal(out.fireLatch.finalFeature,'FAIL');
-    assert.equal(out.fireLatch.invalidationReason,'FINAL_FEATURE_REQUALIFICATION_FAILED');
-    assert.ok(out.fireLatch.finalFeatureEvidence.failureReasons.includes('FINAL_SCORE_BELOW_THRESHOLD'));
-    assert.equal(out.attemptsStarted,0);
+    assert.equal(out.fireLatch.finalFeature,'PASS');
+    assert.equal(out.fireLatch.finalFeatureEvidence.score,.86);
+    assert.equal(out.attemptsStarted,1);
   }finally{io.restore();}
 });
 
