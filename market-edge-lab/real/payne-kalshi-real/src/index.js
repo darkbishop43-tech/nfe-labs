@@ -3330,6 +3330,15 @@ export async function reconcileUnresolvedEntryFromProvider(env,nowMs=Date.now())
       seriesId:series.seriesId,attemptId:attempt.attemptId,attemptNo,
       ticker,clientOrderId,entryOrderId:orderId,exactOrderCount:exactOrders.length,exactFillCount:exactFills.length,exactSettlementCount:exactSettlements.length,
     });
+    await appendRealLedger(env,'PAYNE_PAPER_BRAIN_EXIT_CLOSED',{
+      seriesId:series.seriesId,
+      attemptId:attempt.attemptId,
+      ticker,
+      outcomeSide:attempt.outcomeSide||null,
+      direction:attempt.direction||null,
+      candidateKey:attempt.paperCandidateKey||paperCandidateKey({ticker,outcomeSide:attempt.outcomeSide,direction:attempt.direction}),
+      exitReason:'settled_flat',
+    });
     await saveRealSeriesState(env,series);
     await settleSeriesControl(env,series,0);
     return {ok:true,classification:'FLAT',reason:'PROVIDER_RECONCILED_SETTLED_FLAT',ticker,clientOrderId,orderId,exactOrderCount:exactOrders.length,exactFillCount:exactFills.length,exactSettlementCount:exactSettlements.length,providerPositionClassification:positionEvidence.classification,series:await loadRealSeriesState(env),control:await loadControl(env),providerWrites:0,orders:0,capitalMovedUsd:0};
@@ -3497,6 +3506,15 @@ async function managePayneRealPosition(env,control,series,postImpl=kalshiPayneOr
     if(seriesTerminal(series)){series.status='COMPLETE_FLAT';series.completedAt=series.completedAt||position.closedAt;}
     else {series.status=(await loadControl(env)).armed?'ARMED_FISHING':'SERIES_PAUSED_DISARMED_CLEAN';}
     await appendRealLedger(env,'PROVIDER_RECONCILED_FLAT',{seriesId:series.seriesId,attemptId:position.attemptId,ticker:position.marketTicker,reason:rec.reason,realizedPnlUsd:realizedPnlFromPosition(position)});
+    await appendRealLedger(env,'PAYNE_PAPER_BRAIN_EXIT_CLOSED',{
+      seriesId:series.seriesId,
+      attemptId:position.attemptId,
+      ticker:position.marketTicker,
+      outcomeSide:position.outcomeSide,
+      direction:position.direction,
+      candidateKey:position.paperCandidateKey||paperCandidateKey(position),
+      exitReason:position.exitReason||rec.reason,
+    });
     await settleSeriesControl(env,series,0);
     return saveRealSeriesState(env,series);
   }
