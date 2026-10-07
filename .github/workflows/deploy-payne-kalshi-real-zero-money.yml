@@ -67,12 +67,30 @@ jobs:
           set -euo pipefail
           base='https://market-edge-payne-kalshi-real.darkbishop43.workers.dev'
 
-          for i in $(seq 1 24); do
+          promoted=0
+          for i in $(seq 1 36); do
             code=$(curl -sS -o /tmp/status.json -w '%{http_code}' "$base/status" || true)
-            [ "$code" = "200" ] && break
+            if [ "$code" = "200" ]; then
+              curl -fsS "$base/real-state" -o /tmp/real-state.json || true
+              curl -fsS "$base/cockpit-data" -o /tmp/cockpit.json || true
+              if jq -e '
+                .featureProvenance.source == "PAYNE_PAPER_BRAIN_ON_KALSHI_REALITY" and
+                .featureProvenance.strategyAuthority == "PAYNE_PAPER" and
+                .control.threshold == 0.80 and
+                .control.effectiveLockThreshold == 0.65
+              ' /tmp/cockpit.json >/dev/null 2>&1 &&
+              jq -e '
+                .control.realControlSchema == "PAYNE_REAL_CONTROL_V2_PAPER_BRAIN" and
+                .control.armed == false and
+                .control.activeThreshold == 0.80
+              ' /tmp/real-state.json >/dev/null 2>&1; then
+                promoted=1
+                break
+              fi
+            fi
             sleep 5
           done
-          test "$code" = "200"
+          test "$promoted" = "1"
 
           curl -fsS "$base/real-state" -o /tmp/real-state.json
           curl -fsS "$base/ui-state" -o /tmp/ui-state.json
@@ -142,7 +160,9 @@ jobs:
 
           jq -e '
             .schema == "PAYNE_REAL_STATE_V1" and
+            .control.realControlSchema == "PAYNE_REAL_CONTROL_V2_PAPER_BRAIN" and
             .control.armed == false and
+            .control.activeThreshold == 0.80 and
             (.control.attemptTarget | type == "number" and . >= 1 and . == floor) and
             (.control.maxEntryDebitUsd | type == "number" and . > 0) and
             (.control.activeThreshold | type == "number" and . >= 0.50 and . <= 1.00) and
