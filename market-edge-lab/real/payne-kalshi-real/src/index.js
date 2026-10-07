@@ -1095,16 +1095,13 @@ function buildCandidateViews(markets, featureState, activeThreshold) {
         selectedAsk:side==='YES'?market.yesAsk:market.noAsk,
         payne:feature,
         decision,
+        paperCandidateKey:paperCandidateKey({ticker:market.ticker,outcomeSide:side,direction:side==='YES'?'UP':'DOWN'}),
       });
     }
   }
-  return out.sort((a,b)=>{
-    const av=a.payne?.available?1:0, bv=b.payne?.available?1:0;
-    if (av!==bv) return bv-av;
-    const as=Number(a.payne?.score), bs=Number(b.payne?.score);
-    if (Number.isFinite(as)&&Number.isFinite(bs)&&as!==bs) return bs-as;
-    return Number(a.timeRemainingMs??Infinity)-Number(b.timeRemainingMs??Infinity);
-  });
+  const available=out.filter(x=>x?.payne?.available===true);
+  const unavailable=out.filter(x=>x?.payne?.available!==true);
+  return [...paperRankCandidates(available),...unavailable];
 }
 
 async function readBaselineActualComparison(env, selected) {
