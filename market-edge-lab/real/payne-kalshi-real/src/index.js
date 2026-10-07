@@ -3672,6 +3672,11 @@ export async function runPayneRealExecutionCycle(env,{postImpl=kalshiPayneOrderP
     return invalidateFireSpecimen(env,series,'TIME_GATE_FAILED',{identityMatch:'PASS'},nowMs);
   }
 
+  const paperAvailability=paperCandidateAvailability(candidate,series,await listRealLedger(env,1000),nowMs);
+  if(paperAvailability.available!==true){
+    return invalidateFireSpecimen(env,series,paperAvailability.reason,{identityMatch:'PASS'},nowMs);
+  }
+
   const auto=await baselineAutoTickerConflict(env,candidate.ticker);
   if(!auto.ok || auto.conflict!==false){
     return invalidateFireSpecimen(env,series,auto.conflict?'HOLD_AUTO_TICKER_CONFLICT':'HOLD_AUTO_OWNERSHIP_UNKNOWN',{identityMatch:'PASS'},nowMs);
