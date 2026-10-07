@@ -66,8 +66,11 @@ test('current-window feature state is PAYNE-owned and matches exact provider win
   const env={PAYNE_KALSHI_STATE:kvMock()};
   const seen=[];
   const state=await buildPayneOwnedFeatureState(env,[m],now,{fetchImpl:fetchSpot({BTC:100},seen)});
-  assert.equal(state.source,'KALSHI_AUTHORITATIVE');
+  assert.equal(state.source,'PAYNE_PAPER_BRAIN_ON_KALSHI_REALITY');
   assert.equal(state.transport,'PAYNE_KALSHI_READ');
+  assert.equal(state.strategyAuthority,'PAYNE_PAPER');
+  assert.equal(state.sourceCadenceMs,300000);
+  assert.deepEqual(state.sourceAssets,['BTC','ETH']);
   assert.equal(state.baselineStateRead,false);
   assert.equal(state.fresh,true);
   assert.equal(state.providerWrites,0);
@@ -110,7 +113,7 @@ test('unavailable current raw spot input fails closed without reusing old featur
   const state=await buildPayneOwnedFeatureState(env,[m],now,{fetchImpl:fetchSpot({})});
   assert.equal(state.fresh,false);
   assert.equal(state.ok,false);
-  assert.equal(state.error,'PAYNE_FRESH_FEATURE_INPUTS_UNAVAILABLE');
+  assert.equal(state.error,'PAYNE_PAPER_BRAIN_FEATURE_INPUTS_UNAVAILABLE');
   assert.deepEqual(state.opportunities,[]);
 });
 
