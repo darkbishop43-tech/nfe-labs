@@ -34,9 +34,14 @@ async function signedRequest(env, method, path, body=null){
     'accept':'application/json'
   };
   if(body!=null) headers['content-type']='application/json';
-  const r=await fetch(BASE_URL+path,{method,headers,body:body==null?undefined:bodyText});
-  const text=await r.text(); let parsed; try{parsed=JSON.parse(text)}catch{parsed={raw:text}};
-  if(!r.ok){ const e=new Error('ROBINHOOD_API_HTTP_'+r.status); e.status=r.status; e.providerBody=parsed; throw e; }
+  // A write whose outcome we cannot see (network error, timeout, 5xx, 408) is AMBIGUOUS: the order may exist.
+  // Only a definite 4xx rejection is a clean no-fill. Ambiguity routes to UNKNOWN + reconciliation, never a retry.
+  let r;
+  try{ r=await fetch(BASE_URL+path,{method,headers,body:body==null?undefined:bodyText}); }
+  catch(err){ const e=new Error('ROBINHOOD_NETWORK_ERROR:'+String(err?.message||err)); e.ambiguous=method!=='GET'; throw e; }
+  let text; try{ text=await r.text(); }catch(err){ const e=new Error('ROBINHOOD_RESPONSE_READ_ERROR'); e.status=r.status; e.ambiguous=method!=='GET'; throw e; }
+  let parsed; try{parsed=JSON.parse(text)}catch{parsed={raw:text}};
+  if(!r.ok){ const e=new Error('ROBINHOOD_API_HTTP_'+r.status); e.status=r.status; e.providerBody=parsed; e.ambiguous=method!=='GET'&&(r.status>=500||r.status===408); throw e; }
   return parsed;
 }
 
