@@ -13,12 +13,18 @@ const initialState = {
   owned: null,
   exitIntent: null,
   reconciliation: 'FLAT',
-  record: null
+  record: null,
+  runConfig: null,
+  run: { targetRuns: null, completedRuns: 0, remainingRuns: 0, runStatus: 'NOT_CONFIGURED' },
+  rev: 0
 };
 
 let durable = structuredClone(initialState);
 const events=[];
+const TOKEN = 'f'.repeat(32);
+const H = { authorization: 'Bearer ' + TOKEN };
 const env = {
+  FOUNDER_EXEC_TOKEN: TOKEN,
   V0A_DB: {
     prepare(sql) {
       return {
@@ -34,7 +40,7 @@ const env = {
           } else if (sql.includes('INSERT INTO robinhood_execution_events')) {
             events.push({type:this.args[1],payload:this.args[2]});
           }
-          return { success:true };
+          return { success:true, meta:{changes:1} };
         }
       };
     }
@@ -54,8 +60,15 @@ assert.equal(before.body.armed, false);
 assert.equal(before.body.state.armed, false);
 assert.equal(before.body.state.reconciliation, 'FLAT');
 
+const unauth = await handleExecutionRequest(new Request('https://obs.local/api/robinhood/execution/arm', { method: 'POST', body: '{}' }), env);
+assert.equal(unauth.status, 401);
+const noSecret = await handleExecutionRequest(new Request('https://obs.local/api/robinhood/execution/arm', { method: 'POST', body: '{}', headers: H }), { ...env, FOUNDER_EXEC_TOKEN: undefined });
+assert.equal(noSecret.status, 503);
+await assert.rejects(() => handleExecutionRequest(new Request('https://obs.local/api/robinhood/execution/arm', { method: 'POST', body: '{}', headers: H }), env), /ARM_REQUIRES_FROZEN_RUN_CONFIG/);
+const cfg = await handleExecutionRequest(new Request('https://obs.local/api/robinhood/execution/run-config', { method: 'POST', headers: H, body: JSON.stringify({ targetRuns: 7, stake: 2, entryType: 'market', exitCondition: 'time', exitValue: '30m', exitType: 'market' }) }), env);
+assert.equal(cfg.status, 200); assert.equal(cfg.body.run.targetRuns, 7); assert.equal(cfg.body.run.remainingRuns, 7); assert.equal(cfg.body.runConfig.frozen, true);
 const armed = await handleExecutionRequest(
-  new Request('https://obs.local/api/robinhood/execution/arm', { method: 'POST', body: '{}' }),
+  new Request('https://obs.local/api/robinhood/execution/arm', { method: 'POST', body: '{}', headers: H }),
   env
 );
 assert.equal(armed.status, 200);
@@ -73,7 +86,7 @@ assert.equal(readArmed.body.armed, true);
 assert.equal(readArmed.body.state.state, 'ARMED');
 
 const disarmed = await handleExecutionRequest(
-  new Request('https://obs.local/api/robinhood/execution/disarm', { method: 'POST', body: '{}' }),
+  new Request('https://obs.local/api/robinhood/execution/disarm', { method: 'POST', body: '{}', headers: H }),
   env
 );
 assert.equal(disarmed.status, 200);
@@ -94,7 +107,7 @@ assert.equal(readDisarmed.body.state.exitIntent, null);
 
 await assert.rejects(
   () => handleExecutionRequest(
-    new Request('https://obs.local/api/robinhood/execution/submit-entry', { method: 'POST', body: '{}' }),
+    new Request('https://obs.local/api/robinhood/execution/submit-entry', { method: 'POST', body: '{}', headers: H }),
     env
   ),
   /DISARMED/
@@ -102,7 +115,7 @@ await assert.rejects(
 
 await assert.rejects(
   () => handleExecutionRequest(
-    new Request('https://obs.local/api/robinhood/execution/submit-exit', { method: 'POST', body: '{}' }),
+    new Request('https://obs.local/api/robinhood/execution/submit-exit', { method: 'POST', body: '{}', headers: H }),
     env
   ),
   /AUTHORITATIVE_OWNED_POSITION_REQUIRED/
