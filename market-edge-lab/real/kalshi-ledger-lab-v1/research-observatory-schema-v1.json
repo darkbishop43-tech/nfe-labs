@@ -1,0 +1,101 @@
+{
+  "schema": "NFE_OS_RESEARCH_OBSERVATORY_V1",
+  "scope": "READ_ONLY_ANALYTICS",
+  "integrity": {
+    "historical_provider_source": "Kalshi realized P/L export",
+    "logical_position_grouping": "market_ticker + side + open_timestamp + close_timestamp",
+    "no_hindsight_inference": true,
+    "missing_values": "UNKNOWN",
+    "contract_move_vs_underlying_move_separate": true,
+    "research_scores_do_not_grant_trading_authority": true
+  },
+  "lanes": {
+    "signal_mapping": {
+      "fields": [
+        "observed_at",
+        "system",
+        "asset",
+        "market_ticker",
+        "direction",
+        "score",
+        "score_band",
+        "qualified",
+        "selected",
+        "filled",
+        "threshold",
+        "outcome",
+        "source"
+      ],
+      "status": "PROSPECTIVE_REQUIRED_FOR_FULL_DISTRIBUTION"
+    },
+    "extreme_move_ledger": {
+      "fields": [
+        "event_id",
+        "asset",
+        "market_ticker",
+        "move_type",
+        "start_at",
+        "start_price",
+        "peak_at",
+        "peak_price",
+        "contract_return_pct",
+        "underlying_return_pct",
+        "pre_move_snapshot_id",
+        "post_move_sequence_id",
+        "source"
+      ],
+      "status": "PARTIAL_HISTORICAL_ENTRY_EXIT_ONLY"
+    },
+    "pattern_comparison": {
+      "fields": [
+        "asset",
+        "observed_windows",
+        "qualifying_windows",
+        "qualification_rate",
+        "selections",
+        "selection_share",
+        "directional_accuracy",
+        "net_pl",
+        "extreme_move_count",
+        "source"
+      ],
+      "status": "PARTIAL_HISTORICAL_FILLED_POSITIONS_ONLY"
+    }
+  },
+  "prospective_snapshot": {
+    "required_evidence": [
+      "value",
+      "observed_at",
+      "source"
+    ],
+    "pre_move": [
+      "contract_price",
+      "underlying_price",
+      "spread",
+      "liquidity",
+      "volume",
+      "volatility",
+      "momentum",
+      "acceleration",
+      "nfe_score",
+      "payne_score",
+      "time_remaining_ms",
+      "M",
+      "T",
+      "V",
+      "Q",
+      "F",
+      "umeo_context"
+    ],
+    "post_move": [
+      "t_plus_30s_price",
+      "t_plus_1m_price",
+      "t_plus_2m_price",
+      "t_plus_5m_price",
+      "settlement_value",
+      "max_additional_gain",
+      "max_drawdown_after_move",
+      "time_above_90pct_peak"
+    ]
+  }
+}
