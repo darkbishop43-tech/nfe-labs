@@ -3189,6 +3189,51 @@ async function providerTickerPositionEvidence(env,ticker) {
   }
 }
 
+// Account-wide read-only exposure snapshot. Historical attempt classification is never modified.
+export async function readCurrentPayneExposure(env,nowMs=Date.now()) {
+  const asOf=new Date(nowMs).toISOString();
+  const [orders,positions]=await Promise.all([
+    readKalshiPages(kalshiGetOnly,env,'/trade-api/v2/portfolio/orders',{collection:'orders',query:{subaccount:0}}),
+    readKalshiPages(kalshiGetOnly,env,'/trade-api/v2/portfolio/positions',{collection:'market_positions',query:{subaccount:0},limit:1000}),
+  ]);
+  const base={asOf,readOnly:true,historicalResult:'UNKNOWN_UNCHANGED',providerWrites:0,ordersSubmitted:0,capitalMovedUsd:0,
+    ordersPaginationComplete:orders.paginationComplete===true,positionsPaginationComplete:positions.paginationComplete===true,
+    ordersPages:orders.pages??0,positionsPages:positions.pages??0};
+  if(!orders.ok || !positions.ok) return {...base,classification:'UNKNOWN',reason:'PROVIDER_PAGINATION_INCOMPLETE',
+    ordersReason:orders.reason,positionsReason:positions.reason};
+  const series=await loadRealSeriesState(env);
+  const activeStatuses=new Set(['resting','pending','open','partially_filled','partial','in_flight','submitted','unfilled']);
+  const terminalStatuses=new Set(['executed','canceled','cancelled','expired','rejected','filled','settled']);
+  const activeOrders=[],ambiguousOrders=[];
+  for(const order of orders.rows) {
+    const status=String(order?.status??'').toLowerCase();
+    if(activeStatuses.has(status)) activeOrders.push(order);
+    else if(!terminalStatuses.has(status)) ambiguousOrders.push(order);
+  }
+  const openPositions=[],ambiguousPositions=[];
+  for(const pos of positions.rows) {
+    const quantity=Number(pos?.position_fp??pos?.position??pos?.quantity);
+    if(!Number.isFinite(quantity)) ambiguousPositions.push(pos);
+    else if(Math.abs(quantity)>1e-9) openPositions.push(pos);
+  }
+  const currentManagement=series?.position && !(
+    String(series.position.status)==='CLOSED' && String(series.position.reconciliationState)==='FLAT');
+  const ownedActiveOrders=activeOrders.filter(o=>
+    String(o?.client_order_id??o?.clientOrderId??'').startsWith('payne-real-'));
+  const anyOpen=openPositions.length>0 || activeOrders.length>0;
+  const anyAmbiguous=ambiguousOrders.length>0 || ambiguousPositions.length>0;
+  const classification=anyOpen?'OPEN':currentManagement?'PENDING':anyAmbiguous?'UNKNOWN':'CLEAR';
+  return {...base,classification,
+    reason:anyOpen?'ACCOUNT_EXPOSURE_PRESENT':currentManagement?'PAYNE_MANAGEMENT_OBLIGATION':
+      anyAmbiguous?'PROVIDER_STATUS_OR_QUANTITY_AMBIGUOUS':'COMPLETE_ACCOUNT_WIDE_ZERO_EXPOSURE',
+    activeOrderCount:activeOrders.length,ambiguousOrderCount:ambiguousOrders.length,
+    openPositionCount:openPositions.length,ambiguousPositionCount:ambiguousPositions.length,
+    payneTaggedActiveOrderCount:ownedActiveOrders.length,
+    outstandingPayneManagement:Boolean(currentManagement),
+    historicalSeriesId:series?.seriesId??null,
+    historicalUnresolvedEntry:series?.unresolvedEntry===true};
+}
+
 export async function reconcileUnresolvedEntryFromProvider(env,nowMs=Date.now()) {
   const series=await loadRealSeriesState(env);
   if(series?.unresolvedEntry!==true) return {
@@ -4060,6 +4105,10 @@ export default {
     }
     if (url.pathname === '/ui-state') {
       return Response.json(await buildFastUiState(env),{headers:{'cache-control':'no-store'}});
+    }
+    if (url.pathname === '/current-exposure') {
+      const result=await readCurrentPayneExposure(env);
+      return Response.json(result,{headers:{'cache-control':'no-store'}});
     }
     if (url.pathname === '/real-state') {
       const control=await loadControl(env);
