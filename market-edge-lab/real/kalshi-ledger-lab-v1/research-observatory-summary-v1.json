@@ -1,0 +1,25 @@
+{
+  "schema": "NFE_OS_RESEARCH_OBSERVATORY_SUMMARY_V1",
+  "provider_rows": 527,
+  "auto_baseline_logical_positions": 402,
+  "asset_coverage_provider_outcomes": "9/9",
+  "historical_score_distribution": "UNAVAILABLE",
+  "observed_window_counts": "UNAVAILABLE",
+  "qualification_counts": "UNAVAILABLE",
+  "pre_move_snapshots": "0/18 extreme realized-move positions",
+  "post_move_sequences": "0/18 extreme realized-move positions",
+  "extreme_move_definition": "held-side Kalshi contract entry-to-exit return; not underlying crypto move and not maximum intratrade excursion",
+  "extreme_move_cohorts": {
+    "100-199pct": 17,
+    "200-399pct": 0,
+    "400pct_plus": 1
+  },
+  "near": {
+    "positions": 202,
+    "filled_position_share": 0.502488,
+    "win_rate": 0.574257,
+    "net_pl": -23.3333,
+    "realized_100pct_plus_moves": 12,
+    "note": "Filled-position share is not qualification rate or observed-opportunity share."
+  }
+}
