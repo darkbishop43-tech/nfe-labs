@@ -14,6 +14,7 @@ on:
   push:
     branches:
       - market-edge-payne-kalshi-real-step1
+      - payne-current-exposure-safety-repair-20261007
     paths:
       - ".github/workflows/deploy-payne-kalshi-real-zero-money.yml"
       - "market-edge-lab/real/payne-kalshi-real/src/**"
