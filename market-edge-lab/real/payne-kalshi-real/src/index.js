@@ -45,7 +45,7 @@ export function parseFounderThreshold(rawValue) {
   if(!/^(?:\d+|\d*\.\d{1,2})$/.test(text)) return {ok:false,error:'PAYNE_CONTROL_THRESHOLD_INVALID_PRECISION'};
   const value=Number(text);
   if(!Number.isFinite(value)) return {ok:false,error:'PAYNE_CONTROL_THRESHOLD_NOT_FINITE'};
-  if(value!==PAYNE_PAPER_RULES.pullScore) return {ok:false,error:'PAYNE_PAPER_PULL_THRESHOLD_FIXED_0_80'};
+  if(![0.60,0.70,PAYNE_PAPER_RULES.pullScore].includes(value)) return {ok:false,error:'PAYNE_CONTROL_THRESHOLD_NOT_APPROVED'};
   return {ok:true,value:Number(value.toFixed(FOUNDER_THRESHOLD_DECIMALS))};
 }
 
