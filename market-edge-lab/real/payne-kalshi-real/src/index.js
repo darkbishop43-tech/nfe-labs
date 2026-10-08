@@ -1,4 +1,5 @@
 import { kalshiReadOnlyProof, kalshiGetOnly } from './kalshi-get-only.js';
+import { readKalshiPages } from './provider-pagination.js';
 import { kalshiPayneOrderPost, PAYNE_WRITE_CONTRACT } from './kalshi-real-write.js';
 import { cockpitHtml } from './cockpit-html.js';
 import { buildPayneOwnedFeatureState, payneFeatureIdentity } from './payne-kalshi-features.js';
@@ -3217,13 +3218,20 @@ export async function reconcileUnresolvedEntryFromProvider(env,nowMs=Date.now())
     }
   };
   const q='?limit=200&subaccount=0&ticker='+encodeURIComponent(ticker);
-  const [positionEvidence,ordersRead,fillsRead,historicalFillsRead,settlementsRead]=await Promise.all([
+  const [positionEvidence,ordersPages,fillsPages,historicalFillsPages,settlementsPages]=await Promise.all([
     providerTickerPositionEvidence(env,ticker),
-    readJson('/trade-api/v2/portfolio/orders'+q),
-    readJson('/trade-api/v2/portfolio/fills'+q),
-    readJson('/trade-api/v2/historical/fills'+q),
-    readJson('/trade-api/v2/portfolio/settlements'+q),
+    readKalshiPages(kalshiGetOnly,env,'/trade-api/v2/portfolio/orders',{collection:'orders',query:{subaccount:0,ticker}}),
+    readKalshiPages(kalshiGetOnly,env,'/trade-api/v2/portfolio/fills',{collection:'fills',query:{subaccount:0,ticker}}),
+    readKalshiPages(kalshiGetOnly,env,'/trade-api/v2/historical/fills',{collection:'fills',query:{subaccount:0,ticker}}),
+    readKalshiPages(kalshiGetOnly,env,'/trade-api/v2/portfolio/settlements',{collection:'settlements',query:{subaccount:0,ticker}}),
   ]);
+  // Preserve the established reconciler's result shape, but only expose rows after cursor exhaustion.
+  const asRead = (page,field)=>({ok:page.ok===true && page.paginationComplete===true,
+    httpStatus:page.httpStatus??(page.ok?200:null),body:{[field]:page.rows},paginationComplete:page.paginationComplete,reason:page.reason});
+  const ordersRead=asRead(ordersPages,'orders');
+  const fillsRead=asRead(fillsPages,'fills');
+  const historicalFillsRead=asRead(historicalFillsPages,'fills');
+  const settlementsRead=asRead(settlementsPages,'settlements');
 
   const providerReadsComplete=positionEvidence?.ok===true && ordersRead.ok && fillsRead.ok && historicalFillsRead.ok && settlementsRead.ok;
   if(!providerReadsComplete){
