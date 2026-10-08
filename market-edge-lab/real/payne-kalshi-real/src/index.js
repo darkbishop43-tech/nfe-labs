@@ -196,7 +196,39 @@ export async function updateFounderControl(env, action, rawValue = null) {
     if (!CONTROL_STAKE_OPTIONS.includes(cfgStake)) throw new Error('PAYNE_REAL_ARM_STAKE_NOT_ALLOWED');
     if (!CONTROL_ATTEMPT_OPTIONS.includes(cfgTarget)) throw new Error('PAYNE_REAL_ARM_ATTEMPT_TARGET_NOT_ALLOWED');
     if (Number(before.requiredExchangeIndex)!==2) throw new Error('PAYNE_REAL_ARM_INDEX2_REQUIRED');
-    if (series?.unresolvedEntry===true) throw new Error('PAYNE_REAL_ENTRY_RECONCILIATION_REQUIRED');
+    if (series?.unresolvedEntry===true) {
+      // Historical uncertainty is not proof of current exposure. Never overwrite
+      // the original attempt: archive its exact state before starting a new series.
+      const exposure=await readCurrentPayneExposure(env);
+      const eligibility=historicalIsolationEligibility({series,exposure});
+      if(!eligibility.eligible) throw new Error('PAYNE_REAL_CURRENT_EXPOSURE_NOT_CLEAR_'+eligibility.reason);
+      const archiveKey='payne-kalshi:historical-isolation:'+series.seriesId;
+      const prior=await kvGetJson(env,archiveKey);
+      if(prior && (prior.series?.seriesId!==series.seriesId ||
+          prior.series?.currentAttempt?.clientOrderId!==series.currentAttempt?.clientOrderId ||
+          prior.series?.unresolvedEntry!==true)) throw new Error('PAYNE_HISTORICAL_ISOLATION_ARCHIVE_CONFLICT');
+      if(!prior) {
+        await kvPutJson(env,archiveKey,{
+          schema:'PAYNE_HISTORICAL_UNKNOWN_ISOLATION_V1',
+          reason:'HISTORICAL_PROVIDER_POST_RESULT_UNKNOWN_NOT_RECLASSIFIED',
+          series:structuredClone(series),
+          evidence:{asOf:exposure.asOf,classification:exposure.classification,
+            ordersPaginationComplete:exposure.ordersPaginationComplete,
+            positionsPaginationComplete:exposure.positionsPaginationComplete,
+            activeOrderCount:exposure.activeOrderCount,openPositionCount:exposure.openPositionCount},
+          isolatedAt:new Date().toISOString()
+        });
+        await appendRealLedger(env,'HISTORICAL_UNKNOWN_ISOLATED_FOR_NEW_SERIES',{
+          historicalSeriesId:series.seriesId,
+          historicalAttemptId:series.currentAttempt.attemptId,
+          historicalClientOrderId:series.currentAttempt.clientOrderId,
+          historicalResult:'UNKNOWN',exposureAsOf:exposure.asOf
+        });
+      }
+      // This local sentinel forces the existing new-series path; no stale series resumes.
+      series={...series,completedAt:new Date().toISOString(),status:'HISTORICAL_UNKNOWN_ISOLATED',
+        isolationArchiveKey:archiveKey};
+    }
     if (series?.position && SERIES_BLOCKING_POSITION_STATUSES.includes(String(series.position.status||''))) throw new Error('PAYNE_REAL_OPEN_POSITION_EXISTS');
     const superseded=await reconcileDisarmedSupersededSeries(env,series,before);
     series=superseded.series;
@@ -4120,8 +4152,10 @@ export default {
         exposureReason:exposure.reason,
         isolationEligible:isolation.eligible===true,
         isolationReason:isolation.reason,
-        operationalArmEligible:false,
-        reason:'HISTORICAL_ISOLATION_NOT_COMMITTED_ARM_REMAINS_BLOCKED',
+        operationalArmEligible:series?.unresolvedEntry!==true ? exposure.classification==='CLEAR' : isolation.eligible===true,
+        reason:series?.unresolvedEntry===true
+          ? (isolation.eligible?'HISTORICAL_UNKNOWN_CAN_BE_ISOLATED_ON_FOUNDER_ARM':isolation.reason)
+          : (exposure.classification==='CLEAR'?'CURRENT_EXPOSURE_CLEAR':'CURRENT_EXPOSURE_NOT_CLEAR'),
         providerWrites:0,ordersSubmitted:0,capitalMovedUsd:0
       },{headers:{'cache-control':'no-store'}});
     }
