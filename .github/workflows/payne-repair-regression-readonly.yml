@@ -1,0 +1,30 @@
+name: PAYNE Repair Regression (Read Only)
+on:
+  push:
+    branches:
+      - payne-current-exposure-safety-repair-20261007
+    paths:
+      - 'market-edge-lab/real/payne-kalshi-real/**'
+      - '.github/workflows/payne-repair-regression-readonly.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  payne-regression:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: market-edge-lab/real/payne-kalshi-real
+    steps:
+      - name: Checkout exact repair branch
+        uses: actions/checkout@v4
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Verify source syntax
+        run: |
+          node --check src/index.js
+          node --check src/provider-pagination.js
+      - name: Run complete PAYNE test suite
+        run: npm test
