@@ -3,6 +3,8 @@
 .mgmtHead{display:flex;align-items:flex-start;gap:10px;justify-content:space-between;flex-wrap:wrap}.mgmtTitle{font-size:18px;font-weight:800}.mgmtControls{display:flex;gap:7px;flex-wrap:wrap}.mgmtControls select{background:#08131e;color:var(--t);border:1px solid var(--l);border-radius:6px;padding:6px 8px;font-size:12px}.mgmtGrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px;margin-top:9px}.mgmtBox{background:#08131e;border:1px solid var(--l);border-radius:8px;padding:9px}.mgmtBox .big{font-size:19px;font-weight:800;margin-top:2px}.warnbox{border-left:3px solid var(--y);padding:9px;background:#121922;color:var(--m);font-size:12px}.okbox{border-left:3px solid var(--g);padding:9px;background:#0d1917;color:var(--m);font-size:12px}.scrollx{overflow-x:auto}.transition{margin:10px 0;padding:9px 10px;border:1px dashed var(--a);border-radius:8px;background:#08131e}.transition strong{color:var(--a)}.sampleNote{font-size:11px;color:var(--m);margin-top:6px}.mgmtTrend{height:220px}.unknownMetric{color:var(--y);font-weight:700}
 
 .txnCurve{height:240px}.txnLegend{display:flex;gap:12px;flex-wrap:wrap;margin:7px 0 0}.txnLegend span{font-size:11px;color:var(--m)}.txnDot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:5px}.txnMini{font-size:11px;color:var(--m);line-height:1.45}.txnStrong{font-weight:800}.txnCallout{border:1px solid var(--l);border-radius:8px;background:#08131e;padding:10px}.txnTable td:nth-child(n+2),.txnTable th:nth-child(n+2){white-space:nowrap}.txnTitle{font-size:18px;font-weight:800}.txnHead{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;flex-wrap:wrap}
+
+.obsTitle{font-size:18px;font-weight:800}.obsHead{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;flex-wrap:wrap}.obsGrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px;margin-top:9px}.obsBox{background:#08131e;border:1px solid var(--l);border-radius:8px;padding:9px}.obsBox .big{font-size:19px;font-weight:800;margin-top:2px}.obsStatus{font-size:10px;text-transform:uppercase;letter-spacing:.08em;margin-top:5px}.recoverable{color:var(--g)}.prospective{color:var(--y)}.obsControls{display:flex;gap:7px;flex-wrap:wrap}.obsControls select{background:#08131e;color:var(--t);border:1px solid var(--l);border-radius:6px;padding:6px 8px;font-size:12px}.obsChart{height:235px}.coverageTable td:nth-child(2),.coverageTable td:nth-child(3){white-space:nowrap}.laneTag{font-size:10px;color:var(--a);letter-spacing:.08em;text-transform:uppercase}.obsDivider{height:1px;background:#1d2c3b;margin:9px 0}
 @media(max-width:600px){main{padding:7px}.two{grid-template-columns:1fr}.v{font-size:19px}table{font-size:11px}}</style></head><body>
 <header><h1>NFE-OS Market Edge — Kalshi Ledger Lab V1</h1><div class="sub">Provider-accounting refresh · 527 raw Kalshi rows · read only · source file (8) verified identical to prior (6)</div></header><main>
 <div class="note"><b>Integrity:</b> RAW PROVIDER ROWS = <b>527</b>. This does <b>not</b> mean 527 independent trades. TRADE EPISODES remain <b>UNKNOWN</b> globally because the provider export has no authoritative episode ID. Duplicate-looking rows remain preserved. The four proven Founder-manual NEAR rows remain excluded only from AUTO_BASELINE aggregates.</div>
@@ -79,11 +81,208 @@
     <section class="panel"><h2>Maker / IOC research comparison</h2><div class="warnbox"><b>RESEARCH EVIDENCE UNAVAILABLE.</b><br>A true Maker vs IOC comparison requires prospective shadow evidence for the same candidate: actual IOC result, hypothetical resting-limit fill, fill delay, price improvement, fee difference, missed fills, missed winners, and avoided losers. No such historical paired dataset is attached to this ledger.</div><div class="sampleNote">Until paired evidence exists, this panel intentionally does not estimate maker savings or fill-rate effects.</div></section>
   </div>
 </section>
+
+<section class="panel" style="margin-top:10px" id="researchObservatory">
+  <div class="obsHead">
+    <div><div class="obsTitle">RESEARCH OBSERVATORY</div><div class="sub">Signal mapping · extreme-move ledger · pattern comparison · historical evidence separated from prospective capture</div></div>
+    <div><span class="badge">READ ONLY</span><span class="badge g">HISTORICAL RECOVERABLE</span><span class="badge y">PROSPECTIVE REQUIRED</span></div>
+  </div>
+
+  <div class="obsGrid">
+    <div class="obsBox"><div class="k">Historical logical positions</div><div class="big">402</div><div class="obsStatus recoverable">RECOVERABLE</div><div class="sub">AUTO_BASELINE governed sample</div></div>
+    <div class="obsBox"><div class="k">Asset provider-outcome coverage</div><div class="big">9 / 9</div><div class="obsStatus recoverable">RECOVERABLE</div><div class="sub">filled logical-position outcomes</div></div>
+    <div class="obsBox"><div class="k">Score distribution coverage</div><div class="big y">UNAVAILABLE</div><div class="obsStatus prospective">PROSPECTIVE</div><div class="sub">no complete historical score join</div></div>
+    <div class="obsBox"><div class="k">100%+ realized contract moves</div><div class="big g">18</div><div class="obsStatus recoverable">RECOVERABLE</div><div class="sub">entry → exit held-side contract return</div></div>
+    <div class="obsBox"><div class="k">Pre-move snapshots</div><div class="big y">0 / 18</div><div class="obsStatus prospective">PROSPECTIVE</div><div class="sub">not present in provider export</div></div>
+    <div class="obsBox"><div class="k">Post-move sequences</div><div class="big y">0 / 18</div><div class="obsStatus prospective">PROSPECTIVE</div><div class="sub">30s / 1m / 2m / 5m path not retained</div></div>
+  </div>
+
+  <div class="note" style="margin-top:10px"><b>Research integrity:</b> a Kalshi contract return is not the same thing as the underlying cryptocurrency return. Historical “extreme moves” below use the held-side contract's <b>entry → exit</b> price change only. They are not maximum intratrade excursion and are not treated as pre-move prediction evidence.</div>
+
+  <div class="grid two">
+    <section class="panel">
+      <div class="laneTag">Lane 1 · Signal mapping</div>
+      <h2>Full score distribution</h2>
+      <div class="warnbox"><b>HISTORICAL SCORE DISTRIBUTION UNAVAILABLE.</b><br>The provider export does not contain a complete decision-time NFE/PAYNE score for every observed opportunity. Low-score observations are therefore not backfilled from price behavior.</div>
+      <div id="researchScoreBands" class="scrollx" style="margin-top:8px"></div>
+      <div class="sampleNote">These bands are research buckets only. Observing a sub-.50 score never grants real-trading authority.</div>
+    </section>
+
+    <section class="panel">
+      <div class="laneTag">Lane 3 · Pattern comparison</div>
+      <h2>WHY NEAR?</h2>
+      <div class="mgmtGrid">
+        <div class="mgmtBox"><div class="k">NEAR filled logical positions</div><div class="big">202</div></div>
+        <div class="mgmtBox"><div class="k">Filled-position share</div><div class="big y">50.2%</div></div>
+        <div class="mgmtBox"><div class="k">NEAR win rate</div><div class="big">57.4%</div></div>
+        <div class="mgmtBox"><div class="k">NEAR net P/L</div><div class="big r">-$23.3333</div></div>
+        <div class="mgmtBox"><div class="k">NEAR 100%+ realized moves</div><div class="big g">12</div></div>
+      </div>
+      <div class="warnbox" style="margin-top:8px"><b>DO NOT CALL THIS QUALIFICATION RATE.</b> The 50.2% figure is NEAR's share of historical filled logical positions. Observed-window counts and qualifying-window counts are still unavailable.</div>
+    </section>
+
+    <section class="panel">
+      <h2>Asset pattern comparison</h2>
+      <div id="researchAssetTable" class="scrollx"></div>
+      <div class="sampleNote">This compares filled-position frequency and realized outcomes only. It does not yet prove model preference or opportunity frequency.</div>
+    </section>
+
+    <section class="panel">
+      <div class="laneTag">Lane 2 · Extreme-move ledger</div>
+      <h2>Realized contract-move cohorts</h2>
+      <div class="mgmtGrid">
+        <div class="mgmtBox"><div class="k">100–199%</div><div class="big g">17</div></div>
+        <div class="mgmtBox"><div class="k">200–399%</div><div class="big">0</div></div>
+        <div class="mgmtBox"><div class="k">400%+</div><div class="big g">1</div></div>
+      </div>
+      <svg id="researchExtremeBars" class="obsChart"></svg>
+      <div class="sampleNote">Disjoint cohorts based on held-side entry → exit Kalshi contract return.</div>
+    </section>
+  </div>
+
+  <section class="panel" style="margin-top:10px">
+    <h2>Extreme Move Observatory — historical specimens</h2>
+    <div class="sub">Every row below exceeded +100% from held-side contract entry price to exit price. This is recoverable provider evidence, not a claim that the move was predictable beforehand.</div>
+    <div id="researchExtremeTable" class="scrollx"></div>
+  </section>
+
+  <div class="grid two" style="margin-top:10px">
+    <section class="panel">
+      <h2>Extreme-move fingerprint coverage</h2>
+      <div id="researchFingerprintCoverage" class="scrollx"></div>
+      <div class="sampleNote">A field can participate in predictive research only when VALUE + OBSERVED_AT + SOURCE are preserved before the outcome.</div>
+    </section>
+
+    <section class="panel">
+      <h2>Post-spike behavior monitor</h2>
+      <div class="warnbox"><b>PROSPECTIVE CAPTURE REQUIRED.</b><br>Historical provider exports preserve entry and exit, but not a continuous 30s / 1m / 2m / 5m contract-price sequence after the first large move. No continuation / consolidation / reversal label is manufactured.</div>
+      <div class="obsGrid">
+        <div class="obsBox"><div class="k">30s post-spike</div><div class="big y">UNKNOWN</div></div>
+        <div class="obsBox"><div class="k">1m post-spike</div><div class="big y">UNKNOWN</div></div>
+        <div class="obsBox"><div class="k">2m post-spike</div><div class="big y">UNKNOWN</div></div>
+        <div class="obsBox"><div class="k">5m post-spike</div><div class="big y">UNKNOWN</div></div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>NEAR realized-move interim view</h2>
+      <div class="sub">Historical entry → exit return for NEAR's +100% specimens. This is <b>not</b> the future “NEAR After the Spike” path overlay.</div>
+      <svg id="researchNearExtreme" class="obsChart"></svg>
+    </section>
+
+    <section class="panel">
+      <h2>Prospective capture contract</h2>
+      <div class="okbox"><b>Future specimen standard:</b> every research value should preserve <span class="mono">VALUE + OBSERVED_AT + SOURCE</span>. Pre-move capture should include contract price, underlying price, spread, liquidity, volume, volatility, momentum, acceleration, NFE/PAYNE scores, time remaining, M/T/V/Q/F and UMEO context where those inputs actually exist.</div>
+      <div class="warnbox" style="margin-top:8px"><b>Post-move capture:</b> T+30s, T+1m, T+2m, T+5m, settlement, maximum additional gain, maximum drawdown after the event, and time retained near the peak.</div>
+    </section>
+  </div>
+
+  <section class="panel" style="margin-top:10px">
+    <h2>Research coverage / UNKNOWN diagnostics</h2>
+    <div id="researchCoverageTable" class="scrollx"></div>
+    <div class="sampleNote">UNKNOWN is a research-quality metric. Missing evidence remains visible rather than being inferred from the final trade result.</div>
+  </section>
+</section>
 <section class="panel" style="margin-top:10px"><h2>Best / worst provider records</h2><div class="grid two"><div id="best"></div><div id="worst"></div></div></section>
 <section class="panel" style="margin-top:10px"><h2>Research-layer status</h2><div class="sub"><span class="badge">Provider accounting: PROVEN</span><span class="badge">AUTO/PAYNE ownership: PARTIAL</span><span class="badge">NFE score join: UNKNOWN for many rows</span><span class="badge">M/T/V/Q/F: not historically joined</span><span class="badge">UMEO context: not joined</span></div><p class="sub">Next research layer is the Master Filled-Trade Forensic Ledger: TRADE ID / SYSTEM / provider proof + decision-time score/RADAR/LOCK + feature state + UMEO context + outcome cohort. Missing fields remain UNKNOWN rather than inferred.</p></section>
 </main>
 <script>
 
+
+
+const RESEARCH_SCORE_BANDS=["<.30",".30–.39",".40–.49",".50–.59",".60–.69",".70–.79",".80–.89",".90+"];
+const RESEARCH_ASSET=[
+["NEAR",202,.502488,.574257,-23.3333,12,0,0],
+["ZEC",77,.191542,.571429,3.6893,3,1,1],
+["DOGE",33,.082090,.393939,-10.5782,0,0,0],
+["XRP",29,.072139,.482759,-7.2562,0,0,0],
+["HYPE",25,.062189,.64,1.206,2,0,0],
+["SOL",19,.047264,.473684,-3.5748,1,0,0],
+["ETH",8,.019900,.5,-.2449,0,0,0],
+["BNB",5,.012438,1,2.0412,0,0,0],
+["BTC",4,.009950,0,-3.6063,0,0,0]
+];
+const RESEARCH_EXTREMES=[
+["ZEC","KXZEC15M-26OCT020045-45","YES",.14,.88,5.285714,7.2417,5.03],
+["NEAR","KXNEAR15M-26SEP300115-15","NO",.28,.84,2.0,3.2188,5.92],
+["NEAR","KXNEAR15M-26SEP280100-00","YES",.38,.94,1.473684,3.7768,6.35],
+["NEAR","KXNEAR15M-26SEP241800-00","NO",.41,1.0,1.439024,.0573,14.03],
+["NEAR","KXNEAR15M-26SEP290315-15","YES",.37,.87,1.351351,2.3788,5.03],
+["NEAR","KXNEAR15M-26SEP270545-45","YES",.42,.967,1.302381,1.0553,5.98],
+["NEAR","KXNEAR15M-26SEP292115-15","YES",.34,.76,1.235294,.7829,3.70],
+["NEAR","KXNEAR15M-26SEP241015-15","NO",.45,1.0,1.222222,1.0653,9.03],
+["HYPE","KXHYPE15M-26OCT010100-00","YES",.42,.917,1.183333,.4745,6.75],
+["HYPE","KXHYPE15M-26SEP241815-15","NO",.46,1.0,1.173913,1.0452,15.03],
+["NEAR","KXNEAR15M-26SEP301215-15","YES",.45,.9605,1.134444,1.962,6.00],
+["NEAR","KXNEAR15M-26OCT011600-00","YES",.41,.86,1.097561,1.6984,5.03],
+["NEAR","KXNEAR15M-26SEP270015-15","NO",.34,.71,1.088235,.3397,6.02],
+["ZEC","KXZEC15M-26SEP291845-45","YES",.48,1.0,1.083333,.5025,7.82],
+["SOL","KXSOL15M-26OCT021645-45","NO",.48,1.0,1.083333,1.5075,7.03],
+["ZEC","KXZEC15M-26SEP290115-15","YES",.47,.971667,1.067376,1.4468,5.05],
+["NEAR","KXNEAR15M-26OCT020600-00","YES",.48,.987,1.05625,1.4658,7.00],
+["NEAR","KXNEAR15M-26SEP242100-00","NO",.50,1.0,1.0,.4825,12.03]
+];
+const RESEARCH_COVERAGE=[
+["Provider entry/exit price","402 / 402","HISTORICAL RECOVERABLE"],
+["Provider realized net P/L","402 / 402","HISTORICAL RECOVERABLE"],
+["Asset / side / ticker","402 / 402","HISTORICAL RECOVERABLE"],
+["Complete NFE/PAYNE score distribution","UNKNOWN","PROSPECTIVE / JOIN REQUIRED"],
+["Observed opportunity windows","UNKNOWN","PROSPECTIVE / JOIN REQUIRED"],
+["Qualifying opportunity windows","UNKNOWN","PROSPECTIVE / JOIN REQUIRED"],
+["Pre-move market snapshots","0 / 18 extreme specimens","PROSPECTIVE REQUIRED"],
+["30s / 1m / 2m / 5m post-move path","0 / 18 extreme specimens","PROSPECTIVE REQUIRED"],
+["Underlying-crypto return matched to contract move","UNKNOWN","PROSPECTIVE / EXTERNAL JOIN REQUIRED"],
+["M/T/V/Q/F decision-time features","UNKNOWN","PROSPECTIVE / SOURCE JOIN REQUIRED"],
+["UMEO context","UNKNOWN","PROSPECTIVE / SOURCE JOIN REQUIRED"]
+];
+const RESEARCH_FINGERPRINT=[
+["Contract entry price","18 / 18","RECOVERABLE"],
+["Contract exit price","18 / 18","RECOVERABLE"],
+["Held-side entry→exit return","18 / 18","DERIVED FROM PROVIDER"],
+["Hold duration","18 / 18","RECOVERABLE"],
+["Net realized P/L","18 / 18","RECOVERABLE"],
+["NFE score before move","UNKNOWN","NOT BACKFILLED"],
+["PAYNE score before move","UNKNOWN","NOT BACKFILLED"],
+["Spread / liquidity / volume","UNKNOWN","PROSPECTIVE"],
+["Momentum / acceleration / volatility","UNKNOWN","PROSPECTIVE"],
+["Underlying crypto path","UNKNOWN","PROSPECTIVE / JOIN"],
+["Post-spike retracement path","UNKNOWN","PROSPECTIVE"]
+];
+function renderResearchScoreBands(){
+ researchScoreBands.innerHTML='<table><thead><tr><th>Score band</th><th>Observations</th><th>Qualified</th><th>Selected</th><th>Filled</th><th>Outcome</th></tr></thead><tbody>'+RESEARCH_SCORE_BANDS.map(b=>'<tr><td>'+b+'</td><td class="y">UNKNOWN</td><td class="y">UNKNOWN</td><td class="y">UNKNOWN</td><td class="y">UNKNOWN</td><td class="y">UNKNOWN</td></tr>').join('')+'</tbody></table>';
+}
+function renderResearchAsset(){
+ researchAssetTable.innerHTML='<table><thead><tr><th>Asset</th><th>Filled positions</th><th>Filled share</th><th>Win rate</th><th>Net P/L</th><th>100%+</th><th>200%+</th><th>400%+</th></tr></thead><tbody>'+RESEARCH_ASSET.map(x=>'<tr><td>'+x[0]+'</td><td>'+x[1]+'</td><td>'+PCT(x[2])+'</td><td>'+PCT(x[3])+'</td><td class="'+(x[4]>=0?'g':'r')+'">'+M(x[4])+'</td><td>'+x[5]+'</td><td>'+x[6]+'</td><td>'+x[7]+'</td></tr>').join('')+'</tbody></table>';
+}
+function renderResearchExtremeTable(){
+ researchExtremeTable.innerHTML='<table><thead><tr><th>Asset</th><th>Ticker</th><th>Side</th><th>Entry</th><th>Exit</th><th>Contract return</th><th>Net P/L</th><th>Hold</th></tr></thead><tbody>'+RESEARCH_EXTREMES.map(x=>'<tr><td>'+x[0]+'</td><td class="mono">'+x[1]+'</td><td>'+x[2]+'</td><td>'+x[3].toFixed(3)+'</td><td>'+x[4].toFixed(3)+'</td><td class="g">+'+(x[5]*100).toFixed(1)+'%</td><td class="g">'+M(x[6])+'</td><td>'+x[7].toFixed(2)+'m</td></tr>').join('')+'</tbody></table>';
+}
+function renderResearchCoverage(){
+ researchCoverageTable.innerHTML='<table class="coverageTable"><thead><tr><th>Evidence field</th><th>Coverage</th><th>Status</th></tr></thead><tbody>'+RESEARCH_COVERAGE.map(x=>'<tr><td>'+x[0]+'</td><td>'+x[1]+'</td><td class="'+(x[2].includes('RECOVERABLE')?'g':'y')+'">'+x[2]+'</td></tr>').join('')+'</tbody></table>';
+ researchFingerprintCoverage.innerHTML='<table><thead><tr><th>Fingerprint field</th><th>Coverage</th><th>Status</th></tr></thead><tbody>'+RESEARCH_FINGERPRINT.map(x=>'<tr><td>'+x[0]+'</td><td>'+x[1]+'</td><td class="'+(x[2].includes('RECOVERABLE')||x[2].includes('DERIVED')?'g':'y')+'">'+x[2]+'</td></tr>').join('')+'</tbody></table>';
+}
+function renderResearchExtremeBars(){
+ const el=researchExtremeBars,w=650,h=210,p=40,data=[['100–199%',17],['200–399%',0],['400%+',1]],mx=17,bw=(w-2*p)/data.length;
+ let s='<line x1="'+p+'" y1="'+(h-p)+'" x2="'+(w-p)+'" y2="'+(h-p)+'" stroke="#35506c"/>';
+ data.forEach((x,i)=>{const bh=(x[1]/mx)*(h-2*p),xx=p+i*bw+25,yy=h-p-bh;s+='<rect x="'+xx+'" y="'+yy+'" width="'+(bw-50)+'" height="'+Math.max(1,bh)+'" fill="#4d7598"><title>'+x[0]+' · n='+x[1]+'</title></rect><text x="'+(xx+(bw-50)/2)+'" y="'+(h-15)+'" text-anchor="middle" fill="#8fa4b7" font-size="11">'+x[0]+'</text><text x="'+(xx+(bw-50)/2)+'" y="'+Math.max(15,yy-6)+'" text-anchor="middle" fill="#e8f1f8" font-size="12">'+x[1]+'</text>'});
+ el.setAttribute('viewBox','0 0 '+w+' '+h);el.innerHTML=s;
+}
+function renderResearchNear(){
+ const rows=RESEARCH_EXTREMES.filter(x=>x[0]==='NEAR');
+ const el=researchNearExtreme,w=850,h=230,p=42,mx=Math.max(...rows.map(x=>x[5])),bw=(w-2*p)/rows.length;
+ let s='<line x1="'+p+'" y1="'+(h-p)+'" x2="'+(w-p)+'" y2="'+(h-p)+'" stroke="#35506c"/>';
+ rows.forEach((x,i)=>{const bh=(x[5]/mx)*(h-2*p),xx=p+i*bw+4,yy=h-p-bh; s+='<rect x="'+xx+'" y="'+yy+'" width="'+Math.max(5,bw-8)+'" height="'+Math.max(1,bh)+'" fill="#4d7598"><title>'+x[1]+' · '+x[2]+' · +'+(x[5]*100).toFixed(1)+'% · '+M(x[6])+'</title></rect><text x="'+(xx+(bw-8)/2)+'" y="'+(h-12)+'" text-anchor="middle" fill="#8fa4b7" font-size="9">'+(i+1)+'</text>'});
+ s+='<text x="'+p+'" y="16" fill="#8fa4b7" font-size="11">12 NEAR historical +100% entry→exit specimens · hover/tap bars for ticker and outcome</text>';
+ el.setAttribute('viewBox','0 0 '+w+' '+h);el.innerHTML=s;
+}
+function renderResearchObservatory(){
+ renderResearchScoreBands();
+ renderResearchAsset();
+ renderResearchExtremeTable();
+ renderResearchCoverage();
+ renderResearchExtremeBars();
+ renderResearchNear();
+}
 
 const TXN_ASSET=[
 ["NEAR",202,8.68251,.511,-14.65079,-23.3333],["ZEC",77,3.48946,.205,7.17876,3.6893],["DOGE",33,1.639,.096,-8.9392,-10.5782],["SOL",19,.8858,.052,-2.689,-3.5748],["HYPE",25,.8124,.048,2.0184,1.206],["XRP",29,.7032,.041,-6.553,-7.2562],["ETH",8,.3569,.021,.112,-.2449],["BTC",4,.2253,.013,-3.381,-3.6063],["BNB",5,.2048,.012,2.246,2.0412]
@@ -211,6 +410,7 @@ bars(daily,DAILY.map(x=>[x[0],x[1]]));bars(dailypnl,DAILYPNL);bars(hours,HOURS.m
 function rec(a,title){return `<h3>${title}</h3><table><thead><tr><th>CSV row</th><th>Asset</th><th>Ticker</th><th>Side</th><th>Net</th></tr></thead><tbody>${a.map(x=>`<tr><td>${x[0]}</td><td>${x[1]}</td><td class="mono">${x[2]}</td><td>${x[3]}</td><td class="${x[4]>=0?'g':'r'}">${M(x[4])}</td></tr>`).join('')}</tbody></table>`}
 best.innerHTML=rec(BEST,'Best provider rows');worst.innerHTML=rec(WORST,'Worst provider rows');
 
+renderResearchObservatory();
 renderTxnForensics();
 renderMgmtVersions();
 renderHoldVersion();
