@@ -1,3 +1,4 @@
+import {historicalIsolationEligibility} from './historical-isolation-gate.js';
 import { kalshiReadOnlyProof, kalshiGetOnly } from './kalshi-get-only.js';
 import { readKalshiPages } from './provider-pagination.js';
 import { kalshiPayneOrderPost, PAYNE_WRITE_CONTRACT } from './kalshi-real-write.js';
@@ -4105,6 +4106,24 @@ export default {
     }
     if (url.pathname === '/ui-state') {
       return Response.json(await buildFastUiState(env),{headers:{'cache-control':'no-store'}});
+    }
+    if (url.pathname === '/operational-readiness') {
+      const exposure=await readCurrentPayneExposure(env);
+      const series=await loadRealSeriesState(env);
+      const control=await loadControl(env);
+      const isolation=historicalIsolationEligibility({series,exposure});
+      return Response.json({
+        readOnly:true,armed:control?.armed===true,
+        historicalResult:series?.unresolvedEntry===true?'UNKNOWN':'NOT_HISTORICAL_UNKNOWN',
+        historicalSeriesId:series?.seriesId??null,
+        currentExposure:exposure.classification,
+        exposureReason:exposure.reason,
+        isolationEligible:isolation.eligible===true,
+        isolationReason:isolation.reason,
+        operationalArmEligible:false,
+        reason:'HISTORICAL_ISOLATION_NOT_COMMITTED_ARM_REMAINS_BLOCKED',
+        providerWrites:0,ordersSubmitted:0,capitalMovedUsd:0
+      },{headers:{'cache-control':'no-store'}});
     }
     if (url.pathname === '/current-exposure') {
       const result=await readCurrentPayneExposure(env);
