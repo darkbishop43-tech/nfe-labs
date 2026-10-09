@@ -60,8 +60,24 @@ jobs:
         run: |
           set -euo pipefail
           base='https://market-edge-payne-kalshi-real.darkbishop43.workers.dev'
-          curl --fail --silent --show-error --max-time 20 "$base/real-state" -o /tmp/payne-pre-real.json
-          curl --fail --silent --show-error --max-time 20 "$base/ui-state" -o /tmp/payne-pre-ui.json
+          # A transient runner-to-Cloudflare timeout must not be mistaken for a trading-safety rejection.
+          # All requests remain GET-only, bounded, and fail closed; no cached state or bypass.
+          host='market-edge-payne-kalshi-real.darkbishop43.workers.dev'
+          get_live_state() {
+            local endpoint="$1" target="$2"
+            echo "PAYNE GET connectivity: ${endpoint}"
+            getent ahosts "$host" | head -n 4 || true
+            if curl --fail --silent --show-error --location --retry 2 --retry-delay 2 --retry-all-errors --connect-timeout 10 --max-time 45 "$base/$endpoint" -o "$target"; then
+              return 0
+            fi
+            echo "Default route failed; attempting IPv4 once (same authoritative endpoint)"
+            curl --ipv4 --fail --silent --show-error --location --connect-timeout 10 --max-time 45 "$base/$endpoint" -o "$target" || {
+              echo "BLOCKED: no fresh authoritative PAYNE /$endpoint data from Cloudflare"
+              return 1
+            }
+          }
+          get_live_state real-state /tmp/payne-pre-real.json
+          get_live_state ui-state /tmp/payne-pre-ui.json
           jq -e '
             .ok == true and .schema == "PAYNE_REAL_STATE_V1" and
             .control.armed == false and
