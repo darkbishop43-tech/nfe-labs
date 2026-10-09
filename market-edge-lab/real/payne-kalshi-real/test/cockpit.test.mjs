@@ -265,15 +265,20 @@ test('Payne Paper decision evidence explains advancement and rejection truthfull
   assert.equal(payneDecisionEvidence({score:.80,edge:.1,move:.003},.80).decision,'PULL_QUALIFIED');
 });
 
-test('cockpit exposes fixed source-proven Paper PULL and fixed LOCK observability',()=>{
+test('cockpit exposes Founder-selected PULL, original LOCK, frozen run settings and rejection evidence',()=>{
   const html=cockpitHtml();
   assert.match(html,/id=\"threshold\" type=\"number\"/);
   assert.match(html,/PAYNE Paper default is \.80/);
   assert.match(html,/LOCK remains fixed at \.65/);
+  assert.match(html,/FOUNDER PULL/);
+  assert.match(html,/EFFECTIVE LOCK/);
+  assert.match(html,/FROZEN SERIES PULL/);
+  assert.match(html,/FROZEN STAKE/);
+  assert.match(html,/REJECTION REASON/);
   assert.match(html,/PAYNE funding route remains Index 2/);
   assert.doesNotMatch(html,/Index 3/);
   assert.equal(parseFounderThreshold('.80').value,.80);
-  assert.equal(parseFounderThreshold('.70').ok,false);
+  assert.deepEqual(parseFounderThreshold('.70'),{ok:true,value:.70});
   assert.equal(effectiveLockThreshold(.50),.65);
   assert.equal(effectiveLockThreshold(.80),.65);
 });
@@ -505,8 +510,10 @@ test('promoted controls default disarmed and freeze source-proven Paper .80 PULL
 
   ctl=await updateFounderControl(env,'DISARM');
   assert.equal(ctl.armed,false);
-  await assert.rejects(updateFounderControl(env,'SET_THRESHOLD','.55'),/PAYNE_PAPER_PULL_THRESHOLD_FIXED_0_80/);
-  await assert.rejects(updateFounderControl(env,'SET_THRESHOLD','.70'),/PAYNE_PAPER_PULL_THRESHOLD_FIXED_0_80/);
+  ctl=await updateFounderControl(env,'SET_THRESHOLD','.55');
+  assert.equal(ctl.activeThreshold,.55);
+  ctl=await updateFounderControl(env,'SET_THRESHOLD','.70');
+  assert.equal(ctl.activeThreshold,.70);
   ctl=await updateFounderControl(env,'SET_THRESHOLD','.80');
   assert.equal(ctl.activeThreshold,.80);
   const armed=await updateFounderControl(env,'ARM');
