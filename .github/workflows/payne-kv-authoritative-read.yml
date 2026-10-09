@@ -20,7 +20,7 @@ jobs:
           test -n "$CLOUDFLARE_API_TOKEN"
           test -n "$CLOUDFLARE_ACCOUNT_ID"
           base="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/storage/kv/namespaces/03352b0ccb034f1bb8206f663a04b125/values"
-          for spec in "control:payne-kalshi:control:v1" "series:payne-kalshi:real-series:v1"; do
+          for spec in "control:payne-kalshi:control:v1" "series:payne-kalshi:real-series:v1" "current:payne-kalshi:current:v1"; do
             label="${spec%%:*}"; key="${spec#*:}"
             encoded=$(jq -nr --arg v "$key" '$v|@uri')
             status=$(curl --silent --show-error --max-time 25 --output "/tmp/$label.json" --write-out '%{http_code}' --header "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "$base/$encoded")
@@ -33,3 +33,6 @@ jobs:
           jq -e '.schema=="PAYNE_REAL_SERIES_V1" and .owner=="PAYNE_KALSHI_REAL" and .unresolvedEntry!=true and ((.position.status // "FLAT") | IN("OPEN","EXIT_RETRY","EXIT_RECONCILIATION_REQUIRED","RECONCILIATION_UNKNOWN") | not) and ((.fireLatch.state // "NONE") | IN("LATCHED","PRE_PROVIDER_VALIDATION","PROVIDER_POST_UNKNOWN") | not) and (.currentAttempt.providerPostStarted != true or (.currentAttempt.status | IN("NO_FILL","FILLED","CLOSED","SETTLED")))' /tmp/series.json >/dev/null || { echo 'BLOCKED_SERIES_EXPOSURE_OR_UNCERTAIN'; exit 1; }
           echo 'KV_PERSISTED_CONTROL_AND_SERIES_GATE_PASS'
           jq -n --slurpfile c /tmp/control.json --slurpfile s /tmp/series.json '{armed:$c[0].armed,threshold:$c[0].activeThreshold,attemptTarget:$c[0].attemptTarget,stake:$c[0].maxEntryDebitUsd,scanEnabled:$c[0].scanEnabled,seriesUpdatedAt:$s[0].updatedAt,unresolvedEntry:$s[0].unresolvedEntry,positionStatus:($s[0].position.status//"FLAT")}'
+
+          jq -e '.at != null and ((.source // "") | type=="string")' /tmp/current.json >/dev/null || { echo 'BLOCKED_MISSING_CURRENT_SCHEDULER_HEARTBEAT'; exit 1; }
+          jq -c '{latestScanAt:.at,scanSource:.source,selectedAsset:.selected.asset,scoreAvailable:.selected.payne.available}' /tmp/current.json
