@@ -13,7 +13,11 @@ export function validateLedger(doc){
 }
 export function buildAlerts(doc){
   if(!validateLedger(doc))throw new Error('PAYNE_LEDGER_NOT_AUTHORITATIVE');
-  return doc.rows.map(classifyPayneRealAlert).filter(Boolean);
+  return doc.rows.map(row=>{
+    const alert=classifyPayneRealAlert(row);
+    const observedAtMs=Date.parse(row?.at||row?.observedAt||'');
+    return alert && Number.isFinite(observedAtMs)?{...alert,observedAtMs}:null;
+  }).filter(Boolean);
 }
 export class PaynePushState {
   constructor(state,env){this.state=state;this.env=env;this.sender=env?.__testSender||sendPushNotification;}
@@ -27,14 +31,32 @@ export class PaynePushState {
       await this.state.storage.put('subscription',{endpoint:s.endpoint,keys:{auth:s.keys.auth,p256dh:s.keys.p256dh}});
       return json({ok:true});
     }
+    if(u.pathname==='/baseline' && req.method==='POST'){
+      const evidence=await req.json().catch(()=>null);
+      // Fail closed on a full window: older identities may have been omitted.
+      if(!evidence?.authoritative || !Array.isArray(evidence.ids) ||
+         !Number.isInteger(evidence.count) || evidence.count<0 ||
+         evidence.count>=200 || !Number.isFinite(evidence.observedAtMs))
+        return json({ok:false,reason:'INCOMPLETE_OR_INVALID_INITIAL_LEDGER'},409);
+      const initialized=await this.state.storage.transaction(async txn=>{
+        if(await txn.get('baseline'))return false;
+        await txn.put('baseline',{atMs:evidence.observedAtMs,count:evidence.count});
+        for(const id of evidence.ids)await txn.put('event:'+id,{state:'HISTORICAL_BASELINE'});
+        return true;
+      });
+      return json({ok:true,initialized,alertsSent:0});
+    }
     if(u.pathname==='/dispatch' && req.method==='POST'){
       const alerts=await req.json().catch(()=>null);
       if(!Array.isArray(alerts))return json({ok:false,error:'INVALID_ALERTS'},400);
+      const baseline=await this.state.storage.get('baseline');
+      if(!baseline)return json({ok:false,reason:'BASELINE_NOT_ESTABLISHED'},409);
+      const eligible=alerts.filter(a=>Number.isFinite(a?.observedAtMs)&&a.observedAtMs>baseline.atMs);
       const sub=await this.state.storage.get('subscription');
       if(!sub)return json({ok:false,reason:'NO_PHONE_ENROLLED'});
       if(!this.env.NFE_PUSH_VAPID_PUBLIC_KEY||!this.env.NFE_PUSH_VAPID_PRIVATE_KEY)return json({ok:false,reason:'VAPID_NOT_CONFIGURED'},503);
       let delivered=0,skipped=0,failed=0;
-      for(const alert of alerts){
+      for(const alert of eligible){
         if(!alert?.id||alert?.source!=='PAYNE_REAL_PERSISTED_LEDGER')continue;
         const key='event:'+alert.id;
         // Durable Objects serialize storage transactions for competing cron requests.
@@ -103,6 +125,11 @@ export default {
       if(!response.ok)return;
       const doc=await response.json();
       const alerts=buildAlerts(doc);
+      // A full ledger page cannot prove historical coverage; never initialize from it.
+      if(doc.count!==doc.rows.length || doc.rows.length>=200)return;
+      const evidence={authoritative:true,ids:alerts.map(a=>a.id),count:doc.rows.length,observedAtMs:Date.now()};
+      const initialized=await endpoint(env).fetch(new Request('https://internal/baseline',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(evidence)}));
+      if(!initialized.ok)return;
       if(alerts.length)await endpoint(env).fetch(new Request('https://internal/dispatch',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(alerts)}));
     }catch{ /* isolated notification failures never affect PAYNE trading */ }
   }
