@@ -107,13 +107,13 @@ jobs:
             if [ "$code" = "200" ]; then
               curl -fsS "$base/real-state" -o /tmp/real-state.json || true
               curl -fsS "$base/cockpit-data" -o /tmp/cockpit.json || true
-              if jq -e '
+              if jq -e --argjson founder_pull "$founder_pull" '
                 .featureProvenance.source == "PAYNE_PAPER_BRAIN_ON_KALSHI_REALITY" and
                 .featureProvenance.strategyAuthority == "PAYNE_PAPER" and
                 .control.threshold == $founder_pull and
                 .control.effectiveLockThreshold == 0.65
               ' /tmp/cockpit.json >/dev/null 2>&1 &&
-              jq -e '
+              jq -e --argjson founder_pull "$founder_pull" '
                 .control.realControlSchema == "PAYNE_REAL_CONTROL_V2_PAPER_BRAIN" and
                 .control.armed == false and
                 .control.activeThreshold == $founder_pull
@@ -161,7 +161,7 @@ jobs:
           echo "LIVE_REAL_STATE_SAFE="
           jq '{schema,control:{armed:.control.armed,attempts:.control.attempts,attemptTarget:.control.attemptTarget,maxEntryDebitUsd:.control.maxEntryDebitUsd,activeThreshold:.control.activeThreshold,requiredExchangeIndex:.control.requiredExchangeIndex,providerWriteAuthority:.control.providerWriteAuthority,realExecution:.control.realExecution},series:{seriesId:.series.seriesId,status:.series.status,attemptsStarted:.series.attemptsStarted,attemptTarget:.series.attemptTarget,maxEntryDebitUsd:.series.maxEntryDebitUsd,threshold:.series.threshold,requiredExchangeIndex:.series.requiredExchangeIndex,unresolvedEntry:.series.unresolvedEntry,positionStatus:.series.position.status},providerWrites,ordersSubmittedByThisRead,capitalMovedUsd}' /tmp/real-state.json
 
-          jq -e '
+          jq -e --argjson founder_pull "$founder_pull" '
             .schema == "PAYNE_FAST_UI_STATE_V1" and
             .uiPollAuthority == "PERSISTED_STATE_ONLY" and
             .providerGets == 0 and
@@ -192,7 +192,7 @@ jobs:
           grep -q "BTC:'<svg" /tmp/cockpit.html
           grep -q "NEAR:'<svg" /tmp/cockpit.html
 
-          jq -e '
+          jq -e --argjson founder_pull "$founder_pull" '
             .schema == "PAYNE_REAL_STATE_V1" and
             .control.realControlSchema == "PAYNE_REAL_CONTROL_V2_PAPER_BRAIN" and
             .control.armed == false and
@@ -213,7 +213,7 @@ jobs:
             .capitalMovedUsd == 0
           ' /tmp/real-state.json >/dev/null
 
-          jq -e '
+          jq -e --argjson founder_pull "$founder_pull" '
             .providerWrites == 0 and
             .orders == 0 and
             .capitalMovedUsd == 0 and
@@ -237,7 +237,7 @@ jobs:
 
           # PAYNE live qualification must now be sourced from PAYNE-owned current
           # Kalshi/spot reads, never Baseline shadow state.
-          jq -e '
+          jq -e --argjson founder_pull "$founder_pull" '
             .featureProvenance.source == "PAYNE_PAPER_BRAIN_ON_KALSHI_REALITY" and
             .featureProvenance.transport == "PAYNE_KALSHI_READ" and
             .featureProvenance.spotTransport == "PAYNE_DIRECT_SPOT_READ" and
@@ -252,7 +252,7 @@ jobs:
           scheduled=0
           for i in $(seq 1 24); do
             curl -fsS "$base/evidence/latest" -o /tmp/latest.json || true
-            if jq -e '
+            if jq -e --argjson founder_pull "$founder_pull" '
               .source == "SCHEDULED_CRON" and
               .providerWrites == 0 and
               .orders == 0 and
@@ -270,7 +270,7 @@ jobs:
           test "$scheduled" = "1"
 
           curl -fsS "$base/export?range=current&format=json" -o /tmp/export.json
-          jq -e '
+          jq -e --argjson founder_pull "$founder_pull" '
             .schema == "PAYNE_KALSHI_EXPORT_V1" and
             .providerWrites == 0 and
             .orders == 0 and
@@ -283,7 +283,7 @@ jobs:
           grep -q 'observationAt,scanSource,asset,direction,outcomeSide,ticker' /tmp/export.csv
 
           curl -fsS "$base/evidence/events?limit=200" -o /tmp/events.json
-          jq -e '
+          jq -e --argjson founder_pull "$founder_pull" '
             .schema == "PAYNE_RESEARCH_EVENT_LEDGER_V1" and
             .providerWrites == 0 and
             .orders == 0 and
