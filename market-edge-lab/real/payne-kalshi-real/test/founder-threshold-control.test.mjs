@@ -13,7 +13,7 @@ test('invalid Founder thresholds are explicitly rejected', () => {
   for (const v of ['0.49','1.01','0.701','abc','']) assert.equal(parseFounderThreshold(v).ok,false);
 });
 test('Founder PULL choice reaches the real decision gate while Paper LOCK stays intact', () => {
-  const specimen = {score:0.75,edge:0.04,move:0.001};
+  const specimen = {score:0.75,edge:0.04,move:0.003};
   const lower=payneStage(specimen,0.70);
   const higher=payneStage(specimen,0.80);
   assert.equal(lower.pullTrigger,true);
