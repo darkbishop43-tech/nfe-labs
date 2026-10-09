@@ -185,9 +185,12 @@ const armedControl=async(e)=>{ // put control in a legitimately armed, matching 
 };
 const cleanPosition=(over={})=>({schema:'PAYNE_REAL_POSITION_V1',owner:'PAYNE_KALSHI_REAL',seriesId:'GOV-S',attemptId:'GOV-S-1',attemptNo:1,status:'CLOSED',asset:'BTC',marketTicker:'KXBTC15M-REALTEST',outcomeSide:'YES',exchangeIndex:2,entryOrderId:'E',entryClientOrderId:'CID',filledCount:1,entryAverageFillPrice:.5,entryTime:'2026-10-02T06:04:00Z',reconciliationState:'FLAT',...over});
 
-test('promoted Paper PULL validator accepts only source-proven .80',()=>{
+test('PAYNE Real PULL accepts Founder-selected range; Paper default stays .80',()=>{
   assert.deepEqual(parseFounderThreshold('.80'),{ok:true,value:.80});
-  for(const raw of ['.50','.55','.64','.65','.70','.75','.85','1.00','.49','1.01','.555','abc','NaN','Infinity']){
+  for(const raw of ['.50','.55','.64','.65','.70','.75','.85','1.00']){
+    assert.deepEqual(parseFounderThreshold(raw),{ok:true,value:Number(raw)},raw);
+  }
+  for(const raw of ['.49','1.01','.555','abc','NaN','Infinity']){
     assert.equal(parseFounderThreshold(raw).ok,false,raw);
   }
 });
@@ -650,7 +653,9 @@ test('GOV 17/18/19: Paper threshold stays fixed while Real stake and attemptTarg
     assert.throws(()=>payneOrderWriteProof('ENTRY',{...p},{...sc,maxEntryDebitUsd:1,seriesConfigFrozen:true,priorAttemptClean:true,entryDebitUsd:sc.entryDebitUsd}),/PAYNE_ENTRY_EXCEEDS_SERIES_STAKE_CAP/);
 
     await updateFounderControl(e,'DISARM');
-    await assert.rejects(updateFounderControl(e,'SET_THRESHOLD',.85),/PAYNE_PAPER_PULL_THRESHOLD_FIXED_0_80/);
+    const updated=await updateFounderControl(e,'SET_THRESHOLD',.85);
+    assert.equal(updated.activeThreshold,.85);
+    assert.equal(updated.armed,false);
   }finally{io.restore();}
 });
 
@@ -908,11 +913,12 @@ test('GOV 24/25/26: AUTO is only read (GET), zero provider POSTs, zero capital m
   }finally{io.restore();}
 });
 
-test('GOV: promoted Paper threshold is fixed while target and stake remain configurable',()=>{
+test('GOV: Founder PULL is configurable while series freeze and exchange safety stay required',()=>{
   for(const [t,st] of [[1,1],[5,1],[10,2],[30,1],[7,3]]){
     assert.equal(frozenSeriesConfig({configFrozen:true,attemptTarget:t,threshold:.80,effectiveLockThreshold:.65,maxEntryDebitUsd:st,requiredExchangeIndex:2}).ok,true);
   }
-  assert.equal(frozenSeriesConfig({configFrozen:true,attemptTarget:5,threshold:.70,effectiveLockThreshold:.65,maxEntryDebitUsd:1,requiredExchangeIndex:2}).ok,false);
+  assert.equal(frozenSeriesConfig({configFrozen:true,attemptTarget:5,threshold:.70,effectiveLockThreshold:.65,maxEntryDebitUsd:1,requiredExchangeIndex:2}).ok,true);
+  assert.equal(frozenSeriesConfig({configFrozen:true,attemptTarget:5,threshold:.70,effectiveLockThreshold:.70,maxEntryDebitUsd:1,requiredExchangeIndex:2}).ok,false);
   assert.equal(frozenSeriesConfig({configFrozen:false,attemptTarget:5,threshold:.80,effectiveLockThreshold:.65,maxEntryDebitUsd:1,requiredExchangeIndex:2}).ok,false);
   assert.equal(frozenSeriesConfig({configFrozen:true,attemptTarget:0,threshold:.80,effectiveLockThreshold:.65,maxEntryDebitUsd:1,requiredExchangeIndex:2}).ok,false);
   assert.equal(frozenSeriesConfig({configFrozen:true,attemptTarget:5,threshold:.80,effectiveLockThreshold:.65,maxEntryDebitUsd:1,requiredExchangeIndex:3}).ok,false);
