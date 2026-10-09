@@ -116,3 +116,25 @@ test('concurrent first-run baselines choose one persisted watermark, without sen
  assert.ok([111111111,222222222].includes((await store.get('baseline')).atMs));
  assert.equal([...store.map.keys()].filter(k=>k.startsWith('event:')).length,0);
 });
+
+test('deployment-time cutoff suppresses late-arriving older events and admits newer ones',async()=>{
+ const store=new MemoryStorage();let sends=0;
+ const env={NFE_PUSH_VAPID_PUBLIC_KEY:'public-fixture',NFE_PUSH_VAPID_PRIVATE_KEY:'private-fixture',__testSender:async()=>{sends++;return true}};
+ const obj=new PaynePushState({storage:store},env);
+ await obj.fetch(new Request('https://internal/enroll',{method:'POST',body:JSON.stringify({endpoint:'https://fcm.googleapis.com/fcm/send/fixture',keys:{p256dh:'fixture',auth:'fixture'}})}));
+ const at=Date.parse('2026-10-09T11:00:00Z');
+ const baseline=await obj.fetch(new Request('https://internal/baseline',{method:'POST',body:JSON.stringify({authoritative:true,ids:[],count:0,observedAtMs:at})}));
+ assert.equal((await baseline.json()).initialized,true);
+ const old=buildAlerts(fixture)[0];
+ const fresh={...old,id:old.id+'-new',observedAtMs:at+1};
+ const report=await (await obj.fetch(new Request('https://internal/dispatch',{method:'POST',body:JSON.stringify([old,fresh])}))).json();
+ assert.equal(report.pushServiceAccepted,1);
+ assert.equal(sends,1);
+ const again=await (await new PaynePushState({storage:store},env).fetch(new Request('https://internal/dispatch',{method:'POST',body:JSON.stringify([fresh])}))).json();
+ assert.equal(again.duplicateSuppressed,1);
+});
+test('malformed initial count or inconsistent identities cannot initialize baseline',async()=>{
+ const store=new MemoryStorage(),obj=new PaynePushState({storage:store},{});
+ const response=await obj.fetch(new Request('https://internal/baseline',{method:'POST',body:JSON.stringify({authoritative:true,ids:[],count:1,observedAtMs:Date.now()})}));
+ assert.equal(response.status,409);assert.equal(await store.get('baseline'),undefined);
+});
