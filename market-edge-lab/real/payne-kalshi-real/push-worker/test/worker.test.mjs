@@ -39,7 +39,7 @@ test('isolated enrollment and dedupe state persist through object reconstruction
 
 test('synthetic push accepted once, restart suppresses duplicate, zero trading writes',async()=>{
  const store=new MemoryStorage();let sends=0;
- const env={NFE_PUSH_VAPID_PUBLIC_KEY:'test-public',NFE_PUSH_VAPID_PRIVATE_KEY:'test-private',PAYNE_COCKPIT_URL:'https://market-edge-payne-kalshi-real.darkbishop43.workers.dev/',__testSender:async(sub,payload)=>{sends++;assert.match(payload.title,/PAYNE REAL/);return true}};
+ const env={PAYNE_PUSH_DISPATCH_ENABLED:'TRUE',NFE_PUSH_VAPID_PUBLIC_KEY:'test-public',NFE_PUSH_VAPID_PRIVATE_KEY:'test-private',PAYNE_COCKPIT_URL:'https://market-edge-payne-kalshi-real.darkbishop43.workers.dev/',__testSender:async(sub,payload)=>{sends++;assert.match(payload.title,/PAYNE REAL/);return true}};
  const make=()=>new PaynePushState({storage:store},env);
  await make().fetch(new Request('https://internal/enroll',{method:'POST',body:JSON.stringify({endpoint:'https://fcm.googleapis.com/fcm/send/test',keys:{p256dh:'abc',auth:'def'}})}));
  await makeBaseline(store,Date.parse('2026-10-09T09:00:00Z'));
@@ -54,7 +54,7 @@ test('synthetic push accepted once, restart suppresses duplicate, zero trading w
 });
 test('synthetic push failure is quarantined, not counted as delivered or blindly retried',async()=>{
  const store=new MemoryStorage();let sends=0;
- const env={NFE_PUSH_VAPID_PUBLIC_KEY:'test-public',NFE_PUSH_VAPID_PRIVATE_KEY:'test-private',__testSender:async()=>{sends++;throw Error('synthetic timeout')}};
+ const env={PAYNE_PUSH_DISPATCH_ENABLED:'TRUE',NFE_PUSH_VAPID_PUBLIC_KEY:'test-public',NFE_PUSH_VAPID_PRIVATE_KEY:'test-private',__testSender:async()=>{sends++;throw Error('synthetic timeout')}};
  const obj=new PaynePushState({storage:store},env);
  await obj.fetch(new Request('https://internal/enroll',{method:'POST',body:JSON.stringify({endpoint:'https://fcm.googleapis.com/fcm/send/test',keys:{p256dh:'abc',auth:'def'}})}));
  await makeBaseline(store,Date.parse('2026-10-09T09:00:00Z'));
@@ -77,7 +77,7 @@ test('historical events suppressed on first baseline, persisted across restart',
  const out=await makeBaseline(store,Date.parse('2026-10-09T11:00:00Z'),existing.map(x=>x.id),existing.length);
  assert.equal(out.initialized,true);assert.equal(out.alertsSent,0);
  const restarted=new PaynePushState({storage:store},{
-  NFE_PUSH_VAPID_PUBLIC_KEY:'test',NFE_PUSH_VAPID_PRIVATE_KEY:'test',
+  PAYNE_PUSH_DISPATCH_ENABLED:'TRUE',NFE_PUSH_VAPID_PUBLIC_KEY:'test',NFE_PUSH_VAPID_PRIVATE_KEY:'test',
   __testSender:async()=>{throw Error('historical alert dispatched')}
  });
  await restarted.fetch(new Request('https://internal/enroll',{method:'POST',body:JSON.stringify({
@@ -119,7 +119,7 @@ test('concurrent first-run baselines choose one persisted watermark, without sen
 
 test('deployment-time cutoff suppresses late-arriving older events and admits newer ones',async()=>{
  const store=new MemoryStorage();let sends=0;
- const env={NFE_PUSH_VAPID_PUBLIC_KEY:'public-fixture',NFE_PUSH_VAPID_PRIVATE_KEY:'private-fixture',__testSender:async()=>{sends++;return true}};
+ const env={PAYNE_PUSH_DISPATCH_ENABLED:'TRUE',NFE_PUSH_VAPID_PUBLIC_KEY:'public-fixture',NFE_PUSH_VAPID_PRIVATE_KEY:'private-fixture',__testSender:async()=>{sends++;return true}};
  const obj=new PaynePushState({storage:store},env);
  await obj.fetch(new Request('https://internal/enroll',{method:'POST',body:JSON.stringify({endpoint:'https://fcm.googleapis.com/fcm/send/fixture',keys:{p256dh:'fixture',auth:'fixture'}})}));
  const at=Date.parse('2026-10-09T11:00:00Z');
@@ -137,4 +137,11 @@ test('malformed initial count or inconsistent identities cannot initialize basel
  const store=new MemoryStorage(),obj=new PaynePushState({storage:store},{});
  const response=await obj.fetch(new Request('https://internal/baseline',{method:'POST',body:JSON.stringify({authoritative:true,ids:[],count:1,observedAtMs:Date.now()})}));
  assert.equal(response.status,409);assert.equal(await store.get('baseline'),undefined);
+});
+
+test('production-default dispatch is explicitly disabled',async()=>{
+ const store=new MemoryStorage();await makeBaseline(store,Date.parse('2026-10-09T09:00:00Z'));
+ const obj=new PaynePushState({storage:store},{NFE_PUSH_VAPID_PUBLIC_KEY:'test',NFE_PUSH_VAPID_PRIVATE_KEY:'test'});
+ const res=await obj.fetch(new Request('https://internal/dispatch',{method:'POST',body:JSON.stringify(buildAlerts(fixture))}));
+ assert.equal(res.status,403);assert.equal((await res.json()).reason,'DISPATCH_DISABLED');
 });
