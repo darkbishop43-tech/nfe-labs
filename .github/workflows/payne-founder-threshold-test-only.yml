@@ -5,6 +5,8 @@ on:
       - payne-founder-threshold-diagnostic-20261009
     paths:
       - .github/workflows/payne-founder-threshold-test-only.yml
+      - market-edge-lab/real/payne-kalshi-real/src/**
+      - market-edge-lab/real/payne-kalshi-real/test/**
   workflow_dispatch:
 permissions:
   contents: read
