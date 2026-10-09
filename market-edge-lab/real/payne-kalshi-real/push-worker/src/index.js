@@ -36,6 +36,7 @@ export class PaynePushState {
       // Fail closed on a full window: older identities may have been omitted.
       if(!evidence?.authoritative || !Array.isArray(evidence.ids) ||
          !Number.isInteger(evidence.count) || evidence.count<0 ||
+         evidence.count!==evidence.ids.length ||
          evidence.count>=200 || !Number.isFinite(evidence.observedAtMs))
         return json({ok:false,reason:'INCOMPLETE_OR_INVALID_INITIAL_LEDGER'},409);
       const initialized=await this.state.storage.transaction(async txn=>{
@@ -125,9 +126,14 @@ export default {
       if(!response.ok)return;
       const doc=await response.json();
       const alerts=buildAlerts(doc);
-      // A full ledger page cannot prove historical coverage; never initialize from it.
-      if(doc.count!==doc.rows.length || doc.rows.length>=200)return;
-      const evidence={authoritative:true,ids:alerts.map(a=>a.id),count:doc.rows.length,observedAtMs:Date.now()};
+      // Deployment-time cutoff is authoritative for eligibility, not proof of historical coverage.
+      // Late-arriving older events remain ineligible even if absent from this bounded window.
+      if(!Number.isInteger(doc.count)||doc.count!==doc.rows.length||doc.rows.length>=200)return;
+      if(doc.rows.some(row=>{
+        const ms=Date.parse(row?.at||row?.observedAt||'');
+        return !Number.isFinite(ms)||!row?.type||!row?.seriesId;
+      }))return;
+      const evidence={authoritative:true,ids:alerts.map(a=>a.id),count:alerts.length,observedAtMs:Date.now()};
       const initialized=await endpoint(env).fetch(new Request('https://internal/baseline',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(evidence)}));
       if(!initialized.ok)return;
       if(alerts.length)await endpoint(env).fetch(new Request('https://internal/dispatch',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(alerts)}));
