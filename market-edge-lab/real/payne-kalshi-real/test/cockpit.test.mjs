@@ -815,3 +815,15 @@ test('cockpit HTML exposes clocks, decision evidence, automatic refresh, and no 
   assert.doesNotMatch(html,/PLACE ORDER/i);
   assert.doesNotMatch(html,/SUBMIT ORDER/i);
 });
+
+test('PAYNE 11 export buttons invoke the approved browser download path',()=>{
+  const html=cockpitHtml();
+  assert.match(html,/async function downloadEvidence\(/);
+  assert.match(html,/URL\.createObjectURL\(blob\)/);
+  assert.match(html,/anchor\.download=filename/);
+  assert.match(html,/response\.ok/);
+  assert.match(html,/AbortController/);
+  assert.match(html,/return downloadEvidence\('\/export\?/);
+  assert.match(html,/downloadEvidence\('\/evidence\/events\?limit=500'/);
+  assert.doesNotMatch(html,/window\.location\.href='\/export\?/);
+});
