@@ -1,0 +1,35 @@
+name: PAYNE Independent Push Worker Zero-Money Tests
+on:
+  push:
+    branches:
+      - payne-real-push-notifications-isolated-20261009
+    paths:
+      - .github/workflows/payne-independent-push-test-only.yml
+      - market-edge-lab/real/payne-kalshi-real/push-worker/**
+      - market-edge-lab/real/payne-kalshi-real/src/payne-push-alerts.js
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  isolated-zero-money:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install approved AUTO Web Push library in isolated package
+        working-directory: market-edge-lab/real/payne-kalshi-real/push-worker
+        run: npm install --ignore-scripts --no-audit --no-fund
+      - name: Validate syntax
+        working-directory: market-edge-lab/real/payne-kalshi-real/push-worker
+        run: node --check src/index.js
+      - name: Test independent Worker synthetic fixtures
+        working-directory: market-edge-lab/real/payne-kalshi-real/push-worker
+        run: npm test
+      - name: Full PAYNE existing zero-money suite
+        working-directory: market-edge-lab/real/payne-kalshi-real
+        run: npm test
