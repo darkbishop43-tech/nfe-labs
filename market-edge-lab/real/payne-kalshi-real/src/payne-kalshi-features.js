@@ -57,8 +57,11 @@ async function coinbaseSpot(product,fetchImpl){
 }
 
 async function assetSpot(asset,fetchImpl){
-  const meta=ASSET_PRICE_META[asset];
-  if(!meta) throw new Error('PAYNE_PAPER_ASSET_NOT_SOURCE_PROVEN');
+  // Contract assets come from the existing Kalshi series discovery.
+  // Coinbase must actually return a valid USD spot; unsupported pairs fail closed.
+  const symbol=String(asset||'').toUpperCase();
+  if(!/^[A-Z0-9]{2,10}$/.test(symbol)) throw new Error('INVALID_MARKET_ASSET_SYMBOL');
+  const meta=ASSET_PRICE_META[symbol]||{coinbase:symbol+'-USD',coingecko:null};
   try{
     return {price:await coinbaseSpot(meta.coinbase,fetchImpl),source:'COINBASE'};
   }catch(error){
@@ -89,7 +92,12 @@ export function payneFeatureIdentity(row,market,outcomeSide){
 }
 
 function sourceProvenMarkets(markets){
-  return (Array.isArray(markets)?markets:[]).filter(m=>PAYNE_PAPER_RULES.sourceAssets.includes(String(m?.asset||'')));
+  // Eligibility is based on genuine discovered Kalshi contracts, not the
+  // narrower historical BTC/ETH Paper source inventory.
+  return (Array.isArray(markets)?markets:[]).filter(m=>
+    /^[A-Z0-9]{2,10}$/.test(String(m?.asset||'')) &&
+    Boolean(m?.ticker && m?.openTime && m?.closeTime)
+  );
 }
 
 export async function buildPayneOwnedFeatureState(env,markets,nowMs=Date.now(),{fetchImpl=fetch,forceRefresh=false}={}){
@@ -118,7 +126,7 @@ export async function buildPayneOwnedFeatureState(env,markets,nowMs=Date.now(),{
     };
   }
 
-  const assets=[...new Set(currentMarkets.map(m=>m?.asset).filter(a=>PAYNE_PAPER_RULES.sourceAssets.includes(a)))];
+  const assets=[...new Set(currentMarkets.map(m=>m?.asset).filter(Boolean))];
   const referencePrices=prior?.prices||{};
 
   const spotRows=await Promise.all(assets.map(async asset=>{
