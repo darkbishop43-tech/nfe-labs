@@ -1,0 +1,28 @@
+name: PAYNE Asset Coverage Zero-Money
+on:
+  push:
+    branches:
+      - payne-real-asset-coverage-isolated-20261009
+    paths:
+      - .github/workflows/payne-asset-coverage-test-only.yml
+      - market-edge-lab/real/payne-kalshi-real/src/payne-kalshi-features.js
+      - market-edge-lab/real/payne-kalshi-real/test/payne-feature-source.test.mjs
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  zero-money:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Check feature-source module syntax
+        working-directory: market-edge-lab/real/payne-kalshi-real
+        run: node --check src/payne-kalshi-features.js
+      - name: Run full PAYNE zero-money regression
+        working-directory: market-edge-lab/real/payne-kalshi-real
+        run: npm test
