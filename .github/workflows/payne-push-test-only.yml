@@ -6,7 +6,9 @@ on:
     paths:
       - .github/workflows/payne-push-test-only.yml
       - market-edge-lab/real/payne-kalshi-real/src/payne-push-alerts.js
+      - market-edge-lab/real/payne-kalshi-real/src/payne-push-delivery.js
       - market-edge-lab/real/payne-kalshi-real/test/payne-push-alerts.test.mjs
+      - market-edge-lab/real/payne-kalshi-real/test/payne-push-delivery.test.mjs
   workflow_dispatch:
 permissions:
   contents: read
@@ -22,7 +24,9 @@ jobs:
           node-version: '22'
       - name: Check alert module syntax
         working-directory: market-edge-lab/real/payne-kalshi-real
-        run: node --check src/payne-push-alerts.js
+        run: |
+          node --check src/payne-push-alerts.js
+          node --check src/payne-push-delivery.js
       - name: Full PAYNE zero-money tests
         working-directory: market-edge-lab/real/payne-kalshi-real
         run: npm test
