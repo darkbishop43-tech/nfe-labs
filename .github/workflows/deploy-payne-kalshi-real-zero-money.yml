@@ -42,6 +42,9 @@ jobs:
         with:
           node-version: "22"
 
+      - name: Check PAYNE cockpit JavaScript syntax before tests
+        run: node --check src/cockpit-html.js
+
       - name: Re-run complete zero-money suite before deploy
         run: npm test
 
