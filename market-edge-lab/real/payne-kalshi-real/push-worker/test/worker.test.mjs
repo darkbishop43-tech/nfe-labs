@@ -25,7 +25,7 @@ class MemoryStorage{
  constructor(){this.map=new Map()}
  async get(k){return this.map.get(k)}
  async put(k,v){this.map.set(k,v)}
- async transaction(f){return f(this)}
+ async transaction(f){const prior=this.queue||Promise.resolve();let release;this.queue=new Promise(r=>{release=r});await prior;try{return await f(this)}finally{release()}}
 }
 test('isolated enrollment and dedupe state persist through object reconstruction',async()=>{
  const store=new MemoryStorage(),env={};
