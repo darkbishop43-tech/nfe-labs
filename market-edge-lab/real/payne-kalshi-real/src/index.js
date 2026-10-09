@@ -3089,6 +3089,9 @@ export function summarizeRealExecutionState({control={},series={},ledger=[],asOf
     safeguards:{
       owner:REAL_OWNER,
       threshold:Number(series?.threshold),
+      effectiveLockThreshold:series?.configFrozen===true?Number(series?.effectiveLockThreshold):null,
+      configFrozen:series?.configFrozen===true,
+      attemptTarget:Number(series?.attemptTarget),
       maxEntryDebitUsd:Number(series?.maxEntryDebitUsd),
       requiredExchangeIndex:2,
       timeInForce:'immediate_or_cancel',
@@ -3135,6 +3138,7 @@ async function buildFastUiState(env) {
       attemptTarget:control.attemptTarget,
       maxEntryDebitUsd:control.maxEntryDebitUsd,
       threshold:control.activeThreshold,
+      effectiveLockThreshold:effectiveLockThreshold(control.activeThreshold),
       requiredExchangeIndex:2,
       scanEnabled:control.scanEnabled,
     },
