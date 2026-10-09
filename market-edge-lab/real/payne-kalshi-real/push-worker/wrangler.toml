@@ -18,4 +18,4 @@ tag = "v1"
 new_sqlite_classes = ["PaynePushState"]
 
 [triggers]
-crons = ["* * * * *"]
+crons = []
