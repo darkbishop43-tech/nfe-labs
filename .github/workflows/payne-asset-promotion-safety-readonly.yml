@@ -1,0 +1,27 @@
+name: PAYNE Asset Promotion Fresh Safety Snapshot (GET Only)
+on:
+  push:
+    branches: [payne-real-asset-coverage-isolated-20261009]
+    paths: [.github/workflows/payne-asset-promotion-safety-readonly.yml]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  live-read:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fresh production state / UI / ledger snapshots - zero writes
+        shell: bash
+        run: |
+          set -euo pipefail
+          base=https://market-edge-payne-kalshi-real.darkbishop43.workers.dev
+          for path in real-state ui-state real-ledger; do
+            curl --fail --silent --show-error --retry 2 --retry-delay 2 --connect-timeout 10 --max-time 45 \
+              "$base/$path" -o "/tmp/payne-$path.json"
+          done
+          jq -e '.ok == true and .schema == "PAYNE_REAL_STATE_V1" and .providerWrites == 0 and .ordersSubmittedByThisRead == 0 and .capitalMovedUsd == 0' /tmp/payne-real-state.json >/dev/null
+          jq -e '.schema == "PAYNE_FAST_UI_STATE_V1" and .providerWrites == 0 and .orders == 0 and .capitalMovedUsd == 0' /tmp/payne-ui-state.json >/dev/null
+          jq -e '.ok == true and .schema == "PAYNE_REAL_LEDGER_EXPORT_V1" and .providerWrites == 0 and .ordersSubmittedByThisRead == 0' /tmp/payne-real-ledger.json >/dev/null
+          jq -c '{armed:.control.armed,threshold:.control.activeThreshold,seriesId:.series.id,frozen:.series.configFrozen,seriesThreshold:.series.threshold,attempts:.series.attemptCount,unresolvedEntry:.series.unresolvedEntry,positionStatus:.series.position.status,fireLatch:.series.fireLatch.state,providerPostStarted:.series.currentAttempt.providerPostStarted,fundingIndex:.control.requiredExchangeIndex}' /tmp/payne-real-state.json
+          jq -c '{armed:.control.armed,owned:.realExecution.ownedPositions,unresolved:.realExecution.unresolvedEntry,providerGets:.providerGets}' /tmp/payne-ui-state.json
+          jq -c '{count:.count,lastType:(.rows[-1].type // null)}' /tmp/payne-real-ledger.json
