@@ -74,7 +74,7 @@ async function makeBaseline(store,ms,ids=[],count=0){
 }
 test('historical events suppressed on first baseline, persisted across restart',async()=>{
  const store=new MemoryStorage(),existing=buildAlerts(fixture);
- const out=await makeBaseline(store,Date.parse('2026-10-09T11:00:00Z'),existing.map(x=>x.id),fixture.rows.length);
+ const out=await makeBaseline(store,Date.parse('2026-10-09T11:00:00Z'),existing.map(x=>x.id),existing.length);
  assert.equal(out.initialized,true);assert.equal(out.alertsSent,0);
  const restarted=new PaynePushState({storage:store},{
   NFE_PUSH_VAPID_PUBLIC_KEY:'test',NFE_PUSH_VAPID_PRIVATE_KEY:'test',
