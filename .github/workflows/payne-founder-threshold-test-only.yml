@@ -5,6 +5,7 @@ on:
       - payne-founder-threshold-diagnostic-20261009
     paths:
       - .github/workflows/payne-founder-threshold-test-only.yml
+      - .github/workflows/deploy-payne-kalshi-real-zero-money.yml
       - market-edge-lab/real/payne-kalshi-real/src/**
       - market-edge-lab/real/payne-kalshi-real/test/**
   workflow_dispatch:
@@ -28,3 +29,20 @@ jobs:
       - name: Complete PAYNE zero-money regression suite
         working-directory: market-edge-lab/real/payne-kalshi-real
         run: npm test
+      - name: Assert production workflow safety gate precedes Wrangler deploy
+        shell: bash
+        run: |
+          node --input-type=module - <<'NODE'
+          import fs from 'node:fs';
+          import assert from 'node:assert/strict';
+          const y=fs.readFileSync('.github/workflows/deploy-payne-kalshi-real-zero-money.yml','utf8');
+          const p=y.indexOf('Pre-deploy PAYNE live safety gate');
+          const d=y.indexOf('name: Deploy PAYNE Worker only');
+          assert.ok(p>0 && d>p,'Live safety gate must precede deployment');
+          assert.match(y,/\.series\.unresolvedEntry != true/);
+          assert.match(y,/\.realExecution\.ownedPositions == 0/);
+          assert.match(y,/\.control\.activeThreshold == \$founder_pull/);
+          assert.doesNotMatch(y,/\.control\.activeThreshold == 0\.80/);
+          assert.doesNotMatch(y,/\.control\.threshold == 0\.80/);
+          console.log('PAYNE workflow ordering and dynamic threshold guards: PASS');
+          NODE
