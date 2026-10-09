@@ -1,0 +1,32 @@
+name: PAYNE Cloudflare KV Gate Zero Money CI
+on:
+  push:
+    branches: [payne-real-asset-coverage-isolated-20261009]
+    paths:
+      - .github/scripts/payne-kv-deployment-safety.sh
+      - .github/workflows/payne-kv-gate-ci.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Confirm accepted source and run complete zero-money tests
+        working-directory: market-edge-lab/real/payne-kalshi-real
+        run: |
+          set -euo pipefail
+          test "$(git hash-object src/payne-kalshi-features.js)" = "27952cd97b577e909319ef9e3252d05589f89ef9"
+          node --check src/payne-kalshi-features.js
+          npm test
+      - name: Fresh authoritative Cloudflare KV gate
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: bash .github/scripts/payne-kv-deployment-safety.sh pre
