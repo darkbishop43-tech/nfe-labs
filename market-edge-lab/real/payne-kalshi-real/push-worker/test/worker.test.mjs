@@ -42,6 +42,7 @@ test('synthetic push accepted once, restart suppresses duplicate, zero trading w
  const env={NFE_PUSH_VAPID_PUBLIC_KEY:'test-public',NFE_PUSH_VAPID_PRIVATE_KEY:'test-private',PAYNE_COCKPIT_URL:'https://market-edge-payne-kalshi-real.darkbishop43.workers.dev/',__testSender:async(sub,payload)=>{sends++;assert.match(payload.title,/PAYNE REAL/);return true}};
  const make=()=>new PaynePushState({storage:store},env);
  await make().fetch(new Request('https://internal/enroll',{method:'POST',body:JSON.stringify({endpoint:'https://fcm.googleapis.com/fcm/send/test',keys:{p256dh:'abc',auth:'def'}})}));
+ await makeBaseline(store,Date.parse('2026-10-09T09:00:00Z'));
  const alert=buildAlerts(fixture)[0];
  const req=()=>new Request('https://internal/dispatch',{method:'POST',body:JSON.stringify([alert])});
  const first=await (await make().fetch(req())).json();
@@ -56,10 +57,47 @@ test('synthetic push failure is quarantined, not counted as delivered or blindly
  const env={NFE_PUSH_VAPID_PUBLIC_KEY:'test-public',NFE_PUSH_VAPID_PRIVATE_KEY:'test-private',__testSender:async()=>{sends++;throw Error('synthetic timeout')}};
  const obj=new PaynePushState({storage:store},env);
  await obj.fetch(new Request('https://internal/enroll',{method:'POST',body:JSON.stringify({endpoint:'https://fcm.googleapis.com/fcm/send/test',keys:{p256dh:'abc',auth:'def'}})}));
+ await makeBaseline(store,Date.parse('2026-10-09T09:00:00Z'));
  const alert=buildAlerts(fixture)[0];
  const req=()=>new Request('https://internal/dispatch',{method:'POST',body:JSON.stringify([alert])});
  assert.equal((await (await obj.fetch(req())).json()).failed,1);
  assert.equal((await (await obj.fetch(req())).json()).duplicateSuppressed,1);
  assert.equal(sends,1);
  assert.ok([...store.map.values()].some(v=>v?.state==='DELIVERY_UNKNOWN_NO_AUTO_RETRY'));
+});
+
+async function makeBaseline(store,ms,ids=[],count=0){
+ const obj=new PaynePushState({storage:store},{});
+ return (await obj.fetch(new Request('https://internal/baseline',{method:'POST',body:JSON.stringify({
+   authoritative:true,ids,count,observedAtMs:ms
+ })}))).json();
+}
+test('historical events suppressed on first baseline, persisted across restart',async()=>{
+ const store=new MemoryStorage(),existing=buildAlerts(fixture);
+ const out=await makeBaseline(store,Date.parse('2026-10-09T11:00:00Z'),existing.map(x=>x.id),fixture.rows.length);
+ assert.equal(out.initialized,true);assert.equal(out.alertsSent,0);
+ const restarted=new PaynePushState({storage:store},{
+  NFE_PUSH_VAPID_PUBLIC_KEY:'test',NFE_PUSH_VAPID_PRIVATE_KEY:'test',
+  __testSender:async()=>{throw Error('historical alert dispatched')}
+ });
+ await restarted.fetch(new Request('https://internal/enroll',{method:'POST',body:JSON.stringify({
+   endpoint:'https://fcm.googleapis.com/fcm/send/test',keys:{p256dh:'abc',auth:'def'}
+ })}));
+ const report=await (await restarted.fetch(new Request('https://internal/dispatch',{
+  method:'POST',body:JSON.stringify(existing)
+ }))).json();
+ assert.equal(report.pushServiceAccepted,0);
+});
+test('initial baseline refuses incomplete evidence, duplicate initialization stays unchanged',async()=>{
+ const store=new MemoryStorage();
+ const obj=new PaynePushState({storage:store},{});
+ const request=(count,authoritative=true)=>new Request('https://internal/baseline',{
+  method:'POST',body:JSON.stringify({count,authoritative,ids:[],observedAtMs:123456789})
+ });
+ assert.equal((await (await obj.fetch(request(200))).json()).ok,false);
+ assert.equal((await (await obj.fetch(request(1,false))).json()).ok,false);
+ assert.equal(await store.get('baseline'),undefined);
+ assert.equal((await (await obj.fetch(request(0))).json()).initialized,true);
+ assert.equal((await (await obj.fetch(request(0))).json()).initialized,false);
+ assert.equal((await store.get('baseline')).atMs,123456789);
 });
