@@ -265,11 +265,16 @@ test('Payne Paper decision evidence explains advancement and rejection truthfull
   assert.equal(payneDecisionEvidence({score:.80,edge:.1,move:.003},.80).decision,'PULL_QUALIFIED');
 });
 
-test('cockpit exposes fixed source-proven Paper PULL and fixed LOCK observability',()=>{
+test('cockpit exposes Founder-selected PULL, original LOCK, frozen run settings and rejection evidence',()=>{
   const html=cockpitHtml();
   assert.match(html,/id=\"threshold\" type=\"number\"/);
   assert.match(html,/PAYNE Paper default is \.80/);
   assert.match(html,/LOCK remains fixed at \.65/);
+  assert.match(html,/FOUNDER PULL/);
+  assert.match(html,/EFFECTIVE LOCK/);
+  assert.match(html,/FROZEN SERIES PULL/);
+  assert.match(html,/FROZEN STAKE/);
+  assert.match(html,/REJECTION REASON/);
   assert.match(html,/PAYNE funding route remains Index 2/);
   assert.doesNotMatch(html,/Index 3/);
   assert.equal(parseFounderThreshold('.80').value,.80);
