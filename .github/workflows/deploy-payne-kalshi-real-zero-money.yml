@@ -57,54 +57,16 @@ jobs:
           test -n "$CLOUDFLARE_API_TOKEN" || { echo "Missing CLOUDFLARE_API_TOKEN"; exit 1; }
           test -n "$CLOUDFLARE_ACCOUNT_ID" || { echo "Missing CLOUDFLARE_ACCOUNT_ID"; exit 1; }
 
-      - name: Pre-deploy PAYNE live safety gate (GET only, fail closed)
-        shell: bash
+      - name: Pre-deploy PAYNE live safety gate (authoritative Cloudflare KV GET only)
         working-directory: .
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: |
           set -euo pipefail
-          base='https://market-edge-payne-kalshi-real.darkbishop43.workers.dev'
-          # A transient runner-to-Cloudflare timeout must not be mistaken for a trading-safety rejection.
-          # All requests remain GET-only, bounded, and fail closed; no cached state or bypass.
-          host='market-edge-payne-kalshi-real.darkbishop43.workers.dev'
-          get_live_state() {
-            local endpoint="$1" target="$2"
-            echo "PAYNE GET connectivity: ${endpoint}"
-            getent ahosts "$host" | head -n 4 || true
-            if curl --fail --silent --show-error --location --retry 2 --retry-delay 2 --retry-all-errors --connect-timeout 10 --max-time 45 "$base/$endpoint" -o "$target"; then
-              return 0
-            fi
-            echo "Default route failed; attempting IPv4 once (same authoritative endpoint)"
-            curl --ipv4 --fail --silent --show-error --location --connect-timeout 10 --max-time 45 "$base/$endpoint" -o "$target" || {
-              echo "BLOCKED: no fresh authoritative PAYNE /$endpoint data from Cloudflare"
-              return 1
-            }
-          }
-          get_live_state real-state /tmp/payne-pre-real.json
-          get_live_state ui-state /tmp/payne-pre-ui.json
-          jq -e '
-            .ok == true and .schema == "PAYNE_REAL_STATE_V1" and
-            .control.armed == false and
-            .series.unresolvedEntry != true and
-            ((.series.position.status // "FLAT") | IN("OPEN","EXIT_RETRY","EXIT_RECONCILIATION_REQUIRED","RECONCILIATION_UNKNOWN") | not) and
-            ((.series.fireLatch.state // "NONE") | IN("LATCHED","PRE_PROVIDER_VALIDATION","PROVIDER_POST_UNKNOWN") | not) and
-            (.series.currentAttempt.providerPostStarted != true or
-              (.series.currentAttempt.status | IN("NO_FILL","FILLED","CLOSED","SETTLED"))) and
-            .control.requiredExchangeIndex == 2 and
-            .writeContract.requiredExchangeIndex == 2 and
-            (.control.activeThreshold | type == "number" and . >= 0.50 and . <= 1.00) and
-            (.series.configFrozen != true or (
-              .series.threshold == .control.activeThreshold and
-              .series.effectiveLockThreshold == 0.65
-            )) and
-            .providerWrites == 0 and .ordersSubmittedByThisRead == 0 and .capitalMovedUsd == 0
-          ' /tmp/payne-pre-real.json >/dev/null || { echo 'BLOCKED: PAYNE live exposure/config or management safety gate'; exit 1; }
-          jq -e '
-            .schema == "PAYNE_FAST_UI_STATE_V1" and .uiPollAuthority == "PERSISTED_STATE_ONLY" and
-            .control.armed == false and .realExecution.armed == false and
-            .realExecution.unresolvedEntry == false and .realExecution.ownedPositions == 0 and
-            .providerGets == 0 and .providerWrites == 0 and .orders == 0 and .capitalMovedUsd == 0
-          ' /tmp/payne-pre-ui.json >/dev/null || { echo 'BLOCKED: PAYNE fast UI state/exposure mismatch'; exit 1; }
-          echo 'Pre-deployment PAYNE persisted-state gate: PASS'
+          bash .github/scripts/payne-kv-deployment-safety.sh pre
+          date -u +%s%3N > /tmp/payne-preflight-ms
 
       - name: Deploy PAYNE Worker only
         env:
@@ -112,227 +74,40 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: npx --yes wrangler@4 deploy | tee /tmp/payne-deploy.txt
 
-      - name: Verify live disarmed Payne real capability
-        shell: bash
+      - name: Verify persisted PAYNE safety, scheduler and feature collection (Cloudflare KV GET)
         working-directory: .
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: |
           set -euo pipefail
-          base='https://market-edge-payne-kalshi-real.darkbishop43.workers.dev'
-
-          founder_pull=$(jq -r '.control.activeThreshold' /tmp/payne-pre-real.json)
-          promoted=0
-          for i in $(seq 1 36); do
-            code=$(curl -sS -o /tmp/status.json -w '%{http_code}' "$base/status" || true)
-            if [ "$code" = "200" ]; then
-              curl -fsS "$base/real-state" -o /tmp/real-state.json || true
-              curl -fsS "$base/cockpit-data" -o /tmp/cockpit.json || true
-              if jq -e --argjson founder_pull "$founder_pull" '
-                .featureProvenance.source == "PAYNE_PAPER_BRAIN_ON_KALSHI_REALITY" and
-                .featureProvenance.strategyAuthority == "PAYNE_PAPER" and
-                .control.threshold == $founder_pull and
-                .control.effectiveLockThreshold == 0.65
-              ' /tmp/cockpit.json >/dev/null 2>&1 &&
-              jq -e --argjson founder_pull "$founder_pull" '
-                .control.realControlSchema == "PAYNE_REAL_CONTROL_V2_PAPER_BRAIN" and
-                .control.armed == false and
-                .control.activeThreshold == $founder_pull
-              ' /tmp/real-state.json >/dev/null 2>&1; then
-                promoted=1
-                break
-              fi
-            fi
-            sleep 5
-          done
-          test "$promoted" = "1"
-
-          curl -fsS "$base/real-state" -o /tmp/real-state.json
-          curl -fsS "$base/ui-state" -o /tmp/ui-state.json
-          curl -fsS "$base/cockpit-data" -o /tmp/cockpit.json
-          curl -fsS "$base/" -o /tmp/cockpit.html
-
-          curl -fsS "https://market-edge-baseline-real.darkbishop43.workers.dev/founder-capital-ledger" -o /tmp/capital-ledger.json
-          echo "PRE_MOVE_PROVIDER_BALANCES="
-          jq '{readOnly,state,provider:{cashUsd:.provider.cashUsd,balanceBreakdown:.provider.balanceBreakdown},safety}' /tmp/capital-ledger.json
-
-          echo "LIVE_SHARD_AUDIT="
-          jq '{
-            observedAt:.updatedAt,
-            requiredFundingIndex:.control.requiredExchangeIndex,
-            fundingBalanceUsd:.index2.balance,
-            markets:[.markets[]|{
-              asset,ticker,status,exchangeIndex,timeRemainingMs,
-              executionEligible,
-              eligibleApartFromShard:(.executionEligible==true and (.ticker|length)>0 and (.timeRemainingMs>390000))
-            }],
-            shardCounts:{
-              index0:([.markets[]|select(.exchangeIndex==0)]|length),
-              index1:([.markets[]|select(.exchangeIndex==1)]|length),
-              index2:([.markets[]|select(.exchangeIndex==2)]|length),
-              index3:([.markets[]|select(.exchangeIndex==3)]|length),
-              otherOrNull:([.markets[]|select((.exchangeIndex!=0) and (.exchangeIndex!=1) and (.exchangeIndex!=2) and (.exchangeIndex!=3))]|length)
-            },
-            index2Assets:[.markets[]|select(.exchangeIndex==2)|.asset]
-          }' /tmp/cockpit.json
-
-          echo "LIVE_UI_STATE_SAFE="
-          jq '{schema,uiPollAuthority,providerGets,providerWrites,orders,capitalMovedUsd,control,realExecution:{schema:.realExecution.schema,seriesId:.realExecution.seriesId,armed:.realExecution.armed,attempted:.realExecution.attempted,target:.realExecution.target,remaining:.realExecution.remaining,filled:.realExecution.filled,noFill:.realExecution.noFill,unknown:.realExecution.unknown,status:.realExecution.status,rawSeriesStatus:.realExecution.rawSeriesStatus,unresolvedEntry:.realExecution.unresolvedEntry,ownedPositions:.realExecution.ownedPositions,lastAttempt:.realExecution.lastAttempt,latestLedgerEvent:.realExecution.latestLedgerEvent}}' /tmp/ui-state.json
-
-          echo "LIVE_REAL_STATE_SAFE="
-          jq '{schema,control:{armed:.control.armed,attempts:.control.attempts,attemptTarget:.control.attemptTarget,maxEntryDebitUsd:.control.maxEntryDebitUsd,activeThreshold:.control.activeThreshold,requiredExchangeIndex:.control.requiredExchangeIndex,providerWriteAuthority:.control.providerWriteAuthority,realExecution:.control.realExecution},series:{seriesId:.series.seriesId,status:.series.status,attemptsStarted:.series.attemptsStarted,attemptTarget:.series.attemptTarget,maxEntryDebitUsd:.series.maxEntryDebitUsd,threshold:.series.threshold,requiredExchangeIndex:.series.requiredExchangeIndex,unresolvedEntry:.series.unresolvedEntry,positionStatus:.series.position.status},providerWrites,ordersSubmittedByThisRead,capitalMovedUsd}' /tmp/real-state.json
-
-          jq -e --argjson founder_pull "$founder_pull" '
-            .schema == "PAYNE_FAST_UI_STATE_V1" and
-            .uiPollAuthority == "PERSISTED_STATE_ONLY" and
-            .providerGets == 0 and
-            .providerWrites == 0 and
-            .orders == 0 and
-            .capitalMovedUsd == 0 and
-            .control.armed == false and
-            .realExecution.schema == "PAYNE_REAL_OBSERVABILITY_V1" and
-            .realExecution.armed == false and
-            (.realExecution.attempted >= 0) and
-            (.realExecution.remaining >= 0) and
-            (.realExecution.filled >= 0) and
-            (.realExecution.noFill >= 0) and
-            (.realExecution.unknown >= 0)
-          ' /tmp/ui-state.json >/dev/null
-
-          grep -q 'CURRENT RUN' /tmp/cockpit.html
-          grep -q 'LAST ATTEMPT' /tmp/cockpit.html
-          grep -q 'BASELINE AGE' /tmp/cockpit.html
-          grep -q 'LAST UI UPDATE' /tmp/cockpit.html
-          grep -q 'setInterval(loadFastState,5000)' /tmp/cockpit.html
-          grep -q 'setInterval(load,60000)' /tmp/cockpit.html
-          grep -q 'PRE-SUBMIT LATCHED' /tmp/cockpit.html
-          grep -q 'FILLED / MANAGING' /tmp/cockpit.html
-          grep -q 'NO_PROVIDER_ATTEMPT' /tmp/cockpit.html
-          grep -q 'PAYNE funding route remains Index 2' /tmp/cockpit.html
-          ! grep -q 'Index 3' /tmp/cockpit.html
-          grep -q "BTC:'<svg" /tmp/cockpit.html
-          grep -q "NEAR:'<svg" /tmp/cockpit.html
-
-          jq -e --argjson founder_pull "$founder_pull" '
-            .schema == "PAYNE_REAL_STATE_V1" and
-            .control.realControlSchema == "PAYNE_REAL_CONTROL_V2_PAPER_BRAIN" and
-            .control.armed == false and
-            .control.activeThreshold == $founder_pull and
-            (.control.attemptTarget | type == "number" and . >= 1 and . == floor) and
-            (.control.maxEntryDebitUsd | type == "number" and . > 0) and
-            (.control.activeThreshold | type == "number" and . >= 0.50 and . <= 1.00) and
-            .control.requiredExchangeIndex == 2 and
-            .control.providerWriteAuthority == "BUILT_INACTIVE_DISARMED" and
-            .control.realExecution == "BUILT_INACTIVE_DISARMED" and
-            (.series.attemptTarget | type == "number" and . >= 1 and . == floor) and
-            (.series.maxEntryDebitUsd | type == "number" and . > 0) and
-            (.series.threshold | type == "number" and . >= 0.50 and . <= 1.00) and
-            .series.requiredExchangeIndex == 2 and
-            .writeContract.requiredExchangeIndex == 2 and
-            .providerWrites == 0 and
-            .ordersSubmittedByThisRead == 0 and
-            .capitalMovedUsd == 0
-          ' /tmp/real-state.json >/dev/null
-
-          jq -e --argjson founder_pull "$founder_pull" '
-            .providerWrites == 0 and
-            .orders == 0 and
-            .capitalMovedUsd == 0 and
-            .safety.payneArmed == false and
-            .safety.realExecution == "BUILT_INACTIVE_DISARMED" and
-            .safety.fundingAuthority == "INDEX2_ONLY_INACTIVE_DISARMED" and
-            .safety.providerPost == "BUILT_INACTIVE_DISARMED" and
-            .safety.zeroMoneyProviderPost == "HARD_DISABLED" and
-            .safety.secondIoc == "HOLD" and
-            .featureProvenance.source == "PAYNE_PAPER_BRAIN_ON_KALSHI_REALITY" and
-            .featureProvenance.transport == "PAYNE_KALSHI_READ" and
-            .featureProvenance.binding == "PAYNE_KALSHI_STATE" and
-            .featureProvenance.baselineStateRead == false and
-            .featureProvenance.strategyAuthority == "PAYNE_PAPER" and
-            .featureProvenance.paperSourceCadenceMs == 300000 and
-            (.featureProvenance.paperSourceAssets == ["BTC","ETH"]) and
-            .control.threshold == $founder_pull and
-            .control.effectiveLockThreshold == 0.65 and
-            .clocks.consistency.standard == "NFE_OS_UNIVERSAL_MARKET_CLOCK_V1"
-          ' /tmp/cockpit.json >/dev/null
-
-          # PAYNE live qualification must now be sourced from PAYNE-owned current
-          # Kalshi/spot reads, never Baseline shadow state.
-          jq -e --argjson founder_pull "$founder_pull" '
-            .featureProvenance.source == "PAYNE_PAPER_BRAIN_ON_KALSHI_REALITY" and
-            .featureProvenance.transport == "PAYNE_KALSHI_READ" and
-            .featureProvenance.spotTransport == "PAYNE_DIRECT_SPOT_READ" and
-            .featureProvenance.binding == "PAYNE_KALSHI_STATE" and
-            .featureProvenance.httpStatus == 200 and
-            .featureProvenance.baselineStateRead == false and
-            .featureProvenance.strategyAuthority == "PAYNE_PAPER" and
-            .control.threshold == $founder_pull and
-            .control.effectiveLockThreshold == 0.65
-          ' /tmp/cockpit.json >/dev/null
-
-          scheduled=0
+          # Same authoritative persisted PAYNE control/series gate, with post-deploy
+          # equality assertions. Never call the timed-out public Worker hostname.
+          bash .github/scripts/payne-kv-deployment-safety.sh post
+          deployed_ms="$(date -u +%s%3N)"
+          resumed=0
           for i in $(seq 1 24); do
-            curl -fsS "$base/evidence/latest" -o /tmp/latest.json || true
-            if jq -e --argjson founder_pull "$founder_pull" '
-              .source == "SCHEDULED_CRON" and
-              .providerWrites == 0 and
-              .orders == 0 and
-              .capitalMovedUsd == 0 and
-              .selected.payne.source == "PAYNE_PAPER_BRAIN_ON_KALSHI_REALITY" and
-              (.selected.payne.move != null) and
-              (.selected.payne.fair != null) and
-              (.selected.payne.edge != null) and
-              (.selected.payne.score != null) and
-              (.selected.payne.state != "UNKNOWN") and
-              .clocks.consistency.standard == "NFE_OS_UNIVERSAL_MARKET_CLOCK_V1"
-            ' /tmp/latest.json >/dev/null 2>&1; then scheduled=1; break; fi
-            sleep 5
+            bash .github/scripts/payne-kv-deployment-safety.sh post
+            scan_at="$(jq -r '.at' /tmp/payne-kv-gate/current.json)"
+            scan_ms="$(date -u -d "$scan_at" +%s%3N)"
+            if [[ "$scan_ms" -gt "$deployed_ms" ]]; then resumed=1; break; fi
+            sleep 10
           done
-          test "$scheduled" = "1"
-
-          curl -fsS "$base/export?range=current&format=json" -o /tmp/export.json
-          jq -e --argjson founder_pull "$founder_pull" '
-            .schema == "PAYNE_KALSHI_EXPORT_V1" and
-            .providerWrites == 0 and
-            .orders == 0 and
-            .capitalMovedUsd == 0 and
-            (.eventCount >= 0) and
-            (.events | type == "array")
-          ' /tmp/export.json >/dev/null
-
-          curl -fsS "$base/export?range=current&format=csv" -o /tmp/export.csv
-          grep -q 'observationAt,scanSource,asset,direction,outcomeSide,ticker' /tmp/export.csv
-
-          curl -fsS "$base/evidence/events?limit=200" -o /tmp/events.json
-          jq -e --argjson founder_pull "$founder_pull" '
-            .schema == "PAYNE_RESEARCH_EVENT_LEDGER_V1" and
-            .providerWrites == 0 and
-            .orders == 0 and
-            .capitalMovedUsd == 0 and
-            (.events | type == "array")
-          ' /tmp/events.json >/dev/null
-
-          echo "LIVE_STATUS=GREEN_REAL_CAPABILITY_DISARMED"
-          echo "FEATURE_HTTP=$(jq -r '.featureProvenance.httpStatus' /tmp/cockpit.json)"
-          echo "FEATURE_SOURCE=$(jq -r '.featureProvenance.source' /tmp/cockpit.json)"
-          echo "FEATURE_TRANSPORT=$(jq -r '.featureProvenance.transport' /tmp/cockpit.json)"
-          echo "FEATURE_BINDING=$(jq -r '.featureProvenance.binding' /tmp/cockpit.json)"
-          echo "FEATURE_BASELINE_STATE_READ=$(jq -r '.featureProvenance.baselineStateRead' /tmp/cockpit.json)"
-          echo "PAYNE_STATE=$(jq -r '.payne.state' /tmp/cockpit.json)"
-          echo "WINDOW_CONSISTENCY=$(jq -r '.clocks.consistency.windowConsistency' /tmp/cockpit.json)"
-          echo "BASELINE_ACTUAL_LANE=$(jq -r '.comparison.baselineReal.lane' /tmp/cockpit.json)"
-          echo "PAYNE_PAPER_STATUS=$(jq -r '.comparison.paynePaper.reason' /tmp/cockpit.json)"
-          echo "SCHEDULED_SOURCE=$(jq -r '.source' /tmp/latest.json)"
-          echo "PAYNE_REAL_ARMED=$(jq -r '.control.armed' /tmp/real-state.json)"
-          echo "PAYNE_ATTEMPTS=$(jq -r '(.control.attempts|tostring) + "/" + (.control.attemptTarget|tostring)' /tmp/real-state.json)"
-          echo "PAYNE_SERIES_ATTEMPTS_STARTED=$(jq -r '.series.attemptsStarted' /tmp/real-state.json)"
-          echo "PAYNE_SERIES_STATUS=$(jq -r '.series.status' /tmp/real-state.json)"
-          echo "PAYNE_INDEX=$(jq -r '.control.requiredExchangeIndex' /tmp/real-state.json)"
-          echo "FAST_UI_AUTHORITY=$(jq -r '.uiPollAuthority' /tmp/ui-state.json)"
-          echo "FAST_UI_PROVIDER_GETS=$(jq -r '.providerGets' /tmp/ui-state.json)"
-          echo "CURRENT_RUN_STATUS=$(jq -r '.realExecution.status' /tmp/ui-state.json)"
-          echo "CURRENT_RUN_ATTEMPTED=$(jq -r '.realExecution.attempted' /tmp/ui-state.json)"
-          echo "CURRENT_RUN_NO_FILL=$(jq -r '.realExecution.noFill' /tmp/ui-state.json)"
-          echo "CURRENT_RUN_FILLED=$(jq -r '.realExecution.filled' /tmp/ui-state.json)"
-          echo "CURRENT_RUN_UNKNOWN=$(jq -r '.realExecution.unknown' /tmp/ui-state.json)"
-          echo "providerWrites=0"
-          echo "orders=0"
-          echo "capitalMovedUsd=0"
+          test "$resumed" = 1 || { echo 'BLOCKED: SCHEDULED_CRON_NOT_VERIFIED_AFTER_DEPLOY'; exit 1; }
+          # Existing persisted feature source, read-only through the same
+          # approved KV namespace. Missing market data remains unavailable.
+          source_key="$(jq -nr --arg v 'payne-kalshi:feature-shadow:v2-paper-brain' '$v|@uri')"
+          kv_url="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/storage/kv/namespaces/03352b0ccb034f1bb8206f663a04b125/values/$source_key"
+          curl --fail --silent --show-error --max-time 25 --header "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "$kv_url" -o /tmp/payne-feature-state.json
+          jq -e '
+            .featureState.source=="PAYNE_PAPER_BRAIN_ON_KALSHI_REALITY" and
+            .featureState.transport=="PAYNE_KALSHI_READ" and
+            .featureState.spotTransport=="PAYNE_DIRECT_SPOT_READ" and
+            .featureState.baselineStateRead==false and
+            .featureState.providerWrites==0 and
+            .featureState.orders==0 and .featureState.capitalMovedUsd==0
+          ' /tmp/payne-feature-state.json >/dev/null || { echo 'BLOCKED: AUTHORITATIVE_FEATURE_SOURCE_INVALID';exit 1; }
+          jq -c '{source:.featureState.source,observedAt:.featureState.calculationAt,coveredAssets:(.featureState.opportunities|map(.asset)|unique),spotFailures:.featureState.spotReadFailures}' /tmp/payne-feature-state.json
+          echo 'PAYNE_POSTDEPLOY_CLOUDFLARE_KV_SAFETY_PASS'
+          grep 'Current Version ID:' /tmp/payne-deploy.txt || true

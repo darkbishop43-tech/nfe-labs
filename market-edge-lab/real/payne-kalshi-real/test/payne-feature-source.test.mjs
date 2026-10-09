@@ -127,3 +127,30 @@ test('baseline independence: qualification source does not request Baseline serv
   assert.ok(state.opportunities.length===2);
   assert.ok(seen.every(x=>!x.includes('baseline')));
 });
+
+test('existing discovered non-BTC contracts enter authentic Coinbase-backed PAYNE feature pipeline',async()=>{
+  const now=Date.now(),open=new Date(now-60000).toISOString(),close=new Date(now+14*60000).toISOString();
+  const assets=['SOL','XRP','HYPE','ZEC','DOGE','BNB','NEAR'];
+  const prices=Object.fromEntries(assets.map((asset,i)=>[asset,10+i]));
+  const seen=[];
+  const markets=assets.map(asset=>market('KX'+asset+'15M-EXAMPLE',open,close,asset));
+  const env={PAYNE_KALSHI_STATE:kvMock()};
+  // Seed a preceding genuine spot snapshot. Do not invent missing market movement.
+  await buildPayneOwnedFeatureState(env,markets,now-300000,{fetchImpl:fetchSpot(prices,seen)});
+  const next=await buildPayneOwnedFeatureState(env,markets,now,{fetchImpl:fetchSpot(Object.fromEntries(assets.map((asset,i)=>[asset,10.1+i])),seen)});
+  assert.deepEqual([...new Set(next.opportunities.map(o=>o.asset))].sort(),assets.sort());
+  for(const asset of assets) assert.ok(seen.some(url=>url.includes('/products/'+asset+'-USD/ticker')));
+  assert.ok(next.opportunities.every(row=>row.underlyingPriceSource==='COINBASE'));
+  assert.ok(next.opportunities.every(row=>row.marketTicker&&row.openTime===open&&row.closeTime===close));
+  assert.equal(next.providerWrites,0);
+  assert.equal(next.orders,0);
+  assert.equal(next.capitalMovedUsd,0);
+});
+test('unsupported Coinbase pair remains unavailable; no synthetic spot fallback',async()=>{
+  const now=Date.now();
+  const m=market('KXNEAR15M-EXAMPLE',new Date(now-60000).toISOString(),new Date(now+14*60000).toISOString(),'NEAR');
+  const result=await buildPayneOwnedFeatureState({PAYNE_KALSHI_STATE:kvMock()},[m],now,{fetchImpl:fetchSpot({})});
+  assert.equal(result.opportunities.length,0);
+  assert.ok(result.spotReadFailures.some(row=>row.asset==='NEAR'));
+  assert.equal(result.providerWrites,0);
+});
