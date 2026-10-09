@@ -1,0 +1,29 @@
+name: PAYNE Founder Threshold Isolated Zero-Money Tests
+on:
+  push:
+    branches:
+      - payne-founder-threshold-diagnostic-20261009
+    paths:
+      - .github/workflows/payne-founder-threshold-test-only.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  zero-money-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout exact accepted source commit (never deploy)
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          ref: d0808f34a3046be4795c13e9fc2118124565a114
+      - name: Setup Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Verify exact source commit
+        run: test "$(git rev-parse HEAD)" = "d0808f34a3046be4795c13e9fc2118124565a114"
+      - name: Complete PAYNE zero-money regression suite
+        working-directory: market-edge-lab/real/payne-kalshi-real
+        run: npm test
