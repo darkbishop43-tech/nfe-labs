@@ -29,8 +29,8 @@ const PROVIDER_ATTEMPT_ACCOUNTING_SEMANTICS = 'PROVIDER_POST_BOUNDARY_V1';
 const LEGACY_ATTEMPT_ACCOUNTING_SEMANTICS = 'LEGACY_PRE_PROVIDER_BOUNDARY_V0';
 const SCAN_PERSIST_INTERVAL_MS = 60 * 1000;
 const SCAN_HISTORY_INTERVAL_MS = 15 * 60 * 1000;
-const FOUNDER_THRESHOLD_MIN = PAYNE_PAPER_RULES.pullScore;
-const FOUNDER_THRESHOLD_MAX = PAYNE_PAPER_RULES.pullScore;
+const FOUNDER_THRESHOLD_MIN = 0.50; // Existing Founder cockpit minimum; PAYNE Paper defaults remain unchanged.
+const FOUNDER_THRESHOLD_MAX = 1.00; // Existing Founder cockpit maximum; not a forced trading threshold.
 const FOUNDER_THRESHOLD_DECIMALS = 2;
 const CONTROL_STAKE_OPTIONS = Object.freeze([1,2,5,10]);
 const CONTROL_ATTEMPT_OPTIONS = Object.freeze([1,5,10,30]);
@@ -45,7 +45,7 @@ export function parseFounderThreshold(rawValue) {
   if(!/^(?:\d+|\d*\.\d{1,2})$/.test(text)) return {ok:false,error:'PAYNE_CONTROL_THRESHOLD_INVALID_PRECISION'};
   const value=Number(text);
   if(!Number.isFinite(value)) return {ok:false,error:'PAYNE_CONTROL_THRESHOLD_NOT_FINITE'};
-  if(value!==PAYNE_PAPER_RULES.pullScore) return {ok:false,error:'PAYNE_PAPER_PULL_THRESHOLD_FIXED_0_80'};
+  if(value<FOUNDER_THRESHOLD_MIN || value>FOUNDER_THRESHOLD_MAX) return {ok:false,error:'PAYNE_CONTROL_THRESHOLD_OUT_OF_RANGE'};
   return {ok:true,value:Number(value.toFixed(FOUNDER_THRESHOLD_DECIMALS))};
 }
 
