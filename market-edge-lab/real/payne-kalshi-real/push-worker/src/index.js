@@ -48,6 +48,7 @@ export class PaynePushState {
       return json({ok:true,initialized,alertsSent:0});
     }
     if(u.pathname==='/dispatch' && req.method==='POST'){
+      if(this.env.PAYNE_PUSH_DISPATCH_ENABLED!=='TRUE')return json({ok:false,reason:'DISPATCH_DISABLED'},403);
       const alerts=await req.json().catch(()=>null);
       if(!Array.isArray(alerts))return json({ok:false,error:'INVALID_ALERTS'},400);
       const baseline=await this.state.storage.get('baseline');
@@ -121,6 +122,7 @@ export default {
     return json({ok:false,error:'NOT_FOUND'},404);
   },
   async scheduled(controller,env){
+    if(env.PAYNE_PUSH_DISPATCH_ENABLED!=='TRUE')return;
     try{
       const response=await fetch(env.PAYNE_EVIDENCE_URL,{headers:{accept:'application/json'},signal:AbortSignal.timeout(15000)});
       if(!response.ok)return;
