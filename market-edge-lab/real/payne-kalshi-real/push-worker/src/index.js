@@ -16,7 +16,7 @@ export function buildAlerts(doc){
   return doc.rows.map(classifyPayneRealAlert).filter(Boolean);
 }
 export class PaynePushState {
-  constructor(state,env){this.state=state;this.env=env;}
+  constructor(state,env){this.state=state;this.env=env;this.sender=env?.__testSender||sendPushNotification;}
   async fetch(req){
     const u=new URL(req.url);
     if(u.pathname==='/status')return json({ok:true,enrolled:Boolean(await this.state.storage.get('subscription'))});
@@ -47,7 +47,7 @@ export class PaynePushState {
         });
         if(!claimed){skipped++;continue;}
         try{
-          const accepted=await sendPushNotification(sub,{
+          const accepted=await this.sender(sub,{
             title:alert.title,body:alert.body,url:this.env.PAYNE_COCKPIT_URL,tag:alert.id
           },{
             publicKey:this.env.NFE_PUSH_VAPID_PUBLIC_KEY,
