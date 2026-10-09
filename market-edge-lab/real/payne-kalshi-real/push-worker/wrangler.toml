@@ -1,0 +1,21 @@
+name = "market-edge-payne-real-push"
+main = "src/index.js"
+compatibility_date = "2026-09-17"
+workers_dev = true
+
+# Notification-only: no Kalshi signing keys, no trading service binding,
+# no PAYNE trading KV namespace and no AUTO notification namespace.
+[vars]
+PAYNE_EVIDENCE_URL = "https://market-edge-payne-kalshi-real.darkbishop43.workers.dev/real-ledger?limit=200"
+PAYNE_COCKPIT_URL = "https://market-edge-payne-kalshi-real.darkbishop43.workers.dev/"
+
+[[durable_objects.bindings]]
+name = "PUSH_STATE"
+class_name = "PaynePushState"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["PaynePushState"]
+
+[triggers]
+crons = ["* * * * *"]
