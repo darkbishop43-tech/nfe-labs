@@ -36,3 +36,30 @@ test('isolated enrollment and dedupe state persist through object reconstruction
  assert.equal((await (await new PaynePushState({storage:store},env).fetch(new Request('https://internal/status'))).json()).enrolled,true);
  assert.equal([...store.map.keys()].includes('subscription'),true);
 });
+
+test('synthetic push accepted once, restart suppresses duplicate, zero trading writes',async()=>{
+ const store=new MemoryStorage();let sends=0;
+ const env={NFE_PUSH_VAPID_PUBLIC_KEY:'test-public',NFE_PUSH_VAPID_PRIVATE_KEY:'test-private',PAYNE_COCKPIT_URL:'https://market-edge-payne-kalshi-real.darkbishop43.workers.dev/',__testSender:async(sub,payload)=>{sends++;assert.match(payload.title,/PAYNE REAL/);return true}};
+ const make=()=>new PaynePushState({storage:store},env);
+ await make().fetch(new Request('https://internal/enroll',{method:'POST',body:JSON.stringify({endpoint:'https://fcm.googleapis.com/fcm/send/test',keys:{p256dh:'abc',auth:'def'}})}));
+ const alert=buildAlerts(fixture)[0];
+ const req=()=>new Request('https://internal/dispatch',{method:'POST',body:JSON.stringify([alert])});
+ const first=await (await make().fetch(req())).json();
+ const second=await (await make().fetch(req())).json();
+ assert.equal(first.pushServiceAccepted,1);
+ assert.equal(second.duplicateSuppressed,1);
+ assert.equal(sends,1);
+ assert.ok([...store.map.keys()].some(k=>k.startsWith('event:')));
+});
+test('synthetic push failure is quarantined, not counted as delivered or blindly retried',async()=>{
+ const store=new MemoryStorage();let sends=0;
+ const env={NFE_PUSH_VAPID_PUBLIC_KEY:'test-public',NFE_PUSH_VAPID_PRIVATE_KEY:'test-private',__testSender:async()=>{sends++;throw Error('synthetic timeout')}};
+ const obj=new PaynePushState({storage:store},env);
+ await obj.fetch(new Request('https://internal/enroll',{method:'POST',body:JSON.stringify({endpoint:'https://fcm.googleapis.com/fcm/send/test',keys:{p256dh:'abc',auth:'def'}})}));
+ const alert=buildAlerts(fixture)[0];
+ const req=()=>new Request('https://internal/dispatch',{method:'POST',body:JSON.stringify([alert])});
+ assert.equal((await (await obj.fetch(req())).json()).failed,1);
+ assert.equal((await (await obj.fetch(req())).json()).duplicateSuppressed,1);
+ assert.equal(sends,1);
+ assert.ok([...store.map.values()].some(v=>v?.state==='DELIVERY_UNKNOWN_NO_AUTO_RETRY'));
+});
