@@ -1,0 +1,41 @@
+name: PAYNE Push Cloudflare Token Scope Probe
+on:
+  push:
+    branches:
+      - payne-real-push-notifications-isolated-20261009
+    paths:
+      - .github/workflows/payne-push-cloudflare-scope-probe.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check existing token and account without exposing credentials
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          if [[ -z "$CLOUDFLARE_API_TOKEN" || -z "$CLOUDFLARE_ACCOUNT_ID" ]]; then
+            echo 'BLOCKED: EXISTING_CLOUDFLARE_CREDENTIALS_MISSING'; exit 1
+          fi
+          token_code=$(curl --silent --show-error --max-time 20 --output /tmp/payne-token-check.json --write-out '%{http_code}' \
+            --header "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            https://api.cloudflare.com/client/v4/user/tokens/verify)
+          if [[ "$token_code" != '200' ]] || ! jq -e '.success == true and .result.status == "active"' /tmp/payne-token-check.json >/dev/null; then
+            echo 'BLOCKED: CLOUDFLARE_TOKEN_NOT_VERIFIED';exit 1
+          fi
+          echo 'TOKEN_ACTIVE: VERIFIED'
+          list_code=$(curl --silent --show-error --max-time 20 --output /tmp/payne-workers-check.json --write-out '%{http_code}' \
+            --header "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts")
+          if [[ "$list_code" != '200' ]] || ! jq -e '.success == true' /tmp/payne-workers-check.json >/dev/null; then
+            echo 'BLOCKED: WORKERS_SCRIPTS_READ_OR_ACCOUNT_SCOPE';exit 1
+          fi
+          echo 'WORKERS_SCRIPTS_READ: VERIFIED'
+          echo 'NEW_WORKER_CREATE_PERMISSION: NOT_PROVEN_BY_READ_ONLY_PROBE'
+          echo 'WORKER_SECRET_WRITE_PERMISSION: NOT_PROVEN_BY_READ_ONLY_PROBE'
+          echo 'NO_SECRET_WRITES_OR_DEPLOYMENT_PERFORMED'
