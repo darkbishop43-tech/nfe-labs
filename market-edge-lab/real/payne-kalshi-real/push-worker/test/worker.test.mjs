@@ -101,3 +101,18 @@ test('initial baseline refuses incomplete evidence, duplicate initialization sta
  assert.equal((await (await obj.fetch(request(0))).json()).initialized,false);
  assert.equal((await store.get('baseline')).atMs,123456789);
 });
+
+test('concurrent first-run baselines choose one persisted watermark, without sending',async()=>{
+ const store=new MemoryStorage();
+ const request=ms=>new Request('https://internal/baseline',{
+  method:'POST',body:JSON.stringify({authoritative:true,count:0,ids:[],observedAtMs:ms})
+ });
+ const results=await Promise.all([
+  new PaynePushState({storage:store},{}).fetch(request(111111111)),
+  new PaynePushState({storage:store},{}).fetch(request(222222222))
+ ]);
+ const outcomes=await Promise.all(results.map(x=>x.json()));
+ assert.equal(outcomes.filter(x=>x.initialized).length,1);
+ assert.ok([111111111,222222222].includes((await store.get('baseline')).atMs));
+ assert.equal([...store.map.keys()].filter(k=>k.startsWith('event:')).length,0);
+});
