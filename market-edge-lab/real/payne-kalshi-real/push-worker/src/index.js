@@ -91,7 +91,10 @@ export default {
     if(req.method==='GET'&&u.pathname==='/push-sw.js')return new Response(sw,{headers:{'content-type':'application/javascript','service-worker-allowed':'/'}});
     if(req.method==='GET'&&u.pathname==='/push-config')return json({publicKey:env.NFE_PUSH_VAPID_PUBLIC_KEY||null});
     if(req.method==='GET'&&u.pathname==='/push-status')return endpoint(env).fetch('https://internal/status');
-    if(req.method==='POST'&&u.pathname==='/push-enroll'){\n      if(!env.PAYNE_ENROLL_TOKEN || req.headers.get('authorization')!=='Bearer '+env.PAYNE_ENROLL_TOKEN)return json({ok:false,error:'ENROLLMENT_NOT_AUTHORIZED'},403);\n      return endpoint(env).fetch(new Request('https://internal/enroll',{method:'POST',body:req.body,headers:{'content-type':'application/json'}}));\n    }
+    if(req.method==='POST'&&u.pathname==='/push-enroll'){
+      if(!env.PAYNE_ENROLL_TOKEN || req.headers.get('authorization')!=='Bearer '+env.PAYNE_ENROLL_TOKEN)return json({ok:false,error:'ENROLLMENT_NOT_AUTHORIZED'},403);
+      return endpoint(env).fetch(new Request('https://internal/enroll',{method:'POST',body:req.body,headers:{'content-type':'application/json'}}));
+    }
     return json({ok:false,error:'NOT_FOUND'},404);
   },
   async scheduled(controller,env){
