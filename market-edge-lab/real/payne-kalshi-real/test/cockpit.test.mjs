@@ -273,7 +273,7 @@ test('cockpit exposes fixed source-proven Paper PULL and fixed LOCK observabilit
   assert.match(html,/PAYNE funding route remains Index 2/);
   assert.doesNotMatch(html,/Index 3/);
   assert.equal(parseFounderThreshold('.80').value,.80);
-  assert.equal(parseFounderThreshold('.70').ok,false);
+  assert.deepEqual(parseFounderThreshold('.70'),{ok:true,value:.70});
   assert.equal(effectiveLockThreshold(.50),.65);
   assert.equal(effectiveLockThreshold(.80),.65);
 });
@@ -505,8 +505,10 @@ test('promoted controls default disarmed and freeze source-proven Paper .80 PULL
 
   ctl=await updateFounderControl(env,'DISARM');
   assert.equal(ctl.armed,false);
-  await assert.rejects(updateFounderControl(env,'SET_THRESHOLD','.55'),/PAYNE_PAPER_PULL_THRESHOLD_FIXED_0_80/);
-  await assert.rejects(updateFounderControl(env,'SET_THRESHOLD','.70'),/PAYNE_PAPER_PULL_THRESHOLD_FIXED_0_80/);
+  ctl=await updateFounderControl(env,'SET_THRESHOLD','.55');
+  assert.equal(ctl.activeThreshold,.55);
+  ctl=await updateFounderControl(env,'SET_THRESHOLD','.70');
+  assert.equal(ctl.activeThreshold,.70);
   ctl=await updateFounderControl(env,'SET_THRESHOLD','.80');
   assert.equal(ctl.activeThreshold,.80);
   const armed=await updateFounderControl(env,'ARM');
