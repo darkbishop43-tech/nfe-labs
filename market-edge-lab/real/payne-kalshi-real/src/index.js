@@ -3527,6 +3527,15 @@ export async function reconcileUnresolvedEntryFromProvider(env,nowMs=Date.now())
     const reconciledAt=new Date(nowMs).toISOString();
     const providerResult={state:'NO_PROVIDER_EXECUTION',reason:'PROVIDER_RECONCILED_NO_EXECUTION',clientOrderId,fillCount:0,remainingCount:0};
     series.unresolvedEntry=false; series.position=null;
+    // Reconciliation is now coordinator-approved. Retire only this resolved
+    // operational pre-provider latch; preserve its full specimen and prior state.
+    if(series.fireLatch?.state==='PRE_PROVIDER_VALIDATION' &&
+       series.fireLatch?.specimenId===(attempt.fireSpecimenId||series.fireLatch?.specimenId) &&
+       series.fireLatch?.providerPost==='NOT_STARTED'){
+      series.fireLatch={...series.fireLatch,priorState:series.fireLatch.state,
+        state:'INVALIDATED_BEFORE_POST',finalResult:'NO_PROVIDER_EXECUTION',
+        invalidationReason:'PROVIDER_RECONCILED_NO_EXECUTION',invalidatedAt:reconciledAt};
+    }
     attempt={
       ...attempt,status:'NO_PROVIDER_EXECUTION',providerResult,reconciledAt,
       providerResponseState:'NO_PROVIDER_EXECUTION',providerOrderId:null,
