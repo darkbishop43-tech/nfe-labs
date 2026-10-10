@@ -4136,6 +4136,21 @@ export default {
     const schedulerStartedMs=Date.now();
     await initializeDisarmed(env);
     const control=await loadControl(env);
+    // Management and unresolved-entry reconciliation must not wait for a full scan.
+    // New entry authority still waits for the scan to finish persisting a FIRE latch.
+    const initialSeries=await loadRealSeriesState(env);
+    const urgent=initialSeries?.unresolvedEntry===true ||
+      Boolean(initialSeries?.position && ['OPEN','EXIT_RETRY','EXIT_RECONCILIATION_REQUIRED','RECONCILIATION_UNKNOWN'].includes(String(initialSeries.position.status||'')));
+    if(urgent){
+      const urgentStartMs=Date.now();
+      try{
+        await runPayneRealExecutionCycle(env);
+        logPayneTiming('URGENT_MANAGEMENT_BEFORE_SCAN',payneTimingIdentity(initialSeries,initialSeries?.fireLatch),urgentStartMs,Date.now(),'SUCCESS');
+      }catch(error){
+        logPayneTiming('URGENT_MANAGEMENT_ERROR',payneTimingIdentity(initialSeries,initialSeries?.fireLatch),urgentStartMs,Date.now(),String(error?.name||'EXECUTION_ERROR'));
+        return;
+      }
+    }
     if (control.scanEnabled) {
       const scanStartMs=Date.now();
       logPayneTiming('SCAN_START',{seriesId:'',ticker:'',side:'',windowClose:''},schedulerStartedMs);
@@ -4153,7 +4168,9 @@ export default {
       logPayneTiming('CYCLE_AFTER_SCAN',identity,schedulerStartedMs);
       const managementPending=Boolean(series?.position && ['OPEN','EXIT_RETRY','EXIT_RECONCILIATION_REQUIRED','RECONCILIATION_UNKNOWN'].includes(String(series.position.status||'')));
       const entryReconciliationPending=series?.unresolvedEntry===true;
-      if (control.armed || managementPending || entryReconciliationPending) await runPayneRealExecutionCycle(env);
+      // Avoid a second management cycle in one scheduled invocation.
+      // Newly latched entries are processed only AFTER the scan has completed.
+      if (!urgent && (control.armed || managementPending || entryReconciliationPending)) await runPayneRealExecutionCycle(env);
       else await reconcileDisarmedSupersededSeries(env,series,control);
       logPayneTiming('EXECUTION_CYCLE_END',identity,cycleStartMs,Date.now(),'SUCCESS');
     } catch(error) {
