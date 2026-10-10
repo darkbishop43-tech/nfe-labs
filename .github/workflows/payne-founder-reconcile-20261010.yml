@@ -1,0 +1,40 @@
+name: PAYNE Founder Governed Reconciliation Once
+on:
+  push:
+    branches:
+      - payne-founder-reconcile-20261010
+    paths:
+      - ".github/workflows/payne-founder-reconcile-20261010.yml"
+permissions:
+  contents: read
+jobs:
+  reconcile:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Invoke existing PAYNE provider and coordinator reconciliation
+        shell: bash
+        run: |
+          set -euo pipefail
+          url='https://market-edge-payne-kalshi-real.darkbishop43.workers.dev/control'
+          echo 'CONTROL_ACTION=RECONCILE_UNRESOLVED_ENTRY'
+          echo 'REQUEST_HOST=market-edge-payne-kalshi-real.darkbishop43.workers.dev'
+          if ! getent ahostsv4 market-edge-payne-kalshi-real.darkbishop43.workers.dev >/dev/null; then
+            echo 'RECOVERY_FAILED=WORKER_DNS_UNREACHABLE'
+            exit 1
+          fi
+          status=$(curl --retry 0 --connect-timeout 12 --max-time 55 --silent --show-error \
+            -o /tmp/payne-reconcile-response.json -w '%{http_code}' \
+            -X POST "$url" -H 'content-type: application/json' \
+            --data '{"action":"RECONCILE_UNRESOLVED_ENTRY"}')
+          echo "PRODUCTION_HTTP_STATUS=$status"
+          if ! jq -e 'type=="object"' /tmp/payne-reconcile-response.json >/dev/null; then
+            echo 'RECOVERY_FAILED=INVALID_PRODUCTION_RESPONSE'
+            exit 1
+          fi
+          jq -c '{ok,classification,reason,series:{seriesId:.series.seriesId,unresolvedEntry:.series.unresolvedEntry,fireLatch:.series.fireLatch,attempt:{attemptId:.series.currentAttempt.attemptId,marketTicker:.series.currentAttempt.marketTicker,clientOrderId:.series.currentAttempt.clientOrderId,status:.series.currentAttempt.status,reconciliationReason:.series.currentAttempt.reconciliationReason}},control:{armed:.control.armed,openPositions:.control.openPositions}}' /tmp/payne-reconcile-response.json
+          if [[ "$status" != 200 ]] || ! jq -e '.ok==true' /tmp/payne-reconcile-response.json >/dev/null; then
+            echo 'RECOVERY_FAILED=PRODUCTION_RECONCILIATION_REJECTED'
+            exit 1
+          fi
+          echo 'RECOVERY_ACTION_ACCEPTED_BY_PRODUCTION'
