@@ -774,7 +774,7 @@ test('OVERLAPPING SCHEDULER: same persisted FIRE cannot authorize two provider P
 
 test('SCHEDULER SYNTHETIC: FILLED preserves owned position and prevents duplicate entry',async()=>{
  const e=await env(),clock=Date.now,now=Date.parse('2026-10-02T06:05:00Z');
- const io=installProvider({entryResult:{order_id:'SCHEDULER-FILL',fill_count:1,remaining_count:0,average_fill_price:.50,average_fee_paid:.01},position:'OPEN'});
+ const io=installProvider({entryResult:{order_id:'SCHEDULER-FILL',fill_count:1,remaining_count:0,average_fill_price:.50,average_fee_paid:.01},position:'ABSENT'});
  try{
    Date.now=()=>now;await arm(e);
    await worker.scheduled({},e);
