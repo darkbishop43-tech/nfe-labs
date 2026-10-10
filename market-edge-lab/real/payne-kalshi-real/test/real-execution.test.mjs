@@ -113,14 +113,19 @@ function providerMarket({status='open',close='2026-10-02T06:15:00Z',exchangeInde
   };
 }
 
-function installProvider({index3=0,index2=15.91,position='ABSENT',exactSequence=[],settled=false,orders=[],fills=[],historicalFills=[],settlements=null}={}){
+function installProvider({index3=0,index2=15.91,position='ABSENT',exactSequence=[],settled=false,orders=[],fills=[],historicalFills=[],settlements=null,entryResult=null,discoveryDelayMs=0}={}){
   const original=globalThis.fetch,calls=[]; let exactNo=0;
   globalThis.fetch=async (url,options={})=>{
     calls.push({url:String(url),method:options.method||'GET',body:options.body||null});
     const u=String(url);
+    if(entryResult!==null && u.includes('/trade-api/v2/portfolio/events/orders') && options.method==='POST')
+      return jsonResponse(entryResult);
     if(u.includes('api.exchange.coinbase.com/products/BTC-USD/ticker')) return jsonResponse({price:'100'});
     if(u.includes('/portfolio/balance')) return jsonResponse({balance_breakdown:[{exchange_index:0,balance:0},{exchange_index:2,balance:index2},{exchange_index:3,balance:index3}]});
-    if(u.includes('series_ticker=KXBTC15M')) return jsonResponse({markets:[providerMarket()]});
+    if(u.includes('series_ticker=KXBTC15M')){
+      if(discoveryDelayMs>0) await new Promise(resolve=>setTimeout(resolve,discoveryDelayMs));
+      return jsonResponse({markets:[providerMarket()]});
+    }
     if(u.includes('/trade-api/v2/markets?series_ticker=')) return jsonResponse({markets:[]});
     if(u.includes('/portfolio/orders?')) return jsonResponse({orders});
     if(u.includes('/portfolio/fills?')) return jsonResponse({fills});
