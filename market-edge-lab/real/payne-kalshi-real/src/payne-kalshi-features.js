@@ -108,21 +108,42 @@ export async function buildPayneOwnedFeatureState(env,markets,nowMs=Date.now(),{
   const priorRows=Array.isArray(prior?.opportunities)?prior.opportunities:[];
   const currentIds=new Set(currentMarkets.map(m=>[String(m?.ticker||''),String(m?.openTime||''),String(m?.closeTime||'')].join('|')));
   const cachedIds=new Set(priorRows.map(r=>[String(r?.marketTicker||''),String(r?.openTime||''),String(r?.closeTime||'')].join('|')));
-  const exactWindowSet=currentIds.size>0 && currentIds.size===cachedIds.size && [...currentIds].every(x=>cachedIds.has(x));
+  const exactWindowSubset=currentIds.size>0 && [...currentIds].every(x=>cachedIds.has(x));
 
-  // Paper's authoritative collector ran every five minutes. Fresh-lock and
-  // pre-submit provider reads remain real-time, but the Paper brain itself does
-  // not invent sub-cadence feature epochs.
-  if(sameEpoch && exactWindowSet && prior?.featureState){
+  // The Paper collector advances its price reference ONLY at the five-minute
+  // feature-epoch boundary. A fresh exact-ticker execution read is a subset of
+  // that epoch, not permission to roll the Paper reference forward again.
+  // Repricing uses the FROZEN Paper move and the fresh Kalshi executable ask.
+  if(sameEpoch && exactWindowSubset && prior?.featureState){
     const cached=prior.featureState;
     const ageMs=Math.max(0,Number(nowMs)-Date.parse(cached?.calculationAt||cached?.lastRunAt||''));
+    const matches=row=>currentIds.has([String(row?.marketTicker||''),String(row?.openTime||''),String(row?.closeTime||'')].join('|'));
+    const relevant=(cached.opportunities||[]).filter(matches);
+    const repriced=forceRefresh===true?relevant.flatMap(row=>{
+      const market=currentMarkets.find(m=>m.ticker===row.marketTicker &&
+        String(m.openTime)===String(row.openTime) && String(m.closeTime)===String(row.closeTime));
+      if(!market)return [];
+      const side=String(row.outcomeSide||'').toUpperCase();
+      const ask=side==='YES'?Number(market.yesAsk):Number(market.noAsk);
+      const bid=side==='YES'?Number(market.yesBid):Number(market.noBid);
+      const feature=paperFeatureMath({
+        marketPrice:ask,move:row.move,outcomeSide:side,
+        direction:side==='YES'?'ABOVE':'BELOW'
+      });
+      if(!feature)return [];
+      return [{...row,...feature,observedAsk:ask,
+        observedBid:Number.isFinite(bid)?bid:null,
+        providerTimestamp:market.providerReadAt||null,
+        executionRepriceAt:new Date(nowMs).toISOString()}];
+    }):relevant;
     return {
       ...cached,
+      opportunities:repriced,
       ageMs,
-      fresh:ageMs<=FEATURE_MAX_AGE_MS && Array.isArray(cached?.opportunities) && cached.opportunities.length>0,
+      fresh:ageMs<=FEATURE_MAX_AGE_MS && repriced.length>0,
       forceRefreshRequested:forceRefresh===true,
-      forceRefreshApplied:false,
-      forceRefreshReason:'PAPER_BRAIN_FIVE_MINUTE_EPOCH_PRESERVED',
+      forceRefreshApplied:forceRefresh===true,
+      forceRefreshReason:forceRefresh===true?'PAPER_EPOCH_REUSED_FRESH_KALSHI_BOOK_REPRICED':'PAPER_BRAIN_FIVE_MINUTE_EPOCH_PRESERVED',
     };
   }
 
