@@ -1,3 +1,4 @@
+import {cockpitHtml} from '../src/cockpit-html.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {paynePositionRecords,payneCapacityEvidence,liveOrderWatchProjection} from '../src/payne-live-order-watch.js';
@@ -27,4 +28,13 @@ test('duplicate same attempt ID does not create phantom position',()=>{
  const original=p(1);
  const records=paynePositionRecords({position:original,positions:[original]});
  assert.equal(records.length,1);
+});
+
+test('cockpit exposes Live Order Watch and uses persisted fast-state records',()=>{
+ const html=cockpitHtml();
+ assert.ok(html.includes('LIVE ORDER WATCH'));
+ assert.ok(html.includes('id="liveOrderWatch"'));
+ assert.ok(html.includes('function renderLiveOrderWatch'));
+ assert.ok(html.includes('d.realExecution?.liveOrderWatch'));
+ assert.ok(html.includes('UNAVAILABLE'));
 });
