@@ -1,9 +1,10 @@
 {
   "generated_for": "Kalshi Ledger Lab V1",
-  "source_export": "realized_pnl_2026-01-01_2027-01-01(8).csv",
-  "provider_rows": 527,
+  "source_export": "Founder realized P&L export through 2026-10-10 03:28 ET",
+  "source_csv_sha256": "4f254a08e96097cf767f6fd571e960bfcc2f448a0ef231d295f6617bdfc8356d",
+  "provider_rows": 683,
   "logical_position_method": "exact market_ticker + side + open_timestamp + close_timestamp",
-  "provisional_logical_positions": 405,
+  "provisional_logical_positions": 545,
   "transition": {
     "management_version_from": "OLD_5MIN_CONTROL",
     "management_version_to": "DYNAMIC_V1",
@@ -15,20 +16,20 @@
     "authoritative_boundary": "Successful Deploy Baseline Real Worker run #239 completion"
   },
   "management_version_counts": {
-    "OLD_5MIN_CONTROL": 402,
+    "OLD_5MIN_CONTROL": 457,
     "DYNAMIC_V1": 0,
-    "UNKNOWN": 3
+    "UNKNOWN": 88
   },
   "version_coverage": {
-    "known": 402,
-    "total": 405,
-    "known_percent": 99.2592592593,
-    "note": "The three UNKNOWN logical positions are the proven Founder-manual/training-mistake episode and are not assigned an AUTO management version."
+    "known": 457,
+    "total": 545,
+    "known_percent": 83.8532110092,
+    "note": "Provider CSV alone cannot prove AUTO/PAYNE ownership after the DYNAMIC_V1 activation boundary. Post-transition non-manual logical positions remain UNKNOWN until exact ownership/management evidence is joined. The three Founder-manual logical positions also remain UNKNOWN."
   },
   "continuation_coverage": {
-    "dynamic_v1_positions_in_export": 0,
+    "dynamic_v1_positions_ownership_verified": 0,
     "five_minute_checkpoint_evidence_known": 0,
     "continuation_outcome_known": 0,
-    "note": "Current provider export ends 2026-10-03, before DYNAMIC_V1 production activation on 2026-10-05."
+    "note": "Post-transition provider rows exist, but no DYNAMIC_V1 ownership is assigned from timestamp or hold duration alone."
   }
 }
