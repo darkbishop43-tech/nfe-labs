@@ -95,3 +95,27 @@ test('each PAYNE EXIT client order has exactly one owner across concurrent invoc
  const again=await restarted.fetch(request());
  assert.equal((await again.json()).granted,false,'an uncertain exit cannot retry after restart');
 });
+
+test('provider-proven no-execution without prior claim becomes immutable terminal tombstone',async()=>{
+ const {instance,saved}=syntheticDurableObject();
+ const call=async x=>(await instance.fetch(new Request('https://payne-coordinator.internal/claim',{method:'POST',body:JSON.stringify(x)}))).json();
+ const resolution={...identity,action:'RESOLVE_ENTRY',resolution:'NO_PROVIDER_EXECUTION',
+   providerNoExecutionProven:true,authoritativeReconciliationProven:true};
+ assert.equal((await call(resolution)).reason,'NO_PRIOR_CLAIM_TERMINALLY_RECONCILED');
+ assert.equal(saved.get('attempt:1').claimState,'NO_PROVIDER_EXECUTION');
+ assert.equal((await call(identity)).granted,false,'resolved key must not permit duplicate execution');
+ assert.equal((await call(resolution)).reason,'ALREADY_RESOLVED');
+});
+test('provider no-execution may not bypass any outstanding or mismatched coordinator claim',async()=>{
+ const {instance,saved}=syntheticDurableObject();
+ const call=async x=>(await instance.fetch(new Request('https://payne-coordinator.internal/claim',{method:'POST',body:JSON.stringify(x)}))).json();
+ const resolution={...identity,action:'RESOLVE_ENTRY',resolution:'NO_PROVIDER_EXECUTION',
+   providerNoExecutionProven:true,authoritativeReconciliationProven:true};
+ const other={...identity,attemptNo:2,specimenId:'FIRE-2',clientOrderId:'SECOND'};
+ assert.equal((await call(other)).granted,true);
+ assert.equal((await call(resolution)).reason,'OTHER_OUTSTANDING_COORDINATOR_CLAIM');
+ assert.equal(saved.get('attempt:1'),undefined);
+ assert.equal((await call(identity)).granted,true);
+ assert.equal((await call({...resolution,specimenId:'WRONG'})).reason,'CLAIM_IDENTITY_MISMATCH');
+ assert.equal(saved.get('attempt:1').claimState,'POTENTIALLY_SUBMITTED');
+});
