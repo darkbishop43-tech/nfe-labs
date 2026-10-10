@@ -119,7 +119,7 @@ function providerMarket({status='open',close='2026-10-02T06:15:00Z',exchangeInde
   };
 }
 
-function installProvider({index3=0,index2=15.91,position='ABSENT',exactSequence=[],settled=false,orders=[],fills=[],historicalFills=[],settlements=null,entryResult=null,discoveryDelayMs=0,syntheticPostThrows=false,onSyntheticPost=null,multiPositions=[],multiPositionStatus='OPEN'}={}){
+function installProvider({index3=0,index2=15.91,position='ABSENT',exactSequence=[],settled=false,orders=[],fills=[],historicalFills=[],settlements=null,entryResult=null,discoveryDelayMs=0,syntheticPostThrows=false,onSyntheticPost=null,multiPositions=[],multiPositionStatus='OPEN',multiMarkets=[]}={}){
   const original=globalThis.fetch,calls=[]; let exactNo=0;
   globalThis.fetch=async (url,options={})=>{
     calls.push({url:String(url),method:options.method||'GET',body:options.body||null});
@@ -129,10 +129,15 @@ function installProvider({index3=0,index2=15.91,position='ABSENT',exactSequence=
       if(syntheticPostThrows)throw new Error('SYNTHETIC_POST_RESULT_UNCERTAIN');
       if(entryResult!==null)return jsonResponse(entryResult);
     }
-    if(multiPositions.length && /api.exchange.coinbase.com\/products\/(BTC|ETH|SOL)-USD\/ticker/.test(u))
+    if((multiPositions.length||multiMarkets.length) && /api.exchange.coinbase.com\/products\/(BTC|ETH|SOL|XRP)-USD\/ticker/.test(u))
       return jsonResponse({price:'100'});
     if(u.includes('api.exchange.coinbase.com/products/BTC-USD/ticker')) return jsonResponse({price:'100'});
     if(u.includes('/portfolio/balance')) return jsonResponse({balance_breakdown:[{exchange_index:0,balance:0},{exchange_index:2,balance:index2},{exchange_index:3,balance:index3}]});
+    if(multiMarkets.length && u.includes('/trade-api/v2/markets?series_ticker=')){
+      const series=decodeURIComponent(u.split('series_ticker=')[1]?.split('&')[0]||'');
+      const matched=multiMarkets.filter(t=>t.split('-')[0]===series);
+      return jsonResponse({markets:matched.map(ticker=>providerMarket({ticker}))});
+    }
     if(u.includes('series_ticker=KXBTC15M')){
       if(discoveryDelayMs>0) await new Promise(resolve=>setTimeout(resolve,discoveryDelayMs));
       return jsonResponse({markets:[providerMarket()]});
@@ -150,9 +155,9 @@ function installProvider({index3=0,index2=15.91,position='ABSENT',exactSequence=
       return jsonResponse({market_positions:[],cursor:''});
     }
     if(u.includes('/portfolio/settlements?')) return jsonResponse({settlements:Array.isArray(settlements)?settlements:(settled?[{ticker:'KXBTC15M-REALTEST',market_result:'yes',settled_time:'2026-10-02T06:16:00Z'}]:[])});
-    if(multiPositions.length && u.includes('/markets/')){
+    if((multiPositions.length||multiMarkets.length) && u.includes('/markets/')){
       const ticker=decodeURIComponent(u.split('/markets/')[1]?.split('?')[0]||'');
-      if(multiPositions.includes(ticker))return jsonResponse(providerMarket({ticker,yesBid:.49,yesAsk:.50}));
+      if(multiPositions.includes(ticker)||multiMarkets.includes(ticker))return jsonResponse(providerMarket({ticker,yesBid:.49,yesAsk:.50}));
     }
     if(u.includes('/markets/KXBTC15M-REALTEST')){
       const x=exactSequence.length?exactSequence[Math.min(exactNo++,exactSequence.length-1)]:{status:200,market:providerMarket({yesBid:.49,yesAsk:.50})};
