@@ -3680,6 +3680,20 @@ async function managePayneRealPosition(env,control,series,postImpl=kalshiPayneOr
   return saveRealSeriesState(env,series);
 }
 
+async function manageAllPayneRealPositions(env,control,series,postImpl,nowMs){
+  const pending=unresolvedPaynePositions(series);
+  for(const original of pending){
+    const latest=paynePositionRecords(series).find(p=>p.attemptId===original.attemptId);
+    if(!latest)continue;
+    const managed=await managePayneRealPosition(env,control,{...series,position:latest},postImpl,nowMs);
+    series=upsertPaynePosition(managed,managed.position);
+  }
+  const remaining=unresolvedPaynePositions(series);
+  const failClosed=remaining.some(p=>['RECONCILIATION_UNKNOWN','EXIT_RECONCILIATION_REQUIRED'].includes(p.status));
+  await settleSeriesControl(env,series,remaining.length,{failClosed});
+  return saveRealSeriesState(env,series);
+}
+
 export async function runPayneRealExecutionCycle(env,{postImpl=kalshiPayneOrderPost,nowMs=Date.now()}={}) {
   const executionStartMs=Date.now();
   let control=await loadControl(env);
@@ -3690,14 +3704,19 @@ export async function runPayneRealExecutionCycle(env,{postImpl=kalshiPayneOrderP
   if(series?.unresolvedEntry===true){
     const reconciliation=await reconcileUnresolvedEntryFromProvider(env,nowMs);
     series=reconciliation?.series||await loadRealSeriesState(env);
-    if(series?.position && ['OPEN','EXIT_RETRY','EXIT_RECONCILIATION_REQUIRED','RECONCILIATION_UNKNOWN'].includes(String(series.position.status||''))) {
-      return saveRealSeriesState(env,series);
-    }
+    if(unresolvedPaynePositions(series).length)
+      series=await manageAllPayneRealPositions(env,control,series,postImpl,nowMs);
+    // Reconciled or not, do not issue a new entry in the same UNKNOWN recovery tick.
     return saveRealSeriesState(env,series);
   }
 
-  if(series?.position && ['OPEN','EXIT_RETRY','EXIT_RECONCILIATION_REQUIRED','RECONCILIATION_UNKNOWN'].includes(String(series.position.status||''))) {
-    return managePayneRealPosition(env,control,series,postImpl,nowMs);
+  if(unresolvedPaynePositions(series).length){
+    series=await manageAllPayneRealPositions(env,control,series,postImpl,nowMs);
+    control=await loadControl(env);
+    // Existing management keeps running while DISARMED or after attempt exhaustion.
+    if(!control.armed || seriesTerminal(series) ||
+       !seriesInterlock(series,control.maxPositions).clear)
+      return saveRealSeriesState(env,series);
   }
 
   const started=Number(series.attemptsStarted||0);
