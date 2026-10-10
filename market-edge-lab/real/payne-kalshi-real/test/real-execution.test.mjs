@@ -85,7 +85,18 @@ async function env({shadow=baselineShadow(),autoPositions=[]}={}){
     get:name=>({
       fetch:async(_url,opts)=>{
         const claim=JSON.parse(opts.body);
-        const key=name+':'+claim.attemptNo;
+        const key=name+':' + (['CLAIM_EXIT','RELEASE_EXIT_PROVEN_NO_POST'].includes(claim.action)?'exit:'+claim.clientOrderId:claim.attemptNo);
+        if(claim.action==='CLAIM_EXIT'){
+          if(claims.has(key))return jsonResponse({granted:false,reason:'EXIT_ORDER_ALREADY_CLAIMED'});
+          claims.set(key,{...claim,claimState:'POTENTIALLY_SUBMITTED'});
+          return jsonResponse({granted:true,reason:'EXCLUSIVE_EXIT_CLAIM_PERSISTED'});
+        }
+        if(claim.action==='RELEASE_EXIT_PROVEN_NO_POST'){
+          const prior=claims.get(key);
+          if(!prior||prior.specimenId!==claim.specimenId||claim.provenNoProviderPost!==true)
+            return jsonResponse({granted:false,reason:'EXIT_NO_POST_PROOF_REQUIRED'});
+          claims.delete(key);return jsonResponse({granted:true});
+        }
         if(claim.action==='RESOLVE_ENTRY'){
           const prior=claims.get(key);
           if(!prior)return jsonResponse({granted:false,reason:'CLAIM_NOT_FOUND'});
