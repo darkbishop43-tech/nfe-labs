@@ -60,3 +60,14 @@ export function liveOrderWatchProjection(series,attempts=[],ledger=[],limit=12){
   return {schema:'PAYNE_LIVE_ORDER_WATCH_V1',source:'PERSISTED_PAYNE_EVIDENCE_ONLY',
     active,closed,providerGets:0,providerWrites:0,ordersSubmitted:0};
 }
+
+export function upsertPaynePosition(series,position){
+  if(!position?.attemptId || position?.owner!=='PAYNE_KALSHI_REAL')return {...series};
+  const rows=paynePositionRecords(series);
+  const index=rows.findIndex(p=>p.attemptId===position.attemptId);
+  if(index>=0)rows[index]=position;else rows.push(position);
+  return {...series,positions:rows,position};
+}
+export function unresolvedPaynePositions(series){
+  return paynePositionRecords(series).filter(p=>p.status!=='CLOSED'||p.reconciliationState!=='FLAT');
+}
