@@ -1,5 +1,5 @@
 import {liveOrderWatchProjection,paynePositionRecords,payneCapacityEvidence,upsertPaynePosition,unresolvedPaynePositions} from './payne-live-order-watch.js';
-import {PayneExecutionCoordinator,claimPayneExecution,releaseProvenNoPost} from './payne-execution-coordinator.js';
+import {PayneExecutionCoordinator,claimPayneExecution,releaseProvenNoPost,resolvePayneExecutionClaim} from './payne-execution-coordinator.js';
 export {PayneExecutionCoordinator};
 import { kalshiReadOnlyProof, kalshiGetOnly } from './kalshi-get-only.js';
 import { kalshiPayneOrderPost, PAYNE_WRITE_CONTRACT } from './kalshi-real-write.js';
@@ -3875,12 +3875,14 @@ export async function runPayneRealExecutionCycle(env,{postImpl=kalshiPayneOrderP
 
   // Atomic cross-instance claim belongs to the persisted attempt number, not
   // merely the specimen. Never retry an ambiguous/previously claimed POST.
-  const ownership=await claimPayneExecution(env,{
+  const entryClaimIdentity={
     seriesId,attemptNo:providerAttemptNoCandidate,
     specimenId:series.fireLatch?.specimenId,
     clientOrderId,ticker:candidate.ticker,side:candidate.outcomeSide,
-    windowClose:candidate.closeTime
-  });
+    windowClose:candidate.closeTime,
+    maxPositions:Number(control.maxPositions)
+  };
+  const ownership=await claimPayneExecution(env,entryClaimIdentity);
   if(ownership.granted!==true){
     logPayneTiming('ATOMIC_CLAIM_REJECTED',trace(),executionStartMs,Date.now(),ownership.reason);
     // Do not save a stale local copy over an execution owned by another instance.
@@ -3995,6 +3997,12 @@ export async function runPayneRealExecutionCycle(env,{postImpl=kalshiPayneOrderP
   series.currentAttempt=attempt;
 
   if(result.state==='NO_FILL'){
+    const atomicResult=await resolvePayneExecutionClaim(env,entryClaimIdentity,'NO_FILL');
+    if(!atomicResult.granted){
+      series.status='ATOMIC_NO_FILL_RESOLUTION_UNKNOWN';
+      series.unresolvedEntry=true;
+      return saveRealSeriesState(env,series);
+    }
     series.unresolvedEntry=false;
     attempt={...attempt,terminalClassification:'NO_FILL'};
     series.currentAttempt=attempt;
@@ -4016,11 +4024,18 @@ export async function runPayneRealExecutionCycle(env,{postImpl=kalshiPayneOrderP
     return saveRealSeriesState(env,series);
   }
 
+  const atomicFilled=await resolvePayneExecutionClaim(env,entryClaimIdentity,'OPEN');
+  if(!atomicFilled.granted){
+    series.status='ATOMIC_FILLED_OWNERSHIP_RECONCILIATION_REQUIRED';
+    series.unresolvedEntry=true;
+    return saveRealSeriesState(env,series);
+  }
   const position={
     schema:'PAYNE_REAL_POSITION_V1',owner:REAL_OWNER,seriesId,attemptId,attemptNo,status:'OPEN',
     asset:candidate.asset,marketTicker:candidate.ticker,outcomeSide:candidate.outcomeSide,direction:candidate.direction,
     paperCandidateKey:paperCandidateKey(candidate),
     exchangeIndex:2,entryOrderId:result.orderId,entryClientOrderId:result.clientOrderId||clientOrderId,
+    entryFireSpecimenId:series.fireLatch?.specimenId,marketCloseTime:candidate.closeTime,
     filledCount:Number(result.fillCount),remainingExitCount:Number(result.fillCount),entryAverageFillPrice:result.averageFillPrice,
     entryAverageFeePaid:result.averageFeePaid,entryScore:finalFeature.score,entryMove:finalFeature.move,entryEdge:finalFeature.edge,
     entryTime:new Date(nowMs).toISOString(),freshLockAt:freshLock.readAt,preSubmitAt:preSubmit.readAt,
