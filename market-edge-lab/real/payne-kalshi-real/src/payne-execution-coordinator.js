@@ -36,7 +36,9 @@ export class PayneExecutionCoordinator {
           return {granted:false,reason:'PROVIDER_NO_EXECUTION_EVIDENCE_REQUIRED'};
         if(prior.claimState==='CLOSED'||prior.claimState==='NO_FILL'||prior.claimState==='NO_PROVIDER_EXECUTION')
           return {granted:prior.claimState===resolution,reason:prior.claimState===resolution?'ALREADY_RESOLVED':'TERMINAL_CLAIM_IMMUTABLE'};
-        if(prior.claimState==='UNKNOWN'&&resolution==='NO_FILL')
+        if(prior.claimState==='UNKNOWN'&&
+           ['NO_FILL','NO_PROVIDER_EXECUTION','CLOSED'].includes(resolution) &&
+           input.authoritativeReconciliationProven!==true)
           return {granted:false,reason:'UNKNOWN_NEEDS_AUTHORITATIVE_RECONCILIATION'};
         await tx.put(key,{...prior,claimState:resolution,resolvedAt:new Date().toISOString()});
         return {granted:true,reason:'ENTRY_RESOLUTION_PERSISTED'};
@@ -74,13 +76,13 @@ export async function claimPayneExecution(env,identity){
   }catch{return {granted:false,reason:'ATOMIC_COORDINATOR_UNAVAILABLE'};}
 }
 
-export async function resolvePayneExecutionClaim(env,identity,resolution,{providerFlatProven=false,providerNoExecutionProven=false}={}){
+export async function resolvePayneExecutionClaim(env,identity,resolution,{providerFlatProven=false,providerNoExecutionProven=false,authoritativeReconciliationProven=false}={}){
   const binding=env?.PAYNE_EXECUTION_COORDINATOR;
   if(!binding?.idFromName||!binding?.get)return {granted:false,reason:'ATOMIC_COORDINATOR_UNBOUND'};
   try{
     const response=await binding.get(binding.idFromName(identity.seriesId)).fetch('https://payne-coordinator.internal/resolve',{
       method:'POST',headers:{'content-type':'application/json'},
-      body:JSON.stringify({...identity,action:'RESOLVE_ENTRY',resolution,providerFlatProven,providerNoExecutionProven})
+      body:JSON.stringify({...identity,action:'RESOLVE_ENTRY',resolution,providerFlatProven,providerNoExecutionProven,authoritativeReconciliationProven})
     });
     if(!response.ok)return {granted:false,reason:'RESOLUTION_COORDINATOR_REJECTED'};
     const body=await response.json();
