@@ -1,4 +1,5 @@
 name: PAYNE Founder Governed Reconciliation Once
+# Live verification after coordinator terminal-claim safety repair deployment
 on:
   push:
     branches:
