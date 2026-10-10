@@ -1,0 +1,21 @@
+name: PAYNE ARM Control Acknowledgment Isolated Tests
+on:
+  push:
+    branches: [payne-arm-control-ack-repair-20261010]
+permissions:
+  contents: read
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Full PAYNE tests and syntax
+        working-directory: market-edge-lab/real/payne-kalshi-real
+        run: |
+          node --check src/cockpit-html.js
+          npm test
