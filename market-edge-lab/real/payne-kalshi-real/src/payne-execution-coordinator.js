@@ -41,10 +41,26 @@ export class PayneExecutionCoordinator {
         return {granted:true,reason:'PROVEN_NO_POST_RELEASED'};
       }
       if(action==='RESOLVE_ENTRY'){
+        const resolution=String(input.resolution||'');
+        // Exact-provider no-execution reconciliation may encounter a historical
+        // attempt that never acquired any coordinator claim. Atomically prove no
+        // other unsettled claim exists before writing its immutable terminal tombstone.
+        // A present but mismatched claim is NEVER repaired by this path.
+        if(!prior && resolution==='NO_PROVIDER_EXECUTION' &&
+           input.providerNoExecutionProven===true &&
+           input.authoritativeReconciliationProven===true){
+          const claims=await tx.list({prefix:'attempt:'});
+          const outstanding=[...claims.values()].some(row=>row&&
+            ['POTENTIALLY_SUBMITTED','OPEN','UNKNOWN'].includes(row.claimState));
+          if(outstanding)return {granted:false,reason:'OTHER_OUTSTANDING_COORDINATOR_CLAIM'};
+          await tx.put(key,{seriesId,attemptNo,specimenId,clientOrderId,ticker,side,windowClose,
+            claimState:'NO_PROVIDER_EXECUTION',resolvedAt:new Date().toISOString(),
+            resolutionAuthority:'PROVIDER_CONFIRMED_NO_EXECUTION_NO_PRIOR_CLAIM'});
+          return {granted:true,reason:'NO_PRIOR_CLAIM_TERMINALLY_RECONCILED'};
+        }
         if(!prior||prior.seriesId!==seriesId||prior.specimenId!==specimenId||prior.clientOrderId!==clientOrderId||
            prior.ticker!==ticker||prior.side!==side||prior.windowClose!==windowClose)
-          return {granted:false,reason:'CLAIM_IDENTITY_MISMATCH'};
-        const resolution=String(input.resolution||'');
+          return {granted:false,reason:prior?'CLAIM_IDENTITY_MISMATCH':'CLAIM_NOT_FOUND'};
         if(!['OPEN','NO_FILL','CLOSED','UNKNOWN','NO_PROVIDER_EXECUTION'].includes(resolution))
           return {granted:false,reason:'INVALID_RESOLUTION'};
         if(resolution==='CLOSED'&&input.providerFlatProven!==true)
