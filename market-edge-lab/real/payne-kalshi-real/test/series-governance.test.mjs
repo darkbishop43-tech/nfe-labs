@@ -96,7 +96,14 @@ async function credentials(){
 }
 
 async function env({shadow=baselineShadow(),autoPositions=[]}={}){
-  const e={PAYNE_KALSHI_STATE:new MemoryKV(),BASELINE_REAL_READ:baselineService(shadow,autoPositions),...(await credentials())};
+  const claims=new Map();
+  const coordinator={idFromName:n=>n,get:n=>({fetch:async(_url,opts)=>{
+    const claim=JSON.parse(opts.body),key=n+':'+claim.attemptNo;
+    if(claims.has(key))return jsonResponse({granted:false,reason:'ATTEMPT_ALREADY_CLAIMED'});
+    claims.set(key,claim);
+    return jsonResponse({granted:true});
+  }})};
+  const e={PAYNE_KALSHI_STATE:new MemoryKV(),PAYNE_EXECUTION_COORDINATOR:coordinator,BASELINE_REAL_READ:baselineService(shadow,autoPositions),...(await credentials())};
   await seedPaynePriorSpot(e,shadow);
   return e;
 }
