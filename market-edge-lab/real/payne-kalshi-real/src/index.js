@@ -2706,7 +2706,7 @@ export function seriesInterlock(series,maxPositions=null) {
     if(!availability.available)return {clear:false,reason:availability.reason};
     if(['SUBMITTING','WRITE_ERROR_UNKNOWN','PROVIDER_REJECTED_OR_UNKNOWN','UNKNOWN'].includes(String(series?.currentAttempt?.status||'').toUpperCase()))
       return {clear:false,reason:'ATTEMPT_RESULT_UNKNOWN'};
-    if(/^(ENTRY_SUBMITTING|ENTRY_RECONCILIATION_REQUIRED|ENTRY_AUTHORITY_REVOKED_AFTER_LATCH|EXIT_|HOLD_WRONG_OR_UNKNOWN_OWNERSHIP)/.test(String(series?.status||'')))
+    if(/^(ENTRY_SUBMITTING|ENTRY_RECONCILIATION_REQUIRED|ENTRY_AUTHORITY_REVOKED_AFTER_LATCH|MANAGEMENT_|EXIT_|HOLD_WRONG_OR_UNKNOWN_OWNERSHIP)/.test(String(series?.status||'')))
       return {clear:false,reason:'PENDING_EXECUTION_STATE'};
     return {clear:true,reason:'FOUNDER_CAPACITY_AVAILABLE'};
   }
@@ -3700,6 +3700,12 @@ export async function runPayneRealExecutionCycle(env,{postImpl=kalshiPayneOrderP
   let series=await loadRealSeriesState(env);
   const trace=()=>payneTimingIdentity(series,series?.fireLatch);
   logPayneTiming('EXECUTION_CYCLE_START',trace(),executionStartMs);
+  // Never silently discard an unrecognized or cross-owned legacy position.
+  if((series.position && (series.position.owner!==REAL_OWNER || Number(series.position.exchangeIndex)!==2)) ||
+     (Array.isArray(series.positions)&&series.positions.some(p=>p && (p.owner!==REAL_OWNER || Number(p.exchangeIndex)!==2)))){
+    series.status='HOLD_WRONG_OR_UNKNOWN_OWNERSHIP';
+    return saveRealSeriesState(env,series);
+  }
 
   if(series?.unresolvedEntry===true){
     const reconciliation=await reconcileUnresolvedEntryFromProvider(env,nowMs);
@@ -3711,7 +3717,12 @@ export async function runPayneRealExecutionCycle(env,{postImpl=kalshiPayneOrderP
   }
 
   if(unresolvedPaynePositions(series).length){
+    const managedAttemptIds=unresolvedPaynePositions(series).map(p=>p.attemptId);
     series=await manageAllPayneRealPositions(env,control,series,postImpl,nowMs);
+    // Closing a position and opening a new one never share a scheduler cycle.
+    // The next tick must observe fresh authoritative ownership and cooldown.
+    if(managedAttemptIds.some(id=>paynePositionRecords(series).some(p=>p.attemptId===id&&p.status==='CLOSED')))
+      return saveRealSeriesState(env,series);
     control=await loadControl(env);
     // Existing management keeps running while DISARMED or after attempt exhaustion.
     if(!control.armed || seriesTerminal(series) ||
