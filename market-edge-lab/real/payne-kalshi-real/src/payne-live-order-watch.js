@@ -42,7 +42,8 @@ export function liveOrderWatchProjection(series,attempts=[],ledger=[],limit=12){
     const id=a.attemptId||a.clientOrderId;if(!id)continue;
     if(rows.has(id))continue;
     const raw=String(a.status||'UNKNOWN').toUpperCase();
-    const state=raw.includes('NO_FILL')?'NO_FILL':raw.includes('FILL')?'OPEN':
+    const state=raw.includes('NO_PROVIDER_EXECUTION')||raw.includes('PROVIDER_RECONCILED_NO_EXECUTION')?'NO_PROVIDER_EXECUTION':
+      raw.includes('NO_FILL')?'NO_FILL':raw.includes('FILL')?'OPEN':
       raw.includes('UNKNOWN')?'UNKNOWN':raw.includes('SUBMIT')?'SUBMITTING':
       raw.includes('INVALIDATED')?'CLOSED':'LOCKED';
     put(id,{owner:'PAYNE_KALSHI_REAL',asset:a.asset||null,ticker:a.marketTicker||null,
