@@ -232,6 +232,30 @@ test('UNKNOWN entry self-reconciliation: authenticated provider proves FLAT/no e
   }finally{io.restore();}
 });
 
+test('terminal provider no-execution must not persist before coordinator resolution',async()=>{
+ const e=await env(),client='payne-real-atomic-unknown-entry';
+ const io=installProvider({position:'ABSENT',orders:[],fills:[],historicalFills:[],settlements:[]});
+ try{
+   await saveRealSeriesState(e,{
+     ...defaultRealSeriesState(),seriesId:'ATOMIC-FAIL-TEST',status:'ENTRY_RECONCILIATION_REQUIRED',
+     unresolvedEntry:true,attemptsStarted:1,attemptTarget:5,
+     currentAttempt:{attemptId:'ATOMIC-FAIL-1',attemptNo:1,marketTicker:'KXBTC15M-REALTEST',
+       outcomeSide:'YES',direction:'UP',clientOrderId:client,
+       fireSpecimenId:'FIRE-MISSING-CLAIM',marketCloseTime:'2026-10-02T06:15:00Z',
+       payload:{client_order_id:client},status:'WRITE_ERROR_UNKNOWN'}
+   });
+   const out=await reconcileUnresolvedEntryFromProvider(e,Date.parse('2026-10-02T06:16:00Z'));
+   assert.equal(out.ok,false);
+   assert.equal(out.classification,'UNKNOWN');
+   const state=await loadRealSeriesState(e);
+   assert.equal(state.unresolvedEntry,true);
+   assert.equal(state.currentAttempt.status,'WRITE_ERROR_UNKNOWN');
+   const ledger=await listRealLedger(e,100);
+   assert.equal(ledger.some(x=>x.type==='ENTRY_RECONCILED_NO_EXECUTION'),false);
+   assert.ok(ledger.some(x=>x.type==='ENTRY_RECONCILIATION_STILL_UNKNOWN'));
+ }finally{io.restore();}
+});
+
 test('pending exact provider order with zero fills never clears unresolvedEntry',async()=>{
   const e=await env(),client='payne-real-pending-entry';
   const io=installProvider({position:'ABSENT',orders:[{
