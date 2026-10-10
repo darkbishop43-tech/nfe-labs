@@ -1,4 +1,4 @@
-import {PayneExecutionCoordinator,claimPayneExecution} from './payne-execution-coordinator.js';
+import {PayneExecutionCoordinator,claimPayneExecution,releaseProvenNoPost} from './payne-execution-coordinator.js';
 export {PayneExecutionCoordinator};
 import { kalshiReadOnlyProof, kalshiGetOnly } from './kalshi-get-only.js';
 import { kalshiPayneOrderPost, PAYNE_WRITE_CONTRACT } from './kalshi-real-write.js';
@@ -3897,6 +3897,16 @@ export async function runPayneRealExecutionCycle(env,{postImpl=kalshiPayneOrderP
         seriesId,attemptId,intentNo,attemptNo:null,specimenId:series.fireLatch?.specimenId||null,ticker:candidate.ticker,clientOrderId,
         error:String(error?.message||error),writerInvoked,providerPostStarted:false,providerAttemptCounted:false,finalResult:'INVALIDATED_BEFORE_POST'
       });
+      const released=await releaseProvenNoPost(env,{
+        seriesId,attemptNo:providerAttemptNoCandidate,specimenId:series.fireLatch?.specimenId,
+        clientOrderId,ticker:candidate.ticker,side:candidate.outcomeSide,windowClose:candidate.closeTime
+      });
+      if(!released.granted){
+        series.unresolvedEntry=true;
+        series.status='ATOMIC_OWNERSHIP_RECONCILIATION_REQUIRED';
+        await saveRealSeriesState(env,series);
+        return series;
+      }
       await settleSeriesControl(env,series,0);
       return saveRealSeriesState(env,series);
     }
@@ -3929,6 +3939,14 @@ export async function runPayneRealExecutionCycle(env,{postImpl=kalshiPayneOrderP
       seriesId,attemptId,intentNo,attemptNo:null,ticker:candidate.ticker,clientOrderId,
       error:'PROVIDER_POST_BOUNDARY_NOT_PROVEN',writerInvoked,providerPostStarted:false,providerAttemptCounted:false,finalResult:'INVALIDATED_BEFORE_POST'
     });
+    const released=await releaseProvenNoPost(env,{
+      seriesId,attemptNo:providerAttemptNoCandidate,specimenId:series.fireLatch?.specimenId,
+      clientOrderId,ticker:candidate.ticker,side:candidate.outcomeSide,windowClose:candidate.closeTime
+    });
+    if(!released.granted){
+      series.unresolvedEntry=true;series.status='ATOMIC_OWNERSHIP_RECONCILIATION_REQUIRED';
+      return saveRealSeriesState(env,series);
+    }
     await settleSeriesControl(env,series,0);
     return saveRealSeriesState(env,series);
   }
