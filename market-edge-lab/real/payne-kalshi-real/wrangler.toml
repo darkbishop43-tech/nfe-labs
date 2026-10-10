@@ -36,3 +36,12 @@ crons = ["* * * * *"]
 # Deployment defaults DISARMED. Cron always observes read-only; real entry writes are reachable only after explicit bounded PAYNE ARM.
 # Management may continue for durable PAYNE-owned positions after DISARM. Index 2 is the only permitted funding shard.
 # This Worker MUST NOT bind BASELINE_REAL_SHADOW_STATE or any Payne Paper namespace.
+
+# Isolated-source proposal ONLY. No production binding deployed.
+[[durable_objects.bindings]]
+name = "PAYNE_EXECUTION_COORDINATOR"
+class_name = "PayneExecutionCoordinator"
+
+[[migrations]]
+tag = "payne-execution-ownership-v1"
+new_sqlite_classes = ["PayneExecutionCoordinator"]
