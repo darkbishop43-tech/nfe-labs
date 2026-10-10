@@ -56,10 +56,18 @@ verify_safety() {
        (.fireLatch.providerPost//"NOT_STARTED")=="NOT_STARTED")) and
     (.currentAttempt.providerPostStarted!=true or
       (.currentAttempt.status|IN("NO_FILL","FILLED","CLOSED","SETTLED","NO_PROVIDER_EXECUTION"))) and
+    # Historical frozen-series configuration is not rewritten by a disarmed
+    # software-only deployment. ARM keeps its original frozen-config checks.
     (.configFrozen!=true or
        (.threshold==$c[0].activeThreshold and
         .maxEntryDebitUsd==$c[0].maxEntryDebitUsd and
-        .attemptTarget==$c[0].attemptTarget))
+        .attemptTarget==$c[0].attemptTarget) or
+       ($c[0].armed==false and .unresolvedEntry==true and
+        .currentAttempt.status=="NO_PROVIDER_EXECUTION" and
+        .currentAttempt.reconciliationReason=="PROVIDER_RECONCILED_NO_EXECUTION" and
+        .currentAttempt.providerPostStarted!=true and
+        (.fireLatch.state//"NONE")=="PRE_PROVIDER_VALIDATION" and
+        (.fireLatch.providerPost//"NOT_STARTED")=="NOT_STARTED"))
   ' "$s" >/dev/null || {
     # Existing KV data only: identify the failed invariant without changing state.
     jq -r --slurpfile c "$c" '
