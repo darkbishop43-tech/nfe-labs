@@ -3508,6 +3508,22 @@ export async function reconcileUnresolvedEntryFromProvider(env,nowMs=Date.now())
   }
 
   if((positionEvidence.classification==='ABSENT'||positionEvidence.classification==='FLAT') && exactOrders.length===0 && exactFills.length===0 && exactSettlements.length===0){
+    // Reconcile the atomic submission claim BEFORE persisting a terminal result.
+    // If the coordinator has an outstanding/unknown claim, retain the original
+    // attempt and operational block. Do not record a contradictory terminal event.
+    const atomicAuthority=await reconcileAtomicEntryAuthority(env,series,attempt,'NO_PROVIDER_EXECUTION',{noExecution:true});
+    if(!atomicAuthority.ok){
+      series.status='ATOMIC_RECONCILIATION_REQUIRED';
+      await appendRealLedger(env,'ENTRY_RECONCILIATION_STILL_UNKNOWN',{
+        seriesId:series.seriesId,attemptId:attempt.attemptId,ticker,clientOrderId,
+        reason:atomicAuthority.reason||'ATOMIC_RECONCILIATION_FAILED',
+        providerPositionClassification:positionEvidence.classification,
+        exactOrderCount:0,exactFillCount:0,exactSettlementCount:0,
+      });
+      await saveRealSeriesState(env,series);
+      return {ok:false,classification:'UNKNOWN',reason:atomicAuthority.reason||'ATOMIC_RECONCILIATION_FAILED',
+        series,control:await loadControl(env),providerWrites:0,orders:0,capitalMovedUsd:0};
+    }
     const reconciledAt=new Date(nowMs).toISOString();
     const providerResult={state:'NO_PROVIDER_EXECUTION',reason:'PROVIDER_RECONCILED_NO_EXECUTION',clientOrderId,fillCount:0,remainingCount:0};
     series.unresolvedEntry=false; series.position=null;
@@ -3532,13 +3548,6 @@ export async function reconcileUnresolvedEntryFromProvider(env,nowMs=Date.now())
     });
     await saveRealSeriesState(env,series);
     await settleSeriesControl(env,series,0);
-    const atomicAuthority=await reconcileAtomicEntryAuthority(env,series,attempt,'NO_PROVIDER_EXECUTION',{noExecution:true});
-    if(!atomicAuthority.ok){
-      series.unresolvedEntry=true;series.status='ATOMIC_RECONCILIATION_REQUIRED';
-      await saveRealSeriesState(env,series);
-      return {ok:false,classification:'UNKNOWN',reason:atomicAuthority.reason||'ATOMIC_RECONCILIATION_FAILED',
-        series,control:await loadControl(env),providerWrites:0,orders:0,capitalMovedUsd:0};
-    }
     return {ok:true,classification:'FLAT',reason:'PROVIDER_RECONCILED_NO_EXECUTION',terminalClassification:'NO_PROVIDER_EXECUTION',ticker,clientOrderId,orderId:null,exactOrderCount:0,exactFillCount:0,exactSettlementCount:0,providerPositionClassification:positionEvidence.classification,series:await loadRealSeriesState(env),control:await loadControl(env),providerWrites:0,orders:0,capitalMovedUsd:0};
   }
 
