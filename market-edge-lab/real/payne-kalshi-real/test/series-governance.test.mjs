@@ -99,6 +99,12 @@ async function env({shadow=baselineShadow(),autoPositions=[]}={}){
   const claims=new Map();
   const coordinator={idFromName:n=>n,get:n=>({fetch:async(_url,opts)=>{
     const claim=JSON.parse(opts.body),key=n+':'+claim.attemptNo;
+        if(claim.action==='RESOLVE_ENTRY'){
+          const prior=claims.get(key);
+          if(!prior)return jsonResponse({granted:false,reason:'CLAIM_NOT_FOUND'});
+          claims.set(key,{...prior,claimState:claim.resolution});
+          return jsonResponse({granted:true,reason:'ENTRY_RESOLUTION_PERSISTED'});
+        }
         if(claim.action==='RELEASE_PROVEN_NO_POST'){
           const prior=claims.get(key);
           if(prior?.specimenId===claim.specimenId && prior?.clientOrderId===claim.clientOrderId && claim.provenNoProviderPost===true){
