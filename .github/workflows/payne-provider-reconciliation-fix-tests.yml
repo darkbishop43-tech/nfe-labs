@@ -1,0 +1,26 @@
+name: PAYNE Provider Reconciliation Isolated Tests
+on:
+  push:
+    branches: [payne-provider-reconciliation-fix-20261010]
+    paths:
+      - '.github/workflows/payne-provider-reconciliation-fix-tests.yml'
+      - 'market-edge-lab/real/payne-kalshi-real/src/**'
+      - 'market-edge-lab/real/payne-kalshi-real/test/**'
+permissions:
+  contents: read
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Syntax
+        working-directory: market-edge-lab/real/payne-kalshi-real
+        run: node --check src/index.js
+      - name: PAYNE full zero-money suite
+        working-directory: market-edge-lab/real/payne-kalshi-real
+        run: npm test
