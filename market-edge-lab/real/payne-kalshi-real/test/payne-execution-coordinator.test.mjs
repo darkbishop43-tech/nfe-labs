@@ -7,7 +7,7 @@ function syntheticDurableObject(){
   // Transaction callbacks in this fixture are serialized just as DO storage transactions are.
   let tail=Promise.resolve();
   const state={storage:{transaction(fn){
-    const result=tail.then(()=>fn({get:async key=>saved.get(key),put:async(key,value)=>{saved.set(key,structuredClone(value));}}));
+    const result=tail.then(()=>fn({get:async key=>saved.get(key),put:async(key,value)=>{saved.set(key,structuredClone(value));},delete:async key=>{saved.delete(key);}}));
     tail=result.then(()=>{},()=>{});
     return result;
   }}};
@@ -38,4 +38,16 @@ test('claim owner identity is bound to series and attempt, not just ticker',asyn
  assert.equal((await claimPayneExecution({PAYNE_EXECUTION_COORDINATOR:binding},identity)).granted,true);
  assert.equal((await claimPayneExecution({PAYNE_EXECUTION_COORDINATOR:binding},identity)).granted,false);
  assert.equal((await claimPayneExecution({},identity)).granted,false);
+});
+
+test('proven local no-POST release permits subsequent intent; uncertain claim never releases',async()=>{
+ const {instance,saved}=syntheticDurableObject();
+ const call=async body=>(await instance.fetch(new Request('https://payne-coordinator.internal/claim',{method:'POST',body:JSON.stringify(body)}))).json();
+ assert.equal((await call(identity)).granted,true);
+ assert.equal((await call({...identity,action:'RELEASE_PROVEN_NO_POST',provenNoProviderPost:false})).granted,false);
+ assert.equal(saved.size,1);
+ assert.equal((await call({...identity,action:'RELEASE_PROVEN_NO_POST',provenNoProviderPost:true})).granted,true);
+ assert.equal(saved.size,0);
+ assert.equal((await call({...identity,specimenId:'NEXT-LEGITIMATE-INTENT'})).granted,true);
+ assert.equal((await call(identity)).granted,false);
 });
