@@ -3622,6 +3622,19 @@ async function managePayneRealPosition(env,control,series,postImpl=kalshiPayneOr
   position.reconciliationReason=rec.reason;
   position.reconciledAt=new Date(nowMs).toISOString();
   if(rec.classification==='FLAT'){
+    if(position.entryFireSpecimenId&&position.marketCloseTime){
+      const atomicClosed=await resolvePayneExecutionClaim(env,{
+        seriesId:position.seriesId,attemptNo:Number(position.attemptNo),
+        specimenId:position.entryFireSpecimenId,clientOrderId:position.entryClientOrderId,
+        ticker:position.marketTicker,side:position.outcomeSide,windowClose:position.marketCloseTime
+      },'CLOSED',{providerFlatProven:true,authoritativeReconciliationProven:true});
+      if(!atomicClosed.granted){
+        position.status='RECONCILIATION_UNKNOWN';
+        series.status='ATOMIC_CLOSE_RECONCILIATION_REQUIRED';
+        await settleSeriesControl(env,series,1,{failClosed:true});
+        return saveRealSeriesState(env,series);
+      }
+    }
     position.status='CLOSED';
     position.closedAt=position.closedAt||new Date(nowMs).toISOString();
     if(seriesTerminal(series)){series.status='COMPLETE_FLAT';series.completedAt=series.completedAt||position.closedAt;}
