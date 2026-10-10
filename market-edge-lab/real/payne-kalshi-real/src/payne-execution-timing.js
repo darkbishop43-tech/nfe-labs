@@ -17,3 +17,12 @@ export function logPayneTiming(stage,identity,startMs,nowMs=Date.now(),outcome='
  console.log('PAYNE_TIMING '+JSON.stringify(record));
  return record;
 }
+
+export function paynePriorityBeforeScan(control,series){
+  const unresolved=series?.unresolvedEntry===true;
+  const management=Boolean(series?.position &&
+    ['OPEN','EXIT_RETRY','EXIT_RECONCILIATION_REQUIRED','RECONCILIATION_UNKNOWN']
+      .includes(String(series.position.status||'')));
+  const durableLatch=Boolean(control?.armed && series?.fireLatch?.state==='LATCHED');
+  return unresolved||management||durableLatch;
+}
