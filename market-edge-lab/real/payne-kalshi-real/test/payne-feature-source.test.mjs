@@ -154,3 +154,33 @@ test('unsupported Coinbase pair remains unavailable; no synthetic spot fallback'
   assert.ok(result.spotReadFailures.some(row=>row.asset==='NEAR'));
   assert.equal(result.providerWrites,0);
 });
+
+test('Paper epoch parity: exact single-contract FIRE and FINAL refresh do not reset five-minute underlying reference',async()=>{
+ const e={PAYNE_KALSHI_STATE:kvMock()};
+ const now=Date.parse('2026-10-02T06:05:00Z');
+ const open='2026-10-02T06:00:00Z',close='2026-10-02T06:15:00Z';
+ const btc=market('KXBTC15M-CURRENT',open,close,'BTC');
+ const eth=market('KXETH15M-CURRENT',open,close,'ETH');
+ const prior=100/(1+0.005);
+ await e.PAYNE_KALSHI_STATE.put('payne-kalshi:feature-shadow:v2-paper-brain',JSON.stringify({
+   schema:'PAYNE_PAPER_BRAIN_KALSHI_FEATURE_STATE_V1',
+   prices:{BTC:prior,ETH:prior},referencePrices:{BTC:prior,ETH:prior}
+ }));
+ const seen=[];
+ const initial=await buildPayneOwnedFeatureState(e,[btc,eth],now,{fetchImpl:fetchSpot({BTC:100,ETH:100},seen)});
+ const initialRow=initial.opportunities.find(x=>x.marketTicker===btc.ticker&&x.outcomeSide==='YES');
+ assert.ok(initialRow.score>.80);
+ const beforeCalls=seen.length;
+ const fire=await buildPayneOwnedFeatureState(e,[btc],now,{fetchImpl:fetchSpot({},seen),forceRefresh:true});
+ const row=fire.opportunities.find(x=>x.outcomeSide==='YES');
+ assert.equal(seen.length,beforeCalls,'same Paper epoch must not resample spot input');
+ assert.equal(row.move,initialRow.move);
+ assert.equal(row.score,initialRow.score);
+ assert.equal(fire.forceRefreshReason,'PAPER_EPOCH_REUSED_FRESH_KALSHI_BOOK_REPRICED');
+ const repriced={...btc,yesAsk:.97};
+ const final=await buildPayneOwnedFeatureState(e,[repriced],now,{fetchImpl:fetchSpot({},seen),forceRefresh:true});
+ const finalRow=final.opportunities.find(x=>x.outcomeSide==='YES');
+ assert.ok(finalRow.score<.80,'changed live market price must still fail final PULL qualification');
+ assert.equal(seen.length,beforeCalls);
+ assert.equal(finalRow.observedAsk,.97);
+});
