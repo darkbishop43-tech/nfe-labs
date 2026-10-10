@@ -8,14 +8,31 @@ export class PayneExecutionCoordinator {
     let input;
     try {input=await request.json();}catch{return Response.json({granted:false,reason:'INVALID_CLAIM'},{status:400});}
     const {seriesId,attemptNo,specimenId,clientOrderId,ticker,side,windowClose}=input||{};
-    if(!seriesId||!Number.isSafeInteger(attemptNo)||attemptNo<1||!specimenId||!clientOrderId||!ticker||!['YES','NO'].includes(side)||!windowClose){
+    const action=input?.action||'CLAIM';
+    const exitAction=['CLAIM_EXIT','RELEASE_EXIT_PROVEN_NO_POST'].includes(action);
+    if(!seriesId||!Number.isSafeInteger(attemptNo)||attemptNo<1||!specimenId||!clientOrderId||!ticker||!['YES','NO'].includes(side)||(!exitAction&&!windowClose)){
       return Response.json({granted:false,reason:'INCOMPLETE_EXECUTION_IDENTITY'},{status:400});
     }
-    const key='attempt:'+attemptNo;
-    const action=input?.action||'CLAIM';
-    if(!['CLAIM','RELEASE_PROVEN_NO_POST','RESOLVE_ENTRY'].includes(action)) return Response.json({granted:false,reason:'INVALID_ACTION'},{status:400});
+    const key=exitAction?'exit:'+clientOrderId:'attempt:'+attemptNo;
+    if(!['CLAIM','RELEASE_PROVEN_NO_POST','RESOLVE_ENTRY','CLAIM_EXIT','RELEASE_EXIT_PROVEN_NO_POST'].includes(action))
+      return Response.json({granted:false,reason:'INVALID_ACTION'},{status:400});
     const outcome=await this.state.storage.transaction(async tx=>{
       const prior=await tx.get(key);
+      if(action==='CLAIM_EXIT'){
+        if(prior)return {granted:false,reason:'EXIT_ORDER_ALREADY_CLAIMED'};
+        await tx.put(key,{seriesId,attemptNo,specimenId,clientOrderId,ticker,side,
+          claimState:'POTENTIALLY_SUBMITTED',claimedAt:new Date().toISOString()});
+        return {granted:true,reason:'EXCLUSIVE_EXIT_CLAIM_PERSISTED'};
+      }
+      if(action==='RELEASE_EXIT_PROVEN_NO_POST'){
+        if(!prior||prior.seriesId!==seriesId||prior.specimenId!==specimenId||
+           prior.clientOrderId!==clientOrderId||prior.ticker!==ticker||prior.side!==side)
+          return {granted:false,reason:'EXIT_CLAIM_IDENTITY_MISMATCH'};
+        if(input.provenNoProviderPost!==true)
+          return {granted:false,reason:'EXIT_NO_POST_PROOF_REQUIRED'};
+        await tx.delete(key);
+        return {granted:true,reason:'EXIT_NO_POST_CLAIM_RELEASED'};
+      }
       if(action==='RELEASE_PROVEN_NO_POST'){
         if(!prior||prior.specimenId!==specimenId||prior.clientOrderId!==clientOrderId)
           return {granted:false,reason:'CLAIM_NOT_OWNED'};
@@ -101,4 +118,19 @@ export async function releaseProvenNoPost(env,identity){
     });
     return result.ok?result.json():{granted:false,reason:'RELEASE_REJECTED'};
   }catch{return {granted:false,reason:'RELEASE_FAILED'};}
+}
+
+export async function claimPayneExit(env,identity,{provenNoProviderPost=false,release=false}={}){
+  const binding=env?.PAYNE_EXECUTION_COORDINATOR;
+  if(!binding?.idFromName||!binding?.get)return {granted:false,reason:'ATOMIC_COORDINATOR_UNBOUND'};
+  try{
+    const r=await binding.get(binding.idFromName(identity.seriesId)).fetch('https://payne-coordinator.internal/exit',{
+      method:'POST',headers:{'content-type':'application/json'},
+      body:JSON.stringify({...identity,action:release?'RELEASE_EXIT_PROVEN_NO_POST':'CLAIM_EXIT',provenNoProviderPost})
+    });
+    if(!r.ok)return {granted:false,reason:'EXIT_COORDINATOR_REJECTED'};
+    const body=await r.json();
+    return body?.granted===true?{granted:true,reason:body.reason||'EXIT_CLAIM_OK'}:
+      {granted:false,reason:body?.reason||'EXIT_CLAIM_DENIED'};
+  }catch{return {granted:false,reason:'EXIT_COORDINATOR_UNAVAILABLE'};}
 }
