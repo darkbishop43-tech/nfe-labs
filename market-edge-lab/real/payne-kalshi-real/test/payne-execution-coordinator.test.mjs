@@ -79,3 +79,19 @@ test('UNKNOWN retains capacity and cannot be relabeled NO_FILL without reconcili
  assert.equal((await call({...identity,action:'RESOLVE_ENTRY',resolution:'NO_FILL'})).granted,false);
  assert.equal((await call(identity)).granted,false);
 });
+
+test('each PAYNE EXIT client order has exactly one owner across concurrent invocations and restart',async()=>{
+ const {instance,saved}=syntheticDurableObject();
+ const exit={...identity,action:'CLAIM_EXIT',specimenId:'PAYNE-ATTEMPT-1',clientOrderId:'EXIT-CLIENT-1',windowClose:null};
+ const request=()=>new Request('https://payne-coordinator.internal/exit',{method:'POST',body:JSON.stringify(exit)});
+ const all=await Promise.all(Array.from({length:8},async()=> (await instance.fetch(request())).json()));
+ assert.equal(all.filter(x=>x.granted).length,1);
+ assert.equal(all.filter(x=>!x.granted).length,7);
+ assert.equal(saved.get('exit:EXIT-CLIENT-1').claimState,'POTENTIALLY_SUBMITTED');
+ const restarted=new PayneExecutionCoordinator({storage:{transaction:async fn=>fn({
+   get:async k=>saved.get(k),put:async(k,v)=>saved.set(k,v),delete:async k=>saved.delete(k),
+   list:async({prefix='' }={})=>new Map([...saved.entries()].filter(([k])=>k.startsWith(prefix)))
+ })}});
+ const again=await restarted.fetch(request());
+ assert.equal((await again.json()).granted,false,'an uncertain exit cannot retry after restart');
+});
