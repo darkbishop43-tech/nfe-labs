@@ -6,8 +6,8 @@
 
 .obsTitle{font-size:18px;font-weight:800}.obsHead{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;flex-wrap:wrap}.obsGrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px;margin-top:9px}.obsBox{background:#08131e;border:1px solid var(--l);border-radius:8px;padding:9px}.obsBox .big{font-size:19px;font-weight:800;margin-top:2px}.obsStatus{font-size:10px;text-transform:uppercase;letter-spacing:.08em;margin-top:5px}.recoverable{color:var(--g)}.prospective{color:var(--y)}.obsControls{display:flex;gap:7px;flex-wrap:wrap}.obsControls select{background:#08131e;color:var(--t);border:1px solid var(--l);border-radius:6px;padding:6px 8px;font-size:12px}.obsChart{height:235px}.coverageTable td:nth-child(2),.coverageTable td:nth-child(3){white-space:nowrap}.laneTag{font-size:10px;color:var(--a);letter-spacing:.08em;text-transform:uppercase}.obsDivider{height:1px;background:#1d2c3b;margin:9px 0}
 @media(max-width:600px){main{padding:7px}.two{grid-template-columns:1fr}.v{font-size:19px}table{font-size:11px}}</style></head><body>
-<header><h1>NFE-OS Market Edge — Kalshi Ledger Lab V1</h1><div class="sub">Provider-accounting refresh · 527 raw Kalshi rows · read only · source file (8) verified identical to prior (6)</div></header><main>
-<div class="note"><b>Integrity:</b> RAW PROVIDER ROWS = <b>527</b>. This does <b>not</b> mean 527 independent trades. TRADE EPISODES remain <b>UNKNOWN</b> globally because the provider export has no authoritative episode ID. Duplicate-looking rows remain preserved. The four proven Founder-manual NEAR rows remain excluded only from AUTO_BASELINE aggregates.</div>
+<header><h1>NFE-OS Market Edge — Kalshi Ledger Lab V1</h1><div class="sub">Provider-accounting refresh · 683 raw Kalshi rows · read only · refreshed from Founder export through Oct 10, 2026</div></header><main>
+<div class="note"><b>Integrity:</b> RAW PROVIDER ROWS = <b>683</b>. This does <b>not</b> mean 683 independent trades. TRADE EPISODES remain <b>UNKNOWN</b> globally because the provider export has no authoritative episode ID. Duplicate-looking rows remain preserved. The four proven Founder-manual NEAR rows remain excluded only from AUTO_BASELINE aggregates. AUTO_BASELINE remains an exclusion-based analytical aggregate unless exact lane ownership is independently joined.</div>
 <div id="cards" class="grid cards"></div>
 <div class="grid two">
 <section class="panel"><h2>Cumulative realized net P/L — all 527 provider rows</h2><div class="sub">Chronological by provider close timestamp. Starts at $0. Realized P/L only, not reconstructed account equity.</div><svg id="cum"></svg></section>
@@ -18,7 +18,7 @@
 <section class="panel"><h2>YES / NO and win / loss</h2><div id="sides"></div><br><div id="results"></div></section>
 <section class="panel"><h2>Entry-price economics</h2><div id="bands"></div><div class="sub">Entry price is provider contract price, not NFE score.</div></section>
 <section class="panel"><h2>Provider-row return cohorts</h2><div id="cohorts"></div><div class="sub">Exploratory row-level approximation: net P/L ÷ (entry price × quantity + open fee). Not yet logical-trade episodes. +200%/+300% cohorts are currently empty; one raw provider row is +400%+.</div></section>
-<section class="panel"><h2>Drawdown / recovery</h2><div class="grid cards"><div class="card"><div class="k">Maximum realized drawdown</div><div class="v r">-$44.7834</div></div><div class="card"><div class="k">Trough</div><div class="v" style="font-size:15px">Oct 02 2026 00:36:35 ET</div></div><div class="card"><div class="k">Recovery by dataset end</div><div class="v g">+$1.9624</div><div class="sub">Improvement from trough, not return to prior peak.</div></div></div></section>
+<section class="panel"><h2>Drawdown / recovery</h2><div class="grid cards"><div class="card"><div class="k">Maximum realized drawdown</div><div class="v r">-$46.6806</div></div><div class="card"><div class="k">Trough</div><div class="v" style="font-size:15px">Oct 08 2026 07:15:03 ET</div></div><div class="card"><div class="k">Recovery by dataset end</div><div class="v g">+$1.3534</div><div class="sub">Improvement from trough, not return to prior peak.</div></div></div></section>
 <section class="panel"><h2 class="u">Known Founder manual / training-mistake episode</h2><div class="mono">KXNEAR15M-26SEP292215-15</div><div class="grid cards"><div class="card"><div class="k">Provider rows</div><div class="v">4</div></div><div class="card"><div class="k">Gross</div><div class="v r">-$1.0475</div></div><div class="card"><div class="k">Fees</div><div class="v y">$0.1163</div></div><div class="card"><div class="k">Net</div><div class="v r">-$1.1638</div></div></div><div class="sub">FOUNDER_MANUAL · TRAINING-MISTAKE · preserved in full history · excluded only from AUTO_BASELINE aggregate.</div></section>
 </div>
 <section class="panel" style="margin-top:10px"><h2>Oct 2 forensic checkpoint</h2><div class="grid cards">
@@ -28,42 +28,42 @@
 <section class="panel" style="margin-top:10px" id="managementPerformance">
   <div class="mgmtHead"><div><div class="mgmtTitle">MANAGEMENT PERFORMANCE</div><div class="sub">Version-aware forensic view · logical positions only · read-only analytics</div></div><div><span class="badge">OLD_5MIN_CONTROL</span><span class="badge">DYNAMIC_V1</span><span class="badge y">UNKNOWN VISIBLE</span></div></div>
   <div class="mgmtGrid">
-    <div class="mgmtBox"><div class="k">Management version known</div><div class="big">402 / 405</div><div class="sub">99.3% of provisional logical positions</div></div>
-    <div class="mgmtBox"><div class="k">OLD_5MIN_CONTROL</div><div class="big">402</div><div class="sub">provider export sample</div></div>
-    <div class="mgmtBox"><div class="k">DYNAMIC_V1</div><div class="big y">0</div><div class="sub">current export ends before activation</div></div>
-    <div class="mgmtBox"><div class="k">UNKNOWN</div><div class="big y">3</div><div class="sub">Founder-manual logical positions</div></div>
-    <div class="mgmtBox"><div class="k">5m checkpoint evidence</div><div class="big y">0 / 0</div><div class="sub">no DYNAMIC_V1 position in this export</div></div>
+    <div class="mgmtBox"><div class="k">Management version known</div><div class="big">457 / 545</div><div class="sub">83.9% of provisional logical positions</div></div>
+    <div class="mgmtBox"><div class="k">OLD_5MIN_CONTROL</div><div class="big">457</div><div class="sub">provider export sample</div></div>
+    <div class="mgmtBox"><div class="k">DYNAMIC_V1</div><div class="big y">0</div><div class="sub">no ownership-verified V1 join yet</div></div>
+    <div class="mgmtBox"><div class="k">UNKNOWN</div><div class="big y">88</div><div class="sub">post-transition / manual without exact ownership join</div></div>
+    <div class="mgmtBox"><div class="k">5m checkpoint evidence</div><div class="big y">0 / 0</div><div class="sub">no ownership-verified DYNAMIC_V1 position</div></div>
     <div class="mgmtBox"><div class="k">Continuation outcome known</div><div class="big y">0 / 0</div><div class="sub">no DYNAMIC_V1 continuation sample yet</div></div>
   </div>
-  <div class="transition"><strong>MANAGEMENT TRANSITION</strong><br>OLD_5MIN_CONTROL → DYNAMIC_V1<br><span class="sub">Founder-authorized config commit 4ae1e89d… · successful Baseline deploy run #239 completed <b>2026-10-05 23:10:48Z</b>. The current provider export ends Oct 3, so it contains no post-activation DYNAMIC_V1 positions.</span></div>
+  <div class="transition"><strong>MANAGEMENT TRANSITION</strong><br>OLD_5MIN_CONTROL → DYNAMIC_V1<br><span class="sub">Founder-authorized config commit 4ae1e89d… · successful Baseline deploy run #239 completed <b>2026-10-05 23:10:48Z</b>. The provider export now extends through Oct 10. Post-transition rows are <b>UNKNOWN</b> until exact AUTO/PAYNE ownership and management evidence are joined; version is never inferred from hold duration alone.</span></div>
 
   <div class="grid two">
     <section class="panel"><h2>Management version breakdown</h2><div id="mgmtVersionTable" class="scrollx"></div><div class="sampleNote">Manual/training positions remain UNKNOWN; they are not assigned an AUTO management version.</div></section>
     <section class="panel"><h2>Hold duration × management version</h2><div class="mgmtControls"><label class="sub">Version <select id="holdVersion"><option>OLD_5MIN_CONTROL</option><option>DYNAMIC_V1</option><option>UNKNOWN</option></select></label></div><div id="holdVersionTable" class="scrollx"></div><div class="sampleNote">Duration never determines version. Version is assigned from deployment/ownership evidence first, then duration is analyzed inside that version.</div></section>
-    <section class="panel"><h2>Dynamic V1 continuation analysis</h2><div class="warnbox"><b>5M CHECKPOINT EVIDENCE UNAVAILABLE FOR THIS EXPORT.</b><br>The provider dataset ends before DYNAMIC_V1 activation. No 5-minute mark price, unrealized P/L, score, continuation decision, or continuation value is reconstructed.</div><div class="mgmtGrid"><div class="mgmtBox"><div class="k">V1 positions reaching 5:00</div><div class="big y">NO SAMPLE</div></div><div class="mgmtBox"><div class="k">Continued >5:00</div><div class="big y">NO SAMPLE</div></div><div class="mgmtBox"><div class="k">Average continuation value added</div><div class="big y">UNAVAILABLE</div></div><div class="mgmtBox"><div class="k">Total continuation value added</div><div class="big y">UNAVAILABLE</div></div></div></section>
+    <section class="panel"><h2>Dynamic V1 continuation analysis</h2><div class="warnbox"><b>5M CHECKPOINT EVIDENCE UNAVAILABLE FOR THIS EXPORT.</b><br>The provider dataset now includes post-activation rows, but none are ownership-verified as DYNAMIC_V1 from the provider CSV alone. No 5-minute mark price, unrealized P/L, score, continuation decision, or continuation value is reconstructed.</div><div class="mgmtGrid"><div class="mgmtBox"><div class="k">V1 positions reaching 5:00</div><div class="big y">NO SAMPLE</div></div><div class="mgmtBox"><div class="k">Continued >5:00</div><div class="big y">NO SAMPLE</div></div><div class="mgmtBox"><div class="k">Average continuation value added</div><div class="big y">UNAVAILABLE</div></div><div class="mgmtBox"><div class="k">Total continuation value added</div><div class="big y">UNAVAILABLE</div></div></div></section>
     <section class="panel"><h2>Asset × management analysis</h2><div class="mgmtControls"><label class="sub">Asset <select id="assetMgmtAsset"><option selected>NEAR</option><option>BNB</option><option>BTC</option><option>DOGE</option><option>ETH</option><option>HYPE</option><option>SOL</option><option>XRP</option><option>ZEC</option></select></label><label class="sub">Version <select id="assetMgmtVersion"><option>OLD_5MIN_CONTROL</option><option>DYNAMIC_V1</option><option>UNKNOWN</option></select></label></div><div id="assetMgmtTable" class="scrollx"></div><div class="sampleNote">NEAR defaults first because it has the largest sample. This panel is forensic only and creates no asset-specific trading rule.</div></section>
   </div>
 
-  <section class="panel" style="margin-top:10px"><h2>Management performance trend over time</h2><div class="sub">Daily OLD_5MIN_CONTROL logical-position net P/L · sample size shown in tooltip. Transition marker is after the current export window.</div><svg id="mgmtTrend" class="mgmtTrend"></svg><div class="transition"><strong>DYNAMIC V1 ACTIVATED</strong> · 2026-10-05 23:10:48Z · no post-transition provider rows are present in this dataset.</div></section>
+  <section class="panel" style="margin-top:10px"><h2>Management performance trend over time</h2><div class="sub">Daily OLD_5MIN_CONTROL logical-position net P/L · sample size shown in tooltip. Transition marker is after the current export window.</div><svg id="mgmtTrend" class="mgmtTrend"></svg><div class="transition"><strong>DYNAMIC V1 ACTIVATED</strong> · 2026-10-05 23:10:48Z · post-transition provider rows are present, but remain UNKNOWN until exact management ownership is joined.</div></section>
 
   <section class="panel" style="margin-top:10px"><h2>Evidence / UNKNOWN coverage</h2><div class="okbox"><b>First authoritative observability boundary found:</b> live AUTO creates and persists <span class="mono">position.autoV1Management</span>, including a frozen <span class="mono">fiveMinuteCheckpoint</span>, and archives completed V1 lifecycles under <span class="mono">auto-exp-v1:lifecycle:*</span>. However, the public <span class="mono">GET /execution-test-state</span> serializer omits <span class="mono">autoV1Management</span>, <span class="mono">autoV1ArchiveKey</span>, and checkpoint/continuation fields. The Founder progress panel then cannot map what it never receives.</div><div class="warnbox" style="margin-top:8px"><b>Diagnosis:</b> primary boundary = <b>B. state exists but API does not expose it</b>. Secondary = <b>C. cockpit/progress panel does not map V1 evidence</b>. Historical rows before the V1 fields also satisfy <b>D</b>. Smallest proposed repair: additive read-only exposure of sanitized V1 management evidence/current archive summaries; no change to management or execution behavior.</div></section>
 </section>
 
 <section class="panel" style="margin-top:10px" id="transactionCostForensics">
-  <div class="txnHead"><div><div class="txnTitle">TRANSACTION COST FORENSICS</div><div class="sub">Fee burden across logical positions · AUTO_BASELINE governed sample · read-only analytics</div></div><div><span class="badge">402 LOGICAL POSITIONS</span><span class="badge y">FEES SEPARATED</span><span class="badge">NO EXECUTION CHANGE</span></div></div>
+  <div class="txnHead"><div><div class="txnTitle">TRANSACTION COST FORENSICS</div><div class="sub">Fee burden across logical positions · AUTO_BASELINE governed sample · read-only analytics</div></div><div><span class="badge">542 LOGICAL POSITIONS</span><span class="badge y">FEES SEPARATED</span><span class="badge">NO EXECUTION CHANGE</span></div></div>
 
   <div class="mgmtGrid">
-    <div class="mgmtBox"><div class="k">Total fees</div><div class="big y">$16.9994</div><div class="sub">AUTO_BASELINE logical positions</div></div>
-    <div class="mgmtBox"><div class="k">Fees / position</div><div class="big">$0.0423</div><div class="sub">average round-trip fee burden</div></div>
-    <div class="mgmtBox"><div class="k">Actual net P/L</div><div class="big r">-$41.6572</div><div class="sub">after fees</div></div>
-    <div class="mgmtBox"><div class="k">Zero-fee counterfactual</div><div class="big r">-$24.6578</div><div class="sub">gross before fees only</div></div>
-    <div class="mgmtBox"><div class="k">Gross → net delta</div><div class="big y">-$16.9994</div><div class="sub">exact fee drag</div></div>
-    <div class="mgmtBox"><div class="k">Fees on winners</div><div class="big">$7.4813</div><div class="sub">221 net winners · avg $0.0339</div></div>
-    <div class="mgmtBox"><div class="k">Fees on losers</div><div class="big y">$9.5181</div><div class="sub">181 net losers · avg $0.0526</div></div>
+    <div class="mgmtBox"><div class="k">Total fees</div><div class="big y">$20.6107</div><div class="sub">AUTO_BASELINE logical positions</div></div>
+    <div class="mgmtBox"><div class="k">Fees / position</div><div class="big">$0.0380</div><div class="sub">average round-trip fee burden</div></div>
+    <div class="mgmtBox"><div class="k">Actual net P/L</div><div class="big r">-$44.1634</div><div class="sub">after fees</div></div>
+    <div class="mgmtBox"><div class="k">Zero-fee counterfactual</div><div class="big r">-$23.5527</div><div class="sub">gross before fees only</div></div>
+    <div class="mgmtBox"><div class="k">Gross → net delta</div><div class="big y">-$20.6107</div><div class="sub">exact fee drag</div></div>
+    <div class="mgmtBox"><div class="k">Fees on winners</div><div class="big">$9.4342</div><div class="sub">307 net winners · avg $0.0307</div></div>
+    <div class="mgmtBox"><div class="k">Fees on losers</div><div class="big y">$11.1766</div><div class="sub">235 net losers · avg $0.0476</div></div>
     <div class="mgmtBox"><div class="k">Gross winners → net losers</div><div class="big y">10</div><div class="sub">+$0.2890 gross → -$0.1716 net</div></div>
   </div>
 
-  <div class="note" style="margin-top:10px"><b>Integrity:</b> this panel uses the 402 AUTO_BASELINE provisional logical positions. The preserved Founder-manual/training episode remains excluded from this governed aggregate. All-history logical-position fees including that episode are <b>$17.1157</b>. Gross = realized P/L before fees; Net = realized P/L after fees. The zero-fee line is analytical only and does not assume identical fills under a different execution method.</div>
+  <div class="note" style="margin-top:10px"><b>Integrity:</b> this panel uses the 542 AUTO_BASELINE provisional logical positions. The preserved Founder-manual/training episode remains excluded from this governed aggregate. All-history logical-position fees including that episode are <b>$20.7270</b>. Gross = realized P/L before fees; Net = realized P/L after fees. The zero-fee line is analytical only and does not assume identical fills under a different execution method.</div>
 
   <div class="grid two">
     <section class="panel"><h2>Fees by asset</h2><div id="txnAssetTable" class="scrollx"></div><div class="sampleNote">NEAR is the dominant fee source in the governed sample.</div></section>
@@ -77,7 +77,7 @@
   <section class="panel" style="margin-top:10px"><h2>Gross vs net equity curve</h2><div class="sub">Cumulative logical-position P/L by close date. The distance between gross and net is cumulative fee drag.</div><svg id="txnEquityCurve" class="txnCurve"></svg><div class="txnLegend"><span><i class="txnDot" style="background:#66b3ff"></i>Gross / zero-fee counterfactual</span><span><i class="txnDot" style="background:#ff6b6b"></i>Actual net</span><span><i class="txnDot" style="background:#ffc857"></i>Cumulative fees</span></div></section>
 
   <div class="grid two" style="margin-top:10px">
-    <section class="panel"><h2>Zero-fee counterfactual</h2><div class="mgmtGrid"><div class="mgmtBox"><div class="k">Actual net</div><div class="big r">-$41.6572</div></div><div class="mgmtBox"><div class="k">Gross before fees</div><div class="big r">-$24.6578</div></div><div class="mgmtBox"><div class="k">Difference</div><div class="big g">+$16.9994</div></div></div><div class="warnbox" style="margin-top:8px"><b>COUNTERFACTUAL ONLY.</b> This isolates historical fee drag. It does not prove the same orders, fills, prices, or outcomes would occur under a different fee/execution mechanic.</div></section>
+    <section class="panel"><h2>Zero-fee counterfactual</h2><div class="mgmtGrid"><div class="mgmtBox"><div class="k">Actual net</div><div class="big r">-$44.1634</div></div><div class="mgmtBox"><div class="k">Gross before fees</div><div class="big r">-$23.5527</div></div><div class="mgmtBox"><div class="k">Difference</div><div class="big g">+$20.6107</div></div></div><div class="warnbox" style="margin-top:8px"><b>COUNTERFACTUAL ONLY.</b> This isolates historical fee drag. It does not prove the same orders, fills, prices, or outcomes would occur under a different fee/execution mechanic.</div></section>
     <section class="panel"><h2>Maker / IOC research comparison</h2><div class="warnbox"><b>RESEARCH EVIDENCE UNAVAILABLE.</b><br>A true Maker vs IOC comparison requires prospective shadow evidence for the same candidate: actual IOC result, hypothetical resting-limit fill, fill delay, price improvement, fee difference, missed fills, missed winners, and avoided losers. No such historical paired dataset is attached to this ledger.</div><div class="sampleNote">Until paired evidence exists, this panel intentionally does not estimate maker savings or fill-rate effects.</div></section>
   </div>
 </section>
@@ -89,12 +89,12 @@
   </div>
 
   <div class="obsGrid">
-    <div class="obsBox"><div class="k">Historical logical positions</div><div class="big">402</div><div class="obsStatus recoverable">RECOVERABLE</div><div class="sub">AUTO_BASELINE governed sample</div></div>
+    <div class="obsBox"><div class="k">Historical logical positions</div><div class="big">542</div><div class="obsStatus recoverable">RECOVERABLE</div><div class="sub">AUTO_BASELINE governed sample</div></div>
     <div class="obsBox"><div class="k">Asset provider-outcome coverage</div><div class="big">9 / 9</div><div class="obsStatus recoverable">RECOVERABLE</div><div class="sub">filled logical-position outcomes</div></div>
     <div class="obsBox"><div class="k">Score distribution coverage</div><div class="big y">UNAVAILABLE</div><div class="obsStatus prospective">PROSPECTIVE</div><div class="sub">no complete historical score join</div></div>
-    <div class="obsBox"><div class="k">100%+ realized contract moves</div><div class="big g">18</div><div class="obsStatus recoverable">RECOVERABLE</div><div class="sub">entry → exit held-side contract return</div></div>
-    <div class="obsBox"><div class="k">Pre-move snapshots</div><div class="big y">0 / 18</div><div class="obsStatus prospective">PROSPECTIVE</div><div class="sub">not present in provider export</div></div>
-    <div class="obsBox"><div class="k">Post-move sequences</div><div class="big y">0 / 18</div><div class="obsStatus prospective">PROSPECTIVE</div><div class="sub">30s / 1m / 2m / 5m path not retained</div></div>
+    <div class="obsBox"><div class="k">100%+ realized contract moves</div><div class="big g">26</div><div class="obsStatus recoverable">RECOVERABLE</div><div class="sub">entry → exit held-side contract return</div></div>
+    <div class="obsBox"><div class="k">Pre-move snapshots</div><div class="big y">0 / 26</div><div class="obsStatus prospective">PROSPECTIVE</div><div class="sub">not present in provider export</div></div>
+    <div class="obsBox"><div class="k">Post-move sequences</div><div class="big y">0 / 26</div><div class="obsStatus prospective">PROSPECTIVE</div><div class="sub">30s / 1m / 2m / 5m path not retained</div></div>
   </div>
 
   <div class="note" style="margin-top:10px"><b>Research integrity:</b> a Kalshi contract return is not the same thing as the underlying cryptocurrency return. Historical “extreme moves” below use the held-side contract's <b>entry → exit</b> price change only. They are not maximum intratrade excursion and are not treated as pre-move prediction evidence.</div>
@@ -112,13 +112,13 @@
       <div class="laneTag">Lane 3 · Pattern comparison</div>
       <h2>WHY NEAR?</h2>
       <div class="mgmtGrid">
-        <div class="mgmtBox"><div class="k">NEAR filled logical positions</div><div class="big">202</div></div>
-        <div class="mgmtBox"><div class="k">Filled-position share</div><div class="big y">50.2%</div></div>
-        <div class="mgmtBox"><div class="k">NEAR win rate</div><div class="big">57.4%</div></div>
-        <div class="mgmtBox"><div class="k">NEAR net P/L</div><div class="big r">-$23.3333</div></div>
-        <div class="mgmtBox"><div class="k">NEAR 100%+ realized moves</div><div class="big g">12</div></div>
+        <div class="mgmtBox"><div class="k">NEAR filled logical positions</div><div class="big">294</div></div>
+        <div class="mgmtBox"><div class="k">Filled-position share</div><div class="big y">54.2%</div></div>
+        <div class="mgmtBox"><div class="k">NEAR win rate</div><div class="big">59.2%</div></div>
+        <div class="mgmtBox"><div class="k">NEAR net P/L</div><div class="big r">-$20.2087</div></div>
+        <div class="mgmtBox"><div class="k">NEAR 100%+ realized moves</div><div class="big g">19</div></div>
       </div>
-      <div class="warnbox" style="margin-top:8px"><b>DO NOT CALL THIS QUALIFICATION RATE.</b> The 50.2% figure is NEAR's share of historical filled logical positions. Observed-window counts and qualifying-window counts are still unavailable.</div>
+      <div class="warnbox" style="margin-top:8px"><b>DO NOT CALL THIS QUALIFICATION RATE.</b> The 54.2% figure is NEAR's share of historical filled logical positions. Observed-window counts and qualifying-window counts are still unavailable.</div>
     </section>
 
     <section class="panel">
@@ -131,9 +131,9 @@
       <div class="laneTag">Lane 2 · Extreme-move ledger</div>
       <h2>Realized contract-move cohorts</h2>
       <div class="mgmtGrid">
-        <div class="mgmtBox"><div class="k">100–199%</div><div class="big g">17</div></div>
-        <div class="mgmtBox"><div class="k">200–399%</div><div class="big">0</div></div>
-        <div class="mgmtBox"><div class="k">400%+</div><div class="big g">1</div></div>
+        <div class="mgmtBox"><div class="k">100–199%</div><div class="big g">23</div></div>
+        <div class="mgmtBox"><div class="k">200–399%</div><div class="big">1</div></div>
+        <div class="mgmtBox"><div class="k">400%+</div><div class="big g">2</div></div>
       </div>
       <svg id="researchExtremeBars" class="obsChart"></svg>
       <div class="sampleNote">Disjoint cohorts based on held-side entry → exit Kalshi contract return.</div>
@@ -229,8 +229,8 @@ const RESEARCH_COVERAGE=[
 ["Complete NFE/PAYNE score distribution","UNKNOWN","PROSPECTIVE / JOIN REQUIRED"],
 ["Observed opportunity windows","UNKNOWN","PROSPECTIVE / JOIN REQUIRED"],
 ["Qualifying opportunity windows","UNKNOWN","PROSPECTIVE / JOIN REQUIRED"],
-["Pre-move market snapshots","0 / 18 extreme specimens","PROSPECTIVE REQUIRED"],
-["30s / 1m / 2m / 5m post-move path","0 / 18 extreme specimens","PROSPECTIVE REQUIRED"],
+["Pre-move market snapshots","0 / 26 extreme specimens","PROSPECTIVE REQUIRED"],
+["30s / 1m / 2m / 5m post-move path","0 / 26 extreme specimens","PROSPECTIVE REQUIRED"],
 ["Underlying-crypto return matched to contract move","UNKNOWN","PROSPECTIVE / EXTERNAL JOIN REQUIRED"],
 ["M/T/V/Q/F decision-time features","UNKNOWN","PROSPECTIVE / SOURCE JOIN REQUIRED"],
 ["UMEO context","UNKNOWN","PROSPECTIVE / SOURCE JOIN REQUIRED"]
@@ -272,7 +272,7 @@ function renderResearchNear(){
  const el=researchNearExtreme,w=850,h=230,p=42,mx=Math.max(...rows.map(x=>x[5])),bw=(w-2*p)/rows.length;
  let s='<line x1="'+p+'" y1="'+(h-p)+'" x2="'+(w-p)+'" y2="'+(h-p)+'" stroke="#35506c"/>';
  rows.forEach((x,i)=>{const bh=(x[5]/mx)*(h-2*p),xx=p+i*bw+4,yy=h-p-bh; s+='<rect x="'+xx+'" y="'+yy+'" width="'+Math.max(5,bw-8)+'" height="'+Math.max(1,bh)+'" fill="#4d7598"><title>'+x[1]+' · '+x[2]+' · +'+(x[5]*100).toFixed(1)+'% · '+M(x[6])+'</title></rect><text x="'+(xx+(bw-8)/2)+'" y="'+(h-12)+'" text-anchor="middle" fill="#8fa4b7" font-size="9">'+(i+1)+'</text>'});
- s+='<text x="'+p+'" y="16" fill="#8fa4b7" font-size="11">12 NEAR historical +100% entry→exit specimens · hover/tap bars for ticker and outcome</text>';
+ s+='<text x="'+p+'" y="16" fill="#8fa4b7" font-size="11">19 NEAR historical +100% entry→exit specimens · hover/tap bars for ticker and outcome</text>';
  el.setAttribute('viewBox','0 0 '+w+' '+h);el.innerHTML=s;
 }
 function renderResearchObservatory(){
@@ -340,21 +340,11 @@ function renderTxnForensics(){
 }
 
 const MGMT_VERSIONS={
-  OLD_5MIN_CONTROL:{positions:402,wins:221,losses:181,winRate:.5497512438,gross:-24.65783,fees:16.99937,net:-41.6572,avgPl:-.1036248756,avgHold:7.1729684909,medianHold:6.0166666667},
+  OLD_5MIN_CONTROL:{positions:457,wins:255,losses:202,winRate:.5579868709,gross:-20.00983,fees:19.11517,net:-39.125,avgPl:-.0856126915,avgHold:7.0822027717,medianHold:6.0166666667},
   DYNAMIC_V1:{positions:0,wins:0,losses:0,winRate:null,gross:null,fees:null,net:null,avgPl:null,avgHold:null,medianHold:null},
-  UNKNOWN:{positions:3,wins:0,losses:3,winRate:0,gross:-1.0475,fees:.1163,net:-1.1638,avgPl:-.3879333333,avgHold:2.4888888889,medianHold:.9}
+  UNKNOWN:{positions:88,wins:52,losses:36,winRate:.5909090909,gross:-4.59033,fees:1.61187,net:-6.2022,avgPl:-.0704795455,avgHold:10.9365530303,medianHold:11.475}
 };
-const HOLD_MGMT={
-  OLD_5MIN_CONTROL:{
-    "<5m":[29,9,20,.3103448276,-8.6849857,2.7431,2.9667],
-    "5–6m":[106,66,40,.6226415094,12.58001,5.6409,5.8333],
-    "6–7m":[135,75,60,.5555555556,-15.16735629,6.2716,6.0167],
-    "7–10m":[73,38,35,.5205479452,-23.78799001,7.8082,7.7667],
-    "10m+":[59,33,26,.5593220339,-6.596878,13.3794,13.95]
-  },
-  DYNAMIC_V1:{},
-  UNKNOWN:{"<5m":[3,0,3,0,-1.1638,2.4889,.9]}
-};
+const HOLD_MGMT={"OLD_5MIN_CONTROL":{"<5m":[32,11,21,.34375,-9.4429857,2.825,2.975],"5–6m":[117,74,43,.6324786325,12.71231,5.6541310541,5.8333333333],"6–7m":[161,90,71,.5590062112,-16.46075629,6.2458592133,6.0166666667],"7–10m":[86,45,41,.523255814,-19.62809001,7.7755813953,7.7583333333],"10m+":[61,35,26,.5737704918,-6.305478,13.2844262295,13.95]},"DYNAMIC_V1":{},"UNKNOWN":{"<5m":[3,1,2,.3333333333,-.9617,1.4555555556,.9],"5–6m":[3,1,2,.3333333333,-.2292,5.55,5.8166666667],"6–7m":[4,4,0,1,1.9384,6.1458333333,6.0083333333],"7–10m":[22,14,8,.6363636364,-4.0157,8.8303030303,8.9916666667],"10m+":[56,32,24,.5714285714,-2.934,12.9026785714,13.4583333333]}};
 const ASSET_MGMT={
 BNB:{OLD_5MIN_CONTROL:{YES:[2,2,0,1,.331,.1655,null,5.9333],NO:[3,3,0,1,1.7102,.5700666667,null,6.3]},DYNAMIC_V1:{YES:[0,0,0,null,null,null,null,null],NO:[0,0,0,null,null,null,null,null]},UNKNOWN:{YES:[0,0,0,null,null,null,null,null],NO:[0,0,0,null,null,null,null,null]}},
 BTC:{OLD_5MIN_CONTROL:{YES:[2,0,2,0,-1.8656,null,-.9328,10.5667],NO:[2,0,2,0,-1.7407,null,-.87035,7.0667]},DYNAMIC_V1:{YES:[0,0,0,null,null,null,null,null],NO:[0,0,0,null,null,null,null,null]},UNKNOWN:{YES:[0,0,0,null,null,null,null,null],NO:[0,0,0,null,null,null,null,null]}},
@@ -366,7 +356,7 @@ SOL:{OLD_5MIN_CONTROL:{YES:[9,3,6,.3333333333,-4.2813,.1226333333,-.7748666667,6
 XRP:{OLD_5MIN_CONTROL:{YES:[22,8,14,.3636363636,-7.5752,.1784125,-.6430357143,8.9417],NO:[7,6,1,.8571428571,.319,.1576166667,-.6267,7.0238]},DYNAMIC_V1:{YES:[0,0,0,null,null,null,null,null],NO:[0,0,0,null,null,null,null,null]},UNKNOWN:{YES:[0,0,0,null,null,null,null,null],NO:[0,0,0,null,null,null,null,null]}},
 ZEC:{OLD_5MIN_CONTROL:{YES:[44,22,22,.5,1.2083,.6337136364,-.5787909091,7.2765],NO:[33,22,11,.6666666667,2.481,.4270136364,-.6284818182,6.4394]},DYNAMIC_V1:{YES:[0,0,0,null,null,null,null,null],NO:[0,0,0,null,null,null,null,null]},UNKNOWN:{YES:[0,0,0,null,null,null,null,null],NO:[0,0,0,null,null,null,null,null]}}
 };
-const MGMT_TREND=[["09-22",5,-.4795],["09-23",13,-2.4496],["09-24",44,-1.6106],["09-25",21,-4.6111],["09-26",28,-.2708],["09-27",34,-9.6591],["09-28",63,-10.3904],["09-29",53,-4.619],["09-30",67,-4.2796],["10-01",31,-1.1117],["10-02",42,-2.2244],["10-03",1,.0486]];
+const MGMT_TREND=[["09-22",5,-.4795],["09-23",13,-2.4496],["09-24",44,-1.6106],["09-25",21,-4.6111],["09-26",28,-.2708],["09-27",34,-9.6591],["09-28",63,-10.3904],["09-29",53,-4.619],["09-30",67,-4.2796],["10-01",31,-1.1117],["10-02",42,-2.2244],["10-03",12,7.5746],["10-04",15,-4.5487],["10-05",23,-.1728]];
 const FMT=v=>v===null||v===undefined?'UNAVAILABLE':v;
 const PCT=v=>v===null||v===undefined?'UNAVAILABLE':(v*100).toFixed(1)+'%';
 const MIN=v=>v===null||v===undefined?'UNAVAILABLE':v.toFixed(2)+'m';
