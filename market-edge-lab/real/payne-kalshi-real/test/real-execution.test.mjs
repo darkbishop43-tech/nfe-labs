@@ -873,3 +873,41 @@ test('MEASURED: persisted FIRE fast path avoids deliberate slow full scan before
    console.log('MEASURED_SYNTHETIC_IMPROVEMENT_MS='+(oldMs-repairedMs).toFixed(3));
  }finally{Date.now=clock;}
 });
+
+test('THREE POSITION SYNTHETIC: DISARM manages and exits each owned BTC/ETH/SOL record independently',async()=>{
+ const e=await env();
+ const names=['BTC','ETH','SOL'];
+ const tickers=names.map(asset=>'KX'+asset+'15M-REALTEST');
+ const positions=names.map((asset,i)=>({
+   schema:'PAYNE_REAL_POSITION_V1',owner:'PAYNE_KALSHI_REAL',seriesId:'THREE-POSITIONS',
+   attemptId:'THREE-POSITIONS-'+(i+1),attemptNo:i+1,
+   status:'OPEN',asset,marketTicker:tickers[i],outcomeSide:'YES',direction:'UP',
+   exchangeIndex:2,entryOrderId:'ENTRY-'+(i+1),entryClientOrderId:'CID-'+(i+1),
+   filledCount:1,entryAverageFillPrice:.50,entryAverageFeePaid:.01,
+   entryTime:'2026-10-02T05:58:00Z',exitFilledTotal:0
+ }));
+ await saveRealSeriesState(e,{...defaultRealSeriesState(),seriesId:'THREE-POSITIONS',
+   attemptsStarted:3,attemptTarget:5,position:positions[0],positions,
+   status:'MANAGING_POSITION_SERIES_CONTINUES'});
+ assert.equal((await loadControl(e)).armed,false);
+ const post=postFixture({order_id:'SYNTHETIC-EXIT',fill_count:1,remaining_count:0,average_fill_price:.60,average_fee_paid:.01});
+ const io=installProvider({multiPositions:tickers});
+ try{
+   const out=await runPayneRealExecutionCycle(e,{postImpl:post.fn,nowMs:Date.parse('2026-10-02T06:05:00Z')});
+   assert.equal(post.calls.length,3,'all PAYNE positions need their own exit path');
+   assert.equal(new Set(post.calls.map(x=>x.payload.ticker)).size,3);
+   assert.ok(post.calls.every(x=>x.kind==='EXIT'&&x.payload.reduce_only===true));
+   assert.equal(out.positions.length,3);
+   assert.ok(out.positions.every(p=>p.status==='EXIT_RECONCILIATION_REQUIRED'));
+   assert.equal((await loadControl(e)).armed,false);
+   assert.equal(io.calls.filter(x=>x.method==='POST').length,0,'only injected zero-money exit writer used');
+ }finally{io.restore();}
+ const flat=installProvider({position:'ABSENT'});
+ try{
+   const done=await runPayneRealExecutionCycle(e,{postImpl:post.fn,nowMs:Date.parse('2026-10-02T06:06:00Z')});
+   assert.equal(done.positions.length,3);
+   assert.ok(done.positions.every(p=>p.status==='CLOSED'&&p.reconciliationState==='FLAT'));
+   assert.equal(post.calls.length,3,'provider-flat reconciliation must not submit further EXIT orders');
+   assert.equal((await loadControl(e)).armed,false);
+ }finally{flat.restore();}
+});
