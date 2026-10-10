@@ -3186,14 +3186,20 @@ export async function buildDisplayMarketFeed(env,nowMs=Date.now()){
       const body=await safeProviderJson(response);
       const m=body?.market||null;
       const exact=String(m?.ticker||'')===c.ticker&&
-        String(m?.close_time||m?.closeTime||'')===c.closeTime;
+        String(m?.close_time||m?.closeTime||'')===c.closeTime&&
+        (!m?.series_ticker||c.ticker.startsWith(String(m.series_ticker)+'-'));
+      const providerUpdatedAt=m?.updated_time||m?.updated_at||null;
+      const providerUpdateMs=providerUpdatedAt?Date.parse(providerUpdatedAt):NaN;
+      const providerTimestampValid=!providerUpdatedAt||
+        (Number.isFinite(providerUpdateMs)&&providerUpdateMs<=Date.parse(observedAt)&&
+          Date.parse(observedAt)-providerUpdateMs<=COCKPIT_REFRESH_MS);
       const yesBid=normalizeProviderProbability(m?.yes_bid_dollars??m?.yes_bid);
       const yesAsk=normalizeProviderProbability(m?.yes_ask_dollars??m?.yes_ask);
       const noBid=normalizeProviderProbability(m?.no_bid_dollars??m?.no_bid);
       const noAsk=normalizeProviderProbability(m?.no_ask_dollars??m?.no_ask);
-      const eligible=exact&&response.ok&&['open','active'].includes(String(m?.status||'').toLowerCase())&&Date.parse(observedAt)<end;
-      quotes.push({...c,status:eligible?'LIVE':'UNAVAILABLE',observedAt,
-        reason:eligible?null:'PROVIDER_TICKER_WINDOW_OR_BOOK_UNAVAILABLE',
+      const eligible=exact&&providerTimestampValid&&response.ok&&['open','active'].includes(String(m?.status||'').toLowerCase())&&Date.parse(observedAt)<end;
+      quotes.push({...c,status:eligible?'LIVE':'UNAVAILABLE',observedAt,providerUpdatedAt,
+        reason:eligible?null:!providerTimestampValid?'STALE_PROVIDER_UPDATE':'PROVIDER_TICKER_WINDOW_OR_BOOK_UNAVAILABLE',
         yesBid:eligible?yesBid:null,yesAsk:eligible?yesAsk:null,
         noBid:eligible?noBid:null,noAsk:eligible?noAsk:null,
         selectedBid:eligible?(c.outcomeSide==='NO'?noBid:yesBid):null,
