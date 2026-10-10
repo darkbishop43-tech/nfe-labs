@@ -7,13 +7,13 @@ function syntheticDurableObject(){
   // Transaction callbacks in this fixture are serialized just as DO storage transactions are.
   let tail=Promise.resolve();
   const state={storage:{transaction(fn){
-    const result=tail.then(()=>fn({get:async key=>saved.get(key),put:async(key,value)=>{saved.set(key,structuredClone(value));},delete:async key=>{saved.delete(key);}}));
+    const result=tail.then(()=>fn({get:async key=>saved.get(key),put:async(key,value)=>{saved.set(key,structuredClone(value));},delete:async key=>{saved.delete(key);},list:async({prefix='' }={})=>new Map([...saved.entries()].filter(([k])=>k.startsWith(prefix)))}));
     tail=result.then(()=>{},()=>{});
     return result;
   }}};
   return {instance:new PayneExecutionCoordinator(state),saved};
 }
-const identity={seriesId:'PAYNE-TEST-SERIES',attemptNo:1,specimenId:'FIRE-1',clientOrderId:'payne-real-test-1-entry',ticker:'KXBTC15M-TEST',side:'YES',windowClose:'2026-10-10T04:15:00Z'};
+const identity={seriesId:'PAYNE-TEST-SERIES',attemptNo:1,specimenId:'FIRE-1',clientOrderId:'payne-real-test-1-entry',ticker:'KXBTC15M-TEST',side:'YES',windowClose:'2026-10-10T04:15:00Z',maxPositions:3};
 test('exactly one of simultaneous claims owns one PAYNE provider attempt',async()=>{
  const {instance,saved}=syntheticDurableObject();
  const request=()=>new Request('https://payne-coordinator.internal/claim',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(identity)});
@@ -49,5 +49,33 @@ test('proven local no-POST release permits subsequent intent; uncertain claim ne
  assert.equal((await call({...identity,action:'RELEASE_PROVEN_NO_POST',provenNoProviderPost:true})).granted,true);
  assert.equal(saved.size,0);
  assert.equal((await call({...identity,specimenId:'NEXT-LEGITIMATE-INTENT'})).granted,true);
+ assert.equal((await call(identity)).granted,false);
+});
+
+test('atomic coordinator reserves three Founder-authorized positions and rejects fourth',async()=>{
+ const {instance,saved}=syntheticDurableObject();
+ const call=async x=>(await instance.fetch(new Request('https://payne-coordinator.internal/claim',{
+   method:'POST',body:JSON.stringify(x)}))).json();
+ const ids=[1,2,3,4].map(attemptNo=>({...identity,attemptNo,
+   specimenId:'FIRE-'+attemptNo,clientOrderId:'ENTRY-'+attemptNo,ticker:'KXBTC-'+attemptNo}));
+ const results=await Promise.all(ids.map(call));
+ assert.equal(results.filter(x=>x.granted).length,3);
+ assert.equal(results.filter(x=>x.reason==='CAPACITY_FULL').length,1);
+ for(const x of ids.slice(0,3))assert.equal(saved.get('attempt:'+x.attemptNo).claimState,'POTENTIALLY_SUBMITTED');
+ assert.equal((await call({...ids[0],action:'RESOLVE_ENTRY',resolution:'OPEN'})).granted,true);
+ assert.equal((await call({...ids[1],action:'RESOLVE_ENTRY',resolution:'OPEN'})).granted,true);
+ assert.equal((await call({...ids[2],action:'RESOLVE_ENTRY',resolution:'NO_FILL'})).granted,true);
+ const next=await call(ids[3]);
+ assert.equal(next.granted,true,'authoritative NO_FILL releases only its capacity reservation');
+ assert.equal((await call({...ids[0],action:'RESOLVE_ENTRY',resolution:'CLOSED'})).granted,false);
+ assert.equal((await call({...ids[0],action:'RESOLVE_ENTRY',resolution:'CLOSED',providerFlatProven:true})).granted,true);
+ assert.equal(saved.get('attempt:1').claimState,'CLOSED');
+});
+test('UNKNOWN retains capacity and cannot be relabeled NO_FILL without reconciliation',async()=>{
+ const {instance}=syntheticDurableObject();
+ const call=async x=>(await instance.fetch(new Request('https://payne-coordinator.internal/claim',{method:'POST',body:JSON.stringify(x)}))).json();
+ assert.equal((await call(identity)).granted,true);
+ assert.equal((await call({...identity,action:'RESOLVE_ENTRY',resolution:'UNKNOWN'})).granted,true);
+ assert.equal((await call({...identity,action:'RESOLVE_ENTRY',resolution:'NO_FILL'})).granted,false);
  assert.equal((await call(identity)).granted,false);
 });
