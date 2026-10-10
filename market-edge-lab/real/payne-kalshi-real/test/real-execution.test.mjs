@@ -791,3 +791,71 @@ test('SCHEDULER SYNTHETIC: FILLED preserves owned position and prevents duplicat
    console.log('SYNTHETIC_SCHEDULER_FILLED_OWNERSHIP='+after.position.status);
  }finally{Date.now=clock;io.restore();}
 });
+
+test('SCHEDULER SYNTHETIC: uncertain POST is never repeated without provider reconciliation',async()=>{
+ const e=await env(),clock=Date.now,now=Date.parse('2026-10-02T06:05:00Z');
+ const io=installProvider({syntheticPostThrows:true});
+ try{
+   Date.now=()=>now; await arm(e);
+   await worker.scheduled({},e);
+   const state=await loadRealSeriesState(e);
+   assert.equal(state.attemptsStarted,1);
+   assert.equal(state.unresolvedEntry,true);
+   assert.equal(state.currentAttempt?.status,'WRITE_ERROR_UNKNOWN');
+   const prior=io.calls.filter(c=>c.method==='POST'&&c.url.includes('/portfolio/events/orders'));
+   assert.equal(prior.length,1);
+   await worker.scheduled({},e);
+   const after=io.calls.filter(c=>c.method==='POST'&&c.url.includes('/portfolio/events/orders'));
+   assert.equal(after.length,1,'UNKNOWN may not authorize second entry');
+   console.log('SYNTHETIC_UNKNOWN_RETRY_POST_COUNT='+after.length);
+ }finally{Date.now=clock;io.restore();}
+});
+
+test('MEASURED: qualifying PULL to intercepted provider POST uses real monotonic test-clock',async()=>{
+ const e=await env(),clock=Date.now,originalLog=console.log,now=Date.parse('2026-10-02T06:05:00Z');
+ let pullMs=null,postMs=null;
+ const io=installProvider({entryResult:{order_id:'LATENCY-NOFILL',fill_count:0,remaining_count:1},
+   onSyntheticPost:()=>{postMs=performance.now();}});
+ try{
+   Date.now=()=>now;
+   console.log=(...args)=>{
+     if(pullMs===null&&String(args[0]||'').includes('"stage":"PULL_QUALIFIED"')) pullMs=performance.now();
+     originalLog(...args);
+   };
+   await arm(e);await worker.scheduled({},e);
+   assert.ok(Number.isFinite(pullMs),'PULL must qualify');
+   assert.ok(Number.isFinite(postMs),'synthetic provider POST must occur');
+   const elapsed=postMs-pullMs;
+   assert.ok(elapsed>=0,'measured PULL-to-provider boundary nonnegative');
+   console.log('MEASURED_SYNTHETIC_PULL_TO_POST_MS='+elapsed.toFixed(3));
+ }finally{Date.now=clock;console.log=originalLog;io.restore();}
+});
+
+test('MEASURED: persisted FIRE fast path avoids deliberate slow full scan before provider POST',async()=>{
+ const clock=Date.now,now=Date.parse('2026-10-02T06:05:00Z');
+ const measure=async oldOrder=>{
+   const e=await env();let postMs=null;
+   const io=installProvider({entryResult:{order_id:oldOrder?'OLD-NOFILL':'NEW-NOFILL',fill_count:0,remaining_count:1},
+     discoveryDelayMs:110,onSyntheticPost:()=>{postMs=performance.now();}});
+   try{
+     Date.now=()=>now;await arm(e);
+     await runReadOnlyScan(e,'ZERO_MONEY_EXECUTION_TEST',now);
+     assert.equal((await loadRealSeriesState(e)).fireLatch?.state,'LATCHED');
+     const started=performance.now();
+     if(oldOrder) {
+       await runReadOnlyScan(e,'SCHEDULED_CRON',now);
+       await runPayneRealExecutionCycle(e,{nowMs:now});
+     } else await worker.scheduled({},e);
+     assert.ok(Number.isFinite(postMs),'synthetic provider POST reached');
+     return postMs-started;
+   }finally{io.restore();}
+ };
+ try {
+   const oldMs=await measure(true);
+   const repairedMs=await measure(false);
+   assert.ok(oldMs>repairedMs,'priority execution starts earlier than deliberately delayed scan-first');
+   console.log('MEASURED_SYNTHETIC_OLD_SCAN_FIRST_POST_MS='+oldMs.toFixed(3));
+   console.log('MEASURED_SYNTHETIC_REPAIRED_POST_MS='+repairedMs.toFixed(3));
+   console.log('MEASURED_SYNTHETIC_IMPROVEMENT_MS='+(oldMs-repairedMs).toFixed(3));
+ }finally{Date.now=clock;}
+});
