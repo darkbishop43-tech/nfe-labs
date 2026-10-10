@@ -725,3 +725,66 @@ test('observability current-series scope excludes historical ledger outcomes',()
   const x=summarizeRealExecutionState({control:{armed:true,attempts:0,attemptTarget:1},series:{seriesId:'CURRENT',status:'ARMED_FISHING',attemptsStarted:0,attemptTarget:1,unresolvedEntry:false},ledger:[{type:'ENTRY_NO_FILL',seriesId:'OLD',attemptId:'OLD-1',at:'2026-10-03T00:00:00Z'}]});
   assert.equal(x.attempted,0); assert.equal(x.noFill,0); assert.equal(x.remaining,1); assert.equal(x.latestLedgerEvent,null);
 });
+
+test('SCHEDULER SYNTHETIC: qualifying PULL persists FIRE, POSTs one IOC and accounts NO_FILL',async()=>{
+ const e=await env(), clock=Date.now, now=Date.parse('2026-10-02T06:05:00Z');
+ const io=installProvider({entryResult:{order_id:'SCHEDULER-NOFILL-1',fill_count:0,remaining_count:1}});
+ try{
+   Date.now=()=>now;
+   await arm(e);
+   await worker.scheduled({},e);
+   const entries=io.calls.filter(c=>c.method==='POST'&&c.url.includes('/portfolio/events/orders'));
+   const ledger=await listRealLedger(e,200);
+   const state=await loadRealSeriesState(e);
+   assert.equal(entries.length,1,'exactly one intercepted synthetic Kalshi POST');
+   assert.ok(ledger.some(x=>x.type==='FIRE_SPECIMEN_LATCHED'),'qualifying PULL created persisted FIRE latch');
+   assert.ok(ledger.some(x=>x.type==='ENTRY_PRE_SUBMIT_LATCHED'),'fresh execution gates passed');
+   assert.equal(state.attemptsStarted,1);
+   assert.equal(state.status,'COMPLETE_NO_FILL');
+   assert.equal(state.unresolvedEntry,false);
+   assert.equal((await loadControl(e)).armed,false);
+   const payload=JSON.parse(entries[0].body);
+   assert.equal(payload.ticker,'KXBTC15M-REALTEST');
+   assert.equal(payload.time_in_force,'immediate_or_cancel');
+   assert.equal(payload.post_only,false);
+   console.log('SYNTHETIC_SCHEDULER_NOFILL_POST_COUNT='+entries.length);
+ } finally {Date.now=clock;io.restore();}
+});
+
+test('OVERLAPPING SCHEDULER: same persisted FIRE cannot authorize two provider POSTs',async()=>{
+ const e=await env(),clock=Date.now,now=Date.parse('2026-10-02T06:05:00Z');
+ const io=installProvider({entryResult:{order_id:'CONCURRENT-NOFILL',fill_count:0,remaining_count:1},discoveryDelayMs:40});
+ try{
+   Date.now=()=>now;
+   await arm(e);
+   await runReadOnlyScan(e,'ZERO_MONEY_EXECUTION_TEST',now);
+   const before=await loadRealSeriesState(e);
+   assert.equal(before.fireLatch?.state,'LATCHED');
+   await Promise.all([worker.scheduled({},e),worker.scheduled({},e)]);
+   const entries=io.calls.filter(c=>c.method==='POST'&&c.url.includes('/portfolio/events/orders'));
+   assert.equal(entries.length,1);
+   const after=await loadRealSeriesState(e);
+   assert.equal(after.attemptsStarted,1);
+   assert.equal(after.unresolvedEntry,false);
+   await worker.scheduled({},e);
+   assert.equal(io.calls.filter(c=>c.method==='POST'&&c.url.includes('/portfolio/events/orders')).length,1);
+   console.log('SYNTHETIC_OVERLAP_POST_COUNT='+entries.length);
+ }finally{Date.now=clock;io.restore();}
+});
+
+test('SCHEDULER SYNTHETIC: FILLED preserves owned position and prevents duplicate entry',async()=>{
+ const e=await env(),clock=Date.now,now=Date.parse('2026-10-02T06:05:00Z');
+ const io=installProvider({entryResult:{order_id:'SCHEDULER-FILL',fill_count:1,remaining_count:0,average_fill_price:.50,average_fee_paid:.01},position:'OPEN'});
+ try{
+   Date.now=()=>now;await arm(e);
+   await worker.scheduled({},e);
+   const after=await loadRealSeriesState(e);
+   assert.equal(io.calls.filter(c=>c.method==='POST'&&c.url.includes('/portfolio/events/orders')).length,1);
+   assert.equal(after.attemptsStarted,1);
+   assert.equal(after.position?.owner,'PAYNE_KALSHI_REAL');
+   assert.equal(after.position?.status,'OPEN');
+   await worker.scheduled({},e);
+   assert.equal(io.calls.filter(c=>c.method==='POST'&&c.url.includes('/portfolio/events/orders')&&c.body?.includes('"reduce_only":false')).length,1);
+   console.log('SYNTHETIC_SCHEDULER_FILLED_OWNERSHIP='+after.position.status);
+ }finally{Date.now=clock;io.restore();}
+});
