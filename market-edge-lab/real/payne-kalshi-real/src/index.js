@@ -1640,10 +1640,10 @@ export function fireSpecimenFromSnapshot(series,snapshot) {
   return {...specimen,identityFingerprint:fireSpecimenFingerprint(specimen)};
 }
 
-async function latchFireReadySpecimen(env,series,snapshot,nowMs=Date.now()) {
+async function latchFireReadySpecimen(env,series,snapshot,nowMs=Date.now(),maxPositions=null) {
   const existing=series?.fireLatch||null;
   if(existing?.state==='LATCHED' || existing?.state==='PROVIDER_POST_PENDING') return {series,latched:false,reason:'EXISTING_FIRE_LATCH_ACTIVE'};
-  const gate=seriesInterlock(series);
+  const gate=seriesInterlock(series,maxPositions);
   if(!gate.clear) return {series,latched:false,reason:'PRIOR_ATTEMPT_NOT_CLEAN_'+gate.reason};
   const specimen=fireSpecimenFromSnapshot(series,snapshot);
   if(!specimen) return {series,latched:false,reason:'FIRE_SPECIMEN_NOT_LATCHABLE'};
@@ -1789,7 +1789,7 @@ export async function runReadOnlyScan(env, source='SCHEDULED_CRON', nowMs=Date.n
     if(!seriesTerminal(series) && frozenSeriesMatchesControl(series,control) && prefireMarketPass){
       const synced=await synchronizeFireFeatureEpoch(env,series,snapshot,nowMs);
       if(synced.ok){
-        const latched=await latchFireReadySpecimen(env,synced.series,synced.snapshot,nowMs);
+        const latched=await latchFireReadySpecimen(env,synced.series,synced.snapshot,nowMs,control.maxPositions);
         logPayneTiming('FIRE_LATCH_RESULT',payneTimingIdentity(latched?.series||synced.series,latched?.series?.fireLatch||synced.series?.fireLatch),scanStartedMs,Date.now(),latched?.reason||'LATCH_ATTEMPTED');
       }
     }
@@ -2694,7 +2694,22 @@ async function reconcileDisarmedSupersededSeries(env,series,control,nowMs=Date.n
 }
 
 // Attempt N+1 may begin only if attempt N is authoritatively clean.
-export function seriesInterlock(series) {
+export function seriesInterlock(series,maxPositions=null) {
+  if(Number.isSafeInteger(Number(maxPositions)) && Number(maxPositions)>0){
+    const positions=paynePositionRecords(series);
+    if(series?.unresolvedEntry===true)return {clear:false,reason:'UNRESOLVED_ENTRY'};
+    if(positions.some(p=>p.owner!==REAL_OWNER || Number(p.exchangeIndex)!==2))
+      return {clear:false,reason:'POSITION_OWNERSHIP_UNKNOWN'};
+    if(positions.some(p=>!['OPEN','CLOSED'].includes(String(p.status||''))))
+      return {clear:false,reason:'POSITION_REQUIRES_MANAGEMENT_OR_RECONCILIATION'};
+    const availability=payneCapacityEvidence(series,Number(maxPositions));
+    if(!availability.available)return {clear:false,reason:availability.reason};
+    if(['SUBMITTING','WRITE_ERROR_UNKNOWN','PROVIDER_REJECTED_OR_UNKNOWN','UNKNOWN'].includes(String(series?.currentAttempt?.status||'').toUpperCase()))
+      return {clear:false,reason:'ATTEMPT_RESULT_UNKNOWN'};
+    if(/^(ENTRY_SUBMITTING|ENTRY_RECONCILIATION_REQUIRED|ENTRY_AUTHORITY_REVOKED_AFTER_LATCH|EXIT_|HOLD_WRONG_OR_UNKNOWN_OWNERSHIP)/.test(String(series?.status||'')))
+      return {clear:false,reason:'PENDING_EXECUTION_STATE'};
+    return {clear:true,reason:'FOUNDER_CAPACITY_AVAILABLE'};
+  }
   const pos=series?.position||null;
   const posStatus=String(pos?.status||'');
   const attemptStatus=String(series?.currentAttempt?.status||'').toUpperCase();
@@ -3715,7 +3730,7 @@ export async function runPayneRealExecutionCycle(env,{postImpl=kalshiPayneOrderP
     await closeRealSeriesControl(env,started,series.position?1:0);
     return saveRealSeriesState(env,series);
   }
-  const interlock=seriesInterlock(series);
+  const interlock=seriesInterlock(series,control.maxPositions);
   if(!interlock.clear){
     series.status='HOLD_PRIOR_ATTEMPT_NOT_CLEAN';
     return saveRealSeriesState(env,series);
