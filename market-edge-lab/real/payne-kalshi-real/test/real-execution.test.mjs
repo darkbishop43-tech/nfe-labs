@@ -916,3 +916,53 @@ test('THREE POSITION SYNTHETIC: DISARM manages and exits each owned BTC/ETH/SOL 
    assert.equal((await loadControl(e)).armed,false);
  }finally{flat.restore();}
 });
+
+test('THREE ENTRY SYNTHETIC: distinct PAYNE PULLs fill three owned slots; fourth capacity rejects',async()=>{
+ const now=Date.parse('2026-10-02T06:05:00Z');
+ const assets=['BTC','ETH','SOL','XRP'];
+ const tickers=assets.map(a=>'KX'+a+'15M-REALTEST');
+ const opened=[];
+ const e=await env(),io=installProvider({multiMarkets:tickers,multiPositions:opened});
+ const posts=[];
+ const fn=async(_env,kind,payload,scope)=>{
+   posts.push({kind,payload:structuredClone(payload),scope:structuredClone(scope)});
+   return {response:jsonResponse({order_id:'SYNTHETIC-'+payload.ticker,fill_count:1,remaining_count:0,average_fill_price:.50,average_fee_paid:.01}),
+     proof:payneOrderWriteProof(kind,payload,scope),writerInvoked:true,providerPostStarted:true};
+ };
+ const resetFeature=async()=>{
+   const prior=100/(1+(.86-.50)/72);
+   const prices=Object.fromEntries(assets.map(asset=>[asset,prior]));
+   const priceSources=Object.fromEntries(assets.map(asset=>[asset,'COINBASE']));
+   await e.PAYNE_KALSHI_STATE.put('payne-kalshi:feature-shadow:v2-paper-brain',JSON.stringify({
+     schema:'PAYNE_PAPER_BRAIN_KALSHI_FEATURE_STATE_V1',
+     savedAt:'2026-10-02T06:04:00Z',prices,referencePrices:prices,priceSources
+   }));
+ };
+ try{
+   await updateFounderControl(e,'SET_ATTEMPT_TARGET',5);
+   await arm(e);
+   for(let i=0;i<3;i++){
+     await resetFeature();
+     await runReadOnlyScan(e,'THREE_POSITION_TEST',now);
+     const before=await loadRealSeriesState(e);
+     assert.equal(before.fireLatch?.state,'LATCHED','distinct qualifying PAYNE PULL needs FIRE');
+     const result=await runPayneRealExecutionCycle(e,{postImpl:fn,nowMs:now});
+     assert.equal(result.attemptsStarted,i+1,'one provider attempt per distinct candidate');
+     assert.equal(result.positions.length,i+1,'prior position ownership preserved');
+     assert.ok(result.positions.every(p=>p.status==='OPEN'),'prior positions remain managed');
+     const newest=result.position;
+     assert.ok(!opened.includes(newest.marketTicker),'new candidate must be distinct');
+     opened.push(newest.marketTicker);
+   }
+   assert.equal(new Set(opened).size,3);
+   assert.equal(posts.filter(p=>p.kind==='ENTRY').length,3);
+   await resetFeature();
+   await runReadOnlyScan(e,'THREE_POSITION_FOURTH_REJECT',now);
+   await runPayneRealExecutionCycle(e,{postImpl:fn,nowMs:now});
+   const after=await loadRealSeriesState(e);
+   assert.equal(after.attemptsStarted,3,'fourth entry cannot consume an attempt while full');
+   assert.equal(posts.filter(p=>p.kind==='ENTRY').length,3,'no fourth provider POST');
+   assert.equal(after.positions.filter(p=>p.status==='OPEN').length,3);
+   assert.equal(io.calls.filter(p=>p.method==='POST').length,0);
+ } finally {io.restore();}
+});
