@@ -20,9 +20,12 @@ export function logPayneTiming(stage,identity,startMs,nowMs=Date.now(),outcome='
 
 export function paynePriorityBeforeScan(control,series){
   const unresolved=series?.unresolvedEntry===true;
-  const management=Boolean(series?.position &&
+  const positions=Array.isArray(series?.positions)?series.positions.filter(Boolean):[];
+  if(series?.position&&!positions.some(p=>p.attemptId&&p.attemptId===series.position.attemptId))
+    positions.push(series.position);
+  const management=positions.some(p=>
     ['OPEN','EXIT_RETRY','EXIT_RECONCILIATION_REQUIRED','RECONCILIATION_UNKNOWN']
-      .includes(String(series.position.status||'')));
+      .includes(String(p.status||'')));
   const durableLatch=Boolean(control?.armed && series?.fireLatch?.state==='LATCHED');
   return unresolved||management||durableLatch;
 }
