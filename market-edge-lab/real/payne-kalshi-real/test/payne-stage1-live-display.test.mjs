@@ -37,3 +37,21 @@ test('provider reconciled CLOSED/FLAT leaves active while UNKNOWN remains',()=>{
  assert.deepEqual(output.active.map(p=>p.attemptId),['unknown']);
  assert.deepEqual(output.closed.map(p=>p.attemptId),['closed']);
 });
+
+test('Stage 1B uses separate GET-only provider display route without paper score recomputation',async()=>{
+ const {buildDisplayMarketFeed}=await import('../src/index.js');
+ const source=buildDisplayMarketFeed.toString();
+ assert.match(source,/kalshiGetOnly\(/);
+ assert.match(source,/\/trade-api\/v2\/markets\//);
+ assert.match(source,/current\?\.decisions/);
+ assert.match(source,/current\.selected/);
+ assert.match(source,/paynePositionRecords/);
+ assert.match(source,/CONTRACT_WINDOW_ENDED/);
+ assert.match(source,/PROVIDER_TICKER_WINDOW_OR_BOOK_UNAVAILABLE/);
+ assert.doesNotMatch(source,/paperDecision|runReadOnlyScan|providerPost|submitOrder/);
+ const html=cockpitHtml();
+ assert.match(html,/refreshMarketDisplay/);
+ assert.match(html,/display-market-feed/);
+ assert.match(html,/setInterval\(refreshMarketDisplay,10000\)/);
+ assert.match(html,/UNAVAILABLE \/ STALE/);
+});
