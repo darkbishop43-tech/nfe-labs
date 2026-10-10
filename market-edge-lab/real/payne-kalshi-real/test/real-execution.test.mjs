@@ -232,6 +232,27 @@ test('UNKNOWN entry self-reconciliation: authenticated provider proves FLAT/no e
   }finally{io.restore();}
 });
 
+test('pending exact provider order with zero fills never clears unresolvedEntry',async()=>{
+  const e=await env(),client='payne-real-pending-entry';
+  const io=installProvider({position:'ABSENT',orders:[{
+    ticker:'KXBTC15M-REALTEST',client_order_id:client,order_id:'PENDING-PROVIDER-1',
+    status:'resting',fill_count:0
+  }],fills:[],historicalFills:[],settlements:[]});
+  try{
+    await saveRealSeriesState(e,{
+      ...defaultRealSeriesState(),seriesId:'PENDING-SAFETY-TEST',status:'ENTRY_RECONCILIATION_REQUIRED',
+      unresolvedEntry:true,
+      currentAttempt:{attemptId:'PENDING-1',marketTicker:'KXBTC15M-REALTEST',
+        outcomeSide:'YES',direction:'UP',clientOrderId:client,
+        payload:{client_order_id:client}}
+    });
+    const out=await reconcileUnresolvedEntryFromProvider(e,Date.parse('2026-10-02T06:05:00Z'));
+    assert.equal(out.ok,false);
+    assert.equal(out.reason,'PROVIDER_ORDER_NOT_TERMINAL');
+    assert.equal((await loadRealSeriesState(e)).unresolvedEntry,true);
+  }finally{io.restore();}
+});
+
 test('UNKNOWN entry self-reconciliation: exact PAYNE order/fill plus OPEN provider position restores owned management state',async()=>{
   const client='payne-real-owned-1-entry', order='ORDER-OWNED';
   const e=await env(),io=installProvider({
