@@ -1,5 +1,5 @@
 name: PAYNE Founder Governed Reconciliation Once
-# Final live verification after fully green Cloudflare deployment ff6ce1b5
+# Founder-requested current-state reconciliation and readback — October 10
 on:
   push:
     branches:
