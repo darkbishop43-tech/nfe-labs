@@ -1,25 +1,26 @@
 {
   "schema": "NFE_OS_RESEARCH_OBSERVATORY_SUMMARY_V1",
-  "provider_rows": 527,
-  "auto_baseline_logical_positions": 402,
+  "provider_rows": 683,
+  "auto_baseline_logical_positions": 542,
   "asset_coverage_provider_outcomes": "9/9",
   "historical_score_distribution": "UNAVAILABLE",
   "observed_window_counts": "UNAVAILABLE",
   "qualification_counts": "UNAVAILABLE",
-  "pre_move_snapshots": "0/18 extreme realized-move positions",
-  "post_move_sequences": "0/18 extreme realized-move positions",
+  "pre_move_snapshots": "0/26 extreme realized-move positions",
+  "post_move_sequences": "0/26 extreme realized-move positions",
   "extreme_move_definition": "held-side Kalshi contract entry-to-exit return; not underlying crypto move and not maximum intratrade excursion",
   "extreme_move_cohorts": {
-    "100-199pct": 17,
-    "200-399pct": 0,
-    "400pct_plus": 1
+    "100-199pct": 23,
+    "200-399pct": 1,
+    "400pct_plus": 2
   },
   "near": {
-    "positions": 202,
-    "filled_position_share": 0.502488,
-    "win_rate": 0.574257,
-    "net_pl": -23.3333,
-    "realized_100pct_plus_moves": 12,
+    "positions": 294,
+    "filled_position_share": 0.5424354244,
+    "win_rate": 0.5918367347,
+    "net_pl": -20.2087,
+    "realized_100pct_plus_moves": 19,
     "note": "Filled-position share is not qualification rate or observed-opportunity share."
-  }
+  },
+  "source_csv_sha256": "4f254a08e96097cf767f6fd571e960bfcc2f448a0ef231d295f6617bdfc8356d"
 }
