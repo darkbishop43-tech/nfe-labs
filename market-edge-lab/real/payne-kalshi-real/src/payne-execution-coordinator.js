@@ -13,7 +13,7 @@ export class PayneExecutionCoordinator {
     }
     const key='attempt:'+attemptNo;
     const action=input?.action||'CLAIM';
-    if(!['CLAIM','RELEASE_PROVEN_NO_POST'].includes(action)) return Response.json({granted:false,reason:'INVALID_ACTION'},{status:400});
+    if(!['CLAIM','RELEASE_PROVEN_NO_POST','RESOLVE_ENTRY'].includes(action)) return Response.json({granted:false,reason:'INVALID_ACTION'},{status:400});
     const outcome=await this.state.storage.transaction(async tx=>{
       const prior=await tx.get(key);
       if(action==='RELEASE_PROVEN_NO_POST'){
@@ -23,9 +23,38 @@ export class PayneExecutionCoordinator {
         await tx.delete(key);
         return {granted:true,reason:'PROVEN_NO_POST_RELEASED'};
       }
+      if(action==='RESOLVE_ENTRY'){
+        if(!prior||prior.seriesId!==seriesId||prior.specimenId!==specimenId||prior.clientOrderId!==clientOrderId||
+           prior.ticker!==ticker||prior.side!==side||prior.windowClose!==windowClose)
+          return {granted:false,reason:'CLAIM_IDENTITY_MISMATCH'};
+        const resolution=String(input.resolution||'');
+        if(!['OPEN','NO_FILL','CLOSED','UNKNOWN','NO_PROVIDER_EXECUTION'].includes(resolution))
+          return {granted:false,reason:'INVALID_RESOLUTION'};
+        if(resolution==='CLOSED'&&input.providerFlatProven!==true)
+          return {granted:false,reason:'PROVIDER_FLAT_EVIDENCE_REQUIRED'};
+        if(resolution==='NO_PROVIDER_EXECUTION'&&input.providerNoExecutionProven!==true)
+          return {granted:false,reason:'PROVIDER_NO_EXECUTION_EVIDENCE_REQUIRED'};
+        if(prior.claimState==='CLOSED'||prior.claimState==='NO_FILL'||prior.claimState==='NO_PROVIDER_EXECUTION')
+          return {granted:prior.claimState===resolution,reason:prior.claimState===resolution?'ALREADY_RESOLVED':'TERMINAL_CLAIM_IMMUTABLE'};
+        if(prior.claimState==='UNKNOWN'&&resolution==='NO_FILL')
+          return {granted:false,reason:'UNKNOWN_NEEDS_AUTHORITATIVE_RECONCILIATION'};
+        await tx.put(key,{...prior,claimState:resolution,resolvedAt:new Date().toISOString()});
+        return {granted:true,reason:'ENTRY_RESOLUTION_PERSISTED'};
+      }
       if(prior) return {granted:false,reason:'ATTEMPT_ALREADY_CLAIMED',priorState:'RECONCILIATION_REQUIRED'};
-      await tx.put(key,{seriesId,attemptNo,specimenId,clientOrderId,ticker,side,windowClose,claimState:'POTENTIALLY_SUBMITTED',claimedAt:new Date().toISOString()});
-      return {granted:true,reason:'ATOMIC_CLAIM_PERSISTED'};
+      const maxPositions=Number(input.maxPositions);
+      if(!Number.isSafeInteger(maxPositions)||maxPositions<1)
+        return {granted:false,reason:'FOUNDER_CAPACITY_REQUIRED'};
+      // A Durable Object transaction serializes capacity reservation and the
+      // exclusive attempt claim. No KV read-then-write can overbook this gate.
+      const all=await tx.list({prefix:'attempt:'});
+      const occupied=[...all.values()].filter(row=>
+        row&&['POTENTIALLY_SUBMITTED','OPEN','UNKNOWN'].includes(row.claimState)
+      ).length;
+      if(occupied>=maxPositions)return {granted:false,reason:'CAPACITY_FULL',occupied,maxPositions};
+      await tx.put(key,{seriesId,attemptNo,specimenId,clientOrderId,ticker,side,windowClose,
+        claimState:'POTENTIALLY_SUBMITTED',claimedAt:new Date().toISOString()});
+      return {granted:true,reason:'ATOMIC_CLAIM_PERSISTED',occupiedBefore:occupied};
     });
     return Response.json(outcome);
   }
@@ -43,6 +72,21 @@ export async function claimPayneExecution(env,identity){
     const result=await response.json();
     return result?.granted===true?{granted:true,reason:'ATOMIC_CLAIM_PERSISTED'}:{granted:false,reason:String(result?.reason||'ATOMIC_CLAIM_REJECTED')};
   }catch{return {granted:false,reason:'ATOMIC_COORDINATOR_UNAVAILABLE'};}
+}
+
+export async function resolvePayneExecutionClaim(env,identity,resolution,{providerFlatProven=false,providerNoExecutionProven=false}={}){
+  const binding=env?.PAYNE_EXECUTION_COORDINATOR;
+  if(!binding?.idFromName||!binding?.get)return {granted:false,reason:'ATOMIC_COORDINATOR_UNBOUND'};
+  try{
+    const response=await binding.get(binding.idFromName(identity.seriesId)).fetch('https://payne-coordinator.internal/resolve',{
+      method:'POST',headers:{'content-type':'application/json'},
+      body:JSON.stringify({...identity,action:'RESOLVE_ENTRY',resolution,providerFlatProven,providerNoExecutionProven})
+    });
+    if(!response.ok)return {granted:false,reason:'RESOLUTION_COORDINATOR_REJECTED'};
+    const body=await response.json();
+    return body?.granted===true?{granted:true,reason:String(body.reason||'RESOLVED')}:
+      {granted:false,reason:String(body?.reason||'RESOLUTION_DENIED')};
+  }catch{return {granted:false,reason:'RESOLUTION_COORDINATOR_UNAVAILABLE'};}
 }
 
 export async function releaseProvenNoPost(env,identity){
