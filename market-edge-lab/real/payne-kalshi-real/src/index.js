@@ -4136,11 +4136,15 @@ export default {
     const schedulerStartedMs=Date.now();
     await initializeDisarmed(env);
     const control=await loadControl(env);
-    // Management and unresolved-entry reconciliation must not wait for a full scan.
+    // Pending management, reconciliation, and already-durable FIRE latches
+    // must not wait for another full scan.
     // New entry authority still waits for the scan to finish persisting a FIRE latch.
     const initialSeries=await loadRealSeriesState(env);
     const urgent=initialSeries?.unresolvedEntry===true ||
-      Boolean(initialSeries?.position && ['OPEN','EXIT_RETRY','EXIT_RECONCILIATION_REQUIRED','RECONCILIATION_UNKNOWN'].includes(String(initialSeries.position.status||'')));
+      Boolean(initialSeries?.position && ['OPEN','EXIT_RETRY','EXIT_RECONCILIATION_REQUIRED','RECONCILIATION_UNKNOWN'].includes(String(initialSeries.position.status||''))) ||
+      // A previously persisted FIRE latch is already complete; revalidate it
+      // through every fresh execution gate before starting another full scan.
+      Boolean(control.armed && initialSeries?.fireLatch?.state==='LATCHED');
     if(urgent){
       const urgentStartMs=Date.now();
       try{
