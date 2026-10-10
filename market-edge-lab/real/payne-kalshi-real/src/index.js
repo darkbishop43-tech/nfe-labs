@@ -3694,7 +3694,7 @@ async function manageAllPayneRealPositions(env,control,series,postImpl,nowMs){
   return saveRealSeriesState(env,series);
 }
 
-export async function runPayneRealExecutionCycle(env,{postImpl=kalshiPayneOrderPost,nowMs=Date.now()}={}) {
+export async function runPayneRealExecutionCycle(env,{postImpl=kalshiPayneOrderPost,nowMs=Date.now(),skipManagement=false}={}) {
   const executionStartMs=Date.now();
   let control=await loadControl(env);
   let series=await loadRealSeriesState(env);
@@ -3716,7 +3716,7 @@ export async function runPayneRealExecutionCycle(env,{postImpl=kalshiPayneOrderP
     return saveRealSeriesState(env,series);
   }
 
-  if(unresolvedPaynePositions(series).length){
+  if(!skipManagement && unresolvedPaynePositions(series).length){
     const managedAttemptIds=unresolvedPaynePositions(series).map(p=>p.attemptId);
     series=await manageAllPayneRealPositions(env,control,series,postImpl,nowMs);
     // Closing a position and opening a new one never share a scheduler cycle.
@@ -4278,12 +4278,17 @@ export default {
       const series=await loadRealSeriesState(env);
       const identity=payneTimingIdentity(series,series?.fireLatch);
       logPayneTiming('CYCLE_AFTER_SCAN',identity,schedulerStartedMs);
-      const managementPending=Boolean(series?.position && ['OPEN','EXIT_RETRY','EXIT_RECONCILIATION_REQUIRED','RECONCILIATION_UNKNOWN'].includes(String(series.position.status||'')));
+      const managementPending=unresolvedPaynePositions(series).length>0;
       const entryReconciliationPending=series?.unresolvedEntry===true;
-      // Avoid a second management cycle in one scheduled invocation.
-      // Newly latched entries are processed only AFTER the scan has completed.
-      if (!urgent && (control.armed || managementPending || entryReconciliationPending)) await runPayneRealExecutionCycle(env);
-      else await reconcileDisarmedSupersededSeries(env,series,control);
+      const newLatchedFire=series.fireLatch?.state==='LATCHED' &&
+        series.fireLatch?.specimenId!==initialSeries.fireLatch?.specimenId;
+      // Management ran before the slow scan. A newly persisted FIRE latch may
+      // proceed without re-managing positions or waiting for another cron tick.
+      // An invocation that began UNKNOWN cannot enter again this same tick.
+      const shouldExecute=(!urgent && (control.armed||managementPending||entryReconciliationPending)) ||
+        (urgent&&!initialSeries.unresolvedEntry&&newLatchedFire&&control.armed);
+      if(shouldExecute)await runPayneRealExecutionCycle(env,{skipManagement:urgent});
+      else if(!urgent)await reconcileDisarmedSupersededSeries(env,series,control);
       logPayneTiming('EXECUTION_CYCLE_END',identity,cycleStartMs,Date.now(),'SUCCESS');
     } catch(error) {
       logPayneTiming('EXECUTION_CYCLE_ERROR',{seriesId:'',ticker:'',side:'',windowClose:''},cycleStartMs,Date.now(),String(error?.name||'EXECUTION_ERROR'));
