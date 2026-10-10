@@ -3230,6 +3230,28 @@ async function providerTickerPositionEvidence(env,ticker) {
   }
 }
 
+async function reconcileAtomicEntryAuthority(env,series,attempt,resolution,{flat=false,noExecution=false}={}){
+  // Historical pre-coordinator PAYNE attempts have no Durable Object claim.
+  // Preserve those records without inventing claim identity or releasing slots.
+  const specimenId=attempt?.fireSpecimenId||series?.fireLatch?.specimenId;
+  const windowClose=attempt?.marketCloseTime||series?.fireLatch?.marketCloseTime;
+  if(!attempt?.fireSpecimenId && !attempt?.marketCloseTime)return {ok:true,legacy:true};
+  const identity={
+    seriesId:series.seriesId,
+    attemptNo:Number(attempt?.providerAttemptNoCandidate||attempt?.providerAttemptNo||attempt?.attemptNo),
+    specimenId,clientOrderId:attempt?.clientOrderId,
+    ticker:attempt?.marketTicker,side:attempt?.outcomeSide,windowClose
+  };
+  if(!identity.seriesId||!Number.isSafeInteger(identity.attemptNo)||!identity.specimenId||
+     !identity.clientOrderId||!identity.ticker||!identity.side||!identity.windowClose)
+    return {ok:false,reason:'ATOMIC_RECONCILIATION_IDENTITY_INCOMPLETE'};
+  const proof=await resolvePayneExecutionClaim(env,identity,resolution,{
+    providerFlatProven:flat,providerNoExecutionProven:noExecution,
+    authoritativeReconciliationProven:true
+  });
+  return {ok:proof.granted===true,reason:proof.reason||null};
+}
+
 export async function reconcileUnresolvedEntryFromProvider(env,nowMs=Date.now()) {
   const series=await loadRealSeriesState(env);
   if(series?.unresolvedEntry!==true) return {
@@ -3347,6 +3369,7 @@ export async function reconcileUnresolvedEntryFromProvider(env,nowMs=Date.now())
       asset:attempt.asset,marketTicker:ticker,outcomeSide:attempt.outcomeSide,direction:attempt.direction,
       paperCandidateKey:attempt.paperCandidateKey||paperCandidateKey({ticker,outcomeSide:attempt.outcomeSide,direction:attempt.direction}),
       exchangeIndex:2,entryOrderId:orderId,entryClientOrderId:clientOrderId,
+      entryFireSpecimenId:attempt.fireSpecimenId||null,marketCloseTime:attempt.marketCloseTime||series.fireLatch?.marketCloseTime||null,
       filledCount:ownedFillCount,remainingExitCount:ownedFillCount,
       entryAverageFillPrice:exactOrder?.average_fill_price??exactOrder?.avg_fill_price??null,
       entryAverageFeePaid:exactOrder?.average_fee_paid??exactOrder?.fee_paid??null,
@@ -3895,7 +3918,8 @@ export async function runPayneRealExecutionCycle(env,{postImpl=kalshiPayneOrderP
     asset:candidate.asset,marketTicker:candidate.ticker,outcomeSide:candidate.outcomeSide,direction:candidate.direction,
     paperCandidateKey:paperCandidateKey(candidate),
     exchangeIndex:2,score:finalFeature.score,move:finalFeature.move,directionalMove:finalFeature.directionalMove??null,edge:finalFeature.edge,threshold:cfg.threshold,
-    observedAt:series.fireLatch?.fireObservedAt||new Date(nowMs).toISOString(),freshLockAt:freshLock.readAt,preSubmitAt:preSubmit.readAt,
+    observedAt:series.fireLatch?.fireObservedAt||new Date(nowMs).toISOString(),
+    marketCloseTime:candidate.closeTime,freshLockAt:freshLock.readAt,preSubmitAt:preSubmit.readAt,
     freshLockResult:'PASS',freshLockPrice:candidate.outcomeSide==='YES'?freshLock.market.yesAsk:freshLock.market.noAsk,
     preSubmitResult:'PASS',preSubmitPrice:ask,
     finalFeatureRequalification:'PASS',
