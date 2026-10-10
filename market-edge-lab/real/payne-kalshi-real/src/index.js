@@ -1,5 +1,5 @@
 import {liveOrderWatchProjection,paynePositionRecords,payneCapacityEvidence,upsertPaynePosition,unresolvedPaynePositions} from './payne-live-order-watch.js';
-import {PayneExecutionCoordinator,claimPayneExecution,releaseProvenNoPost,resolvePayneExecutionClaim} from './payne-execution-coordinator.js';
+import {PayneExecutionCoordinator,claimPayneExecution,releaseProvenNoPost,resolvePayneExecutionClaim,claimPayneExit} from './payne-execution-coordinator.js';
 export {PayneExecutionCoordinator};
 import { kalshiReadOnlyProof, kalshiGetOnly } from './kalshi-get-only.js';
 import { kalshiPayneOrderPost, PAYNE_WRITE_CONTRACT } from './kalshi-real-write.js';
@@ -3596,6 +3596,14 @@ async function managePayneRealPosition(env,control,series,postImpl=kalshiPayneOr
     return saveRealSeriesState(env,series);
   }
 
+  if(position.status==='EXIT_RECONCILIATION_REQUIRED'){
+    // The previous exit may have reached Kalshi. Reconcile its exact order and
+    // provider position before any new client_order_id can be constructed.
+    series.status='EXIT_RECONCILIATION_REQUIRED';
+    await settleSeriesControl(env,series,1,{failClosed:true});
+    return saveRealSeriesState(env,series);
+  }
+
   const quote=await exactMarketRead(env,position.marketTicker,position.asset);
   const featureState=await readAuthoritativePayneFeatures(env,quote?.market?[quote.market]:[],nowMs,{forceRefresh:true});
   const feature=featureForCandidate(featureState,position.marketTicker,position.outcomeSide,position.asset,Number(series.threshold),quote?.market||null);
@@ -3642,20 +3650,35 @@ async function managePayneRealPosition(env,control,series,postImpl=kalshiPayneOr
   if(!payload || payload.reduce_only!==true){
     position.status='EXIT_RETRY';series.status='EXIT_REQUEST_BUILD_FAILED';await settleSeriesControl(env,series,1,{failClosed:true});return saveRealSeriesState(env,series);
   }
+  const exitClaimIdentity={
+    seriesId:series.seriesId,attemptNo:Number(position.attemptNo||1),
+    specimenId:position.attemptId,clientOrderId:exitClientOrderId,
+    ticker:position.marketTicker,side:position.outcomeSide
+  };
+  const exitOwnership=await claimPayneExit(env,exitClaimIdentity);
+  if(!exitOwnership.granted){
+    // Another Worker may already be submitting the exact same exit.
+    // Never write this stale copy over the genuine execution owner.
+    return loadRealSeriesState(env);
+  }
   await appendRealLedger(env,'EXIT_PRE_SUBMIT_LATCHED',{seriesId:series.seriesId,attemptId:position.attemptId,ticker:position.marketTicker,reason:decision.reason,clientOrderId:exitClientOrderId,payload:{...payload},exchangeIndex:2});
   let response,proof;
   try{
     const out=await postImpl(env,'EXIT',payload,payneRealScope(control,series,'EXIT',position));
     response=out.response; proof=out.proof;
   }catch(error){
-    position.status='EXIT_RETRY';position.exitWriteError=String(error?.message||error);series.status='EXIT_WRITE_ERROR_RETRY_PENDING';
+    const certainlyNoPost=error?.payneProviderPostStarted===false;
+    const released=certainlyNoPost?await claimPayneExit(env,exitClaimIdentity,{release:true,provenNoProviderPost:true}):{granted:false};
+    position.status=released.granted?'EXIT_RETRY':'EXIT_RECONCILIATION_REQUIRED';
+    position.exitWriteError=String(error?.message||error);
+    series.status=released.granted?'EXIT_WRITE_ERROR_RETRY_PENDING':'EXIT_WRITE_UNKNOWN_RECONCILIATION_REQUIRED';
     await appendRealLedger(env,'EXIT_WRITE_ERROR',{seriesId:series.seriesId,attemptId:position.attemptId,ticker:position.marketTicker,error:position.exitWriteError});
     await settleSeriesControl(env,series,1,{failClosed:true});
     return saveRealSeriesState(env,series);
   }
   const body=await response.json().catch(()=>({}));
   if(!response.ok){
-    position.status='EXIT_RETRY';position.exitProviderStatus=response.status;series.status='EXIT_PROVIDER_REJECTED_RETRY_PENDING';
+    position.status='EXIT_RECONCILIATION_REQUIRED';position.exitProviderStatus=response.status;series.status='EXIT_PROVIDER_UNKNOWN_RECONCILIATION_REQUIRED';
     await appendRealLedger(env,'EXIT_PROVIDER_REJECTED',{seriesId:series.seriesId,attemptId:position.attemptId,ticker:position.marketTicker,httpStatus:response.status,proof});
     await settleSeriesControl(env,series,1,{failClosed:true});
     return saveRealSeriesState(env,series);
