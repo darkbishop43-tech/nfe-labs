@@ -67,7 +67,13 @@ verify_safety() {
         .currentAttempt.reconciliationReason=="PROVIDER_RECONCILED_NO_EXECUTION" and
         .currentAttempt.providerPostStarted!=true and
         (.fireLatch.state//"NONE")=="PRE_PROVIDER_VALIDATION" and
-        (.fireLatch.providerPost//"NOT_STARTED")=="NOT_STARTED"))
+        (.fireLatch.providerPost//"NOT_STARTED")=="NOT_STARTED") or
+       ($c[0].armed==false and .unresolvedEntry==false and
+        (.position//null)==null and
+        .currentAttempt.status=="NO_PROVIDER_EXECUTION" and
+        .currentAttempt.reconciliationReason=="PROVIDER_RECONCILED_NO_EXECUTION" and
+        (.fireLatch.state//"NONE")=="INVALIDATED_BEFORE_POST" and
+        .fireLatch.finalResult=="NO_PROVIDER_EXECUTION"))
   ' "$s" >/dev/null || {
     # Existing KV data only: identify the failed invariant without changing state.
     jq -r --slurpfile c "$c" '
