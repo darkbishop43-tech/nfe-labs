@@ -3543,6 +3543,22 @@ export async function reconcileUnresolvedEntryFromProvider(env,nowMs=Date.now())
   }
 
   if((positionEvidence.classification==='ABSENT'||positionEvidence.classification==='FLAT') && exactOrders.length>0){
+    // An order with zero fills can still be live. Never retire its obligation
+    // from a zero-fill count alone; the Kalshi terminal state must be proven.
+    const nonterminal=exactOrders.filter(x=>{
+      const state=String(x?.status||x?.order_status||'').toLowerCase();
+      return !['canceled','cancelled','executed','filled','expired','closed','settled','rejected'].includes(state);
+    });
+    if(nonterminal.length){
+      series.status='ENTRY_RECONCILIATION_REQUIRED';
+      await appendRealLedger(env,'ENTRY_RECONCILIATION_STILL_UNKNOWN',{
+        seriesId:series.seriesId,attemptId:attempt.attemptId,ticker,clientOrderId,
+        reason:'PROVIDER_ORDER_NOT_TERMINAL',orderIds:nonterminal.map(x=>x?.order_id||null),
+      });
+      await saveRealSeriesState(env,series);
+      return {ok:false,classification:'UNKNOWN',reason:'PROVIDER_ORDER_NOT_TERMINAL',
+        series,control:await loadControl(env),providerWrites:0,orders:0,capitalMovedUsd:0};
+    }
     const zeroFillOrders=exactOrders.every(x=>{
       const n=Number(x?.fill_count??x?.filled_count??x?.count_filled??0);
       return Number.isFinite(n)&&n===0;
