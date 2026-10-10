@@ -1,3 +1,5 @@
+import {PayneExecutionCoordinator,claimPayneExecution} from './payne-execution-coordinator.js';
+export {PayneExecutionCoordinator};
 import { kalshiReadOnlyProof, kalshiGetOnly } from './kalshi-get-only.js';
 import { kalshiPayneOrderPost, PAYNE_WRITE_CONTRACT } from './kalshi-real-write.js';
 import { cockpitHtml } from './cockpit-html.js';
@@ -3856,6 +3858,21 @@ export async function runPayneRealExecutionCycle(env,{postImpl=kalshiPayneOrderP
     return saveRealSeriesState(env,series);
   }
 
+  // Atomic cross-instance claim belongs to the persisted attempt number, not
+  // merely the specimen. Never retry an ambiguous/previously claimed POST.
+  const ownership=await claimPayneExecution(env,{
+    seriesId,attemptNo:providerAttemptNoCandidate,
+    specimenId:series.fireLatch?.specimenId,
+    clientOrderId,ticker:candidate.ticker,side:candidate.outcomeSide,
+    windowClose:candidate.closeTime
+  });
+  if(ownership.granted!==true){
+    logPayneTiming('ATOMIC_CLAIM_REJECTED',trace(),executionStartMs,Date.now(),ownership.reason);
+    // Do not save a stale local copy over an execution owned by another instance.
+    // No provider POST is possible from this invocation.
+    return loadRealSeriesState(env);
+  }
+  logPayneTiming('ATOMIC_CLAIM_GRANTED',trace(),executionStartMs,Date.now(),'EXCLUSIVE');
   logPayneTiming('PROVIDER_WRITE_ELIGIBLE',trace(),executionStartMs,Date.now(),'PRE_PROVIDER_GATES_PASSED');
   let response,proof,writerInvoked=false,providerPostStarted=false;
   try{
