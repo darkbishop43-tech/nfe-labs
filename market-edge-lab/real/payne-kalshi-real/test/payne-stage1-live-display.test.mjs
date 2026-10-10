@@ -5,9 +5,9 @@ import {liveOrderWatchProjection} from '../src/payne-live-order-watch.js';
 
 test('Stage 1 renders exclusively dynamic observed ticker data, not seeded price history',()=>{
  const html=cockpitHtml();
- const scripts=[...html.matchAll(/<script(?:\\s[^>]*)?>([\\s\\S]*?)<\\/script>/g)];
+ const scripts=html.split('<script>').slice(1).map(x=>x.split('</script>')[0]);
  assert.ok(scripts.length>0,'cockpit contains executable inline script');
- for(const [,script] of scripts)assert.doesNotThrow(()=>new Function(script),'inline script parses');
+ for(const script of scripts)assert.doesNotThrow(()=>new Function(script),'inline script parses');
 
  assert.match(html,/function takeFeedObservation\(/);
  assert.match(html,/function observeMarketFeed\(/);
