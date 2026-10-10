@@ -21,6 +21,9 @@ jobs:
       - name: Syntax
         working-directory: market-edge-lab/real/payne-kalshi-real
         run: node --check src/index.js
+      - name: Maintenance safety gate syntax
+        working-directory: .
+        run: bash -n .github/scripts/payne-kv-deployment-safety.sh
       - name: PAYNE full zero-money suite
         working-directory: market-edge-lab/real/payne-kalshi-real
         run: npm test
