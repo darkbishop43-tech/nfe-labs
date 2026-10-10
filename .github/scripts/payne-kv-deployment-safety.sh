@@ -33,13 +33,20 @@ verify_safety() {
     .schema=="PAYNE_REAL_SERIES_V1" and
     .owner=="PAYNE_KALSHI_REAL" and
     .requiredExchangeIndex==2 and
-    .unresolvedEntry==false and
+    # Maintenance deployment is NOT permission to enter. Preserve unresolvedEntry.
+    # An unresolved terminal historical result is permitted only while DISARMED;
+    # active/submitting coordinator obligations retain their separate interlocks.
+    (.unresolvedEntry==false or
+      (.unresolvedEntry==true and $c[0].armed==false and
+       (.currentAttempt.status//""|IN("NO_PROVIDER_EXECUTION","PROVIDER_RECONCILED_NO_EXECUTION")) and
+       (.currentAttempt.reconciliationReason//""|IN("PROVIDER_RECONCILED_NO_EXECUTION")))) and
     ((.position // null)==null or
-      ((.position.status//"")|IN("FLAT","CLOSED","SETTLED"))) and
+      ((.position.owner//"")=="PAYNE_KALSHI_REAL" and
+       (.position.status//""|IN("OPEN","FLAT","CLOSED","SETTLED")))) and
     ((.fireLatch.state // "NONE") |
       IN("LATCHED","PRE_PROVIDER_VALIDATION","PROVIDER_POST_UNKNOWN")|not) and
     (.currentAttempt.providerPostStarted!=true or
-      (.currentAttempt.status|IN("NO_FILL","FILLED","CLOSED","SETTLED"))) and
+      (.currentAttempt.status|IN("NO_FILL","FILLED","CLOSED","SETTLED","NO_PROVIDER_EXECUTION"))) and
     (.configFrozen!=true or
        (.threshold==$c[0].activeThreshold and
         .maxEntryDebitUsd==$c[0].maxEntryDebitUsd and
