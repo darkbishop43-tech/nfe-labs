@@ -116,6 +116,21 @@ test('provider no-execution may not bypass any outstanding or mismatched coordin
  assert.equal((await call(resolution)).reason,'OTHER_OUTSTANDING_COORDINATOR_CLAIM');
  assert.equal(saved.get('attempt:1'),undefined);
  assert.equal((await call(identity)).granted,true);
- assert.equal((await call({...resolution,specimenId:'WRONG'})).reason,'CLAIM_IDENTITY_MISMATCH');
+ assert.equal((await call({...resolution,specimenId:'WRONG'})).reason,'CLAIM_IDENTITY_MISMATCH_POTENTIALLY_SUBMITTED');
  assert.equal(saved.get('attempt:1').claimState,'POTENTIALLY_SUBMITTED');
+});
+
+test('distinct historical terminal claim is preserved when current attempt is proven no-execution',async()=>{
+ const {instance,saved}=syntheticDurableObject();
+ const call=async x=>(await instance.fetch(new Request('https://payne-coordinator.internal/claim',{method:'POST',body:JSON.stringify(x)}))).json();
+ assert.equal((await call(identity)).granted,true);
+ assert.equal((await call({...identity,action:'RESOLVE_ENTRY',resolution:'NO_FILL'})).granted,true);
+ const current={...identity,specimenId:'NEW-CURRENT-INTENT',clientOrderId:'CURRENT-CLIENT-ID',
+   action:'RESOLVE_ENTRY',resolution:'NO_PROVIDER_EXECUTION',
+   providerNoExecutionProven:true,authoritativeReconciliationProven:true};
+ assert.equal((await call(current)).reason,'DISTINCT_HISTORICAL_TERMINAL_CLAIM_PRESERVED');
+ assert.equal(saved.get('attempt:1').clientOrderId,identity.clientOrderId,'historical claim identity unchanged');
+ assert.equal(saved.get('attempt:1').claimState,'NO_FILL','historical classification unchanged');
+ assert.equal((await call({...current,providerNoExecutionProven:false})).granted,false);
+ assert.equal((await call({...identity,action:'CLAIM'})).granted,false,'duplicate attempts remain blocked');
 });
