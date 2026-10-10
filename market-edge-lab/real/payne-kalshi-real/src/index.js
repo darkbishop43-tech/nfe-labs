@@ -3156,6 +3156,56 @@ export async function buildRealExecutionObservability(env) {
     positionCapacity:payneCapacityEvidence(series,control.maxPositions)};
 }
 
+
+export async function buildDisplayMarketFeed(env,nowMs=Date.now()){
+  const current=await kvGetJson(env,CURRENT_KEY);
+  const series=await loadRealSeriesState(env);
+  const identities=new Map();
+  for(const c of current?.candidates||[]){
+    if(c?.ticker&&c?.closeTime)identities.set(c.ticker,{ticker:c.ticker,asset:c.asset||null,
+      closeTime:c.closeTime,direction:c.direction||null,outcomeSide:c.outcomeSide||null});
+  }
+  for(const p of paynePositionRecords(series)){
+    if(!p?.marketTicker)continue;
+    if(!identities.has(p.marketTicker))identities.set(p.marketTicker,{
+      ticker:p.marketTicker,asset:p.asset||null,closeTime:p.closeTime||null,
+      direction:p.direction||null,outcomeSide:p.outcomeSide||null});
+  }
+  if(current?.selected?.ticker&&current?.selected?.closeTime&&!identities.has(current.selected.ticker)){
+    const c=current.selected;identities.set(c.ticker,{ticker:c.ticker,asset:c.asset||null,
+      closeTime:c.closeTime,direction:c.direction||null,outcomeSide:c.outcomeSide||null});
+  }
+  const quotes=[];
+  // Existing authorised provider GET transport. No strategy scan, no provider POST.
+  for(const c of identities.values()){
+    const end=Date.parse(c.closeTime||'');
+    if(!Number.isFinite(end)||end<=nowMs){quotes.push({...c,status:'STALE',reason:'CONTRACT_WINDOW_ENDED'});continue;}
+    try{
+      const response=await kalshiGetOnly(env,'/trade-api/v2/markets/'+encodeURIComponent(c.ticker));
+      const observedAt=new Date().toISOString();
+      const body=await safeProviderJson(response);
+      const m=body?.market||null;
+      const exact=String(m?.ticker||'')===c.ticker&&
+        String(m?.close_time||m?.closeTime||'')===c.closeTime;
+      const yesBid=normalizeProviderProbability(m?.yes_bid_dollars??m?.yes_bid);
+      const yesAsk=normalizeProviderProbability(m?.yes_ask_dollars??m?.yes_ask);
+      const noBid=normalizeProviderProbability(m?.no_bid_dollars??m?.no_bid);
+      const noAsk=normalizeProviderProbability(m?.no_ask_dollars??m?.no_ask);
+      const eligible=exact&&response.ok&&['open','active'].includes(String(m?.status||'').toLowerCase())&&Date.parse(observedAt)<end;
+      quotes.push({...c,status:eligible?'LIVE':'UNAVAILABLE',observedAt,
+        reason:eligible?null:'PROVIDER_TICKER_WINDOW_OR_BOOK_UNAVAILABLE',
+        yesBid:eligible?yesBid:null,yesAsk:eligible?yesAsk:null,
+        noBid:eligible?noBid:null,noAsk:eligible?noAsk:null,
+        selectedBid:eligible?(c.outcomeSide==='NO'?noBid:yesBid):null,
+        selectedAsk:eligible?(c.outcomeSide==='NO'?noAsk:yesAsk):null});
+    }catch{quotes.push({...c,status:'UNAVAILABLE',reason:'PROVIDER_GET_FAILED'});}
+  }
+  return {ok:true,schema:'PAYNE_DISPLAY_MARKET_FEED_V1',
+    source:'PAYNE_AUTHENTICATED_KALSHI_GET_ONLY',
+    quotes,providerGets:quotes.filter(x=>x.observedAt).length,
+    providerWrites:0,orders:0,capitalMovedUsd:0};
+}
+
 async function buildFastUiState(env) {
   const [control,latestPersistent,realExecution]=await Promise.all([
     loadControl(env),
@@ -4269,6 +4319,7 @@ export default {
         capitalMovedUsd:0,
       });
     }
+    if (url.pathname === '/display-market-feed') return Response.json(await buildDisplayMarketFeed(env),{headers:{'cache-control':'no-store'}});
     if (url.pathname === '/ui-state') {
       return Response.json(await buildFastUiState(env),{headers:{'cache-control':'no-store'}});
     }
