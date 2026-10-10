@@ -1,4 +1,4 @@
-import {liveOrderWatchProjection,paynePositionRecords,payneCapacityEvidence} from './payne-live-order-watch.js';
+import {liveOrderWatchProjection,paynePositionRecords,payneCapacityEvidence,upsertPaynePosition,unresolvedPaynePositions} from './payne-live-order-watch.js';
 import {PayneExecutionCoordinator,claimPayneExecution,releaseProvenNoPost} from './payne-execution-coordinator.js';
 export {PayneExecutionCoordinator};
 import { kalshiReadOnlyProof, kalshiGetOnly } from './kalshi-get-only.js';
@@ -2758,7 +2758,11 @@ export async function loadRealSeriesState(env) {
 }
 
 export async function saveRealSeriesState(env,state) {
-  const next={...defaultRealSeriesState(),...state,owner:REAL_OWNER,requiredExchangeIndex:2,updatedAt:new Date().toISOString()};
+  // Preserve the complete PAYNE collection while retaining legacy position readers.
+  // This does not itself grant additional entry authority.
+  const normalized=state?.position?upsertPaynePosition(state,state.position):state;
+  const next={...defaultRealSeriesState(),...normalized,positions:paynePositionRecords(normalized),
+    owner:REAL_OWNER,requiredExchangeIndex:2,updatedAt:new Date().toISOString()};
   await kvPutJson(env,REAL_SERIES_KEY,next);
   return next;
 }
