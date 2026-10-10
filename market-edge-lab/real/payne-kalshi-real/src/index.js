@@ -1088,15 +1088,15 @@ export function payneBookEvidence(market, outcomeSide, selectedPrice=null, obser
 function paperCandidateAvailability(candidate,series,ledger,nowMs=Date.now()) {
   const candidateKey=paperCandidateKey(candidate);
   if(!candidateKey) return {available:false,candidateKey:null,reason:'PAPER_CANDIDATE_KEY_UNAVAILABLE'};
-  const position=series?.position||null;
-  const activeKey=position?.paperCandidateKey||paperCandidateKey({
-    ticker:position?.marketTicker,
-    outcomeSide:position?.outcomeSide,
-    direction:position?.direction,
+  // Keep Paper's exact-candidate cooldown/ownership rule, but apply it
+  // independently to every PAYNE-owned active position, not just the legacy slot.
+  const duplicates=unresolvedPaynePositions(series).some(position=>{
+    const activeKey=position?.paperCandidateKey||paperCandidateKey({
+      ticker:position?.marketTicker,outcomeSide:position?.outcomeSide,direction:position?.direction
+    });
+    return activeKey===candidateKey;
   });
-  if(position&&SERIES_BLOCKING_POSITION_STATUSES.includes(String(position?.status||''))&&activeKey===candidateKey) {
-    return {available:false,candidateKey,reason:'PAPER_DUPLICATE_ACTIVE'};
-  }
+  if(duplicates)return {available:false,candidateKey,reason:'PAPER_DUPLICATE_ACTIVE'};
   const exits=(Array.isArray(ledger)?ledger:[])
     .filter(row=>String(row?.type||'')==='PAYNE_PAPER_BRAIN_EXIT_CLOSED'&&String(row?.candidateKey||'')===candidateKey)
     .sort((a,b)=>Date.parse(a?.at||0)-Date.parse(b?.at||0));
