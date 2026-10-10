@@ -58,9 +58,25 @@ export class PayneExecutionCoordinator {
             resolutionAuthority:'PROVIDER_CONFIRMED_NO_EXECUTION_NO_PRIOR_CLAIM'});
           return {granted:true,reason:'NO_PRIOR_CLAIM_TERMINALLY_RECONCILED'};
         }
-        if(!prior||prior.seriesId!==seriesId||prior.specimenId!==specimenId||prior.clientOrderId!==clientOrderId||
-           prior.ticker!==ticker||prior.side!==side||prior.windowClose!==windowClose)
-          return {granted:false,reason:prior?'CLAIM_IDENTITY_MISMATCH':'CLAIM_NOT_FOUND'};
+        if(prior&&(prior.seriesId!==seriesId||prior.specimenId!==specimenId||prior.clientOrderId!==clientOrderId||
+           prior.ticker!==ticker||prior.side!==side||prior.windowClose!==windowClose)){
+          // A different, already terminal historical claim owns this attempt key.
+          // Preserve it unchanged. Provider-proven no-execution for the current
+          // identity may retire its local latch only when NO claim in this DO
+          // remains capable of a future provider submission.
+          if(resolution==='NO_PROVIDER_EXECUTION' &&
+             input.providerNoExecutionProven===true &&
+             input.authoritativeReconciliationProven===true &&
+             ['CLOSED','NO_FILL','NO_PROVIDER_EXECUTION'].includes(prior.claimState)){
+            const claims=await tx.list({prefix:'attempt:'});
+            const outstanding=[...claims.values()].some(row=>row&&
+              ['POTENTIALLY_SUBMITTED','OPEN','UNKNOWN'].includes(row.claimState));
+            if(!outstanding)return {granted:true,reason:'DISTINCT_HISTORICAL_TERMINAL_CLAIM_PRESERVED'};
+          }
+          return {granted:false,reason:'CLAIM_IDENTITY_MISMATCH_'+
+            String(prior.claimState||'UNSPECIFIED')};
+        }
+        if(!prior)return {granted:false,reason:'CLAIM_NOT_FOUND'};
         if(!['OPEN','NO_FILL','CLOSED','UNKNOWN','NO_PROVIDER_EXECUTION'].includes(resolution))
           return {granted:false,reason:'INVALID_RESOLUTION'};
         if(resolution==='CLOSED'&&input.providerFlatProven!==true)
