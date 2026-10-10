@@ -3168,7 +3168,7 @@ export async function buildDisplayMarketFeed(env,nowMs=Date.now()){
   for(const p of paynePositionRecords(series)){
     if(!p?.marketTicker)continue;
     if(!identities.has(p.marketTicker))identities.set(p.marketTicker,{
-      ticker:p.marketTicker,asset:p.asset||null,closeTime:p.closeTime||null,
+      ticker:p.marketTicker,asset:p.asset||null,closeTime:p.marketCloseTime||p.closeTime||null,
       direction:p.direction||null,outcomeSide:p.outcomeSide||null});
   }
   if(current?.selected?.ticker&&current?.selected?.closeTime&&!identities.has(current.selected.ticker)){
