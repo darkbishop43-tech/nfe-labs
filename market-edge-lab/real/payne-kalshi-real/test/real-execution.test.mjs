@@ -119,7 +119,7 @@ function providerMarket({status='open',close='2026-10-02T06:15:00Z',exchangeInde
   };
 }
 
-function installProvider({index3=0,index2=15.91,position='ABSENT',exactSequence=[],settled=false,orders=[],fills=[],historicalFills=[],settlements=null,entryResult=null,discoveryDelayMs=0,syntheticPostThrows=false,onSyntheticPost=null,multiPositions=[]}={}){
+function installProvider({index3=0,index2=15.91,position='ABSENT',exactSequence=[],settled=false,orders=[],fills=[],historicalFills=[],settlements=null,entryResult=null,discoveryDelayMs=0,syntheticPostThrows=false,onSyntheticPost=null,multiPositions=[],multiPositionStatus='OPEN'}={}){
   const original=globalThis.fetch,calls=[]; let exactNo=0;
   globalThis.fetch=async (url,options={})=>{
     calls.push({url:String(url),method:options.method||'GET',body:options.body||null});
@@ -142,7 +142,7 @@ function installProvider({index3=0,index2=15.91,position='ABSENT',exactSequence=
     if(u.includes('/portfolio/fills?')) return jsonResponse({fills});
     if(u.includes('/historical/fills?')) return jsonResponse({fills:historicalFills});
     if(u.includes('/portfolio/positions?')&&multiPositions.length)
-      return jsonResponse({market_positions:multiPositions.map(ticker=>({ticker,position_fp:'1'})),cursor:''});
+      return jsonResponse({market_positions:multiPositions.map(ticker=>({ticker,position_fp:multiPositionStatus==='FLAT'?'0':'1'})),cursor:''});
     if(u.includes('/portfolio/positions?')){
       if(position==='HTTP_FAIL') return jsonResponse({error:'x'},500);
       if(position==='OPEN') return jsonResponse({market_positions:[{ticker:'KXBTC15M-REALTEST',position_fp:'1'}],cursor:''});
@@ -902,7 +902,7 @@ test('THREE POSITION SYNTHETIC: DISARM manages and exits each owned BTC/ETH/SOL 
    assert.equal((await loadControl(e)).armed,false);
    assert.equal(io.calls.filter(x=>x.method==='POST').length,0,'only injected zero-money exit writer used');
  }finally{io.restore();}
- const flat=installProvider({position:'ABSENT'});
+ const flat=installProvider({multiPositions:tickers,multiPositionStatus:'FLAT'});
  try{
    const done=await runPayneRealExecutionCycle(e,{postImpl:post.fn,nowMs:Date.parse('2026-10-02T06:06:00Z')});
    assert.equal(done.positions.length,3);
