@@ -3161,9 +3161,9 @@ export async function buildDisplayMarketFeed(env,nowMs=Date.now()){
   const current=await kvGetJson(env,CURRENT_KEY);
   const series=await loadRealSeriesState(env);
   const identities=new Map();
-  for(const c of current?.candidates||[]){
-    if(c?.ticker&&c?.closeTime)identities.set(c.ticker,{ticker:c.ticker,asset:c.asset||null,
-      closeTime:c.closeTime,direction:c.direction||null,outcomeSide:c.outcomeSide||null});
+  for(const c of current?.decisions||[]){
+    if(c?.ticker&&c?.contractCloseTime)identities.set(c.ticker,{ticker:c.ticker,asset:c.asset||null,
+      closeTime:c.contractCloseTime,direction:c.direction||null,outcomeSide:c.outcomeSide||null});
   }
   for(const p of paynePositionRecords(series)){
     if(!p?.marketTicker)continue;
