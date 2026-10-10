@@ -1773,6 +1773,11 @@ export async function runReadOnlyScan(env, source='SCHEDULED_CRON', nowMs=Date.n
   const nextKey=[snapshot?.selected?.ticker,snapshot?.selected?.outcomeSide,snapshot?.selected?.payne?.state].join('|');
   const transition=Boolean(previous && prevKey!==nextKey);
   const previewReady=snapshot?.zeroMoneyPreview?.status==='FIRE_READY';
+  if(previewReady) logPayneTiming('PULL_QUALIFIED',{
+    seriesId:'',attemptNo:0,ticker:snapshot?.selected?.ticker||'',
+    side:snapshot?.selected?.outcomeSide||'',
+    windowClose:snapshot?.selected?.closeTime||''
+  },scanStartedMs,Date.now(),'QUALIFIED_SCAN_OBSERVATION');
   if(previewReady && control.armed===true){
     const series=await loadRealSeriesState(env);
     const prefireMarketPass=snapshot?.pipeline?.freshLock==='PROVEN'
