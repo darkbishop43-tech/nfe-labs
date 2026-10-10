@@ -44,7 +44,16 @@ verify_safety() {
       ((.position.owner//"")=="PAYNE_KALSHI_REAL" and
        (.position.status//""|IN("OPEN","FLAT","CLOSED","SETTLED")))) and
     ((.fireLatch.state // "NONE") |
-      IN("LATCHED","PRE_PROVIDER_VALIDATION","PROVIDER_POST_UNKNOWN")|not) and
+      (IN("LATCHED","PROVIDER_POST_UNKNOWN")|not)) and
+    # A disarmed terminal historical attempt may retain an obsolete pre-provider
+    # latch across SOFTWARE maintenance only. Entry remains blocked by
+    # unresolvedEntry and the independent Durable Object coordinator.
+    ((.fireLatch.state // "NONE")!="PRE_PROVIDER_VALIDATION" or
+      ($c[0].armed==false and .unresolvedEntry==true and
+       .currentAttempt.status=="NO_PROVIDER_EXECUTION" and
+       .currentAttempt.reconciliationReason=="PROVIDER_RECONCILED_NO_EXECUTION" and
+       .currentAttempt.providerPostStarted!=true and
+       (.fireLatch.providerPost//"NOT_STARTED")=="NOT_STARTED")) and
     (.currentAttempt.providerPostStarted!=true or
       (.currentAttempt.status|IN("NO_FILL","FILLED","CLOSED","SETTLED","NO_PROVIDER_EXECUTION"))) and
     (.configFrozen!=true or
@@ -65,8 +74,15 @@ verify_safety() {
           ((.position.owner//"")!="PAYNE_KALSHI_REAL" or
            (.position.status//""|IN("OPEN","FLAT","CLOSED","SETTLED")|not)))
          then "BLOCKED: POSITION_OWNERSHIP_OR_STATUS"
-      elif (.fireLatch.state//"NONE"|IN("LATCHED","PRE_PROVIDER_VALIDATION","PROVIDER_POST_UNKNOWN"))
+      elif (.fireLatch.state//"NONE"|IN("LATCHED","PROVIDER_POST_UNKNOWN"))
          then "BLOCKED: ACTIVE_FIRE_LATCH"
+      elif (.fireLatch.state//"NONE")=="PRE_PROVIDER_VALIDATION" and
+          ($c[0].armed!=false or .unresolvedEntry!=true or
+           .currentAttempt.status!="NO_PROVIDER_EXECUTION" or
+           .currentAttempt.reconciliationReason!="PROVIDER_RECONCILED_NO_EXECUTION" or
+           .currentAttempt.providerPostStarted==true or
+           (.fireLatch.providerPost//"NOT_STARTED")!="NOT_STARTED")
+         then "BLOCKED: PRE_PROVIDER_LATCH_NOT_PROVEN_MAINTENANCE_SAFE"
       elif (.currentAttempt.providerPostStarted==true and
             (.currentAttempt.status|IN("NO_FILL","FILLED","CLOSED","SETTLED","NO_PROVIDER_EXECUTION")|not))
          then "BLOCKED: PROVIDER_SUBMISSION_UNKNOWN"
