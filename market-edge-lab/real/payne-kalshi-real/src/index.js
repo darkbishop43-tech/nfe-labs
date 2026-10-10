@@ -1,7 +1,7 @@
 import { kalshiReadOnlyProof, kalshiGetOnly } from './kalshi-get-only.js';
 import { kalshiPayneOrderPost, PAYNE_WRITE_CONTRACT } from './kalshi-real-write.js';
 import { cockpitHtml } from './cockpit-html.js';
-import {logPayneTiming,payneTimingIdentity} from './payne-execution-timing.js';
+import {logPayneTiming,payneTimingIdentity,paynePriorityBeforeScan} from './payne-execution-timing.js';
 import { buildPayneOwnedFeatureState, payneFeatureIdentity } from './payne-kalshi-features.js';
 import {
   PAYNE_PAPER_RULES,
@@ -4140,11 +4140,9 @@ export default {
     // must not wait for another full scan.
     // New entry authority still waits for the scan to finish persisting a FIRE latch.
     const initialSeries=await loadRealSeriesState(env);
-    const urgent=initialSeries?.unresolvedEntry===true ||
-      Boolean(initialSeries?.position && ['OPEN','EXIT_RETRY','EXIT_RECONCILIATION_REQUIRED','RECONCILIATION_UNKNOWN'].includes(String(initialSeries.position.status||''))) ||
-      // A previously persisted FIRE latch is already complete; revalidate it
-      // through every fresh execution gate before starting another full scan.
-      Boolean(control.armed && initialSeries?.fireLatch?.state==='LATCHED');
+    // A previously persisted FIRE latch is already complete; fresh provider
+    // checks still run before the submission boundary.
+    const urgent=paynePriorityBeforeScan(control,initialSeries);
     if(urgent){
       const urgentStartMs=Date.now();
       try{
