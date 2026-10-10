@@ -4,6 +4,7 @@ on:
     branches: [payne-provider-reconciliation-fix-20261010]
     paths:
       - '.github/workflows/payne-provider-reconciliation-fix-tests.yml'
+      - '.github/scripts/payne-kv-deployment-safety.sh'
       - 'market-edge-lab/real/payne-kalshi-real/src/**'
       - 'market-edge-lab/real/payne-kalshi-real/test/**'
 permissions:
