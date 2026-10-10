@@ -99,7 +99,14 @@ async function env({shadow=baselineShadow(),autoPositions=[]}={}){
   const claims=new Map();
   const coordinator={idFromName:n=>n,get:n=>({fetch:async(_url,opts)=>{
     const claim=JSON.parse(opts.body),key=n+':'+claim.attemptNo;
-    if(claims.has(key))return jsonResponse({granted:false,reason:'ATTEMPT_ALREADY_CLAIMED'});
+        if(claim.action==='RELEASE_PROVEN_NO_POST'){
+          const prior=claims.get(key);
+          if(prior?.specimenId===claim.specimenId && prior?.clientOrderId===claim.clientOrderId && claim.provenNoProviderPost===true){
+            claims.delete(key); return jsonResponse({granted:true,reason:'PROVEN_NO_POST_RELEASED'});
+          }
+          return jsonResponse({granted:false,reason:'CLAIM_NOT_OWNED'});
+        }
+        if(claims.has(key)) return jsonResponse({granted:false,reason:'ATTEMPT_ALREADY_CLAIMED'});
     claims.set(key,claim);
     return jsonResponse({granted:true});
   }})};
