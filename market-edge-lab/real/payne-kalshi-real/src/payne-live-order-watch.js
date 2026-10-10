@@ -56,9 +56,11 @@ export function liveOrderWatchProjection(series,attempts=[],ledger=[],limit=12){
       closedAt:a.reconciledAt||null});
   }
   const ordered=[...rows.values()].sort((a,b)=>String(b.closedAt||b.openedAt||'').localeCompare(String(a.closedAt||a.openedAt||'')));
-  const active=ordered.filter(r=>ACTIVE.has(r.state) ||
-    (r.state==='NO_PROVIDER_EXECUTION'&&series?.unresolvedEntry===true) ||
-    (r.reconciliation==='UNKNOWN'&&!['NO_FILL','NO_PROVIDER_EXECUTION'].includes(r.state)));
+  const active=ordered.filter(r=>{
+    if(r.state==='NO_PROVIDER_EXECUTION')return series?.unresolvedEntry===true;
+    if(r.state==='NO_FILL'||r.state==='CLOSED')return false;
+    return ACTIVE.has(r.state)||r.reconciliation==='UNKNOWN';
+  });
   const closed=ordered.filter(r=>!active.includes(r)).slice(0,Math.max(0,limit));
   return {schema:'PAYNE_LIVE_ORDER_WATCH_V1',source:'PERSISTED_PAYNE_EVIDENCE_ONLY',
     active,closed,providerGets:0,providerWrites:0,ordersSubmitted:0};
