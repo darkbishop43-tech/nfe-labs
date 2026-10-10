@@ -3394,6 +3394,13 @@ export async function reconcileUnresolvedEntryFromProvider(env,nowMs=Date.now())
     });
     await saveRealSeriesState(env,series);
     await settleSeriesControl(env,series,1);
+    const atomicAuthority=await reconcileAtomicEntryAuthority(env,series,attempt,'OPEN',{});
+    if(!atomicAuthority.ok){
+      series.unresolvedEntry=true;series.status='ATOMIC_RECONCILIATION_REQUIRED';
+      await saveRealSeriesState(env,series);
+      return {ok:false,classification:'UNKNOWN',reason:atomicAuthority.reason||'ATOMIC_RECONCILIATION_FAILED',
+        series,control:await loadControl(env),providerWrites:0,orders:0,capitalMovedUsd:0};
+    }
     return {ok:true,classification:'OWNED',reason:'PROVIDER_RECONCILED_OWNED',ticker,clientOrderId,orderId,exactOrderCount:exactOrders.length,exactFillCount:exactFills.length,exactSettlementCount:exactSettlements.length,providerPositionClassification:positionEvidence.classification,series:await loadRealSeriesState(env),control:await loadControl(env),providerWrites:0,orders:0,capitalMovedUsd:0};
   }
 
@@ -3434,6 +3441,13 @@ export async function reconcileUnresolvedEntryFromProvider(env,nowMs=Date.now())
     });
     await saveRealSeriesState(env,series);
     await settleSeriesControl(env,series,0);
+    const atomicAuthority=await reconcileAtomicEntryAuthority(env,series,attempt,'CLOSED',{flat:true});
+    if(!atomicAuthority.ok){
+      series.unresolvedEntry=true;series.status='ATOMIC_RECONCILIATION_REQUIRED';
+      await saveRealSeriesState(env,series);
+      return {ok:false,classification:'UNKNOWN',reason:atomicAuthority.reason||'ATOMIC_RECONCILIATION_FAILED',
+        series,control:await loadControl(env),providerWrites:0,orders:0,capitalMovedUsd:0};
+    }
     return {ok:true,classification:'FLAT',reason:'PROVIDER_RECONCILED_SETTLED_FLAT',ticker,clientOrderId,orderId,exactOrderCount:exactOrders.length,exactFillCount:exactFills.length,exactSettlementCount:exactSettlements.length,providerPositionClassification:positionEvidence.classification,series:await loadRealSeriesState(env),control:await loadControl(env),providerWrites:0,orders:0,capitalMovedUsd:0};
   }
 
@@ -3462,6 +3476,13 @@ export async function reconcileUnresolvedEntryFromProvider(env,nowMs=Date.now())
     });
     await saveRealSeriesState(env,series);
     await settleSeriesControl(env,series,0);
+    const atomicAuthority=await reconcileAtomicEntryAuthority(env,series,attempt,'NO_PROVIDER_EXECUTION',{noExecution:true});
+    if(!atomicAuthority.ok){
+      series.unresolvedEntry=true;series.status='ATOMIC_RECONCILIATION_REQUIRED';
+      await saveRealSeriesState(env,series);
+      return {ok:false,classification:'UNKNOWN',reason:atomicAuthority.reason||'ATOMIC_RECONCILIATION_FAILED',
+        series,control:await loadControl(env),providerWrites:0,orders:0,capitalMovedUsd:0};
+    }
     return {ok:true,classification:'FLAT',reason:'PROVIDER_RECONCILED_NO_EXECUTION',terminalClassification:'NO_PROVIDER_EXECUTION',ticker,clientOrderId,orderId:null,exactOrderCount:0,exactFillCount:0,exactSettlementCount:0,providerPositionClassification:positionEvidence.classification,series:await loadRealSeriesState(env),control:await loadControl(env),providerWrites:0,orders:0,capitalMovedUsd:0};
   }
 
@@ -3493,7 +3514,14 @@ export async function reconcileUnresolvedEntryFromProvider(env,nowMs=Date.now())
       });
       await saveRealSeriesState(env,series);
       await settleSeriesControl(env,series,0);
-      return {ok:true,classification:'FLAT',reason:'PROVIDER_ORDER_ZERO_FILL_RECONCILED',terminalClassification:'NO_FILL',ticker,clientOrderId,orderId,exactOrderCount:exactOrders.length,exactFillCount:0,exactSettlementCount:0,providerPositionClassification:positionEvidence.classification,series:await loadRealSeriesState(env),control:await loadControl(env),providerWrites:0,orders:0,capitalMovedUsd:0};
+      const atomicAuthority=await reconcileAtomicEntryAuthority(env,series,attempt,'NO_FILL',{});
+    if(!atomicAuthority.ok){
+      series.unresolvedEntry=true;series.status='ATOMIC_RECONCILIATION_REQUIRED';
+      await saveRealSeriesState(env,series);
+      return {ok:false,classification:'UNKNOWN',reason:atomicAuthority.reason||'ATOMIC_RECONCILIATION_FAILED',
+        series,control:await loadControl(env),providerWrites:0,orders:0,capitalMovedUsd:0};
+    }
+    return {ok:true,classification:'FLAT',reason:'PROVIDER_ORDER_ZERO_FILL_RECONCILED',terminalClassification:'NO_FILL',ticker,clientOrderId,orderId,exactOrderCount:exactOrders.length,exactFillCount:0,exactSettlementCount:0,providerPositionClassification:positionEvidence.classification,series:await loadRealSeriesState(env),control:await loadControl(env),providerWrites:0,orders:0,capitalMovedUsd:0};
     }
   }
 
