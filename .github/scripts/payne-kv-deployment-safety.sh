@@ -51,7 +51,35 @@ verify_safety() {
        (.threshold==$c[0].activeThreshold and
         .maxEntryDebitUsd==$c[0].maxEntryDebitUsd and
         .attemptTarget==$c[0].attemptTarget))
-  ' "$s" >/dev/null || { echo 'BLOCKED: PERSISTED_SERIES_EXPOSURE_OR_CONFIG';exit 1; }
+  ' "$s" >/dev/null || {
+    # Existing KV data only: identify the failed invariant without changing state.
+    jq -r --slurpfile c "$c" '
+      if .schema!="PAYNE_REAL_SERIES_V1" then "BLOCKED: SERIES_SCHEMA"
+      elif .owner!="PAYNE_KALSHI_REAL" then "BLOCKED: SERIES_OWNER"
+      elif .requiredExchangeIndex!=2 then "BLOCKED: SERIES_FUNDING_INDEX"
+      elif (.unresolvedEntry==true and
+          ((.currentAttempt.status//""|IN("NO_PROVIDER_EXECUTION","PROVIDER_RECONCILED_NO_EXECUTION")|not) or
+           (.currentAttempt.reconciliationReason//"")!="PROVIDER_RECONCILED_NO_EXECUTION"))
+         then "BLOCKED: HISTORICAL_UNRESOLVED_RESULT_NOT_TERMINAL"
+      elif ((.position//null)!=null and
+          ((.position.owner//"")!="PAYNE_KALSHI_REAL" or
+           (.position.status//""|IN("OPEN","FLAT","CLOSED","SETTLED")|not)))
+         then "BLOCKED: POSITION_OWNERSHIP_OR_STATUS"
+      elif (.fireLatch.state//"NONE"|IN("LATCHED","PRE_PROVIDER_VALIDATION","PROVIDER_POST_UNKNOWN"))
+         then "BLOCKED: ACTIVE_FIRE_LATCH"
+      elif (.currentAttempt.providerPostStarted==true and
+            (.currentAttempt.status|IN("NO_FILL","FILLED","CLOSED","SETTLED","NO_PROVIDER_EXECUTION")|not))
+         then "BLOCKED: PROVIDER_SUBMISSION_UNKNOWN"
+      elif (.configFrozen==true and
+           (.threshold!=$c[0].activeThreshold or
+            .maxEntryDebitUsd!=$c[0].maxEntryDebitUsd or
+            .attemptTarget!=$c[0].attemptTarget))
+         then "BLOCKED: FROZEN_FOUNDER_CONFIG_MISMATCH"
+      else "BLOCKED: PERSISTED_SERIES_EXPOSURE_OR_CONFIG"
+      end
+    ' "$s"
+    exit 1
+  }
   # The live Worker scheduler persists this heartbeat every minute. The
   # existing Paper source cadence is 300000ms, not a new trading value.
   local observed_ms now_ms age_ms
