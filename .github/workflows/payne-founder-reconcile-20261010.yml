@@ -12,6 +12,18 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 3
     steps:
+      - name: Read production PAYNE state and display after deployed maintenance
+        shell: bash
+        run: |
+          set -euo pipefail
+          base='https://market-edge-payne-kalshi-real.darkbishop43.workers.dev'
+          for p in control ui-state display-market-feed; do
+            status=$(curl --connect-timeout 12 --max-time 30 --silent --show-error -o "/tmp/payne-$p.json" -w '%{http_code}' "$base/$p")
+            echo "GET_$p=$status"
+          done
+          jq -c '{armed:.control.armed,attemptTarget:.control.attemptTarget,openPositions:.control.openPositions,maxPositions:.control.maxPositions}' /tmp/payne-control.json
+          jq -c '{keys:keys,series:{id:.realExecution.series.seriesId,unresolved:.realExecution.series.unresolvedEntry,latch:.realExecution.series.fireLatch.state,attempt:.realExecution.series.currentAttempt.status}}' /tmp/payne-ui-state.json
+          jq -c '{keys:keys}' /tmp/payne-display-market-feed.json
       - name: Invoke existing PAYNE provider and coordinator reconciliation
         shell: bash
         run: |
