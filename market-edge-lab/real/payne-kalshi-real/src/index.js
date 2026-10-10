@@ -1,3 +1,4 @@
+import {liveOrderWatchProjection,paynePositionRecords,payneCapacityEvidence} from './payne-live-order-watch.js';
 import {PayneExecutionCoordinator,claimPayneExecution,releaseProvenNoPost} from './payne-execution-coordinator.js';
 export {PayneExecutionCoordinator};
 import { kalshiReadOnlyProof, kalshiGetOnly } from './kalshi-get-only.js';
@@ -2728,6 +2729,8 @@ export function defaultRealSeriesState() {
     fireLatch:null,
     currentAttempt:null,
     position:null,
+    // Versioned collection is additive; legacy single-position evidence remains.
+    positions:[],
     completedAt:null,
     updatedAt:new Date().toISOString(),
   };
@@ -2746,6 +2749,7 @@ export async function loadRealSeriesState(env) {
       ?PROVIDER_ATTEMPT_ACCOUNTING_SEMANTICS
       :LEGACY_ATTEMPT_ACCOUNTING_SEMANTICS,
     legacyQuarantined:saved?.legacyQuarantined===true,
+    positions:paynePositionRecords(saved),
     attemptsStarted:Number.isFinite(Number(saved?.attemptsStarted))?Math.max(0,Math.trunc(Number(saved.attemptsStarted))):0,
     executionIntentsStarted:Number.isFinite(Number(saved?.executionIntentsStarted))
       ?Math.max(0,Math.trunc(Number(saved.executionIntentsStarted)))
@@ -3128,7 +3132,9 @@ export async function buildRealExecutionObservability(env) {
     loadRealSeriesState(env),
     listRealLedger(env,1000),
   ]);
-  return summarizeRealExecutionState({control,series,ledger,asOf:new Date().toISOString()});
+  const summary=summarizeRealExecutionState({control,series,ledger,asOf:new Date().toISOString()});
+  return {...summary,liveOrderWatch:liveOrderWatchProjection(series,[],ledger),
+    positionCapacity:payneCapacityEvidence(series,control.maxPositions)};
 }
 
 async function buildFastUiState(env) {
