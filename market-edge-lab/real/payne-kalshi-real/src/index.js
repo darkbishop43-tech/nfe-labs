@@ -1,6 +1,9 @@
+import {PayneExecutionCoordinator,claimPayneExecution,releaseProvenNoPost} from './payne-execution-coordinator.js';
+export {PayneExecutionCoordinator};
 import { kalshiReadOnlyProof, kalshiGetOnly } from './kalshi-get-only.js';
 import { kalshiPayneOrderPost, PAYNE_WRITE_CONTRACT } from './kalshi-real-write.js';
 import { cockpitHtml } from './cockpit-html.js';
+import {logPayneTiming,payneTimingIdentity,paynePriorityBeforeScan} from './payne-execution-timing.js';
 import { buildPayneOwnedFeatureState, payneFeatureIdentity } from './payne-kalshi-features.js';
 import {
   PAYNE_PAPER_RULES,
@@ -1758,8 +1761,10 @@ export async function runReadOnlyScan(env, source='SCHEDULED_CRON', nowMs=Date.n
   if (!control.scanEnabled && source==='SCHEDULED_CRON') {
     return {ok:true,skipped:true,reason:'AUTO_SCAN_PAUSED',providerWrites:0,orders:0,capitalMovedUsd:0};
   }
+  const scanStartedMs=Date.now();
   const data=await buildCockpitData(env,nowMs);
   const snapshot=compactObservation(data,source,nowMs);
+  logPayneTiming('SCAN_DATA_READY',{seriesId:'',attemptNo:0,ticker:snapshot?.selected?.ticker||'',side:snapshot?.selected?.outcomeSide||'',windowClose:snapshot?.selected?.closeTime||''},scanStartedMs);
   const previous=await kvGetJson(env,CURRENT_KEY);
   snapshot.researchCounters=incrementResearchCounters(previous,snapshot);
   const previousAt=Date.parse(previous?.at||'');
@@ -1768,6 +1773,11 @@ export async function runReadOnlyScan(env, source='SCHEDULED_CRON', nowMs=Date.n
   const nextKey=[snapshot?.selected?.ticker,snapshot?.selected?.outcomeSide,snapshot?.selected?.payne?.state].join('|');
   const transition=Boolean(previous && prevKey!==nextKey);
   const previewReady=snapshot?.zeroMoneyPreview?.status==='FIRE_READY';
+  if(previewReady) logPayneTiming('PULL_QUALIFIED',{
+    seriesId:'',attemptNo:0,ticker:snapshot?.selected?.ticker||'',
+    side:snapshot?.selected?.outcomeSide||'',
+    windowClose:snapshot?.selected?.closeTime||''
+  },scanStartedMs,Date.now(),'QUALIFIED_SCAN_OBSERVATION');
   if(previewReady && control.armed===true){
     const series=await loadRealSeriesState(env);
     const prefireMarketPass=snapshot?.pipeline?.freshLock==='PROVEN'
@@ -1777,7 +1787,10 @@ export async function runReadOnlyScan(env, source='SCHEDULED_CRON', nowMs=Date.n
       && snapshot?.pipeline?.timeGate6_5m==='PASS';
     if(!seriesTerminal(series) && frozenSeriesMatchesControl(series,control) && prefireMarketPass){
       const synced=await synchronizeFireFeatureEpoch(env,series,snapshot,nowMs);
-      if(synced.ok) await latchFireReadySpecimen(env,synced.series,synced.snapshot,nowMs);
+      if(synced.ok){
+        const latched=await latchFireReadySpecimen(env,synced.series,synced.snapshot,nowMs);
+        logPayneTiming('FIRE_LATCH_RESULT',payneTimingIdentity(latched?.series||synced.series,latched?.series?.fireLatch||synced.series?.fireLatch),scanStartedMs,Date.now(),latched?.reason||'LATCH_ATTEMPTED');
+      }
     }
   }
   const persistLatest=true;
@@ -3643,8 +3656,11 @@ async function managePayneRealPosition(env,control,series,postImpl=kalshiPayneOr
 }
 
 export async function runPayneRealExecutionCycle(env,{postImpl=kalshiPayneOrderPost,nowMs=Date.now()}={}) {
+  const executionStartMs=Date.now();
   let control=await loadControl(env);
   let series=await loadRealSeriesState(env);
+  const trace=()=>payneTimingIdentity(series,series?.fireLatch);
+  logPayneTiming('EXECUTION_CYCLE_START',trace(),executionStartMs);
 
   if(series?.unresolvedEntry===true){
     const reconciliation=await reconcileUnresolvedEntryFromProvider(env,nowMs);
@@ -3737,7 +3753,9 @@ export async function runPayneRealExecutionCycle(env,{postImpl=kalshiPayneOrderP
     return invalidateFireSpecimen(env,series,providerConflict.classification==='OPEN'?'HOLD_PROVIDER_TICKER_POSITION_CONFLICT':'HOLD_PROVIDER_POSITION_UNKNOWN',{identityMatch:'PASS'},nowMs);
   }
 
+  const freshLockStartMs=Date.now();
   const freshLock=await exactMarketRead(env,candidate.ticker,candidate.asset);
+  logPayneTiming('FRESH_LOCK_READ',trace(),freshLockStartMs,Date.now(),freshLock?.ok?'READ_OK':'READ_FAILED');
   if(!freshLock?.ok || freshLock?.market?.ticker!==candidate.ticker || String(freshLock?.market?.closeTime||'')!==String(candidate.closeTime||'')){
     return invalidateFireSpecimen(env,series,'FRESH_LOCK_INVALIDATED',{identityMatch:'PASS',freshLock:'FAIL'},nowMs);
   }
@@ -3745,7 +3763,9 @@ export async function runPayneRealExecutionCycle(env,{postImpl=kalshiPayneOrderP
     candidate.outcomeSide==='YES'?freshLock.market.yesAsk:freshLock.market.noAsk,freshLock.readAt);
   series.fireLatch={...series.fireLatch,freshLock:'PASS',freshLockAt:freshLock.readAt,freshLockBookEvidence};
 
+  const preSubmitStartMs=Date.now();
   const preSubmit=await exactMarketRead(env,candidate.ticker,candidate.asset);
+  logPayneTiming('PRE_SUBMIT_READ',trace(),preSubmitStartMs,Date.now(),preSubmit?.ok?'READ_OK':'READ_FAILED');
   if(!preSubmit?.ok || preSubmit?.market?.ticker!==candidate.ticker || String(preSubmit?.market?.closeTime||'')!==String(candidate.closeTime||'')){
     return invalidateFireSpecimen(env,series,'PRE_SUBMIT_INVALIDATED',{identityMatch:'PASS',freshLock:'PASS',preSubmit:'FAIL'},nowMs);
   }
@@ -3753,10 +3773,13 @@ export async function runPayneRealExecutionCycle(env,{postImpl=kalshiPayneOrderP
     candidate.outcomeSide==='YES'?preSubmit.market.yesAsk:preSubmit.market.noAsk,preSubmit.readAt);
   series.fireLatch={...series.fireLatch,preSubmit:'PASS',preSubmitAt:preSubmit.readAt,preSubmitBookEvidence};
 
+  const finalRefreshStartMs=Date.now();
   const features=await readAuthoritativePayneFeatures(env,preSubmit?.market?[preSubmit.market]:[],nowMs,{forceRefresh:true});
+  logPayneTiming('FINAL_FEATURE_REFRESH',trace(),finalRefreshStartMs,Date.now(),features?.fresh?'SOURCE_FRESH':'SOURCE_UNAVAILABLE');
   const finalFeature=featureForCandidate(features,candidate.ticker,candidate.outcomeSide,candidate.asset,cfg.threshold,preSubmit?.market||null);
   const finalGate=payneStage(finalFeature,cfg.threshold,cfg.effectiveLockThreshold);
   const finalFeatureEvidence=payneFeatureBoundaryEvidence(finalFeature,cfg.threshold,cfg.effectiveLockThreshold,'FINAL');
+  logPayneTiming('FINAL_FEATURE_GATE',trace(),executionStartMs,Date.now(),!finalFeature.available?'FEATURE_UNAVAILABLE':finalGate.pullTrigger?'PASS':'PULL_REJECTED');
   if(!finalFeature.available || !finalGate.pullTrigger){
     return invalidateFireSpecimen(env,series,'FINAL_FEATURE_REQUALIFICATION_FAILED',{
       identityMatch:'PASS',freshLock:'PASS',preSubmit:'PASS',finalFeature:'FAIL',
@@ -3840,6 +3863,22 @@ export async function runPayneRealExecutionCycle(env,{postImpl=kalshiPayneOrderP
     return saveRealSeriesState(env,series);
   }
 
+  // Atomic cross-instance claim belongs to the persisted attempt number, not
+  // merely the specimen. Never retry an ambiguous/previously claimed POST.
+  const ownership=await claimPayneExecution(env,{
+    seriesId,attemptNo:providerAttemptNoCandidate,
+    specimenId:series.fireLatch?.specimenId,
+    clientOrderId,ticker:candidate.ticker,side:candidate.outcomeSide,
+    windowClose:candidate.closeTime
+  });
+  if(ownership.granted!==true){
+    logPayneTiming('ATOMIC_CLAIM_REJECTED',trace(),executionStartMs,Date.now(),ownership.reason);
+    // Do not save a stale local copy over an execution owned by another instance.
+    // No provider POST is possible from this invocation.
+    return loadRealSeriesState(env);
+  }
+  logPayneTiming('ATOMIC_CLAIM_GRANTED',trace(),executionStartMs,Date.now(),'EXCLUSIVE');
+  logPayneTiming('PROVIDER_WRITE_ELIGIBLE',trace(),executionStartMs,Date.now(),'PRE_PROVIDER_GATES_PASSED');
   let response,proof,writerInvoked=false,providerPostStarted=false;
   try{
     const out=await postImpl(env,'ENTRY',payload,payneRealScope(control,series,'ENTRY',null,{attemptsBefore:started,priorAttemptClean:interlock.clear,entryDebitUsd:sizing.totalDebitUsd}));
@@ -3863,6 +3902,16 @@ export async function runPayneRealExecutionCycle(env,{postImpl=kalshiPayneOrderP
         seriesId,attemptId,intentNo,attemptNo:null,specimenId:series.fireLatch?.specimenId||null,ticker:candidate.ticker,clientOrderId,
         error:String(error?.message||error),writerInvoked,providerPostStarted:false,providerAttemptCounted:false,finalResult:'INVALIDATED_BEFORE_POST'
       });
+      const released=await releaseProvenNoPost(env,{
+        seriesId,attemptNo:providerAttemptNoCandidate,specimenId:series.fireLatch?.specimenId,
+        clientOrderId,ticker:candidate.ticker,side:candidate.outcomeSide,windowClose:candidate.closeTime
+      });
+      if(!released.granted){
+        series.unresolvedEntry=true;
+        series.status='ATOMIC_OWNERSHIP_RECONCILIATION_REQUIRED';
+        await saveRealSeriesState(env,series);
+        return series;
+      }
       await settleSeriesControl(env,series,0);
       return saveRealSeriesState(env,series);
     }
@@ -3895,6 +3944,14 @@ export async function runPayneRealExecutionCycle(env,{postImpl=kalshiPayneOrderP
       seriesId,attemptId,intentNo,attemptNo:null,ticker:candidate.ticker,clientOrderId,
       error:'PROVIDER_POST_BOUNDARY_NOT_PROVEN',writerInvoked,providerPostStarted:false,providerAttemptCounted:false,finalResult:'INVALIDATED_BEFORE_POST'
     });
+    const released=await releaseProvenNoPost(env,{
+      seriesId,attemptNo:providerAttemptNoCandidate,specimenId:series.fireLatch?.specimenId,
+      clientOrderId,ticker:candidate.ticker,side:candidate.outcomeSide,windowClose:candidate.closeTime
+    });
+    if(!released.granted){
+      series.unresolvedEntry=true;series.status='ATOMIC_OWNERSHIP_RECONCILIATION_REQUIRED';
+      return saveRealSeriesState(env,series);
+    }
     await settleSeriesControl(env,series,0);
     return saveRealSeriesState(env,series);
   }
@@ -4116,17 +4173,50 @@ export default {
   },
 
   async scheduled(controller, env) {
+    const schedulerStartedMs=Date.now();
     await initializeDisarmed(env);
     const control=await loadControl(env);
-    if (control.scanEnabled) {
-      try { await runReadOnlyScan(env,'SCHEDULED_CRON'); } catch {}
+    // Pending management, reconciliation, and already-durable FIRE latches
+    // must not wait for another full scan.
+    // New entry authority still waits for the scan to finish persisting a FIRE latch.
+    const initialSeries=await loadRealSeriesState(env);
+    // A previously persisted FIRE latch is already complete; fresh provider
+    // checks still run before the submission boundary.
+    const urgent=paynePriorityBeforeScan(control,initialSeries);
+    if(urgent){
+      const urgentStartMs=Date.now();
+      try{
+        await runPayneRealExecutionCycle(env);
+        logPayneTiming('URGENT_MANAGEMENT_BEFORE_SCAN',payneTimingIdentity(initialSeries,initialSeries?.fireLatch),urgentStartMs,Date.now(),'SUCCESS');
+      }catch(error){
+        logPayneTiming('URGENT_MANAGEMENT_ERROR',payneTimingIdentity(initialSeries,initialSeries?.fireLatch),urgentStartMs,Date.now(),String(error?.name||'EXECUTION_ERROR'));
+        return;
+      }
     }
+    if (control.scanEnabled) {
+      const scanStartMs=Date.now();
+      logPayneTiming('SCAN_START',{seriesId:'',ticker:'',side:'',windowClose:''},schedulerStartedMs);
+      try {
+        await runReadOnlyScan(env,'SCHEDULED_CRON');
+        logPayneTiming('SCAN_END',{seriesId:'',ticker:'',side:'',windowClose:''},scanStartMs,Date.now(),'SUCCESS');
+      } catch(error) {
+        logPayneTiming('SCAN_ERROR',{seriesId:'',ticker:'',side:'',windowClose:''},scanStartMs,Date.now(),String(error?.name||'SCAN_ERROR'));
+      }
+    }
+    const cycleStartMs=Date.now();
     try {
       const series=await loadRealSeriesState(env);
+      const identity=payneTimingIdentity(series,series?.fireLatch);
+      logPayneTiming('CYCLE_AFTER_SCAN',identity,schedulerStartedMs);
       const managementPending=Boolean(series?.position && ['OPEN','EXIT_RETRY','EXIT_RECONCILIATION_REQUIRED','RECONCILIATION_UNKNOWN'].includes(String(series.position.status||'')));
       const entryReconciliationPending=series?.unresolvedEntry===true;
-      if (control.armed || managementPending || entryReconciliationPending) await runPayneRealExecutionCycle(env);
+      // Avoid a second management cycle in one scheduled invocation.
+      // Newly latched entries are processed only AFTER the scan has completed.
+      if (!urgent && (control.armed || managementPending || entryReconciliationPending)) await runPayneRealExecutionCycle(env);
       else await reconcileDisarmedSupersededSeries(env,series,control);
-    } catch {}
+      logPayneTiming('EXECUTION_CYCLE_END',identity,cycleStartMs,Date.now(),'SUCCESS');
+    } catch(error) {
+      logPayneTiming('EXECUTION_CYCLE_ERROR',{seriesId:'',ticker:'',side:'',windowClose:''},cycleStartMs,Date.now(),String(error?.name||'EXECUTION_ERROR'));
+    }
   },
 };

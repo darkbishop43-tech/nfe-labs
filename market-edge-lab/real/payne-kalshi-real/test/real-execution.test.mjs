@@ -79,7 +79,27 @@ async function credentials(){
 }
 
 async function env({shadow=baselineShadow(),autoPositions=[]}={}){
-  const e={PAYNE_KALSHI_STATE:new MemoryKV(),BASELINE_REAL_READ:baselineService(shadow,autoPositions),...(await credentials())};
+  const claims=new Map();
+  const coordinator={
+    idFromName:name=>name,
+    get:name=>({
+      fetch:async(_url,opts)=>{
+        const claim=JSON.parse(opts.body);
+        const key=name+':'+claim.attemptNo;
+        if(claim.action==='RELEASE_PROVEN_NO_POST'){
+          const prior=claims.get(key);
+          if(prior?.specimenId===claim.specimenId && prior?.clientOrderId===claim.clientOrderId && claim.provenNoProviderPost===true){
+            claims.delete(key); return jsonResponse({granted:true,reason:'PROVEN_NO_POST_RELEASED'});
+          }
+          return jsonResponse({granted:false,reason:'CLAIM_NOT_OWNED'});
+        }
+        if(claims.has(key)) return jsonResponse({granted:false,reason:'ATTEMPT_ALREADY_CLAIMED'});
+        claims.set(key,structuredClone(claim));
+        return jsonResponse({granted:true,reason:'ATOMIC_CLAIM_PERSISTED'});
+      }
+    })
+  };
+  const e={PAYNE_KALSHI_STATE:new MemoryKV(),PAYNE_EXECUTION_COORDINATOR:coordinator,BASELINE_REAL_READ:baselineService(shadow,autoPositions),...(await credentials())};
   await seedPaynePriorSpot(e,shadow);
   return e;
 }
@@ -93,14 +113,22 @@ function providerMarket({status='open',close='2026-10-02T06:15:00Z',exchangeInde
   };
 }
 
-function installProvider({index3=0,index2=15.91,position='ABSENT',exactSequence=[],settled=false,orders=[],fills=[],historicalFills=[],settlements=null}={}){
+function installProvider({index3=0,index2=15.91,position='ABSENT',exactSequence=[],settled=false,orders=[],fills=[],historicalFills=[],settlements=null,entryResult=null,discoveryDelayMs=0,syntheticPostThrows=false,onSyntheticPost=null}={}){
   const original=globalThis.fetch,calls=[]; let exactNo=0;
   globalThis.fetch=async (url,options={})=>{
     calls.push({url:String(url),method:options.method||'GET',body:options.body||null});
     const u=String(url);
+    if(u.includes('/trade-api/v2/portfolio/events/orders') && options.method==='POST'){
+      if(typeof onSyntheticPost==='function')onSyntheticPost();
+      if(syntheticPostThrows)throw new Error('SYNTHETIC_POST_RESULT_UNCERTAIN');
+      if(entryResult!==null)return jsonResponse(entryResult);
+    }
     if(u.includes('api.exchange.coinbase.com/products/BTC-USD/ticker')) return jsonResponse({price:'100'});
     if(u.includes('/portfolio/balance')) return jsonResponse({balance_breakdown:[{exchange_index:0,balance:0},{exchange_index:2,balance:index2},{exchange_index:3,balance:index3}]});
-    if(u.includes('series_ticker=KXBTC15M')) return jsonResponse({markets:[providerMarket()]});
+    if(u.includes('series_ticker=KXBTC15M')){
+      if(discoveryDelayMs>0) await new Promise(resolve=>setTimeout(resolve,discoveryDelayMs));
+      return jsonResponse({markets:[providerMarket()]});
+    }
     if(u.includes('/trade-api/v2/markets?series_ticker=')) return jsonResponse({markets:[]});
     if(u.includes('/portfolio/orders?')) return jsonResponse({orders});
     if(u.includes('/portfolio/fills?')) return jsonResponse({fills});
@@ -699,4 +727,135 @@ test('observability invariant: NO_FILL ledger evidence forces consumed attempt c
 test('observability current-series scope excludes historical ledger outcomes',()=>{
   const x=summarizeRealExecutionState({control:{armed:true,attempts:0,attemptTarget:1},series:{seriesId:'CURRENT',status:'ARMED_FISHING',attemptsStarted:0,attemptTarget:1,unresolvedEntry:false},ledger:[{type:'ENTRY_NO_FILL',seriesId:'OLD',attemptId:'OLD-1',at:'2026-10-03T00:00:00Z'}]});
   assert.equal(x.attempted,0); assert.equal(x.noFill,0); assert.equal(x.remaining,1); assert.equal(x.latestLedgerEvent,null);
+});
+
+test('SCHEDULER SYNTHETIC: qualifying PULL persists FIRE, POSTs one IOC and accounts NO_FILL',async()=>{
+ const e=await env(), clock=Date.now, now=Date.parse('2026-10-02T06:05:00Z');
+ const io=installProvider({entryResult:{order_id:'SCHEDULER-NOFILL-1',fill_count:0,remaining_count:1}});
+ try{
+   Date.now=()=>now;
+   await arm(e);
+   await worker.scheduled({},e);
+   const entries=io.calls.filter(c=>c.method==='POST'&&c.url.includes('/portfolio/events/orders'));
+   const ledger=await listRealLedger(e,200);
+   const state=await loadRealSeriesState(e);
+   assert.equal(entries.length,1,'exactly one intercepted synthetic Kalshi POST');
+   assert.ok(ledger.some(x=>x.type==='FIRE_SPECIMEN_LATCHED'),'qualifying PULL created persisted FIRE latch');
+   assert.ok(ledger.some(x=>x.type==='ENTRY_PRE_SUBMIT_LATCHED'),'fresh execution gates passed');
+   assert.equal(state.attemptsStarted,1);
+   assert.equal(state.status,'COMPLETE_NO_FILL');
+   assert.equal(state.unresolvedEntry,false);
+   assert.equal((await loadControl(e)).armed,false);
+   const payload=JSON.parse(entries[0].body);
+   assert.equal(payload.ticker,'KXBTC15M-REALTEST');
+   assert.equal(payload.time_in_force,'immediate_or_cancel');
+   assert.equal(payload.post_only,false);
+   console.log('SYNTHETIC_SCHEDULER_NOFILL_POST_COUNT='+entries.length);
+ } finally {Date.now=clock;io.restore();}
+});
+
+test('OVERLAPPING SCHEDULER: same persisted FIRE cannot authorize two provider POSTs',async()=>{
+ const e=await env(),clock=Date.now,now=Date.parse('2026-10-02T06:05:00Z');
+ const io=installProvider({entryResult:{order_id:'CONCURRENT-NOFILL',fill_count:0,remaining_count:1},discoveryDelayMs:40});
+ try{
+   Date.now=()=>now;
+   await arm(e);
+   await runReadOnlyScan(e,'ZERO_MONEY_EXECUTION_TEST',now);
+   const before=await loadRealSeriesState(e);
+   assert.equal(before.fireLatch?.state,'LATCHED');
+   await Promise.all([worker.scheduled({},e),worker.scheduled({},e)]);
+   const entries=io.calls.filter(c=>c.method==='POST'&&c.url.includes('/portfolio/events/orders'));
+   assert.equal(entries.length,1);
+   const after=await loadRealSeriesState(e);
+   assert.equal(after.attemptsStarted,1);
+   assert.equal(after.unresolvedEntry,false);
+   await worker.scheduled({},e);
+   assert.equal(io.calls.filter(c=>c.method==='POST'&&c.url.includes('/portfolio/events/orders')).length,1);
+   console.log('SYNTHETIC_OVERLAP_POST_COUNT='+entries.length);
+ }finally{Date.now=clock;io.restore();}
+});
+
+test('SCHEDULER SYNTHETIC: FILLED preserves owned position and prevents duplicate entry',async()=>{
+ const e=await env(),clock=Date.now,now=Date.parse('2026-10-02T06:05:00Z');
+ const io=installProvider({entryResult:{order_id:'SCHEDULER-FILL',fill_count:1,remaining_count:0,average_fill_price:.50,average_fee_paid:.01},position:'ABSENT'});
+ try{
+   Date.now=()=>now;await arm(e);
+   await worker.scheduled({},e);
+   const after=await loadRealSeriesState(e);
+   assert.equal(io.calls.filter(c=>c.method==='POST'&&c.url.includes('/portfolio/events/orders')).length,1);
+   assert.equal(after.attemptsStarted,1);
+   assert.equal(after.position?.owner,'PAYNE_KALSHI_REAL');
+   assert.equal(after.position?.status,'OPEN');
+   await worker.scheduled({},e);
+   assert.equal(io.calls.filter(c=>c.method==='POST'&&c.url.includes('/portfolio/events/orders')&&c.body?.includes('"reduce_only":false')).length,1);
+   console.log('SYNTHETIC_SCHEDULER_FILLED_OWNERSHIP='+after.position.status);
+ }finally{Date.now=clock;io.restore();}
+});
+
+test('SCHEDULER SYNTHETIC: uncertain POST is never repeated without provider reconciliation',async()=>{
+ const e=await env(),clock=Date.now,now=Date.parse('2026-10-02T06:05:00Z');
+ const io=installProvider({syntheticPostThrows:true});
+ try{
+   Date.now=()=>now; await arm(e);
+   await worker.scheduled({},e);
+   const state=await loadRealSeriesState(e);
+   assert.equal(state.attemptsStarted,1);
+   assert.equal(state.unresolvedEntry,true);
+   assert.equal(state.currentAttempt?.status,'WRITE_ERROR_UNKNOWN');
+   const prior=io.calls.filter(c=>c.method==='POST'&&c.url.includes('/portfolio/events/orders'));
+   assert.equal(prior.length,1);
+   await worker.scheduled({},e);
+   const after=io.calls.filter(c=>c.method==='POST'&&c.url.includes('/portfolio/events/orders'));
+   assert.equal(after.length,1,'UNKNOWN may not authorize second entry');
+   console.log('SYNTHETIC_UNKNOWN_RETRY_POST_COUNT='+after.length);
+ }finally{Date.now=clock;io.restore();}
+});
+
+test('MEASURED: qualifying PULL to intercepted provider POST uses real monotonic test-clock',async()=>{
+ const e=await env(),clock=Date.now,originalLog=console.log,now=Date.parse('2026-10-02T06:05:00Z');
+ let pullMs=null,postMs=null;
+ const io=installProvider({entryResult:{order_id:'LATENCY-NOFILL',fill_count:0,remaining_count:1},
+   onSyntheticPost:()=>{postMs=performance.now();}});
+ try{
+   Date.now=()=>now;
+   console.log=(...args)=>{
+     if(pullMs===null&&String(args[0]||'').includes('"stage":"PULL_QUALIFIED"')) pullMs=performance.now();
+     originalLog(...args);
+   };
+   await arm(e);await worker.scheduled({},e);
+   assert.ok(Number.isFinite(pullMs),'PULL must qualify');
+   assert.ok(Number.isFinite(postMs),'synthetic provider POST must occur');
+   const elapsed=postMs-pullMs;
+   assert.ok(elapsed>=0,'measured PULL-to-provider boundary nonnegative');
+   console.log('MEASURED_SYNTHETIC_PULL_TO_POST_MS='+elapsed.toFixed(3));
+ }finally{Date.now=clock;console.log=originalLog;io.restore();}
+});
+
+test('MEASURED: persisted FIRE fast path avoids deliberate slow full scan before provider POST',async()=>{
+ const clock=Date.now,now=Date.parse('2026-10-02T06:05:00Z');
+ const measure=async oldOrder=>{
+   const e=await env();let postMs=null;
+   const io=installProvider({entryResult:{order_id:oldOrder?'OLD-NOFILL':'NEW-NOFILL',fill_count:0,remaining_count:1},
+     discoveryDelayMs:110,onSyntheticPost:()=>{postMs=performance.now();}});
+   try{
+     Date.now=()=>now;await arm(e);
+     await runReadOnlyScan(e,'ZERO_MONEY_EXECUTION_TEST',now);
+     assert.equal((await loadRealSeriesState(e)).fireLatch?.state,'LATCHED');
+     const started=performance.now();
+     if(oldOrder) {
+       await runReadOnlyScan(e,'SCHEDULED_CRON',now);
+       await runPayneRealExecutionCycle(e,{nowMs:now});
+     } else await worker.scheduled({},e);
+     assert.ok(Number.isFinite(postMs),'synthetic provider POST reached');
+     return postMs-started;
+   }finally{io.restore();}
+ };
+ try {
+   const oldMs=await measure(true);
+   const repairedMs=await measure(false);
+   assert.ok(oldMs>repairedMs,'priority execution starts earlier than deliberately delayed scan-first');
+   console.log('MEASURED_SYNTHETIC_OLD_SCAN_FIRST_POST_MS='+oldMs.toFixed(3));
+   console.log('MEASURED_SYNTHETIC_REPAIRED_POST_MS='+repairedMs.toFixed(3));
+   console.log('MEASURED_SYNTHETIC_IMPROVEMENT_MS='+(oldMs-repairedMs).toFixed(3));
+ }finally{Date.now=clock;}
 });
