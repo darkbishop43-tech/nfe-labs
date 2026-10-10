@@ -1,10 +1,11 @@
 {
   "schema": "NFE_OS_MANAGEMENT_PERFORMANCE_DATA_V1",
-  "generated_at": "2026-10-07",
+  "generated_at": "2026-10-10",
   "source": {
-    "provider_rows": 527,
-    "provisional_logical_positions": 405,
-    "grouping": "market_ticker + side + open_timestamp + close_timestamp"
+    "provider_rows": 683,
+    "provisional_logical_positions": 545,
+    "grouping": "market_ticker + side + open_timestamp + close_timestamp",
+    "source_csv_sha256": "4f254a08e96097cf767f6fd571e960bfcc2f448a0ef231d295f6617bdfc8356d"
   },
   "transition": {
     "from": "OLD_5MIN_CONTROL",
@@ -15,8 +16,8 @@
     "deploy_completed_at": "2026-10-05T23:10:48Z"
   },
   "coverage": {
-    "management_version_known": 402,
-    "total": 405,
+    "management_version_known": 457,
+    "total": 545,
     "five_minute_checkpoint_known": 0,
     "five_minute_checkpoint_eligible": 0,
     "continuation_outcome_known": 0,
@@ -24,15 +25,15 @@
   },
   "versions": {
     "OLD_5MIN_CONTROL": {
-      "positions": 402,
-      "wins": 221,
-      "losses": 181,
-      "winRate": 0.5497512438,
-      "gross": -24.65783,
-      "fees": 16.99937,
-      "net": -41.6572,
-      "avgPl": -0.1036248756,
-      "avgHoldMin": 7.1729684909,
+      "positions": 457,
+      "wins": 255,
+      "losses": 202,
+      "winRate": 0.5579868709,
+      "gross": -20.00983,
+      "fees": 19.11517,
+      "net": -39.125,
+      "avgPl": -0.0856126915,
+      "avgHoldMin": 7.0822027717,
       "medianHoldMin": 6.0166666667
     },
     "DYNAMIC_V1": {
@@ -48,63 +49,63 @@
       "medianHoldMin": null
     },
     "UNKNOWN": {
-      "positions": 3,
-      "wins": 0,
-      "losses": 3,
-      "winRate": 0,
-      "gross": -1.0475,
-      "fees": 0.1163,
-      "net": -1.1638,
-      "avgPl": -0.3879333333,
-      "avgHoldMin": 2.4888888889,
-      "medianHoldMin": 0.9
+      "positions": 88,
+      "wins": 52,
+      "losses": 36,
+      "winRate": 0.5909090909,
+      "gross": -4.59033,
+      "fees": 1.61187,
+      "net": -6.2022,
+      "avgPl": -0.0704795455,
+      "avgHoldMin": 10.9365530303,
+      "medianHoldMin": 11.475
     }
   },
   "holdByVersion": {
     "OLD_5MIN_CONTROL": {
       "<5m": {
-        "positions": 29,
-        "wins": 9,
-        "losses": 20,
-        "winRate": 0.3103448276,
-        "net": -8.6849857,
-        "avgHoldMin": 2.7431034483,
-        "medianHoldMin": 2.9666666667
+        "positions": 32,
+        "wins": 11,
+        "losses": 21,
+        "winRate": 0.34375,
+        "net": -9.4429857,
+        "avgHoldMin": 2.825,
+        "medianHoldMin": 2.975
       },
       "5–6m": {
-        "positions": 106,
-        "wins": 66,
-        "losses": 40,
-        "winRate": 0.6226415094,
-        "net": 12.58001,
-        "avgHoldMin": 5.6408805031,
+        "positions": 117,
+        "wins": 74,
+        "losses": 43,
+        "winRate": 0.6324786325,
+        "net": 12.71231,
+        "avgHoldMin": 5.6541310541,
         "medianHoldMin": 5.8333333333
       },
       "6–7m": {
-        "positions": 135,
-        "wins": 75,
-        "losses": 60,
-        "winRate": 0.5555555556,
-        "net": -15.16735629,
-        "avgHoldMin": 6.2716049383,
+        "positions": 161,
+        "wins": 90,
+        "losses": 71,
+        "winRate": 0.5590062112,
+        "net": -16.46075629,
+        "avgHoldMin": 6.2458592133,
         "medianHoldMin": 6.0166666667
       },
       "7–10m": {
-        "positions": 73,
-        "wins": 38,
-        "losses": 35,
-        "winRate": 0.5205479452,
-        "net": -23.78799001,
-        "avgHoldMin": 7.8082191781,
-        "medianHoldMin": 7.7666666667
+        "positions": 86,
+        "wins": 45,
+        "losses": 41,
+        "winRate": 0.523255814,
+        "net": -19.62809001,
+        "avgHoldMin": 7.7755813953,
+        "medianHoldMin": 7.7583333333
       },
       "10m+": {
-        "positions": 59,
-        "wins": 33,
+        "positions": 61,
+        "wins": 35,
         "losses": 26,
-        "winRate": 0.5593220339,
-        "net": -6.596878,
-        "avgHoldMin": 13.3793785311,
+        "winRate": 0.5737704918,
+        "net": -6.305478,
+        "avgHoldMin": 13.2844262295,
         "medianHoldMin": 13.95
       }
     },
@@ -112,12 +113,48 @@
     "UNKNOWN": {
       "<5m": {
         "positions": 3,
-        "wins": 0,
-        "losses": 3,
-        "winRate": 0,
-        "net": -1.1638,
-        "avgHoldMin": 2.4888888889,
+        "wins": 1,
+        "losses": 2,
+        "winRate": 0.3333333333,
+        "net": -0.9617,
+        "avgHoldMin": 1.4555555556,
         "medianHoldMin": 0.9
+      },
+      "5–6m": {
+        "positions": 3,
+        "wins": 1,
+        "losses": 2,
+        "winRate": 0.3333333333,
+        "net": -0.2292,
+        "avgHoldMin": 5.55,
+        "medianHoldMin": 5.8166666667
+      },
+      "6–7m": {
+        "positions": 4,
+        "wins": 4,
+        "losses": 0,
+        "winRate": 1,
+        "net": 1.9384,
+        "avgHoldMin": 6.1458333333,
+        "medianHoldMin": 6.0083333333
+      },
+      "7–10m": {
+        "positions": 22,
+        "wins": 14,
+        "losses": 8,
+        "winRate": 0.6363636364,
+        "net": -4.0157,
+        "avgHoldMin": 8.8303030303,
+        "medianHoldMin": 8.9916666667
+      },
+      "10m+": {
+        "positions": 56,
+        "wins": 32,
+        "losses": 24,
+        "winRate": 0.5714285714,
+        "net": -2.934,
+        "avgHoldMin": 12.9026785714,
+        "medianHoldMin": 13.4583333333
       }
     }
   },
