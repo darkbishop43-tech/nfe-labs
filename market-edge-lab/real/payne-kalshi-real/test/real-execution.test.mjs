@@ -943,9 +943,13 @@ test('THREE ENTRY SYNTHETIC: distinct PAYNE PULLs fill three owned slots; fourth
    await arm(e);
    for(let i=0;i<3;i++){
      await resetFeature();
-     await runReadOnlyScan(e,'THREE_POSITION_TEST',now);
+     const scan=await runReadOnlyScan(e,'THREE_POSITION_TEST',now);
      const before=await loadRealSeriesState(e);
-     assert.equal(before.fireLatch?.state,'LATCHED','distinct qualifying PAYNE PULL needs FIRE');
+     assert.equal(before.fireLatch?.state,'LATCHED','iteration='+i+
+       ' selected='+scan.snapshot?.selected?.ticker+
+       ' preview='+scan.snapshot?.zeroMoneyPreview?.status+
+       ' reason='+before.status+
+       ' failure='+JSON.stringify(before.fireRefreshEvidence?.failureReasons||[]));
      const result=await runPayneRealExecutionCycle(e,{postImpl:fn,nowMs:now});
      assert.equal(result.attemptsStarted,i+1,'one provider attempt per distinct candidate');
      assert.equal(result.positions.length,i+1,'prior position ownership preserved');
