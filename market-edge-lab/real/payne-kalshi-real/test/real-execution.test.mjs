@@ -110,16 +110,16 @@ async function env({shadow=baselineShadow(),autoPositions=[]}={}){
   return e;
 }
 
-function providerMarket({status='open',close='2026-10-02T06:15:00Z',exchangeIndex=2,yesBid=.48,yesAsk=.50}={}){
+function providerMarket({status='open',close='2026-10-02T06:15:00Z',exchangeIndex=2,yesBid=.48,yesAsk=.50,ticker='KXBTC15M-REALTEST'}={}){
   return {
-    ticker:'KXBTC15M-REALTEST',series_ticker:'KXBTC15M',exchange_index:exchangeIndex,title:'BTC up in next 15 minutes?',status,
+    ticker,series_ticker:ticker.split('-')[0],exchange_index:exchangeIndex,title:'Synthetic 15 minute market',status,
     open_time:'2026-10-02T06:00:00Z',close_time:close,
     yes_bid_dollars:String(yesBid),yes_ask_dollars:String(yesAsk),
     no_bid_dollars:String(1-yesAsk),no_ask_dollars:String(1-yesBid),
   };
 }
 
-function installProvider({index3=0,index2=15.91,position='ABSENT',exactSequence=[],settled=false,orders=[],fills=[],historicalFills=[],settlements=null,entryResult=null,discoveryDelayMs=0,syntheticPostThrows=false,onSyntheticPost=null}={}){
+function installProvider({index3=0,index2=15.91,position='ABSENT',exactSequence=[],settled=false,orders=[],fills=[],historicalFills=[],settlements=null,entryResult=null,discoveryDelayMs=0,syntheticPostThrows=false,onSyntheticPost=null,multiPositions=[]}={}){
   const original=globalThis.fetch,calls=[]; let exactNo=0;
   globalThis.fetch=async (url,options={})=>{
     calls.push({url:String(url),method:options.method||'GET',body:options.body||null});
@@ -129,6 +129,8 @@ function installProvider({index3=0,index2=15.91,position='ABSENT',exactSequence=
       if(syntheticPostThrows)throw new Error('SYNTHETIC_POST_RESULT_UNCERTAIN');
       if(entryResult!==null)return jsonResponse(entryResult);
     }
+    if(multiPositions.length && /api.exchange.coinbase.com\/products\/(BTC|ETH|SOL)-USD\/ticker/.test(u))
+      return jsonResponse({price:'100'});
     if(u.includes('api.exchange.coinbase.com/products/BTC-USD/ticker')) return jsonResponse({price:'100'});
     if(u.includes('/portfolio/balance')) return jsonResponse({balance_breakdown:[{exchange_index:0,balance:0},{exchange_index:2,balance:index2},{exchange_index:3,balance:index3}]});
     if(u.includes('series_ticker=KXBTC15M')){
@@ -139,6 +141,8 @@ function installProvider({index3=0,index2=15.91,position='ABSENT',exactSequence=
     if(u.includes('/portfolio/orders?')) return jsonResponse({orders});
     if(u.includes('/portfolio/fills?')) return jsonResponse({fills});
     if(u.includes('/historical/fills?')) return jsonResponse({fills:historicalFills});
+    if(u.includes('/portfolio/positions?')&&multiPositions.length)
+      return jsonResponse({market_positions:multiPositions.map(ticker=>({ticker,position_fp:'1'})),cursor:''});
     if(u.includes('/portfolio/positions?')){
       if(position==='HTTP_FAIL') return jsonResponse({error:'x'},500);
       if(position==='OPEN') return jsonResponse({market_positions:[{ticker:'KXBTC15M-REALTEST',position_fp:'1'}],cursor:''});
@@ -146,6 +150,10 @@ function installProvider({index3=0,index2=15.91,position='ABSENT',exactSequence=
       return jsonResponse({market_positions:[],cursor:''});
     }
     if(u.includes('/portfolio/settlements?')) return jsonResponse({settlements:Array.isArray(settlements)?settlements:(settled?[{ticker:'KXBTC15M-REALTEST',market_result:'yes',settled_time:'2026-10-02T06:16:00Z'}]:[])});
+    if(multiPositions.length && u.includes('/markets/')){
+      const ticker=decodeURIComponent(u.split('/markets/')[1]?.split('?')[0]||'');
+      if(multiPositions.includes(ticker))return jsonResponse(providerMarket({ticker,yesBid:.49,yesAsk:.50}));
+    }
     if(u.includes('/markets/KXBTC15M-REALTEST')){
       const x=exactSequence.length?exactSequence[Math.min(exactNo++,exactSequence.length-1)]:{status:200,market:providerMarket({yesBid:.49,yesAsk:.50})};
       return jsonResponse(x.market||{},x.status??200);
