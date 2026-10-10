@@ -38,3 +38,15 @@ test('cockpit exposes Live Order Watch and uses persisted fast-state records',()
  assert.ok(html.includes('d.realExecution?.liveOrderWatch'));
  assert.ok(html.includes('UNAVAILABLE'));
 });
+
+test('historical no-provider-execution goes to recent history without clearing operational UNKNOWN',()=>{
+ const attempt={owner:'PAYNE_KALSHI_REAL',attemptId:'HISTORIC-NOEXEC',status:'NO_PROVIDER_EXECUTION',
+  marketTicker:'KXHYPE15M-HISTORICAL',reconciliationReason:'PROVIDER_RECONCILED_NO_EXECUTION'};
+ const watch=liveOrderWatchProjection({currentAttempt:attempt,unresolvedEntry:false},[],[]);
+ assert.equal(watch.active.length,0);
+ assert.equal(watch.closed.length,1);
+ assert.equal(watch.closed[0].state,'NO_PROVIDER_EXECUTION');
+ const unknown={...attempt,attemptId:'STILL-UNKNOWN',status:'UNKNOWN'};
+ const pending=liveOrderWatchProjection({currentAttempt:unknown,unresolvedEntry:true},[],[]);
+ assert.equal(pending.active.length,1);
+});
