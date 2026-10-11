@@ -1,0 +1,63 @@
+name: PAYNE Grok Exact Source Packaging Validation Only
+on:
+  push:
+    branches:
+      - payne-grok-exact-deployment-package-20261011
+permissions:
+  contents: read
+jobs:
+  validate-no-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Verify protected Grok source unchanged
+        shell: bash
+        run: |
+          set -euo pipefail
+          base=4b0c649af0b3571ed7c8521805194e76131c9a17
+          git merge-base --is-ancestor "$base" HEAD
+          git diff --exit-code "$base" HEAD -- market-edge-lab/real/payne-kalshi-real/src
+          echo "PINNED_TRADING_SOURCE_UNCHANGED=PASS"
+          changed="$(git diff --name-only "$base" HEAD)"
+          printf '%s\n' "$changed"
+          while IFS= read -r name; do
+            case "$name" in
+              market-edge-lab/real/payne-kalshi-real/wrangler.toml|market-edge-lab/real/payne-kalshi-real/DEPLOYMENT-PACKAGING-VALIDATION.md|.github/workflows/payne-grok-exact-package-validation.yml) ;;
+              "") ;;
+              *) echo "UNAUTHORIZED_PACKAGING_DIFF=$name"; exit 1;;
+            esac
+          done <<< "$changed"
+      - name: Verify existing Worker target and essential bindings
+        shell: bash
+        run: |
+          set -euo pipefail
+          file=market-edge-lab/real/payne-kalshi-real/wrangler.toml
+          grep -q '^name = "market-edge-payne-kalshi-real"$' "$file"
+          grep -q '^main = "src/index.js"$' "$file"
+          grep -q '^binding = "PAYNE_KALSHI_STATE"$' "$file"
+          grep -q '^binding = "BASELINE_REAL_READ"$' "$file"
+          grep -q '^name = "PAYNE_EXECUTION_COORDINATOR"$' "$file"
+          grep -q '^new_sqlite_classes = \["PayneExecutionCoordinator"\]$' "$file"
+          echo "DEPLOYMENT_BINDING_MANIFEST=PASS"
+      - name: Check pinned source build dependencies without deployment
+        shell: bash
+        run: |
+          set -euo pipefail
+          base=market-edge-lab/real/payne-kalshi-real
+          node --check "$base/src/index.js"
+          missing=0
+          for f in payne-live-order-watch.js payne-execution-coordinator.js kalshi-get-only.js kalshi-real-write.js cockpit-html.js payne-execution-timing.js payne-kalshi-features.js payne-paper-brain.js; do
+            if [ ! -f "$base/src/$f" ]; then
+              echo "MISSING_PROTECTED_COMMIT_DEPENDENCY=$f"
+              missing=1
+            fi
+          done
+          if [ ! -f "$base/package.json" ]; then echo "MISSING_PACKAGE_MANIFEST=package.json"; missing=1; fi
+          if [ "$missing" -ne 0 ]; then
+            echo 'NOT_READY_FOR_PRODUCTION_PROMOTION=PINNED_SOURCE_INCOMPLETE'
+            exit 1
+          fi
+          echo 'PINNED_SOURCE_DEPENDENCIES=PASS'
