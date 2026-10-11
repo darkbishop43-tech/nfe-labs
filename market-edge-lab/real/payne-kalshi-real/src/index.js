@@ -1,0 +1,1 @@
+$(cat /tmp/index-trade-capable.js)
