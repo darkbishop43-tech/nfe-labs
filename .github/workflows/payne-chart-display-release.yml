@@ -1,4 +1,5 @@
 name: PAYNE Single Chart Display-Only Production Release
+# Retry after isolated chart renderer syntax correction; source-only change.
 on:
   push:
     branches: [market-edge-payne-kalshi-real-step1]
