@@ -1,0 +1,26 @@
+name: PAYNE Grok Cloudflare Traffic Readback
+on:
+  push:
+    branches: [payne-grok-exact-deployment-package-20261011]
+    paths: [".github/workflows/payne-grok-production-traffic-readback.yml"]
+permissions:
+  contents: read
+jobs:
+  verify-traffic:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Read existing Cloudflare deployment and traffic allocation
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error --max-time 25 \
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/market-edge-payne-kalshi-real/deployments" \
+            -o /tmp/payne-deployments.json
+          jq -e '.success==true' /tmp/payne-deployments.json >/dev/null
+          jq -c '[.result.deployments[]? | {id,created_on,versions:[.versions[]?|{version_id,percentage}]}] | .[:3]' /tmp/payne-deployments.json
+          jq -e '[.result.deployments[]?.versions[]? | select(.version_id=="116963fc-eaa6-4c3a-8962-f4b528d7f55d") | .percentage] | any(.==100)' /tmp/payne-deployments.json >/dev/null || { echo "TRAFFIC_100_PERCENT_NOT_CONFIRMED"; exit 1; }
+          echo "GROK_VERSION_TRAFFIC_100_PERCENT_CONFIRMED"
