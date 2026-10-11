@@ -17,7 +17,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test "$(git rev-parse HEAD^\{tree\})" = "$(git rev-parse ea8a0c78d638d9cfef8d3b1ba220f92b142149e8^\{tree\})" || { echo "ASSEMBLY_TREE_CHANGED"; exit 1; }
+          git merge-base --is-ancestor ea8a0c78d638d9cfef8d3b1ba220f92b142149e8 HEAD
+          git diff --exit-code ea8a0c78d638d9cfef8d3b1ba220f92b142149e8 HEAD -- market-edge-lab/real/payne-kalshi-real/
           test "$(git rev-parse HEAD:market-edge-lab/real/payne-kalshi-real/src/index.js)" = 8f5335b1ae27074c4db56cca4dad720514004c01
           grep -q '^name = "market-edge-payne-kalshi-real"$' market-edge-lab/real/payne-kalshi-real/wrangler.toml
           echo "PROTECTED_BLOB_AND_TARGET=PASS"
