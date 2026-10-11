@@ -1,0 +1,27 @@
+name: PAYNE Reconciliation Evidence GET Only
+on:
+  push:
+    branches: [payne-reconciliation-readonly-20261011]
+    paths: [".github/workflows/payne-reconciliation-evidence-get.yml"]
+permissions:
+  contents: read
+jobs:
+  read:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Read persisted PAYNE state and ledger without writes
+        shell: bash
+        run: |
+          set -euo pipefail
+          base='https://market-edge-payne-kalshi-real.darkbishop43.workers.dev'
+          for route in control real-state 'real-ledger?limit=40'; do
+            key="${route%%\?*}"
+            status=$(curl --connect-timeout 10 --max-time 25 --silent --show-error -o "/tmp/$key.json" -w '%{http_code}' "$base/$route") || { echo "READ_$key=NETWORK_FAILED";continue; }
+            echo "READ_$key=$status"
+          done
+          if test -f /tmp/real-state.json; then
+            jq -c '{ok,control:{armed:.control.armed,openPositions:.control.openPositions,maxPositions:.control.maxPositions,attemptTarget:.control.attemptTarget},series:{seriesId:.series.seriesId,status:.series.status,unresolvedEntry:.series.unresolvedEntry,fireLatch:{state:.series.fireLatch.state,specimenId:.series.fireLatch.specimenId,ticker:.series.fireLatch.ticker,providerPost:.series.fireLatch.providerPost},attempt:{attemptId:.series.currentAttempt.attemptId,providerAttemptNoCandidate:.series.currentAttempt.providerAttemptNoCandidate,fireSpecimenId:.series.currentAttempt.fireSpecimenId,clientOrderId:.series.currentAttempt.clientOrderId,marketTicker:.series.currentAttempt.marketTicker,outcomeSide:.series.currentAttempt.outcomeSide,marketCloseTime:.series.currentAttempt.marketCloseTime,status:.series.currentAttempt.status,writerInvoked:.series.currentAttempt.writerInvoked,providerPostStarted:.series.currentAttempt.providerPostStarted,providerOrderId:.series.currentAttempt.providerOrderId,reconciliationReason:.series.currentAttempt.reconciliationReason},positions:.series.positions,position:.series.position}}' /tmp/real-state.json
+          fi
+          if test -f /tmp/real-ledger.json; then
+            jq -c '{ok,count,events:[.rows[]? | {type,at,seriesId,attemptId,ticker,clientOrderId,reason,result,providerPostStarted,writerInvoked}]}' /tmp/real-ledger.json
+          fi
