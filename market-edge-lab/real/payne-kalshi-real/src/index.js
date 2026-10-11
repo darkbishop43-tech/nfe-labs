@@ -3289,8 +3289,9 @@ async function providerTickerPositionEvidence(env,ticker) {
 async function reconcileAtomicEntryAuthority(env,series,attempt,resolution,{flat=false,noExecution=false}={}){
   // Historical pre-coordinator PAYNE attempts have no Durable Object claim.
   // Preserve those records without inventing claim identity or releasing slots.
-  const specimenId=attempt?.fireSpecimenId||series?.fireLatch?.specimenId;
-  const windowClose=attempt?.marketCloseTime||series?.fireLatch?.marketCloseTime;
+  // Prefer durable fireLatch identity (matches coordinator claim) over attempt snapshot.
+  const specimenId=series?.fireLatch?.specimenId||attempt?.fireSpecimenId;
+  const windowClose=series?.fireLatch?.marketCloseTime||attempt?.marketCloseTime;
   if(!attempt?.fireSpecimenId && !attempt?.marketCloseTime)return {ok:true,legacy:true};
   const identity={
     seriesId:series.seriesId,
