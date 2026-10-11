@@ -1,0 +1,26 @@
+name: PAYNE Founder One-Time NEAR Reconciliation
+on:
+  push:
+    branches: [payne-grok-exact-deployment-package-20261011]
+    paths: [".github/workflows/payne-founder-near-reconcile-once.yml"]
+permissions:
+  contents: read
+jobs:
+  reconcile-once:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Invoke existing production reconciliation exactly once and read back
+        shell: bash
+        run: |
+          set -euo pipefail
+          base=https://market-edge-payne-kalshi-real.darkbishop43.workers.dev
+          curl --fail --silent --show-error --max-time 25 "$base/real-state" -o /tmp/before.json
+          jq -c '{seriesId:.series.seriesId,ticker:.series.currentAttempt.marketTicker,clientOrderId:.series.currentAttempt.clientOrderId,unresolvedEntry:.series.unresolvedEntry,status:.series.status}' /tmp/before.json
+          jq -e '.series.seriesId=="367facf0-a0ab-4361-99b6-0dbe4c786660" and .series.currentAttempt.marketTicker=="KXNEAR15M-26OCT110600-00" and .series.currentAttempt.clientOrderId=="payne-real-0dbe4c786660-1-entry" and .series.unresolvedEntry==true' /tmp/before.json >/dev/null || { echo "STOP_EXACT_IDENTITY_NOT_CURRENT";exit 1; }
+          status=$(curl --silent --show-error --max-time 60 -X POST "$base/control" -H 'content-type: application/json' --data '{"action":"RECONCILE_UNRESOLVED_ENTRY"}' -o /tmp/reconcile.json -w '%{http_code}')
+          echo "RECONCILE_HTTP=$status"
+          jq -c '{ok,classification,reason,providerWrites,orders,capitalMovedUsd,series:{seriesId:.series.seriesId,status:.series.status,unresolvedEntry:.series.unresolvedEntry,attempt:{attemptId:.series.currentAttempt.attemptId,marketTicker:.series.currentAttempt.marketTicker,clientOrderId:.series.currentAttempt.clientOrderId,status:.series.currentAttempt.status,providerPostStarted:.series.currentAttempt.providerPostStarted,providerOrderId:.series.currentAttempt.providerOrderId,terminalClassification:.series.currentAttempt.terminalClassification}},control:{armed:.control.armed,attemptTarget:.control.attemptTarget,maxPositions:.control.maxPositions}}' /tmp/reconcile.json
+          echo 'RECONCILE_ACTION_INVOKED_ONCE'
+          curl --fail --silent --show-error --max-time 25 "$base/real-state" -o /tmp/after.json
+          jq -c '{seriesId:.series.seriesId,status:.series.status,unresolvedEntry:.series.unresolvedEntry,fireLatchState:.series.fireLatch.state,attempt:{attemptId:.series.currentAttempt.attemptId,status:.series.currentAttempt.status,terminalClassification:.series.currentAttempt.terminalClassification},control:{armed:.control.armed,attemptTarget:.control.attemptTarget,maxPositions:.control.maxPositions}}' /tmp/after.json
+          if jq -e '.series.unresolvedEntry==false' /tmp/after.json >/dev/null; then echo 'PRODUCTION_UNRESOLVED_ENTRY_CLEARED'; else echo 'PRODUCTION_UNRESOLVED_ENTRY_PERSISTS'; fi
