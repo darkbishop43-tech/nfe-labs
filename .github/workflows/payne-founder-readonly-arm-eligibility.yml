@@ -1,0 +1,40 @@
+name: PAYNE Founder Read-Only ARM Eligibility Evidence
+on:
+  push:
+    branches: [payne-grok-exact-deployment-package-20261011]
+    paths: [".github/workflows/payne-founder-readonly-arm-eligibility.yml"]
+permissions: {contents: read}
+jobs:
+  eligibility:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: f243f7de350f5081a79cf628f0c715bc0bfb2537
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Read-only source-defined ARM eligibility, no ARM call
+        working-directory: market-edge-lab/real/payne-kalshi-real
+        run: |
+          set -euo pipefail
+          curl -fsS --max-time 25 https://market-edge-payne-kalshi-real.darkbishop43.workers.dev/real-state -o /tmp/eligibility-state.json
+          node --input-type=module -e '
+            import fs from "node:fs";
+            import {seriesInterlock,parseFounderThreshold} from "./src/index.js";
+            const {control,series}=JSON.parse(fs.readFileSync("/tmp/eligibility-state.json","utf8"));
+            const gate=seriesInterlock(series);
+            const controlChecks={
+              disarmed:control.armed===false,
+              thresholdValid:parseFounderThreshold(String(control.activeThreshold)).ok,
+              stakeAllowed:[1,2,5,10].includes(Number(control.maxEntryDebitUsd)),
+              targetAllowed:[1,5,10,30].includes(Number(control.attemptTarget)),
+              requiredIndex:Number(control.requiredExchangeIndex)===2,
+              noUnresolved:series.unresolvedEntry!==true,
+              noLegacyOpenPosition:!series.position,
+              interlockClean:gate.clear===true
+            };
+            console.log(JSON.stringify({controlChecks,gate,seriesStatus:series.status,attemptStatus:series.currentAttempt?.status,attemptsStarted:series.attemptsStarted,accountingSemantics:series.accountingSemantics}));
+            if(Object.values(controlChecks).some(x=>x!==true))process.exitCode=1;
+          '
