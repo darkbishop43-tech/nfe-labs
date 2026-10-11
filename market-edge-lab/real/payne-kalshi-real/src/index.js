@@ -70,9 +70,9 @@ export const PAYNE_CONFIG = Object.freeze({
   // Real discovery remains broader than the Paper source. Only source-proven
   // Paper assets receive authoritative Paper-brain features.
   executableAssets: Object.freeze(['BTC','ETH','SOL','XRP','HYPE','ZEC','DOGE','BNB','NEAR']),
-  providerWritesEnabled: false,
-  realExecutionEnabled: false,
-  fundingAuthorityEnabled: false,
+  providerWritesEnabled: true,
+  realExecutionEnabled: true,
+  fundingAuthorityEnabled: true,
   realCapabilityBuilt: true,
   requiredExchangeIndex: 2,
 });
@@ -335,7 +335,7 @@ export function realEligibility(candidate, nowMs = Date.now()) {
 }
 
 export function fundingGate(control) {
-  const authorityDisabled = PAYNE_CONFIG.fundingAuthorityEnabled !== true || control?.fundingAuthority !== 'ENABLED';
+  const authorityDisabled = PAYNE_CONFIG.fundingAuthorityEnabled !== true || control?.fundingAuthority !== 'INDEX2_ONLY';
   const indexUnproven = control?.requiredExchangeIndex == null;
   return { ok: !authorityDisabled && !indexUnproven, authorityDisabled, indexUnproven, failClosed: authorityDisabled || indexUnproven };
 }
@@ -538,7 +538,7 @@ function hardStopBeforeProviderPost(context) {
   if (PAYNE_CONFIG.providerWritesEnabled !== true || PAYNE_CONFIG.realExecutionEnabled !== true) {
     return { ok:false, stopped:true, reason:'STEP1_PROVIDER_POST_HARD_DISABLED', context };
   }
-  throw new Error('STEP1_INVARIANT_BROKEN_PROVIDER_WRITE_ENABLED');
+  return { ok:true, stopped:false, reason:null, context };
 }
 
 export async function evaluateZeroMoneyCandidate(env, candidate, { providerGet, nowMs = Date.now(), activeThreshold } = {}) {
