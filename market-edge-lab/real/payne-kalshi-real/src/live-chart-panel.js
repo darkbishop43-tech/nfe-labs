@@ -92,18 +92,17 @@ function ingest(feed){
 }
 window.payneChartAcceptFeed=ingest;
 function ema(points,n){
- const a=[],alpha=2/(n+1),vals=[];
+ let output=[],values=[],previous=null;
+ const alpha=2/(n+1);
  for(let i=0;i<points.length;i++){
-  if(i&&points[i].t-points[i-1].t>30000)vals.length=0;
-  vals.push(points[i].p);
-  if(vals.length===n){
-   const initial=vals.reduce((x,y)=>x+y,0)/n;
-   a.push({t:points[i].t,p:initial});
-  }else if(vals.length>n&&a.length){
-   a.push({t:points[i].t,p:points[i].p*alpha+a[a.length-1].p*(1-alpha)});
-  }
+  if(i&&points[i].t-points[i-1].t>30000){output=[];values=[];previous=null;}
+  values.push(points[i].p);
+  if(values.length<n)continue;
+  if(previous===null)previous=values.slice(0,n).reduce((a,b)=>a+b,0)/n;
+  else previous=points[i].p*alpha+previous*(1-alpha);
+  output.push({t:points[i].t,p:previous});
  }
- return a;
+ return output;
 }
 function render(){
  for(const b of tabs.children)b.setAttribute('aria-selected',String(b.dataset.asset===asset));
@@ -124,8 +123,9 @@ function render(){
  $('payneChartLegend').replaceChildren();
  if(!q){info.textContent='No live Kalshi contract for '+asset+'. Historical contracts are not concatenated.';return;}
  const key=q.ticker+'|'+q.outcomeSide,all=samples.get(key)||[];
- const visible=all.filter(x=>x.t>=Date.now()-frame&&x.t<=Date.now());
- if(visible.length<2){info.textContent='History unavailable: fewer than two authentic observations in this '+Math.round(frame/60000)+'m window. Chart collection begins when the cockpit is open.';return;}
+ const span=frame*12,now=Date.now();
+ const visible=all.filter(x=>x.t>=now-span&&x.t<=now);
+ if(visible.length<2){info.textContent='History unavailable: fewer than two authentic observations in this '+Math.round(frame/60000)+'m candle timeframe (12 buckets). Chart collection begins when the cockpit is open.';return;}
  const candles=[];
  if(mode==='candle'){
   const grouped=new Map();
@@ -136,11 +136,11 @@ function render(){
   candles.push(...grouped.values());
   if(candles.every(c=>c.n<2)){info.textContent='Insufficient intraperiod observations to display authentic candles. No OHLC backfill.';return;}
  }
- const overlays=emaSettings.filter(e=>e.enabled).map(e=>({...e,points:ema(all,e.period).filter(p=>p.t>=Date.now()-frame)}));
+ const overlays=emaSettings.filter(e=>e.enabled).map(e=>({...e,points:ema(all,e.period).filter(p=>p.t>=now-span)}));
  const prices=visible.map(p=>p.p).concat(overlays.flatMap(e=>e.points.map(p=>p.p)));
  const low=Math.max(0,Math.min(...prices)-0.02),high=Math.min(1,Math.max(...prices)+0.02);
  const left=46,right=w-12,top=15,bottom=h-25;
- const X=t=>left+(t-(Date.now()-frame))/frame*(right-left);
+ const X=t=>left+(t-(now-span))/span*(right-left);
  const Y=p=>bottom-(p-low)/Math.max(.0001,high-low)*(bottom-top);
  ctx.lineWidth=1;ctx.strokeStyle='#243848';ctx.fillStyle='#99adbd';ctx.font='11px system-ui';
  for(let i=0;i<=4;i++){const y=top+i*(bottom-top)/4;ctx.beginPath();ctx.moveTo(left,y);ctx.lineTo(right,y);ctx.stroke();ctx.fillText((high-(high-low)*i/4).toFixed(2),6,y+3);}
@@ -165,7 +165,7 @@ function render(){
   ctx.beginPath();e.points.forEach((p,i)=>{if(i===0)ctx.moveTo(X(p.t),Y(p.p));else ctx.lineTo(X(p.t),Y(p.p))});
   ctx.strokeStyle=e.color;ctx.lineWidth=1.6;ctx.stroke();
  }
- info.textContent=visible.length+' actual timestamped observations · '+Math.round(frame/60000)+'m displayed · '+(fresh?'Fresh':'Stale')+
+ info.textContent=visible.length+' actual timestamped observations · '+Math.round(frame/60000)+'m OHLC buckets · 12-bucket window · '+(fresh?'Fresh':'Stale')+
    (mode==='candle'?' · Candle buckets with fewer than 2 observations omitted':'')+
    ' · Provider historical OHLC unavailable.';
 }
