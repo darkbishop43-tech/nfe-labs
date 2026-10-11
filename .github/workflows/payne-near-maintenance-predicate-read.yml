@@ -1,0 +1,15 @@
+name: PAYNE Exact NEAR Maintenance Predicate Read
+on:
+  push:
+    branches: [payne-grok-exact-deployment-package-20261011]
+    paths: [".github/workflows/payne-near-maintenance-predicate-read.yml"]
+permissions: {contents: read}
+jobs:
+  evidence:
+    runs-on: ubuntu-latest
+    steps:
+      - name: GET-only current source-state and report maintenance-relevant fields
+        run: |
+          set -euo pipefail
+          curl -fsS --max-time 25 https://market-edge-payne-kalshi-real.darkbishop43.workers.dev/real-state -o /tmp/current.json
+          jq -c '{control:{armed:.control.armed,openPositions:.control.openPositions,maxPositions:.control.maxPositions,attemptTarget:.control.attemptTarget},series:{seriesId:.series.seriesId,status:.series.status,unresolvedEntry:.series.unresolvedEntry,position:.series.position,positions:.series.positions,fireLatch:{state:.series.fireLatch.state,providerPost:.series.fireLatch.providerPost},attempt:{attemptId:.series.currentAttempt.attemptId,status:.series.currentAttempt.status,marketTicker:.series.currentAttempt.marketTicker,clientOrderId:.series.currentAttempt.clientOrderId,writerInvoked:.series.currentAttempt.writerInvoked,providerPostStarted:.series.currentAttempt.providerPostStarted,providerOrderId:.series.currentAttempt.providerOrderId}}}' /tmp/current.json
