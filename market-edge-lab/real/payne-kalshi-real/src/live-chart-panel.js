@@ -145,7 +145,7 @@ function render(){
  ctx.lineWidth=1;ctx.strokeStyle='#243848';ctx.fillStyle='#99adbd';ctx.font='11px system-ui';
  for(let i=0;i<=4;i++){const y=top+i*(bottom-top)/4;ctx.beginPath();ctx.moveTo(left,y);ctx.lineTo(right,y);ctx.stroke();ctx.fillText((high-(high-low)*i/4).toFixed(2),6,y+3);}
  if(mode==='line'){
-  ctx.beginPath();visible.forEach((p,i)=>{if(i===0)ctx.moveTo(X(p.t),Y(p.p));else ctx.lineTo(X(p.t),Y(p.p))});
+  ctx.beginPath();visible.forEach((p,i)=>{if(i===0||p.t-visible[i-1].t>30000)ctx.moveTo(X(p.t),Y(p.p));else ctx.lineTo(X(p.t),Y(p.p)});
   ctx.strokeStyle=$('pcPriceColor').value;ctx.lineWidth=2;ctx.stroke();
   $('payneChartLegend').append(label('Observed ask · '+visible.length+' samples'));
  }else{
