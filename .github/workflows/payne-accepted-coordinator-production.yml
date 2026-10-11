@@ -1,0 +1,93 @@
+name: PAYNE Accepted Coordinator Repair Production Gate
+on:
+  push:
+    branches: [payne-atomic-terminal-reconcile-test-20261011]
+    paths: [".github/workflows/payne-accepted-coordinator-production.yml"]
+permissions:
+  contents: read
+concurrency:
+  group: deploy-payne-kalshi-real-zero-money
+  cancel-in-progress: false
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 72204f13b62822a6583da5e1aa955f254f822e19
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          ref: ea8a0c78d638d9cfef8d3b1ba220f92b142149e8
+          path: protected-baseline
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          ref: 621a0f9fb237cd9defb420605dd5c384489a84bb
+          path: existing-payne-safety-source
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Verify protected Grok index unchanged and single companion patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = 72204f13b62822a6583da5e1aa955f254f822e19
+          test "$(git rev-parse HEAD:market-edge-lab/real/payne-kalshi-real/src/index.js)" = 8f5335b1ae27074c4db56cca4dad720514004c01
+          git diff --no-index --exit-code protected-baseline/market-edge-lab/real/payne-kalshi-real/src/index.js market-edge-lab/real/payne-kalshi-real/src/index.js
+          git diff --no-index --exit-code protected-baseline/market-edge-lab/real/payne-kalshi-real/wrangler.toml market-edge-lab/real/payne-kalshi-real/wrangler.toml
+          grep -q '^name = "market-edge-payne-kalshi-real"$' market-edge-lab/real/payne-kalshi-real/wrangler.toml
+          echo 'PROTECTED_SOURCE_AND_WORKER_TARGET=PASS'
+      - name: Run companion regression
+        run: |
+          set -euo pipefail
+          node --check market-edge-lab/real/payne-kalshi-real/src/payne-execution-coordinator.js
+          node --test market-edge-lab/real/payne-kalshi-real/test/atomic-terminal-reconciliation.test.mjs
+      - name: Validate Cloudflare deployment credentials
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+      - name: Existing Cloudflare KV predeployment safety gate
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: bash existing-payne-safety-source/.github/scripts/payne-kv-deployment-safety.sh pre
+      - name: Founder DISARM read-back before deployment
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error --max-time 20 https://market-edge-payne-kalshi-real.darkbishop43.workers.dev/control -o /tmp/payne-coordinator-control.json
+          jq -c '{armed:.control.armed,openPositions:.control.openPositions,maxPositions:.control.maxPositions,attemptTarget:.control.attemptTarget}' /tmp/payne-coordinator-control.json
+          jq -e '.ok==true and .control.armed==false' /tmp/payne-coordinator-control.json >/dev/null || { echo 'BLOCKED: LIVE_FOUNDER_ARMED'; exit 1; }
+      - name: Build pinned accepted repair without provider writes
+        working-directory: market-edge-lab/real/payne-kalshi-real
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: npx --yes wrangler@4 deploy --dry-run --outdir /tmp/payne-coordinator-preview
+      - name: Deploy only accepted companion repair to existing Worker
+        working-directory: market-edge-lab/real/payne-kalshi-real
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          npx --yes wrangler@4 deploy | tee /tmp/payne-accepted-coordinator-deploy.log
+          grep 'Current Version ID:' /tmp/payne-accepted-coordinator-deploy.log
+      - name: Existing Cloudflare KV postdeployment safety gate
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: bash existing-payne-safety-source/.github/scripts/payne-kv-deployment-safety.sh post
+      - name: Verify production read-only state after deployment
+        run: |
+          set -euo pipefail
+          base=https://market-edge-payne-kalshi-real.darkbishop43.workers.dev
+          curl --fail --silent --show-error --max-time 25 "$base/control" -o /tmp/payne-coordinator-after-control.json
+          curl --fail --silent --show-error --max-time 25 "$base/real-state" -o /tmp/payne-coordinator-after-series.json
+          jq -c '{armed:.control.armed,maxPositions:.control.maxPositions,attemptTarget:.control.attemptTarget}' /tmp/payne-coordinator-after-control.json
+          jq -c '{unresolvedEntry:.series.unresolvedEntry,status:.series.status,attempt:.series.currentAttempt.attemptId,ticker:.series.currentAttempt.marketTicker}' /tmp/payne-coordinator-after-series.json
