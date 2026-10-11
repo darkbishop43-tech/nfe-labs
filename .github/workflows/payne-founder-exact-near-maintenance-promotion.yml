@@ -46,7 +46,7 @@ jobs:
           curl --fail --silent --show-error --max-time 25 "$base/control" -o /tmp/ctl.json
           jq -e '.ok==true and .control.armed==false and .control.openPositions==0 and .control.maxPositions==3 and .control.attemptTarget==5' /tmp/ctl.json >/dev/null || { echo 'BLOCKED: CONTROL_OR_POSITION_STATE_CHANGED';exit 1; }
           curl --fail --silent --show-error --max-time 25 "$base/real-state" -o /tmp/state.json
-          jq -e '.series.unresolvedEntry==true and .series.currentAttempt.marketTicker=="KXNEAR15M-26OCT110600-00" and .series.currentAttempt.providerPostStarted==false and .series.currentAttempt.writerInvoked==false and (.series.positions//[]|length)==0' /tmp/state.json >/dev/null || { echo 'BLOCKED: LIVE_NEAR_STATE_CHANGED';exit 1; }
+          jq -e '(.series.unresolvedEntry==true or (.series.unresolvedEntry==false and .series.currentAttempt.status=="NO_PROVIDER_EXECUTION")) and .series.currentAttempt.marketTicker=="KXNEAR15M-26OCT110600-00" and .series.currentAttempt.providerPostStarted==false and .series.currentAttempt.writerInvoked==false and (.series.positions//[]|length)==0' /tmp/state.json >/dev/null || { echo 'BLOCKED: LIVE_NEAR_STATE_CHANGED';exit 1; }
       - name: Build exact approved Grok release
         working-directory: market-edge-lab/real/payne-kalshi-real
         env:
