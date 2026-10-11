@@ -19,6 +19,7 @@ export function injectPayneChart(html) {
  <div class="muted">Each ticker/side is isolated. Candles show OHLC of timestamped observed asks only, not provider historical OHLC or unseen intraperiod extremes. No synthetic backfill. EMA requires enough consecutive observations.</div>
 </section>`;
   const css = String.raw`
+.market .displayFeedTrend{display:none} /* avoid duplicated per-card sparkline; existing card data untouched */
 .payneChartPanel{margin:7px 0 9px;padding:12px;background:#091923;border:1px solid #37566c;max-width:100%;overflow:hidden}
 .payneChartHead{display:flex;gap:10px;align-items:center;justify-content:space-between;flex-wrap:wrap;font-size:13px}
 .payneChartTabs{display:flex;gap:4px;flex-wrap:wrap;margin:10px 0}
