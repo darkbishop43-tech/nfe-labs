@@ -1,0 +1,36 @@
+name: PAYNE Founder Post-Release NEAR Verification
+on:
+  push:
+    branches: [payne-grok-exact-deployment-package-20261011]
+    paths: [".github/workflows/payne-founder-postrelease-near-verify.yml"]
+permissions: {contents: read}
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Reconcile once using existing control action, then reread
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          base=https://market-edge-payne-kalshi-real.darkbishop43.workers.dev
+          curl -fsS --max-time 25 "$base/real-state" -o /tmp/before.json
+          jq -e '.series.seriesId=="367facf0-a0ab-4361-99b6-0dbe4c786660" and .series.currentAttempt.attemptId=="367facf0-a0ab-4361-99b6-0dbe4c786660-intent-1" and .series.currentAttempt.marketTicker=="KXNEAR15M-26OCT110600-00" and .series.currentAttempt.clientOrderId=="payne-real-0dbe4c786660-1-entry" and .control.armed==false' /tmp/before.json >/dev/null || { echo "STOP_IDENTITY_OR_ARM_STATE_CHANGED";exit 1; }
+          echo "NEAR_PRE_RECONCILE_STATE:"
+          jq -c '{status:.series.status,unresolvedEntry:.series.unresolvedEntry,attemptStatus:.series.currentAttempt.status,terminalClassification:.series.currentAttempt.terminalClassification,armed:.control.armed,attemptTarget:.control.attemptTarget,maxPositions:.control.maxPositions}' /tmp/before.json
+          status=$(curl --silent --show-error --max-time 60 -X POST -H 'content-type: application/json' --data '{"action":"RECONCILE_UNRESOLVED_ENTRY"}' -o /tmp/result.json -w '%{http_code}' "$base/control")
+          echo "RECONCILIATION_HTTP=$status"
+          jq -c '{ok,classification,reason,providerWrites,orders,capitalMovedUsd,attemptStatus:.series.currentAttempt.status,terminalClassification:.series.currentAttempt.terminalClassification,unresolvedEntry:.series.unresolvedEntry,armed:.control.armed}' /tmp/result.json
+          curl -fsS --max-time 25 "$base/real-state" -o /tmp/after.json
+          jq -c '{status:.series.status,unresolvedEntry:.series.unresolvedEntry,fireLatchState:.series.fireLatch.state,attemptStatus:.series.currentAttempt.status,terminalClassification:.series.currentAttempt.terminalClassification,armed:.control.armed,attemptTarget:.control.attemptTarget,maxPositions:.control.maxPositions,positions:.series.positions}' /tmp/after.json
+          jq -e '.series.unresolvedEntry==false and .control.armed==false and .control.attemptTarget==5 and .control.maxPositions==3' /tmp/after.json >/dev/null || { echo 'NEAR_OPERATIONAL_CLEAN_NOT_VERIFIED';exit 1; }
+          curl -fsS --max-time 25 "$base/real-state" -o /tmp/reread.json
+          jq -e '.series.unresolvedEntry==false and .series.currentAttempt.status=="NO_PROVIDER_EXECUTION"' /tmp/reread.json >/dev/null || { echo 'NEAR_CLEAN_PERSISTENCE_NOT_VERIFIED';exit 1; }
+          echo 'NEAR_CLEAN_PERSISTENCE=PASS'
+          curl -fsS --max-time 25 -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/market-edge-payne-kalshi-real/deployments" -o /tmp/deployments.json
+          jq -e '.success==true' /tmp/deployments.json >/dev/null
+          jq -c '[.result.deployments[]?|{id,versions:[.versions[]?|{version_id,percentage}]}]|.[:2]' /tmp/deployments.json
+          jq -e '[.result.deployments[]?.versions[]?|select(.version_id=="baf2a28f-4888-4495-9e19-cc1f976764d1")|.percentage]|any(.==100)' /tmp/deployments.json >/dev/null || { echo 'TRAFFIC_100_NOT_CONFIRMED';exit 1; }
+          echo 'TRAFFIC_100_CONFIRMED'
