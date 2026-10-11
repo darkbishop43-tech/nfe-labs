@@ -1,0 +1,32 @@
+name: PAYNE Atomic Reconciliation Test Only
+on:
+  push:
+    branches: [payne-atomic-terminal-reconcile-test-20261011]
+    paths: [".github/workflows/payne-atomic-terminal-test.yml"]
+permissions:
+  contents: read
+jobs:
+  isolated-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Protect exact Grok engine and scope diff
+        run: |
+          set -euo pipefail
+          base=ea8a0c78d638d9cfef8d3b1ba220f92b142149e8
+          test "$(git rev-parse HEAD:market-edge-lab/real/payne-kalshi-real/src/index.js)" = 8f5335b1ae27074c4db56cca4dad720514004c01
+          git diff --exit-code "$base" HEAD -- market-edge-lab/real/payne-kalshi-real/src/index.js
+          git diff --name-only "$base" HEAD
+      - name: Run exact test-only coordinator regression
+        run: |
+          set -euo pipefail
+          node --check market-edge-lab/real/payne-kalshi-real/src/payne-execution-coordinator.js
+          node --test market-edge-lab/real/payne-kalshi-real/test/atomic-terminal-reconciliation.test.mjs
+      - name: Confirm no deployment
+        run: echo 'NO_DEPLOY_NO_CONTROL_NO_PROVIDER_ORDERS'
