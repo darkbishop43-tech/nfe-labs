@@ -1,0 +1,59 @@
+name: PAYNE Grok Pinned Identity Fix Safe Promotion
+on:
+  push:
+    branches: [payne-grok-exact-deployment-package-20261011]
+    paths: [".github/workflows/payne-grok-identity-safe-promotion.yml"]
+permissions:
+  contents: read
+concurrency:
+  group: deploy-payne-kalshi-real-zero-money
+  cancel-in-progress: false
+jobs:
+  gate-and-promote:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: f243f7de350f5081a79cf628f0c715bc0bfb2537
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          ref: 621a0f9fb237cd9defb420605dd5c384489a84bb
+          path: approved-gate
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Validate pinned Grok release source
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = f243f7de350f5081a79cf628f0c715bc0bfb2537
+          grep -q '^name = "market-edge-payne-kalshi-real"$' market-edge-lab/real/payne-kalshi-real/wrangler.toml
+          node --check market-edge-lab/real/payne-kalshi-real/src/index.js
+          echo 'EXACT_GROK_COMMIT_CONFIRMED'
+      - name: Existing production KV safety gate
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          bash approved-gate/.github/scripts/payne-kv-deployment-safety.sh pre
+      - name: Founder ARM verification before deploy
+        run: |
+          set -euo pipefail
+          curl -fsS --max-time 25 https://market-edge-payne-kalshi-real.darkbishop43.workers.dev/control -o /tmp/control.json
+          jq -e '.ok==true and .control.armed==false' /tmp/control.json >/dev/null || { echo 'BLOCKED: LIVE_FOUNDER_ARMED_OR_UNVERIFIED'; exit 1; }
+      - name: Wrangler exact pinned deploy
+        working-directory: market-edge-lab/real/payne-kalshi-real
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          npx --yes wrangler@4 deploy | tee /tmp/deployment.log
+          grep 'Current Version ID:' /tmp/deployment.log
+      - name: Existing post-deploy KV safety verification
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: bash approved-gate/.github/scripts/payne-kv-deployment-safety.sh post
