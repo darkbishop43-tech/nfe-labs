@@ -1,0 +1,35 @@
+name: PAYNE Grok Pinned Promotion Preflight
+on:
+  push:
+    branches: [payne-grok-exact-deployment-package-20261011]
+    paths: [".github/workflows/payne-grok-pinned-promotion-preflight.yml"]
+permissions:
+  contents: read
+jobs:
+  preflight-only:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Verify exact pinned assembly and protected index
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD^\{tree\})" = "$(git rev-parse ea8a0c78d638d9cfef8d3b1ba220f92b142149e8^\{tree\})" || { echo "ASSEMBLY_TREE_CHANGED"; exit 1; }
+          test "$(git rev-parse HEAD:market-edge-lab/real/payne-kalshi-real/src/index.js)" = 8f5335b1ae27074c4db56cca4dad720514004c01
+          grep -q '^name = "market-edge-payne-kalshi-real"$' market-edge-lab/real/payne-kalshi-real/wrangler.toml
+          echo "PROTECTED_BLOB_AND_TARGET=PASS"
+      - name: Check live Founder ARM and report gate decision without change
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error --max-time 20 'https://market-edge-payne-kalshi-real.darkbishop43.workers.dev/control' -o /tmp/payne-live-control.json
+          jq -c '{ok,armed:.control.armed,openPositions:.control.openPositions,maxPositions:.control.maxPositions,attemptTarget:.control.attemptTarget}' /tmp/payne-live-control.json
+          if ! jq -e '.ok==true and .control.armed==false' /tmp/payne-live-control.json >/dev/null; then
+            echo "BLOCKED: LIVE_FOUNDER_CONTROL_ARMED_OR_UNVERIFIED"
+            exit 1
+          fi
+          echo "LIVE_FOUNDER_DISARMED=VERIFIED"
+      - name: No deployment in preflight workflow
+        run: echo 'PREFLIGHT_ONLY_NO_DEPLOY'
