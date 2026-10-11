@@ -1,0 +1,95 @@
+name: PAYNE Single Chart Display-Only Production Release
+on:
+  push:
+    branches: [market-edge-payne-kalshi-real-step1]
+    paths: [".github/workflows/payne-chart-display-release.yml"]
+permissions:
+  contents: read
+concurrency:
+  group: deploy-payne-kalshi-real-zero-money
+  cancel-in-progress: false
+jobs:
+  chart:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Prove only pre-approved display files differ from original production source
+        shell: bash
+        run: |
+          set -euo pipefail
+          base=d103f92673c4979d0e42a8cf6b50de4713177f7d
+          git merge-base --is-ancestor "$base" HEAD
+          git diff --name-only "$base" HEAD >/tmp/payne-chart-changed.txt
+          cat /tmp/payne-chart-changed.txt
+          while IFS= read -r file; do
+            case "$file" in
+              .github/workflows/payne-single-chart-isolated-tests.yml|\
+              .github/workflows/payne-chart-display-release.yml|\
+              market-edge-lab/real/payne-kalshi-real/src/cockpit-html.js|\
+              market-edge-lab/real/payne-kalshi-real/src/live-chart-panel.js|\
+              market-edge-lab/real/payne-kalshi-real/test/payne-live-chart-panel.test.mjs) ;;
+              *) echo "BLOCKED: UNAUTHORIZED_NONDISPLAY_CHANGE $file"; exit 1;;
+            esac
+          done </tmp/payne-chart-changed.txt
+          test "$(grep -c '^market-edge-lab/real/payne-kalshi-real/src/live-chart-panel.js$' /tmp/payne-chart-changed.txt)" -eq 1
+          echo 'DISPLAY_ONLY_SOURCE_BOUNDARY=PASS'
+      - name: Validate chart, existing Stage1B display, Live Order Watch
+        working-directory: market-edge-lab/real/payne-kalshi-real
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check src/live-chart-panel.js
+          node --check src/cockpit-html.js
+          node --test test/payne-live-chart-panel.test.mjs test/payne-stage1-live-display.test.mjs test/payne-live-order-watch.test.mjs
+      - name: Validate existing Cloudflare credentials
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          test -n "$CLOUDFLARE_API_TOKEN" && test -n "$CLOUDFLARE_ACCOUNT_ID"
+      - name: Existing authenticated Cloudflare KV predeployment safety gate
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: bash .github/scripts/payne-kv-deployment-safety.sh pre
+      - name: Deploy identical Worker plus display-only chart
+        working-directory: market-edge-lab/real/payne-kalshi-real
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          npx --yes wrangler@4 deploy | tee /tmp/payne-chart-deploy.txt
+      - name: Existing authenticated Cloudflare KV postdeployment safety gate
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          bash .github/scripts/payne-kv-deployment-safety.sh post
+      - name: Verify live chart and unchanged market-data read path
+        shell: bash
+        run: |
+          set -euo pipefail
+          base='https://market-edge-payne-kalshi-real.darkbishop43.workers.dev'
+          curl --fail --silent --show-error --max-time 30 "$base/" -o /tmp/payne-chart-live.html
+          grep -q 'id="payneChartPanel"' /tmp/payne-chart-live.html
+          grep -q 'id="payneChartCanvas"' /tmp/payne-chart-live.html
+          grep -q 'id="liveOrderWatch"' /tmp/payne-chart-live.html
+          grep -q 'setInterval(refreshMarketDisplay,10000)' /tmp/payne-chart-live.html
+          curl --fail --silent --show-error --max-time 30 "$base/display-market-feed" -o /tmp/payne-chart-feed.json
+          jq -e '.ok==true and .source=="PAYNE_AUTHENTICATED_KALSHI_GET_ONLY" and (.quotes|type=="array")' /tmp/payne-chart-feed.json
+          echo 'LIVE_CHART_COCKPIT=PASS'
+          echo 'LIVE_AUTHENTICATED_MARKET_FEED=PASS'
+          grep 'Current Version ID:' /tmp/payne-chart-deploy.txt
