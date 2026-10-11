@@ -1,0 +1,47 @@
+name = "market-edge-payne-kalshi-real"
+main = "src/index.js"
+compatibility_date = "2026-09-17"
+workers_dev = true
+
+[vars]
+EXPERIMENT_NAME = "MARKET EDGE — PAYNE-KALSHI REAL"
+EXECUTION_MODE = "PAYNE_REAL_CAPABILITY_DISARMED"
+LIVE_ORDER_SUBMISSION = "GOVERNED_PAYNE_ONLY_DISARMED"
+FUNDING_AUTHORITY = "INDEX2_ONLY_DISARMED"
+PAYNE_THRESHOLD = "0.80"
+PAYNE_REAL_DEFAULT_ARMED = "FALSE"
+PAYNE_REAL_ATTEMPT_TARGET = "1"
+PAYNE_REAL_MAX_ENTRY_DEBIT_USD = "1"
+PAYNE_REAL_REQUIRED_EXCHANGE_INDEX = "2"
+MARKET_SCOPE = "BTC_ETH_SOL_XRP_HYPE_ZEC_DOGE_BNB_NEAR_AUTO_SELECT"
+
+# SECURITY:
+# Kalshi credentials are encrypted Worker secrets on this isolated Worker only.
+# Never place API key IDs, private keys, signatures, or other auth material here.
+
+[[kv_namespaces]]
+binding = "PAYNE_KALSHI_STATE"
+id = "03352b0ccb034f1bb8206f663a04b125"
+
+# Read-only source bridge to the existing Baseline Worker.
+# PAYNE code constrains this binding to GET /shadow-state and GET /execution-test-state only.
+[[services]]
+binding = "BASELINE_REAL_READ"
+service = "market-edge-baseline-real"
+
+[triggers]
+crons = ["* * * * *"]
+
+# PAYNE REAL CAPABILITY:
+# Deployment defaults DISARMED. Cron always observes read-only; real entry writes are reachable only after explicit bounded PAYNE ARM.
+# Management may continue for durable PAYNE-owned positions after DISARM. Index 2 is the only permitted funding shard.
+# This Worker MUST NOT bind BASELINE_REAL_SHADOW_STATE or any Payne Paper namespace.
+
+# Isolated-source proposal ONLY. No production binding deployed.
+[[durable_objects.bindings]]
+name = "PAYNE_EXECUTION_COORDINATOR"
+class_name = "PayneExecutionCoordinator"
+
+[[migrations]]
+tag = "payne-execution-ownership-v1"
+new_sqlite_classes = ["PayneExecutionCoordinator"]
