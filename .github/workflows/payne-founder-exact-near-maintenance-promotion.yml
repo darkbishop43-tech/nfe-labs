@@ -18,7 +18,7 @@ jobs:
           persist-credentials: false
       - uses: actions/checkout@v4
         with:
-          ref: bc3b0b85dc758fc4f97f0b675f8bc04c9a6b45a0
+          ref: 6d42bd01cc4fc1f131bf7313a9f9d3dac9c77f4b
           path: reviewed-maintenance-gate
           persist-credentials: false
       - uses: actions/setup-node@v4
