@@ -56,6 +56,12 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: |
           test -n "$CLOUDFLARE_API_TOKEN" && test -n "$CLOUDFLARE_ACCOUNT_ID"
+      - name: Read live PAYNE Founder control without changing it
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error --max-time 20 'https://market-edge-payne-kalshi-real.darkbishop43.workers.dev/control' > /tmp/payne-chart-existing-control.json
+          jq -c '{armed:.control.armed,scanEnabled:.control.scanEnabled,openPositions:.control.openPositions,maxPositions:.control.maxPositions,attemptTarget:.control.attemptTarget,requiredExchangeIndex:.control.requiredExchangeIndex,threshold:.control.activeThreshold,stake:.control.maxEntryDebitUsd,providerWriteAuthority:.control.providerWriteAuthority}' /tmp/payne-chart-existing-control.json
       - name: Existing authenticated Cloudflare KV predeployment safety gate
         shell: bash
         env:
