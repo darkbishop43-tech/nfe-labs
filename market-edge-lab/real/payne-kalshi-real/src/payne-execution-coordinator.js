@@ -41,9 +41,25 @@ export class PayneExecutionCoordinator {
         return {granted:true,reason:'PROVEN_NO_POST_RELEASED'};
       }
       if(action==='RESOLVE_ENTRY'){
-        if(!prior||prior.seriesId!==seriesId||prior.specimenId!==specimenId||prior.clientOrderId!==clientOrderId||
-           prior.ticker!==ticker||prior.side!==side||prior.windowClose!==windowClose)
-          return {granted:false,reason:'CLAIM_IDENTITY_MISMATCH'};
+        const same=prior&&prior.seriesId===seriesId&&prior.specimenId===specimenId&&
+          prior.clientOrderId===clientOrderId&&prior.ticker===ticker&&
+          prior.side===side&&prior.windowClose===windowClose;
+        if(!same){
+          // A recycled series attempt number can address an older claim.
+          // Never rewrite or free the older claim. Permit a distinct current
+          // NO_PROVIDER_EXECUTION only with authoritative provider proof, and
+          // only if no coordinator claim is potentially pending/submitted.
+          const proven=input.resolution==='NO_PROVIDER_EXECUTION'&&
+            input.providerNoExecutionProven===true&&input.authoritativeReconciliationProven===true;
+          if(proven&&prior&&prior.seriesId===seriesId&&
+             ['CLOSED','NO_FILL','NO_PROVIDER_EXECUTION'].includes(prior.claimState)){
+            const claims=await tx.list({prefix:'attempt:'});
+            const unsettled=[...claims.values()].some(row=>row&&
+              !['CLOSED','NO_FILL','NO_PROVIDER_EXECUTION'].includes(row.claimState));
+            if(!unsettled)return {granted:true,reason:'DISTINCT_TERMINAL_HISTORICAL_CLAIM_PRESERVED'};
+          }
+          return {granted:false,reason:!prior?'CLAIM_NOT_FOUND':'CLAIM_IDENTITY_MISMATCH'};
+        }
         const resolution=String(input.resolution||'');
         if(!['OPEN','NO_FILL','CLOSED','UNKNOWN','NO_PROVIDER_EXECUTION'].includes(resolution))
           return {granted:false,reason:'INVALID_RESOLUTION'};
