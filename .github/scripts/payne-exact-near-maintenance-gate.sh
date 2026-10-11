@@ -39,13 +39,13 @@ verify_safety() {
      ' "$c" >/dev/null &&
      jq -e '
        .seriesId=="367facf0-a0ab-4361-99b6-0dbe4c786660" and
-       .unresolvedEntry==true and .status=="ATOMIC_RECONCILIATION_REQUIRED" and
+       ((.unresolvedEntry==true and .status=="ATOMIC_RECONCILIATION_REQUIRED" and .currentAttempt.status=="EXECUTION_INTENT") or
+        (.unresolvedEntry==false and .status=="SERIES_PAUSED_DISARMED_CLEAN" and .currentAttempt.status=="NO_PROVIDER_EXECUTION")) and
        (.position//null)==null and
        ((.positions//[])|length)==0 and
        .currentAttempt.attemptId=="367facf0-a0ab-4361-99b6-0dbe4c786660-intent-1" and
        .currentAttempt.marketTicker=="KXNEAR15M-26OCT110600-00" and
        .currentAttempt.clientOrderId=="payne-real-0dbe4c786660-1-entry" and
-       .currentAttempt.status=="EXECUTION_INTENT" and
        .currentAttempt.writerInvoked==false and
        .currentAttempt.providerPostStarted==false and
        (.currentAttempt.providerOrderId//null)==null and
