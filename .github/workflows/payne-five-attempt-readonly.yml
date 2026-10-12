@@ -44,6 +44,30 @@ jobs:
               echo "READ_UNAVAILABLE_${label}"
             fi
           done
+      - name: Existing Cloudflare KV October 12 key discovery and exact value reads
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          base="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/storage/kv/namespaces/03352b0ccb034f1bb8206f663a04b125"
+          for prefix in 'payne-kalshi:real-ledger:2026-10-12' 'payne-kalshi:real-attempt:'; do
+            enc=$(jq -rn --arg x "$prefix" '$x|@uri')
+            case "$prefix" in *real-ledger*) label=oct12-ledger;; *) label=attempts;; esac
+            status=$(curl --retry 0 -sS --max-time 35 -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -o "$label-keys.json" -w '%{http_code}' "$base/keys?prefix=$enc&limit=1000")
+            echo "KV_LIST_$label HTTP=$status"
+            test "$status" = 200 || exit 1
+            jq -c '{success,result_info,keyCount:(.result|length),errors}' "$label-keys.json"
+          done
+          python3 - <<'PY'
+          import json
+          for name in ['oct12-ledger','attempts']:
+            d=json.load(open(name+'-keys.json'))
+            keys=[v['name'] for v in d.get('result',[])]
+            print('KEYSET',name,'TOTAL',len(keys),'CURSOR',d.get('result_info',{}).get('cursor'))
+            print('KEYS',json.dumps(keys[:100]))
+          PY
       - uses: actions/upload-artifact@v4
         with:
           name: payne-five-attempt-existing-reads
