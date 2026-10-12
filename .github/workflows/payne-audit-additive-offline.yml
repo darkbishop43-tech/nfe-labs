@@ -34,3 +34,53 @@ jobs:
             echo 'PROTECTED_SOURCE_CHANGED'; exit 1
           fi
           echo OFFLINE_ONLY_NO_DEPLOYMENT
+      - name: Render unchanged cockpit plus audit panel at 390px viewport
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd market-edge-lab/real/payne-kalshi-real
+          npm install --no-save --no-package-lock playwright@1.56.1
+          npx playwright install chromium
+          node --input-type=module <<'JS'
+          import {chromium} from 'playwright';
+          import {cockpitHtml} from './src/cockpit-html.js';
+          import {mkdirSync,writeFileSync} from 'node:fs';
+          const root='/tmp/payne-mobile-preview';
+          mkdirSync(root,{recursive:true});
+          writeFileSync(root+'/index.html',cockpitHtml());
+          const {spawn}=await import('node:child_process');
+          const server=spawn('python3',['-m','http.server','8765','--directory',root],{stdio:'ignore'});
+          let browser;
+          try {
+            await new Promise(r=>setTimeout(r,1100));
+            browser=await chromium.launch({headless:true,args:['--no-sandbox']});
+            const page=await browser.newPage({viewport:{width:390,height:844},deviceScaleFactor:1});
+            const attempts=[
+              {attemptId:'offline-403-1',attemptNo:1,asset:'NEAR',ticker:'KXNEAR15M-OFFLINE-TEST',side:'NO',createdAt:'2026-10-12T11:32:04.523Z',httpStatus:403,providerResponseState:'HTTP_REJECTED_OR_UNKNOWN',providerErrorMessage:'Offline simulated rejection',providerErrorCode:'TEST_ORDER_REJECTED',providerOrderId:null,terminalClassification:'PROVIDER_REJECTED_OR_UNKNOWN',reconciliationReason:null,writerInvoked:true,providerPostStarted:true,events:[{type:'ENTRY_PROVIDER_REJECTED_OR_UNKNOWN',at:'2026-10-12T11:32:07.639Z'}]},
+              {attemptId:'historical-403-2',attemptNo:2,asset:'ZEC',ticker:'KXZEC15M-HISTORICAL',side:'NO',createdAt:'2026-10-12T11:47:17.837Z',httpStatus:403,providerResponseState:'HTTP_REJECTED_OR_UNKNOWN',providerErrorMessage:null,providerErrorCode:null,providerOrderId:null,terminalClassification:'NO_PROVIDER_EXECUTION',reconciliationReason:'PROVIDER_RECONCILED_NO_EXECUTION',writerInvoked:true,providerPostStarted:true,events:[{type:'ENTRY_RECONCILED_NO_EXECUTION',at:'2026-10-12T11:47:22.702Z'}]}
+            ];
+            await page.route('**/real-history?view=audit*',route=>route.fulfill({status:200,contentType:'application/json',body:JSON.stringify({ok:true,seriesId:'offline-audit-sample',count:attempts.length,attempts})}));
+            await page.goto('http://127.0.0.1:8765/',{waitUntil:'domcontentloaded'});
+            await page.locator('#payneAuditCards article').first().waitFor({timeout:12000});
+            const heading=page.locator('#payneExecutionAuditPanel h2');
+            await heading.scrollIntoViewIfNeeded();
+            await page.locator('#payneExecutionAuditPanel').screenshot({path:'payne-audit-mobile-full.png'});
+            await page.locator('#payneAuditCards details').first().locator('summary').click();
+            await page.locator('#payneExecutionAuditPanel').screenshot({path:'payne-audit-mobile-expanded.png'});
+            const evidence=await page.evaluate(()=>{
+              const el=document.getElementById('payneExecutionAuditPanel');
+              return {viewportWidth:innerWidth,scrollWidth:document.documentElement.scrollWidth,panelScrollWidth:el.scrollWidth,panelClientWidth:el.clientWidth,cards:document.querySelectorAll('#payneAuditCards article').length,expanded:document.querySelectorAll('#payneAuditCards details[open]').length,controlArm:!!document.getElementById('arm'),controlDisarm:!!document.getElementById('disarm'),watch:document.body.textContent.includes('LIVE ORDER WATCH'),has403:el.textContent.includes('Offline simulated rejection'),hasMissing:el.textContent.includes('NOT RECORDED')};
+            });
+            console.log('BROWSER_MOBILE_EVIDENCE',JSON.stringify(evidence));
+            if(evidence.scrollWidth>evidence.viewportWidth||evidence.panelScrollWidth>evidence.panelClientWidth||evidence.cards!==2||evidence.expanded!==1||!evidence.controlArm||!evidence.controlDisarm||!evidence.watch||!evidence.has403||!evidence.hasMissing)throw Error('MOBILE_PANEL_ACCEPTANCE_FAILED');
+          } finally {if(browser)await browser.close();server.kill();}
+          JS
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: payne-audit-mobile-offline-preview
+          path: |
+            market-edge-lab/real/payne-kalshi-real/payne-audit-mobile-full.png
+            market-edge-lab/real/payne-kalshi-real/payne-audit-mobile-expanded.png
+          if-no-files-found: warn
+          retention-days: 14
