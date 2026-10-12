@@ -2790,13 +2790,39 @@ export async function appendRealLedger(env,type,payload={}) {
   return row;
 }
 
-export async function listRealLedger(env,limit=200) {
+// Scan the existing ledger namespace to the final KV cursor before selecting
+// the newest rows. An incomplete scan is an error, never a complete alert window.
+export async function listRealLedgerWithEvidence(env,limit=200) {
   const kv=binding(env);
-  if(typeof kv.list!=='function') return [];
-  const page=await kv.list({prefix:REAL_LEDGER_PREFIX,limit:Math.max(1,Math.min(1000,Number(limit)||200))});
+  if(typeof kv?.list!=='function') throw new Error('PAYNE_LEDGER_KV_LIST_UNAVAILABLE');
+  const safeLimit=Math.max(1,Math.min(1000,Number(limit)||200));
+  const keys=[];
+  const cursors=new Set();
+  let cursor;
+  for(;;){
+    const page=await kv.list({prefix:REAL_LEDGER_PREFIX,limit:1000,...(cursor?{cursor}:{})});
+    if(!page||!Array.isArray(page.keys)||typeof page.list_complete!=='boolean')
+      throw new Error('PAYNE_LEDGER_PAGE_INCOMPLETE_OR_INVALID');
+    keys.push(...page.keys.map(k=>k.name));
+    if(page.list_complete) break;
+    if(typeof page.cursor!=='string'||!page.cursor||cursors.has(page.cursor))
+      throw new Error('PAYNE_LEDGER_CURSOR_INVALID');
+    cursor=page.cursor;
+    cursors.add(cursor);
+  }
+  const lastKeys=keys.sort().slice(-safeLimit);
   const rows=[];
-  for(const item of page?.keys||[]){const x=await kvGetJson(env,item.name);if(x)rows.push(x);}
-  return rows.sort((a,b)=>String(a.at).localeCompare(String(b.at))).slice(-Math.max(1,Math.min(1000,Number(limit)||200)));
+  for(const key of lastKeys){
+    const row=await kvGetJson(env,key);
+    if(!row)throw new Error('PAYNE_LEDGER_RECORD_UNREADABLE');
+    rows.push(row);
+  }
+  return {rows:rows.sort((a,b)=>String(a.at).localeCompare(String(b.at))),complete:true,
+    scannedKeys:keys.length,returnedRows:rows.length,
+    omittedOlderKeys:Math.max(0,keys.length-rows.length)};
+}
+export async function listRealLedger(env,limit=200){
+  return (await listRealLedgerWithEvidence(env,limit)).rows;
 }
 
 export async function listRealAttemptsForSeries(env,seriesId) {
@@ -4492,9 +4518,13 @@ export default {
     if (url.pathname === '/real-ledger') {
       const requested=Number(url.searchParams.get('limit')||200);
       const seriesId=String(url.searchParams.get('seriesId')||'').trim();
-      let rows=await listRealLedger(env,requested);
+      const result=await listRealLedgerWithEvidence(env,requested);
+      let rows=result.rows;
       if(seriesId) rows=rows.filter(x=>String(x?.seriesId||'')===seriesId);
-      return Response.json({ok:true,schema:'PAYNE_REAL_LEDGER_EXPORT_V1',readOnly:true,seriesId:seriesId||null,count:rows.length,rows,providerWrites:0,ordersSubmittedByThisRead:0,capitalMovedUsd:0},{headers:{'cache-control':'no-store'}});
+      return Response.json({ok:true,schema:'PAYNE_REAL_LEDGER_EXPORT_V1',readOnly:true,
+        complete:result.complete,scannedKeys:result.scannedKeys,omittedOlderKeys:result.omittedOlderKeys,
+        seriesId:seriesId||null,count:rows.length,rows,
+        providerWrites:0,ordersSubmittedByThisRead:0,capitalMovedUsd:0},{headers:{'cache-control':'no-store'}});
     }
     if (url.pathname === '/real-history') {
       try{
