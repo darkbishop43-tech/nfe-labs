@@ -1,4 +1,5 @@
 name: PAYNE Founder Faithful FIRE Production Promotion
+# Founder-maintenance-disarm-confirmed: rerun the unchanged pinned deployment safety path.
 on:
   push:
     branches: [payne-faithful-fire-handoff-20261011]
