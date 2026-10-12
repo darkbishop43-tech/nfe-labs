@@ -79,7 +79,7 @@ jobs:
                 .currentAttempt.reconciliationReason=="PROVIDER_RECONCILED_NO_EXECUTION" and
                 (.currentAttempt.providerOrderId//null)==null and
                 (.fireLatch.state//"NONE" | IN("PRE_PROVIDER_VALIDATION","PROVIDER_POST_CREATED","INVALIDATED_BEFORE_POST")) and
-                (.fireLatch.finalResult//"") == "NO_PROVIDER_EXECUTION"
+                ((.fireLatch.finalResult//"")=="NO_PROVIDER_EXECUTION" or ((.fireLatch.state//"")=="PROVIDER_POST_CREATED" and (.fireLatch.finalResult//"")=="REJECTED_OR_UNKNOWN"))
               )
             ) and
             (.unresolvedEntry!=true or
@@ -95,7 +95,7 @@ jobs:
               ($s[0]) as $x | ($c[0]) as $ctl |
               {
                 position_safe: ($x.position==null or (($x.position.owner//"")=="PAYNE_KALSHI_REAL" and ($x.position.status//""|IN("FLAT","CLOSED","SETTLED")))),
-                fire_latch_safe: ((($x.fireLatch.state//"NONE")|IN("LATCHED","PROVIDER_POST_UNKNOWN","PRE_PROVIDER_VALIDATION","PROVIDER_POST_STARTED","PROVIDER_POST_CREATED")|not) or ($ctl.armed==false and $x.unresolvedEntry==false and ($x.position//null)==null and $x.currentAttempt.status=="NO_PROVIDER_EXECUTION" and $x.currentAttempt.terminalClassification=="NO_PROVIDER_EXECUTION" and $x.currentAttempt.reconciliationReason=="PROVIDER_RECONCILED_NO_EXECUTION" and $x.currentAttempt.providerOrderId==null and (($x.fireLatch.state//"NONE")|IN("PRE_PROVIDER_VALIDATION","PROVIDER_POST_CREATED","INVALIDATED_BEFORE_POST")) and ($x.fireLatch.finalResult//"")=="NO_PROVIDER_EXECUTION")),
+                fire_latch_safe: ((($x.fireLatch.state//"NONE")|IN("LATCHED","PROVIDER_POST_UNKNOWN","PRE_PROVIDER_VALIDATION","PROVIDER_POST_STARTED","PROVIDER_POST_CREATED")|not) or ($ctl.armed==false and $x.unresolvedEntry==false and ($x.position//null)==null and $x.currentAttempt.status=="NO_PROVIDER_EXECUTION" and $x.currentAttempt.terminalClassification=="NO_PROVIDER_EXECUTION" and $x.currentAttempt.reconciliationReason=="PROVIDER_RECONCILED_NO_EXECUTION" and $x.currentAttempt.providerOrderId==null and (($x.fireLatch.state//"NONE")|IN("PRE_PROVIDER_VALIDATION","PROVIDER_POST_CREATED","INVALIDATED_BEFORE_POST")) and (($x.fireLatch.finalResult//"")=="NO_PROVIDER_EXECUTION" or (($x.fireLatch.state//"")=="PROVIDER_POST_CREATED" and ($x.fireLatch.finalResult//"")=="REJECTED_OR_UNKNOWN")))),
                 unresolved_safe: ($x.unresolvedEntry!=true or ($ctl.armed==false and $x.currentAttempt.writerInvoked==false and $x.currentAttempt.providerPostStarted==false and $x.currentAttempt.providerOrderId==null)),
                 post_started_safe: ($x.currentAttempt.providerPostStarted!=true or ($x.currentAttempt.status|IN("NO_FILL","FILLED","CLOSED","SETTLED","NO_PROVIDER_EXECUTION"))),
                 current_status_safe: (($x.currentAttempt.status//"")|IN("PROVIDER_REJECTED_OR_UNKNOWN","WRITE_ERROR_UNKNOWN","RESULT_UNKNOWN","ENTRY_RECONCILIATION_REQUIRED")|not)
