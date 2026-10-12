@@ -1,0 +1,50 @@
+name: AUTO PAYNE 403 Read Only Comparison
+on:
+  push:
+    branches: [payne-auto-403-readonly-comparison-20261012]
+    paths: ['.github/workflows/payne-auto-403-readonly-comparison.yml']
+permissions: {contents: read}
+jobs:
+  compare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Read AUTO production and existing Cloudflare KV history
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -uo pipefail
+          set +e
+          base=https://market-edge-baseline-real.darkbishop43.workers.dev
+          for endpoint in real-trade-state execution-test-state execution-test-nofill-forensic; do
+            curl -sS --retry 0 --connect-timeout 12 --max-time 25 -o "/tmp/$endpoint.json" -w "AUTO_HTTP $endpoint %{http_code} %{size_download} %{time_total}\n" "$base/$endpoint"
+            echo "AUTO_CURL_EXIT $endpoint $?"
+            if [ -s "/tmp/$endpoint.json" ]; then
+              python3 - "$endpoint" <<'PY'
+          import json,sys
+          name=sys.argv[1]
+          try:
+            x=json.load(open('/tmp/'+name+'.json'))
+            print('AUTO_DATA',name,json.dumps(x,default=str)[:17000])
+          except Exception as e:print('AUTO_PARSE_ERROR',name,str(e))
+          PY
+            fi
+          done
+          python3 - <<'PY'
+          import os,json,urllib.request,urllib.parse
+          url=f"https://api.cloudflare.com/client/v4/accounts/{os.environ['CLOUDFLARE_ACCOUNT_ID']}/storage/kv/namespaces/d110292129c94b26942c25d0c462a17b/values/"
+          for key in ['baseline-real-execution-test-v1','baseline-real-one-trade-v1']:
+            req=urllib.request.Request(url+urllib.parse.quote(key,safe=''),headers={'Authorization':'Bearer '+os.environ['CLOUDFLARE_API_TOKEN']})
+            try:
+              with urllib.request.urlopen(req,timeout=30) as r:d=json.load(r)
+              print('KV_AUTO_KEY',key,'keys',list(d))
+              for name in ['ledger','attempts','positions','queueHistory']:
+                v=d.get(name)
+                if isinstance(v,list):
+                  print('KV_AUTO_LIST',key,name,'COUNT',len(v))
+                  for row in v[-45:]:print('KV_AUTO_ROW',key,name,json.dumps(row,default=str)[:3000])
+              print('KV_AUTO_SUMMARY',key,json.dumps({k:v for k,v in d.items() if k in ['status','seriesId','armed','entryProviderStatus','entryProviderResponse','entryOrderId','entryClientOrderId','filledCount','exitOrderId','attemptsStarted']},default=str)[:5000])
+            except Exception as e:print('KV_AUTO_ERROR',key,str(e))
+          PY
