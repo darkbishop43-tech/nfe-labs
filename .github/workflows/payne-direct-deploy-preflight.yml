@@ -1,0 +1,29 @@
+name: PAYNE Direct Deployment Read-only Preflight
+on:
+  push:
+    branches: [payne-auto-direct-submission-isolated-20261012]
+    paths: [".github/workflows/payne-direct-deploy-preflight.yml"]
+permissions: {contents: read}
+jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Read current PAYNE state, exposure and Cloudflare deployment without writes
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          base=https://market-edge-payne-kalshi-real.darkbishop43.workers.dev
+          for endpoint in control real-state real-execution-observability; do
+            code=$(curl -sS --max-time 25 -o "/tmp/$endpoint.json" -w '%{http_code}' "$base/$endpoint") || { echo "READ_$endpoint=NETWORK_ERROR";continue; }
+            echo "READ_$endpoint=$code"
+          done
+          jq -c '{armed:.control.armed,openPositions:.control.openPositions,maxPositions:.control.maxPositions,attemptTarget:.control.attemptTarget}' /tmp/control.json
+          jq -c '{seriesId:.series.seriesId,status:.series.status,unresolvedEntry:.series.unresolvedEntry,latch:.series.fireLatch.state,providerPost:.series.fireLatch.providerPost,attemptStatus:.series.currentAttempt.status,writerInvoked:.series.currentAttempt.writerInvoked,providerPostStarted:.series.currentAttempt.providerPostStarted,positions:.series.positions,position:.series.position,updatedAt:.series.updatedAt}' /tmp/real-state.json
+          curl -fsS --max-time 25 -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/market-edge-payne-kalshi-real/deployments" -o /tmp/deploy.json
+          jq -c '[.result.deployments[]?|{id,versions:[.versions[]?|{version_id,percentage}]}]|.[:1]' /tmp/deploy.json
+          if jq -e '.control.armed==false and .control.openPositions==0' /tmp/control.json >/dev/null &&
+             jq -e '.series.unresolvedEntry==false and ((.series.positions//[])|length)==0 and (.series.position//null)==null and (.series.currentAttempt.providerPostStarted!=true) and ((.series.fireLatch.state//"NONE")|IN("LATCHED","PROVIDER_POST_PENDING","PROVIDER_POST_UNKNOWN")|not)' /tmp/real-state.json >/dev/null; then
+             echo 'READ_ONLY_PRELIMINARY_STATE_CLEAN'
+          else echo 'READ_ONLY_PRELIMINARY_STATE_NOT_CLEAN'; fi
