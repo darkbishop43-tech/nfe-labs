@@ -3864,7 +3864,21 @@ async function manageAllPayneRealPositions(env,control,series,postImpl,nowMs){
   return saveRealSeriesState(env,series);
 }
 
-export async function runPayneRealExecutionCycle(env,{postImpl=kalshiPayneOrderPost,nowMs=Date.now(),skipManagement=false}={}) {
+// Suppress overlapping entry cycles within this Worker isolate.
+// This is NOT a cross-isolate or distributed lock; KV remains non-atomic.
+const activePayneExecutionSeries=new Set();
+export async function runPayneRealExecutionCycle(env,options={}) {
+  const series=await loadRealSeriesState(env);
+  const identity=String(series?.seriesId||'UNIDENTIFIED_SERIES');
+  if(activePayneExecutionSeries.has(identity)) return loadRealSeriesState(env);
+  activePayneExecutionSeries.add(identity);
+  try {
+    return await runPayneRealExecutionCycleOwned(env,options);
+  } finally {
+    activePayneExecutionSeries.delete(identity);
+  }
+}
+async function runPayneRealExecutionCycleOwned(env,{postImpl=kalshiPayneOrderPost,nowMs=Date.now(),skipManagement=false}={}) {
   const executionStartMs=Date.now();
   let control=await loadControl(env);
   let series=await loadRealSeriesState(env);
