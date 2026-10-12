@@ -33,3 +33,45 @@ jobs:
       - name: Full PAYNE existing zero-money suite
         working-directory: market-edge-lab/real/payne-kalshi-real
         run: npm test
+      - name: Offline Android-sized PAYNE notification UX preview
+        working-directory: market-edge-lab/real/payne-kalshi-real/push-worker
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm install --no-save --no-package-lock playwright@1.56.1
+          npx playwright install chromium
+          node --input-type=module <<'JS'
+          import {chromium} from 'playwright';
+          import worker from './src/index.js';
+          import {cockpitHtml} from '../../src/cockpit-html.js';
+          const browser=await chromium.launch({headless:true,args:['--no-sandbox']});
+          try {
+            const page=await browser.newPage({viewport:{width:390,height:844}});
+            const cockpit=cockpitHtml();
+            await page.setContent(cockpit,{waitUntil:'domcontentloaded'});
+            const button=page.getByRole('button',{name:'Enable PAYNE-only Android notifications'});
+            await button.waitFor();
+            await button.scrollIntoViewIfNeeded();
+            await page.screenshot({path:'payne-push-cockpit-mobile.png',fullPage:false});
+            const href=await button.getAttribute('href');
+            if(!href?.includes('market-edge-payne-real-push.darkbishop43.workers.dev'))throw Error('PUSH_LINK_INCORRECT');
+            const req=new Request('https://payne.test/');
+            const res=await worker.fetch(req,{});
+            const pageHtml=await res.text();
+            await page.setContent(pageHtml,{waitUntil:'domcontentloaded'});
+            await page.getByRole('button',{name:'ENABLE NFE-OS NOTIFICATIONS'}).waitFor();
+            await page.screenshot({path:'payne-push-enrollment-mobile.png',fullPage:true});
+            const widths=await page.evaluate(()=>({viewport:innerWidth,document:document.documentElement.scrollWidth}));
+            console.log('PAYNE_PUSH_MOBILE_EVIDENCE',JSON.stringify({button:true,panel:true,...widths}));
+            if(widths.document>widths.viewport)throw Error('MOBILE_HORIZONTAL_OVERFLOW');
+          }finally{await browser.close()}
+          JS
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: payne-push-mobile-offline-preview
+          path: |
+            market-edge-lab/real/payne-kalshi-real/push-worker/payne-push-cockpit-mobile.png
+            market-edge-lab/real/payne-kalshi-real/push-worker/payne-push-enrollment-mobile.png
+          retention-days: 14
+          if-no-files-found: warn
