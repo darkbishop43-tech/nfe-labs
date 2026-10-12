@@ -77,7 +77,7 @@ test('F coordinator RESOLVE_ENTRY retains identity and proof requirements',async
   const f=fixture({...identity,claimState:'POTENTIALLY_SUBMITTED'});
   const resolve=body=>f.coordinator.fetch(new Request('https://coordinator.test/resolve',
     {method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({action:'RESOLVE_ENTRY',resolution:'NO_PROVIDER_EXECUTION',...body})}));
-  assert.equal((await (await resolve({...identity,ticker:'WRONG'})).json()).reason,'CLAIM_IDENTITY_MISMATCH');
+  assert.equal((await (await resolve({...identity,ticker:'WRONG'})).json()).reason,'CLAIM_DIFFERENT_IDENTITY');
   assert.equal((await (await resolve(identity)).json()).reason,'PROVIDER_NO_EXECUTION_EVIDENCE_REQUIRED');
   assert.equal(f.records.get('attempt:1').claimState,'POTENTIALLY_SUBMITTED');
 });
