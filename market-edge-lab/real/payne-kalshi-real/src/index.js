@@ -4277,7 +4277,8 @@ async function runPayneRealExecutionCycleOwned(env,{postImpl=kalshiPayneOrderPos
   await appendRealLedger(env,'ENTRY_PROVIDER_POST_STARTED',{seriesId,attemptId,intentNo,attemptNo,ticker:candidate.ticker,clientOrderId,writerInvoked:true,providerPostStarted:true,providerAttemptCounted:true,proof});
   await saveRealSeriesState(env,series);
 
-  const body=await response.json().catch(()=>({}));
+  let providerResponseReadable=true;
+  const body=await response.json().catch(()=>{providerResponseReadable=false;return {};});
   if(!response.ok){
     series.status='ENTRY_RECONCILIATION_REQUIRED';
     series.unresolvedEntry=true;
