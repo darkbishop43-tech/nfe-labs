@@ -2,7 +2,7 @@ name: PAYNE Direct Submission Pinned Offline Tests
 on:
   push:
     branches: [payne-auto-direct-submission-isolated-20261012]
-    paths: ['.github/workflows/payne-direct-pinned-offline-tests.yml', 'market-edge-lab/real/payne-kalshi-real/test/direct-positive-controller-offline.test.mjs']
+    paths: ['.github/workflows/payne-direct-pinned-offline-tests.yml', 'market-edge-lab/real/payne-kalshi-real/test/direct-positive-controller-offline.test.mjs', 'market-edge-lab/real/payne-kalshi-real/src/index.js']
 permissions:
   contents: read
 jobs:
@@ -26,7 +26,7 @@ jobs:
           set -euo pipefail
           echo "CHECKED_OUT_SHA=$(git rev-parse HEAD)"
           test "$(git rev-parse HEAD)" = "${{ github.sha }}"
-          git diff --exit-code 546bd4c56cc8a59ffea85c0844e9f3e050887188 HEAD -- market-edge-lab/real/payne-kalshi-real/src market-edge-lab/real/shared market-edge-lab/real/baseline
+          git diff --exit-code 546bd4c56cc8a59ffea85c0844e9f3e050887188 HEAD -- market-edge-lab/real/payne-kalshi-real/src/payne-paper-brain.js market-edge-lab/real/payne-kalshi-real/src/payne-kalshi-features.js market-edge-lab/real/payne-kalshi-real/src/kalshi-real-write.js market-edge-lab/real/shared market-edge-lab/real/baseline
           echo "TRADING_SOURCE_PIN=546bd4c56cc8a59ffea85c0844e9f3e050887188"
           node --version
           npm --version
