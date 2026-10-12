@@ -1,0 +1,38 @@
+name: Existing AUTO Push PAYNE Source Offline Only
+on:
+  push:
+    branches: [auto-existing-push-payne-source-offline-20261012]
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with: {fetch-depth: 0}
+      - uses: actions/setup-node@v4
+        with: {node-version: '22'}
+      - name: Verify only additive notification source files changed
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --name-only c78cd0332857d347ec5dae567b6dc4c93297c6ad HEAD > /tmp/changed.txt
+          cat /tmp/changed.txt
+          if grep -Ev '^market-edge-lab/real/baseline/(src/index.js|src/payne-real-notification-adapter.js|test/payne-real-notification-adapter.test.mjs)$|^\.github/workflows/auto-existing-push-payne-offline.yml$' /tmp/changed.txt; then exit 1; fi
+          node --check market-edge-lab/real/baseline/src/index.js
+          node --check market-edge-lab/real/baseline/src/payne-real-notification-adapter.js
+          grep -Fq 'PAYNE_REAL_PUSH_ROUTING_ENABLED==="TRUE"' market-edge-lab/real/baseline/src/index.js
+          grep -Fq 'dispatchExecutionNotifications(env)' market-edge-lab/real/baseline/src/index.js
+          grep -Fq 'notification:founder:subscription:v1' market-edge-lab/real/baseline/src/index.js
+          grep -Fq 'PAYNE_REAL_READ' market-edge-lab/real/baseline/wrangler.toml
+          echo EXISTING_AUTO_PUSH_PRESERVED=PASS
+      - name: Run additive PAYNE push adapter offline tests
+        working-directory: market-edge-lab/real/baseline
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --test test/payne-real-notification-adapter.test.mjs
+          npm install --ignore-scripts --no-audit --no-fund
+          npx wrangler deploy --dry-run --outdir /tmp/auto-payne-push-offline
+          echo ZERO_LIVE_DEPLOYMENT=PASS
