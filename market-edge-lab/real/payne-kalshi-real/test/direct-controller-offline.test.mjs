@@ -11,7 +11,7 @@ function fixture(series,control=defaultControlState()){
  const env={PAYNE_KALSHI_STATE:{
   get:async key=>values.get(key)??null,
   put:async(key,value)=>{values.set(key,String(value))},
-  list:async()=>({keys:[]})
+  list:async()=>({keys:[],list_complete:true})
  }};
  return {env,values,get writerCalls(){return writerCalls},
   postImpl:async()=>{writerCalls++;throw Error('OFFLINE_WRITER_MUST_NOT_BE_CALLED')}};
