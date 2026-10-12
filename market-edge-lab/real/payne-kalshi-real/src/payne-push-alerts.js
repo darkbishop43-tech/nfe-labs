@@ -26,7 +26,7 @@ export function classifyPayneRealAlert(event) {
   if (!category) return null;
   // Fail closed: a local plan, preview, or unconfirmed provider attempt
   // is insufficient proof of a filled or closed contract.
-  if (category==='FILLED' && !(event.entryOrderId || event.providerOrderId || event.position?.entryOrderId)) return null;
+  if (category==='FILLED' && (!(event.entryOrderId || event.providerOrderId || event.position?.entryOrderId) || !(Number(event.filledCount ?? event.position?.filledCount ?? event.result?.fillCount)>0))) return null;
   if(category==='ACCEPTED' && !(event.providerOrderId || event.result?.orderId))return null;
   if(category==='REJECTED' && !(Number.isInteger(event.httpStatus) && event.httpStatus>=400))return null;
   if(category==='FISH' && !(event.specimenId || event.attemptId))return null;
