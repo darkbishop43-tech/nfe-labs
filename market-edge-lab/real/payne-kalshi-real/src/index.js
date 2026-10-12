@@ -3867,13 +3867,21 @@ async function manageAllPayneRealPositions(env,control,series,postImpl,nowMs){
 // Suppress overlapping entry cycles within this Worker isolate.
 // This is NOT a cross-isolate or distributed lock; KV remains non-atomic.
 const activePayneExecutionSeries=new Set();
+const submittedPayneFireSpecimens=new Set();
 export async function runPayneRealExecutionCycle(env,options={}) {
   const series=await loadRealSeriesState(env);
   const identity=String(series?.seriesId||'UNIDENTIFIED_SERIES');
-  if(activePayneExecutionSeries.has(identity)) return loadRealSeriesState(env);
+  const specimen=series?.fireLatch?.specimenId;
+  const submitKey=specimen?identity+'|'+specimen:null;
+  if(activePayneExecutionSeries.has(identity) || (submitKey && submittedPayneFireSpecimens.has(submitKey)))
+    return loadRealSeriesState(env);
   activePayneExecutionSeries.add(identity);
   try {
-    return await runPayneRealExecutionCycleOwned(env,options);
+    const outcome=await runPayneRealExecutionCycleOwned(env,options);
+    const attempted=outcome?.currentAttempt;
+    if(submitKey && attempted?.fireSpecimenId===specimen && attempted?.providerPostStarted===true)
+      submittedPayneFireSpecimens.add(submitKey);
+    return outcome;
   } finally {
     activePayneExecutionSeries.delete(identity);
   }
