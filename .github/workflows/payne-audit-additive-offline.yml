@@ -1,0 +1,34 @@
+name: PAYNE Additive Execution Audit Offline Validation
+on:
+  push:
+    branches: [payne-execution-audit-additive-offline-20261012]
+    paths:
+      - 'market-edge-lab/real/payne-kalshi-real/**'
+      - '.github/workflows/payne-audit-additive-offline.yml'
+permissions: {contents: read}
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Validate syntax and offline regression tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd market-edge-lab/real/payne-kalshi-real
+          node --check src/index.js
+          node --check src/cockpit-html.js
+          node --check src/payne-execution-audit.js
+          npm test
+      - name: Confirm scoped source and no production deploy
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --name-only 4a4a6841e62eccb98c76bcf740b09c76935400bc HEAD
+          if git diff --name-only 4a4a6841e62eccb98c76bcf740b09c76935400bc HEAD | grep -E 'market-edge-lab/real/baseline/|payne-paper-brain.js|market-edge-lab/real/shared/'; then
+            echo 'PROTECTED_SOURCE_CHANGED'; exit 1
+          fi
+          echo OFFLINE_ONLY_NO_DEPLOYMENT
