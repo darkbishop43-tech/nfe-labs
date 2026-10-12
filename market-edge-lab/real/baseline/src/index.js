@@ -1,4 +1,5 @@
 import { sendPushNotification, topicFromString } from "@mmmike/web-push/send";
+import {dispatchPayneUsingExistingPush} from "./payne-real-notification-adapter.js";
 import { buildPhase1AShadowAttachment, freezePhase1ACheckpointDecision, authorizePhase1BContinuation, recordPhase1BAuthorizedObservation, freezePhase1BEndpointComparison, phase1AShadowFixtureProof, phase1BShadowFixtureProof } from "./phase1a-shadow.js";
 import { kalshiExecutionOrderPost } from "../../shared/kalshi-execution-write.js";
 import { persistCompletedLifecycle } from "../experiments/dynamic-management-zero-money.js";
@@ -4313,6 +4314,21 @@ export default {
       // Notification adapter is downstream/best-effort and cannot block or mutate trading.
       ctx.waitUntil(dispatchExecutionNotifications(env).catch(()=>{}));
       ctx.waitUntil(dispatchOnePaynePaperFishNotification(env).catch(()=>{}));
+      // PAYNE REAL is an additive notification source using the already enrolled
+      // Founder phone / VAPID sender. Feature off unless separately authorized.
+      if(env?.PAYNE_REAL_PUSH_ROUTING_ENABLED==="TRUE"){
+        ctx.waitUntil(dispatchPayneUsingExistingPush({
+          kv:env.BASELINE_REAL_SHADOW_STATE,
+          readLedger:async()=>{
+            const response=await env.PAYNE_REAL_READ.fetch(
+              new Request("https://market-edge-payne-kalshi-real.darkbishop43.workers.dev/real-ledger?limit=200",
+              {headers:{accept:"application/json"}}));
+            if(!response.ok)throw Error("PAYNE_LEDGER_READ_FAILED_"+response.status);
+            return response.json();
+          },
+          send:(eventId,payload)=>sendFounderPushBestEffort(env,eventId,payload)
+        }).catch(()=>{}));
+      }
 
       const traceState=await loadRealTradeState(env);
       const traceTestThreshold=Number(traceState?.founderAuthorization?.testEntryScore);
