@@ -1,0 +1,37 @@
+name: PAYNE Production KV Control Diagnostics
+on:
+  push:
+    branches: [payne-faithful-fire-handoff-20261011]
+    paths: [".github/workflows/payne-control-invariant-diagnostics.yml"]
+permissions: {contents: read}
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Authenticated GET-only exact gate control assertions
+        env:
+          CF_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CF_ACCOUNT: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          ns=03352b0ccb034f1bb8206f663a04b125
+          key=$(jq -nr --arg value 'payne-kalshi:control:v1' '$value|@uri')
+          url="https://api.cloudflare.com/client/v4/accounts/$CF_ACCOUNT/storage/kv/namespaces/$ns/values/$key"
+          code=$(curl -sS --max-time 25 -H "Authorization: Bearer $CF_TOKEN" -o /tmp/payne-control.json -w '%{http_code}' "$url")
+          echo "KV_CONTROL_HTTP=$code"
+          test "$code" = 200 || exit 1
+          jq -c '{
+            realControlSchema,armed,openPositions,requiredExchangeIndex,activeThreshold,attemptTarget,maxEntryDebitUsd,scanEnabled,maxPositions,
+            assertions:[
+              {field:"realControlSchema",actual:.realControlSchema,expected:"PAYNE_REAL_CONTROL_V2_PAPER_BRAIN",pass:(.realControlSchema=="PAYNE_REAL_CONTROL_V2_PAPER_BRAIN"),source:"existing gate"},
+              {field:"armed",actual:.armed,expected:false,pass:(.armed==false),source:"existing gate"},
+              {field:"openPositions",actual:.openPositions,expected:0,pass:(.openPositions==0),source:"existing gate"},
+              {field:"requiredExchangeIndex",actual:.requiredExchangeIndex,expected:2,pass:(.requiredExchangeIndex==2),source:"existing gate"},
+              {field:"activeThreshold",actual:.activeThreshold,expected:"number 0.50..1.00",pass:(.activeThreshold|type=="number" and .>=0.50 and .<=1),source:"existing gate"},
+              {field:"attemptTarget",actual:.attemptTarget,expected:"positive integer",pass:(.attemptTarget|type=="number" and .>=1 and .==floor),source:"existing gate"},
+              {field:"maxEntryDebitUsd",actual:.maxEntryDebitUsd,expected:"positive number",pass:(.maxEntryDebitUsd|type=="number" and .>0),source:"existing gate"},
+              {field:"scanEnabled",actual:.scanEnabled,expected:true,pass:(.scanEnabled==true),source:"existing gate"}
+            ]
+          }' /tmp/payne-control.json
+          echo 'GET_ONLY_NO_CONTROL_MUTATION'
