@@ -1,0 +1,79 @@
+name: Founder Authorized PAYNE V6 Pinned Production Installation
+on:
+  push:
+    branches: [payne-v6-prod-deploy-authorized-20261012]
+    paths: ['.github/workflows/payne-v6-founder-production-install.yml']
+permissions:
+  contents: read
+concurrency:
+  group: deploy-payne-kalshi-real-zero-money
+  cancel-in-progress: false
+jobs:
+  install:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 3b2394e9559a77c0f8106d462ae3e3a0d1d0b7c3
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Verify exact pinned validated build
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = 3b2394e9559a77c0f8106d462ae3e3a0d1d0b7c3
+          git diff --exit-code ed131c056a2f0b446a94c01af1554f11f9fa930a HEAD -- market-edge-lab/real/payne-kalshi-real/src/index.js market-edge-lab/real/payne-kalshi-real/src/payne-execution-coordinator.js
+          git diff --exit-code d5d92a39361c8eec464ff3b60c4d8f16e44bcbfd HEAD -- market-edge-lab/real/payne-kalshi-real/src/payne-paper-brain.js market-edge-lab/real/payne-kalshi-real/src/payne-kalshi-features.js market-edge-lab/real/payne-kalshi-real/src/kalshi-real-write.js market-edge-lab/real/baseline market-edge-lab/real/shared
+          grep -q '^name = "market-edge-payne-kalshi-real"$' market-edge-lab/real/payne-kalshi-real/wrangler.toml
+          node --check market-edge-lab/real/payne-kalshi-real/src/index.js
+          echo PINNED_SOURCE_PASSED
+      - name: Verify current Founder control and retain original state snapshot
+        shell: bash
+        run: |
+          set -euo pipefail
+          base='https://market-edge-payne-kalshi-real.darkbishop43.workers.dev'
+          curl --fail --show-error --silent --max-time 25 "$base/control" -o /tmp/payne-pre-control.json
+          curl --fail --show-error --silent --max-time 25 "$base/real-state" -o /tmp/payne-pre-state.json
+          jq -e '.ok==true and .control.armed==false and .control.openPositions==0' /tmp/payne-pre-control.json
+          jq -e '.ok==true and .control.armed==false and .series.unresolvedEntry==true' /tmp/payne-pre-state.json
+          echo FOUNDER_DISARM_AND_HISTORICAL_STATE_READ=PASS
+      - name: Verify authenticated Kalshi exposure before software installation
+        shell: bash
+        run: |
+          set -euo pipefail
+          base='https://market-edge-payne-kalshi-real.darkbishop43.workers.dev'
+          curl --fail --show-error --silent --max-time 35 "$base/proof" -o /tmp/payne-provider-proof.json
+          jq -e '.kalshi.authenticatedGet=="PROVEN"' /tmp/payne-provider-proof.json
+          # Existing /proof verifies balance/market GET, not account-wide orders,
+          # positions, active submissions or coordinator claim safety.
+          # No current approved endpoint exposes complete account-wide evidence.
+          echo 'BLOCKED: AUTHENTICATED_ACCOUNT_WIDE_PROVIDER_EXPOSURE_READ_UNAVAILABLE'
+          exit 42
+      - name: Execute Wrangler installation only after verified exposure
+        working-directory: market-edge-lab/real/payne-kalshi-real
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          npx --yes wrangler@4 deploy | tee /tmp/payne-v6-install.txt
+          grep 'Current Version ID:' /tmp/payne-v6-install.txt
+      - name: Read back control and state after deployment
+        shell: bash
+        run: |
+          set -euo pipefail
+          base='https://market-edge-payne-kalshi-real.darkbishop43.workers.dev'
+          curl --fail --silent --show-error "$base/control" -o /tmp/payne-post-control.json
+          curl --fail --silent --show-error "$base/real-state" -o /tmp/payne-post-state.json
+          jq -e '.ok==true and .control.armed==false' /tmp/payne-post-control.json
+          jq -S '.control' /tmp/payne-pre-control.json > /tmp/pre.json
+          jq -S '.control' /tmp/payne-post-control.json > /tmp/post.json
+          cmp /tmp/pre.json /tmp/post.json
+          jq -S '.series' /tmp/payne-pre-state.json > /tmp/series-pre.json
+          jq -S '.series' /tmp/payne-post-state.json > /tmp/series-post.json
+          cmp /tmp/series-pre.json /tmp/series-post.json
+          echo CONTROL_AND_HISTORICAL_SERIES_PRESERVED
