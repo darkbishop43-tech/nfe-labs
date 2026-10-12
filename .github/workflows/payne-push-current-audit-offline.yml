@@ -1,0 +1,88 @@
+name: PAYNE Push Current Audit Offline Integration
+on:
+  push:
+    branches: [payne-push-current-audit-integration-offline-20261012]
+permissions: {contents: read}
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with: {fetch-depth: 0}
+      - uses: actions/setup-node@v4
+        with: {node-version: '22'}
+      - name: Verify no protected source changes and current cockpit preserved
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --name-only 66cedcadda4b02ac378d630c8f70764d8c2be060 HEAD
+          if git diff --name-only 66cedcadda4b02ac378d630c8f70764d8c2be060 HEAD | grep -E 'market-edge-lab/real/baseline/|payne-paper-brain.js|kalshi-real-write.js|market-edge-lab/real/shared/'; then exit 1; fi
+          node --input-type=module <<'JS'
+          import {cockpitHtml} from './market-edge-lab/real/payne-kalshi-real/src/cockpit-html.js';
+          const h=cockpitHtml();
+          for(const x of ['PAYNE EXECUTION AUDIT','LIVE ORDER WATCH','PAYNE PUSH','id="arm"','id="disarm"'])if(!h.includes(x))throw Error('MISSING_COCKPIT_COMPONENT '+x);
+          console.log('CURRENT_COCKPIT_ADD_ONLY=PASS');
+          JS
+      - name: Test integrated PAYNE and isolated push worker
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd market-edge-lab/real/payne-kalshi-real
+          npm test
+          cd push-worker
+          npm install --ignore-scripts --no-audit --no-fund
+          npm test
+          npx wrangler deploy --dry-run --outdir /tmp/payne-push-dry-run
+          echo 'DRY_RUN_ONLY_NO_DEPLOYMENT'
+      - name: Existing PAYNE VAPID binding readiness (names only)
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          PAYNE_PUBLIC: ${{ secrets.PAYNE_PUSH_VAPID_PUBLIC_KEY }}
+          PAYNE_PRIVATE: ${{ secrets.PAYNE_PUSH_VAPID_PRIVATE_KEY }}
+          PAYNE_ENROLL: ${{ secrets.PAYNE_PUSH_ENROLL_TOKEN }}
+        run: |
+          set -euo pipefail
+          for name in CLOUDFLARE_API_TOKEN CLOUDFLARE_ACCOUNT_ID PAYNE_PUBLIC PAYNE_PRIVATE PAYNE_ENROLL; do
+            if [ -n "${!name:-}" ]; then echo "BINDING_PRESENT=$name"; else echo "BINDING_MISSING=$name"; fi
+          done
+      - name: Browser preview current cockpit and existing enrollment page
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd market-edge-lab/real/payne-kalshi-real/push-worker
+          npm install --no-save --no-package-lock playwright@1.56.1
+          npx playwright install chromium
+          node --input-type=module <<'JS'
+          import {chromium} from 'playwright';
+          import {cockpitHtml} from '../src/cockpit-html.js';
+          import push from './src/index.js';
+          const browser=await chromium.launch({headless:true,args:['--no-sandbox']});
+          try{
+            const page=await browser.newPage({viewport:{width:390,height:844}});
+            await page.setContent(cockpitHtml(),{waitUntil:'domcontentloaded'});
+            for(const x of ['PAYNE EXECUTION AUDIT','PAYNE PUSH','LIVE ORDER WATCH'])if(!await page.locator('body').textContent().then(t=>t.includes(x)))throw Error('PANEL_MISSING '+x);
+            await page.getByRole('button',{name:'Enable PAYNE-only Android notifications'}).scrollIntoViewIfNeeded();
+            await page.screenshot({path:'payne-integrated-cockpit-mobile.png'});
+            const html=await(await push.fetch(new Request('https://payne.example/'),{})).text();
+            await page.setContent(html,{waitUntil:'domcontentloaded'});
+            const errs=[];page.on('pageerror',e=>errs.push(e.message));
+            const button=page.getByRole('button',{name:'ENABLE NFE-OS NOTIFICATIONS'});
+            await button.waitFor();
+            await page.screenshot({path:'payne-integrated-enrollment-mobile.png'});
+            const w=await page.evaluate(()=>({viewport:innerWidth,scroll:document.documentElement.scrollWidth}));
+            console.log('MOBILE_READINESS',JSON.stringify({...w,enrollmentButton:true,jsErrors:errs}));
+            if(w.scroll>w.viewport||errs.length)throw Error('MOBILE_PREVIEW_FAILED');
+          }finally{await browser.close()}
+          JS
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: payne-push-current-audit-mobile-preview
+          path: |
+            market-edge-lab/real/payne-kalshi-real/push-worker/payne-integrated-cockpit-mobile.png
+            market-edge-lab/real/payne-kalshi-real/push-worker/payne-integrated-enrollment-mobile.png
+          retention-days: 14
+          if-no-files-found: warn
