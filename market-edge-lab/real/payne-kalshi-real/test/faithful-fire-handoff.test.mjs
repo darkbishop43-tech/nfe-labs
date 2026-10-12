@@ -51,10 +51,14 @@ test('PAYNE-authorized exact side and ticker persisted in attempt',()=>{
  assert.match(cycle,/score:finalFeature\.score/);
  assert.match(cycle,/finalFeatureRequalification:'ORIGINAL_FIRE_PRESERVED'/);
 });
-test('atomic claim precedes provider writer and protects duplicate',()=>{
- assert.ok(cycle.indexOf('claimPayneExecution(env,entryClaimIdentity)')<cycle.indexOf("postImpl(env,'ENTRY'"));
- assert.match(cycle,/if\(ownership\.granted!==true\)/);
- assert.match(coord,/if\(prior\) return \{granted:false,reason:'ATTEMPT_ALREADY_CLAIMED'/);
+test('AUTO-style direct entry has durable SUBMITTING before shared writer',()=>{
+ const direct=cycle.slice(cycle.indexOf('// AUTO-style direct submission:'),cycle.indexOf("postImpl(env,'ENTRY'"));
+ assert.match(direct,/executionHandoff:'DIRECT_KALSHI_WRITER_V1'/);
+ assert.match(direct,/status:'SUBMITTING'/);
+ assert.match(direct,/await persistAttempt\(env,/);
+ assert.match(direct,/await saveRealSeriesState\(env,series\)/);
+ assert.doesNotMatch(direct,/claimPayneExecution\(/);
+ assert.match(cycle,/postImpl\(env,'ENTRY'/);
 });
 test('provider writer shared mechanical primitive and IOC is preserved',()=>{
  assert.match(writer,/kalshiExecutionOrderPost\(env,payload/);
@@ -71,7 +75,7 @@ test('live result and no-provider results retain distinct accounting',()=>{
  assert.match(src,/FILLED/);
 });
 test('multi-position capacity and read-only watch retained',()=>{
- assert.match(coord,/occupied>=maxPositions/);
+ assert.match(src,/seriesInterlock\(series,control\.maxPositions\)/);
  assert.match(watch,/occupied\.length<cap/);
  assert.match(watch,/providerWrites:0,ordersSubmitted:0/);
 });
