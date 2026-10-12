@@ -14,7 +14,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ed131c056a2f0b446a94c01af1554f11f9fa930a
+          ref: ca47712bd3363f62ec35d22147b97f7f9d34a70d
           fetch-depth: 0
           persist-credentials: false
       - uses: actions/setup-node@v4
@@ -24,7 +24,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test "$(git rev-parse HEAD)" = "ed131c056a2f0b446a94c01af1554f11f9fa930a"
+          test "$(git rev-parse HEAD)" = "ca47712bd3363f62ec35d22147b97f7f9d34a70d"
+          git diff --exit-code ed131c056a2f0b446a94c01af1554f11f9fa930a HEAD -- market-edge-lab/real/payne-kalshi-real/src/index.js market-edge-lab/real/payne-kalshi-real/src/payne-execution-coordinator.js
           git diff --exit-code d5d92a39361c8eec464ff3b60c4d8f16e44bcbfd HEAD -- market-edge-lab/real/payne-kalshi-real/src/payne-paper-brain.js market-edge-lab/real/payne-kalshi-real/src/payne-kalshi-features.js market-edge-lab/real/payne-kalshi-real/src/kalshi-real-write.js market-edge-lab/real/baseline market-edge-lab/real/shared
           node --check market-edge-lab/real/payne-kalshi-real/src/index.js
           node --check market-edge-lab/real/payne-kalshi-real/src/payne-execution-coordinator.js
