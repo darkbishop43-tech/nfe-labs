@@ -3303,6 +3303,23 @@ async function reconcileAtomicEntryAuthority(env,series,attempt,resolution,{flat
   if(!identity.seriesId||!Number.isSafeInteger(identity.attemptNo)||!identity.specimenId||
      !identity.clientOrderId||!identity.ticker||!identity.side||!identity.windowClose)
     return {ok:false,reason:'ATOMIC_RECONCILIATION_IDENTITY_INCOMPLETE'};
+  // Legacy collision recovery: exact provider order/fill/position/settlement
+  // absence has already been established by reconcileUnresolvedEntryFromProvider.
+  // Never mutate a coordinator claim owned by a different FIRE specimen.
+  if(resolution==='NO_PROVIDER_EXECUTION' && noExecution===true &&
+     attempt?.writerInvoked===false && attempt?.providerPostStarted===false &&
+     !attempt?.providerOrderId) {
+    const inspection=await inspectPayneCoordinatorClaim(env,identity.seriesId,identity.attemptNo);
+    if(!inspection.ok)return {ok:false,reason:inspection.reason||'LEGACY_CLAIM_INSPECTION_UNAVAILABLE'};
+    if(inspection.status==='NOT_FOUND')
+      return {ok:true,legacyNoClaim:true,reason:'LEGACY_CLAIM_NOT_FOUND_PROVIDER_NO_EXECUTION_PROVEN'};
+    if(inspection.status==='FOUND'){
+      const claim=inspection.claim;
+      const same=claim && ['seriesId','specimenId','clientOrderId','ticker','side','windowClose']
+        .every(field=>claim[field]===identity[field]);
+      if(!same)return {ok:true,legacyDifferentClaimPreserved:true,reason:'LEGACY_DIFFERENT_CLAIM_PRESERVED_PROVIDER_NO_EXECUTION_PROVEN'};
+    }
+  }
   const proof=await resolvePayneExecutionClaim(env,identity,resolution,{
     providerFlatProven:flat,providerNoExecutionProven:noExecution,
     authoritativeReconciliationProven:true
