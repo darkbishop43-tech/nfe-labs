@@ -1,0 +1,48 @@
+# PAYNE V6 MAINTENANCE-ONLY PREFLIGHT PROPOSAL
+# REVIEW ONLY. NOT A DEPLOYMENT AUTHORIZATION.
+# Exact source: 3b2394e9559a77c0f8106d462ae3e3a0d1d0b7c3
+# Gate baseline: 621a0f9fb237cd9defb420605dd5c384489a84bb
+#
+# This file deliberately does not replace the existing production safety gate.
+# It documents the minimum, narrowly scoped historical-terminal condition
+# change needed for code-only installation and the additional exposure proof
+# that must be implemented/validated before activation.
+#
+# Existing gate conditions to retain:
+# - Verified PAYNE_CONTROL_V2 schema; armed=false, openPositions=0,
+#   requiredExchangeIndex=2, scanEnabled=true, numerical checks.
+# - PAYNE_REAL_SERIES_V1 schema, owner, index checks.
+# - Position ownership checks; reject active provider-post latches.
+# - Pre/post matching of Founder control fingerprint and series state.
+# - Fresh scheduler heartbeat, source SCHEDULED_CRON.
+# - Fail closed on unknown claim, submission or provider exposure.
+#
+# ORIGINAL condition (in verify_safety jq):
+# (.unresolvedEntry==false or
+#   (.unresolvedEntry==true and $c[0].armed==false and
+#    (.currentAttempt.status//""|IN("NO_PROVIDER_EXECUTION","PROVIDER_RECONCILED_NO_EXECUTION")) and
+#    (.currentAttempt.reconciliationReason//""|IN("PROVIDER_RECONCILED_NO_EXECUTION"))))
+#
+# PROPOSED MAINTENANCE-ONLY exception, NOT FOR ARM:
+# If unresolvedEntry=true with nonterminal classification, allow CODE INSTALL
+# ONLY WHEN ALL following independently hold:
+# - Founder remains DISARMED and no PAYNE-owned position exists
+# - seriesId is exactly 367facf0-a0ab-4361-99b6-0dbe4c786660
+# - currentAttempt.attemptId is exactly
+#   367facf0-a0ab-4361-99b6-0dbe4c786660-intent-1
+# - currentAttempt.marketTicker is exactly KXZEC15M-26OCT112315-15
+# - currentAttempt.clientOrderId is exactly payne-real-0dbe4c786660-1-entry
+# - writerInvoked is false; providerPostStarted is false; order ID is null
+# - fireLatch.state is PRE_PROVIDER_VALIDATION and providerPost is NOT_STARTED
+# - historical series is not mutated, classified, reset, or released
+# - independently authenticated Kalshi orders, fills, settlements, positions
+#   AND account-wide outstanding exposure verification is COMPLETE/CLEAN
+#   immediately before install; missing/incomplete evidence FAILS CLOSED.
+#
+# As of preparation: independently authenticated exposure proof is NOT
+# available in this workflow and the Durable Object claim remains unread.
+# Therefore this proposal intentionally does not implement an executable
+# bypass. Do not deploy on this file alone.
+#
+# IMPORTANT: a code install does NOT clear unresolvedEntry and does NOT arm.
+# The separate, explicit Founder authorization to deploy remains mandatory.
