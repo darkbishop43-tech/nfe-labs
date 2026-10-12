@@ -52,7 +52,7 @@ function createFixture(kind='FILLED',opts={}){
   PAYNE_KALSHI_STATE:{
    get:async k=>state.get(k)||null,
    put:async(k,v)=>{state.set(k,String(v))},
-   list:async({prefix})=>({keys:[...state.keys()].filter(k=>k.startsWith(prefix)).map(name=>({name}))})
+   list:async({prefix})=>({keys:[...state.keys()].filter(k=>k.startsWith(prefix)).map(name=>({name})),list_complete:true})
   }};
  const execute=async()=>{
   globalThis.fetch=provider;
