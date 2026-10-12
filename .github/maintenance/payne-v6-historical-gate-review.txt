@@ -1,48 +1,51 @@
-# PAYNE V6 MAINTENANCE-ONLY PREFLIGHT PROPOSAL
-# REVIEW ONLY. NOT A DEPLOYMENT AUTHORIZATION.
-# Exact source: 3b2394e9559a77c0f8106d462ae3e3a0d1d0b7c3
-# Gate baseline: 621a0f9fb237cd9defb420605dd5c384489a84bb
-#
-# This file deliberately does not replace the existing production safety gate.
-# It documents the minimum, narrowly scoped historical-terminal condition
-# change needed for code-only installation and the additional exposure proof
-# that must be implemented/validated before activation.
-#
-# Existing gate conditions to retain:
-# - Verified PAYNE_CONTROL_V2 schema; armed=false, openPositions=0,
-#   requiredExchangeIndex=2, scanEnabled=true, numerical checks.
-# - PAYNE_REAL_SERIES_V1 schema, owner, index checks.
-# - Position ownership checks; reject active provider-post latches.
-# - Pre/post matching of Founder control fingerprint and series state.
-# - Fresh scheduler heartbeat, source SCHEDULED_CRON.
-# - Fail closed on unknown claim, submission or provider exposure.
-#
-# ORIGINAL condition (in verify_safety jq):
-# (.unresolvedEntry==false or
-#   (.unresolvedEntry==true and $c[0].armed==false and
-#    (.currentAttempt.status//""|IN("NO_PROVIDER_EXECUTION","PROVIDER_RECONCILED_NO_EXECUTION")) and
-#    (.currentAttempt.reconciliationReason//""|IN("PROVIDER_RECONCILED_NO_EXECUTION"))))
-#
-# PROPOSED MAINTENANCE-ONLY exception, NOT FOR ARM:
-# If unresolvedEntry=true with nonterminal classification, allow CODE INSTALL
-# ONLY WHEN ALL following independently hold:
-# - Founder remains DISARMED and no PAYNE-owned position exists
-# - seriesId is exactly 367facf0-a0ab-4361-99b6-0dbe4c786660
-# - currentAttempt.attemptId is exactly
-#   367facf0-a0ab-4361-99b6-0dbe4c786660-intent-1
-# - currentAttempt.marketTicker is exactly KXZEC15M-26OCT112315-15
-# - currentAttempt.clientOrderId is exactly payne-real-0dbe4c786660-1-entry
-# - writerInvoked is false; providerPostStarted is false; order ID is null
-# - fireLatch.state is PRE_PROVIDER_VALIDATION and providerPost is NOT_STARTED
-# - historical series is not mutated, classified, reset, or released
-# - independently authenticated Kalshi orders, fills, settlements, positions
-#   AND account-wide outstanding exposure verification is COMPLETE/CLEAN
-#   immediately before install; missing/incomplete evidence FAILS CLOSED.
-#
-# As of preparation: independently authenticated exposure proof is NOT
-# available in this workflow and the Durable Object claim remains unread.
-# Therefore this proposal intentionally does not implement an executable
-# bypass. Do not deploy on this file alone.
-#
-# IMPORTANT: a code install does NOT clear unresolvedEntry and does NOT arm.
-# The separate, explicit Founder authorization to deploy remains mandatory.
+PAYNE V6 GENERIC DISARMED MAINTENANCE GATE PROPOSAL
+REVIEW ONLY — NOT ACTIVE PRODUCTION GATE
+
+VALIDATED SOURCE PIN:
+3b2394e9559a77c0f8106d462ae3e3a0d1d0b7c3
+
+Existing gate:
+.github/scripts/payne-kv-deployment-safety.sh
+Source revision 621a0f9fb237cd9defb420605dd5c384489a84bb
+
+PROPOSED GENERIC DIFFERENCE:
+
+The existing verify_safety jq expression requires any unresolvedEntry
+to have a terminal NO_PROVIDER_EXECUTION status and reason. For an explicitly
+authorized disarmed CODE MAINTENANCE operation ONLY, remove that terminality
+requirement from *software installation eligibility*, without editing
+historical state or changing live execution/ARM interlocks.
+
+Do NOT add any ticker, client order ID, series ID, or attempt-specific gate.
+Do NOT reclassify UNKNOWN. Do NOT clear unresolvedEntry.
+
+The maintenance preflight must fail closed unless ALL are proven:
+1. Founder persisted control armed=false, openPositions=0, valid schema,
+   required index and unchanged approved control values.
+2. Exact source SHA pinned and protected trading files verified.
+3. No owned active position or provider-submitting fire latch.
+4. An unresolved PRE_PROVIDER_VALIDATION latch is allowed for code
+   installation only when writerInvoked===false,
+   providerPostStarted===false, providerOrderId==null and
+   fireLatch.providerPost==='NOT_STARTED'.
+5. Existing authenticated Kalshi account-wide order, fill and position
+   reads complete successfully with no active/in-flight obligations
+   or unmanaged exposure. Unknown/incomplete reads BLOCK installation.
+6. Current coordinator obligations remain guarded; an unknown Durable
+   Object claim must not be treated as absent or cleared.
+7. Current live Founder control read confirms DISARMED immediately
+   before and after installation.
+8. KV control/series snapshots and source configuration must match
+   before/after installation, except documented scheduler heartbeat.
+9. Version/traffic readback must confirm the exact installed build.
+
+The existing script checks KV but has no authenticated Kalshi account-wide
+exposure proof or coordinator claim inspection. Therefore simply replacing
+the historical terminal predicate in that script is INSUFFICIENT.
+
+The normal ARM/live entry guard, exposure reconciliation, and provider
+writer contracts are never changed by this proposed maintenance exception.
+
+NO LIVE GATE PATCH OR INSTALLATION HAS BEEN PREPARED HERE.
+A separately reviewed executable gate and authenticated provider
+exposure read are mandatory before any Founder-approved installation.
