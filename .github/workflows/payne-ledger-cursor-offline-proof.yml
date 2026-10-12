@@ -1,0 +1,39 @@
+name: PAYNE Real Ledger Cursor Offline Proof
+on:
+  push:
+    branches: [payne-real-ledger-cursor-read-offline-20261012]
+permissions:
+  contents: read
+jobs:
+  proof:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Validate read-only ledger pagination and existing PAYNE tests
+        working-directory: market-edge-lab/real/payne-kalshi-real
+        run: |
+          set -euo pipefail
+          npm test
+          node --check src/index.js
+          echo OFFLINE_ONLY_NO_DEPLOYMENT=PASS
+      - name: Read-only production time-gate snapshot
+        shell: bash
+        run: |
+          set -euo pipefail
+          url='https://market-edge-payne-kalshi-real.darkbishop43.workers.dev'
+          for path in real-state 'real-history?view=audit'; do
+            code=$(curl -sS --max-time 25 -o /tmp/payne-read.json -w '%{http_code}' "$url/$path")
+            echo "PAYNE_READ_ENDPOINT=$path HTTP=$code"
+            if [[ "$code" != 200 ]];then continue;fi
+            jq -c '{
+              seriesId:(.series.seriesId//.seriesId//null),
+              seriesStatus:(.series.status//null),
+              currentAttempt:(.series.currentAttempt|if type=="object" then {attemptId,attemptNo,ticker,createdAt,at,fireAt,providerSubmitStartedAt,providerPostStarted,providerOrderId,terminalClassification,status,closeTime} else null end),
+              latch:(.series.fireLatch|if type=="object" then {specimenId,attemptNo,ticker,marketOpenTime,marketCloseTime,latchedAt,invalidatedAt,invalidationReason,freshLockAt,preSubmitAt,state} else null end),
+              attemptedAudit:(.attempts|if type=="array" then map({attemptId,attemptNo,ticker,fireAt,createdAt,providerSubmitStartedAt,terminalClassification})|.[-3:] else null end)
+            }' /tmp/payne-read.json
+          done
