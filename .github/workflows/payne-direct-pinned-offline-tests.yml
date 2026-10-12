@@ -15,6 +15,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: payne-auto-direct-submission-isolated-20261012
+          fetch-depth: 0
           persist-credentials: false
       - uses: actions/setup-node@v4
         with:
