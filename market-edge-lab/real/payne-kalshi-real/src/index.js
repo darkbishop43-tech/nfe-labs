@@ -4518,13 +4518,20 @@ export default {
     if (url.pathname === '/real-ledger') {
       const requested=Number(url.searchParams.get('limit')||200);
       const seriesId=String(url.searchParams.get('seriesId')||'').trim();
-      const result=await listRealLedgerWithEvidence(env,requested);
-      let rows=result.rows;
-      if(seriesId) rows=rows.filter(x=>String(x?.seriesId||'')===seriesId);
-      return Response.json({ok:true,schema:'PAYNE_REAL_LEDGER_EXPORT_V1',readOnly:true,
-        complete:result.complete,scannedKeys:result.scannedKeys,omittedOlderKeys:result.omittedOlderKeys,
-        seriesId:seriesId||null,count:rows.length,rows,
-        providerWrites:0,ordersSubmittedByThisRead:0,capitalMovedUsd:0},{headers:{'cache-control':'no-store'}});
+      try {
+        const result=await listRealLedgerWithEvidence(env,requested);
+        let rows=result.rows;
+        if(seriesId) rows=rows.filter(x=>String(x?.seriesId||'')===seriesId);
+        return Response.json({ok:true,schema:'PAYNE_REAL_LEDGER_EXPORT_V1',readOnly:true,
+          complete:result.complete,scannedKeys:result.scannedKeys,omittedOlderKeys:result.omittedOlderKeys,
+          seriesId:seriesId||null,count:rows.length,rows,
+          providerWrites:0,ordersSubmittedByThisRead:0,capitalMovedUsd:0},{headers:{'cache-control':'no-store'}});
+      } catch(error) {
+        return Response.json({ok:false,schema:'PAYNE_REAL_LEDGER_EXPORT_V1',readOnly:true,
+          complete:false,error:String(error?.message||'PAYNE_LEDGER_READ_INCOMPLETE'),
+          providerWrites:0,ordersSubmittedByThisRead:0,capitalMovedUsd:0},
+          {status:503,headers:{'cache-control':'no-store'}});
+      }
     }
     if (url.pathname === '/real-history') {
       try{
