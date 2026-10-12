@@ -1,5 +1,5 @@
 import {liveOrderWatchProjection,paynePositionRecords,payneCapacityEvidence,upsertPaynePosition,unresolvedPaynePositions} from './payne-live-order-watch.js';
-import {PayneExecutionCoordinator,claimPayneExecution,releaseProvenNoPost,resolvePayneExecutionClaim,claimPayneExit} from './payne-execution-coordinator.js';
+import {PayneExecutionCoordinator,claimPayneExecution,releaseProvenNoPost,resolvePayneExecutionClaim,claimPayneExit,inspectPayneCoordinatorClaim} from './payne-execution-coordinator.js';
 export {PayneExecutionCoordinator};
 import { kalshiReadOnlyProof, kalshiGetOnly } from './kalshi-get-only.js';
 import { kalshiPayneOrderPost, PAYNE_WRITE_CONTRACT } from './kalshi-real-write.js';
@@ -4325,6 +4325,49 @@ export default {
 
     if (request.method !== 'GET') return Response.json({ ok:false, reason:'GET_ONLY_PROVIDER_AUTHORITY / CONTROL_POSTS_LOCAL_ONLY' }, { status:405 });
 
+    if (url.pathname === '/internal/atomic-claim-diagnostic') {
+      // Fail closed unless a separate encrypted, non-trading diagnostic secret
+      // has explicitly been provisioned. Never reflect or log the supplied token.
+      const secret=env?.PAYNE_COORDINATOR_DIAGNOSTIC_TOKEN;
+      const supplied=request.headers.get('x-payne-diagnostic-token');
+      if(typeof secret!=='string'||secret.length<32||typeof supplied!=='string'||supplied.length!==secret.length)
+        return Response.json({ok:false,status:'UNAUTHORIZED'},{status:403,headers:{'cache-control':'no-store'}});
+      const [expectedHash,receivedHash]=await Promise.all([
+        crypto.subtle.digest('SHA-256',new TextEncoder().encode(secret)),
+        crypto.subtle.digest('SHA-256',new TextEncoder().encode(supplied))
+      ]);
+      const expectedBytes=new Uint8Array(expectedHash),receivedBytes=new Uint8Array(receivedHash);
+      let difference=0;
+      for(let i=0;i<expectedBytes.length;i++)difference|=expectedBytes[i]^receivedBytes[i];
+      if(difference!==0)
+        return Response.json({ok:false,status:'UNAUTHORIZED'},{status:403,headers:{'cache-control':'no-store'}});
+      const series=await loadRealSeriesState(env);
+      const attempt=series?.currentAttempt;
+      const seriesId=String(url.searchParams.get('seriesId')||'');
+      const attemptNo=Number(url.searchParams.get('attemptNo'));
+      if(!series||series.seriesId!==seriesId||!attempt||!Number.isSafeInteger(attemptNo)||attemptNo<1||
+         attemptNo!==Number(attempt.providerAttemptNoCandidate||attempt.providerAttemptNo||attempt.attemptNo))
+        return Response.json({ok:false,status:'NOT_CURRENT_SPECIMEN'},{status:404,headers:{'cache-control':'no-store'}});
+      const expected={
+        seriesId:series.seriesId,attemptNo,
+        specimenId:series.fireLatch?.specimenId||attempt.fireSpecimenId,
+        clientOrderId:attempt.clientOrderId,
+        ticker:attempt.marketTicker,side:attempt.outcomeSide,
+        windowClose:series.fireLatch?.marketCloseTime||attempt.marketCloseTime
+      };
+      const observation=await inspectPayneCoordinatorClaim(env,seriesId,attemptNo);
+      const actual=observation?.claim||null;
+      const identityFields=['seriesId','attemptNo','specimenId','clientOrderId','ticker','side','windowClose'];
+      const mismatches=actual?identityFields.filter(field=>actual[field]!==expected[field]):[];
+      return Response.json({
+        ok:observation?.ok===true,status:observation?.status||'ERROR',
+        exists:observation?.exists??null,
+        expected,claim:actual,
+        mismatchedFields:mismatches,
+        reason:observation?.reason||null,
+        readOnly:true,providerWrites:0
+      },{status:observation?.ok===true?200:500,headers:{'cache-control':'no-store'}});
+    }
     if (url.pathname === '/status') return Response.json(step1Status());
     if (url.pathname === '/control') {
       const control=await loadControl(env);
