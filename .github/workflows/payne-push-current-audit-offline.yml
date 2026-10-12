@@ -33,6 +33,9 @@ jobs:
           cd push-worker
           npm install --ignore-scripts --no-audit --no-fund
           npm test
+          grep -Fq 'crons = ["* * * * *"]' wrangler.toml
+          grep -Fq 'PAYNE_PUSH_DISPATCH_ENABLED = "FALSE"' wrangler.toml
+          grep -q "PAYNE_PUSH_DISPATCH_ENABLED!=='TRUE'" src/index.js
           npx wrangler deploy --dry-run --outdir /tmp/payne-push-dry-run
           echo 'DRY_RUN_ONLY_NO_DEPLOYMENT'
       - name: Existing PAYNE VAPID binding readiness (names only)
