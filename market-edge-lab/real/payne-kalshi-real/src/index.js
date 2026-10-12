@@ -3290,6 +3290,7 @@ async function reconcileAtomicEntryAuthority(env,series,attempt,resolution,{flat
   // Historical pre-coordinator PAYNE attempts have no Durable Object claim.
   // Preserve those records without inventing claim identity or releasing slots.
   // Prefer durable fireLatch identity (matches coordinator claim) over attempt snapshot.
+  if(attempt?.executionHandoff==='DIRECT_KALSHI_WRITER_V1') return {ok:true,direct:true};
   const specimenId=series?.fireLatch?.specimenId||attempt?.fireSpecimenId;
   const windowClose=series?.fireLatch?.marketCloseTime||attempt?.marketCloseTime;
   if(!attempt?.fireSpecimenId && !attempt?.marketCloseTime)return {ok:true,legacy:true};
@@ -4087,24 +4088,21 @@ export async function runPayneRealExecutionCycle(env,{postImpl=kalshiPayneOrderP
     return saveRealSeriesState(env,series);
   }
 
-  // Atomic cross-instance claim belongs to the persisted attempt number, not
-  // merely the specimen. Never retry an ambiguous/previously claimed POST.
-  const entryClaimIdentity={
-    seriesId,attemptNo:providerAttemptNoCandidate,
-    specimenId:series.fireLatch?.specimenId,
-    clientOrderId,ticker:candidate.ticker,side:candidate.outcomeSide,
-    windowClose:candidate.closeTime,
-    maxPositions:Number(control.maxPositions)
-  };
-  const ownership=await claimPayneExecution(env,entryClaimIdentity);
-  if(ownership.granted!==true){
-    logPayneTiming('ATOMIC_CLAIM_REJECTED',trace(),executionStartMs,Date.now(),ownership.reason);
-    // Do not save a stale local copy over an execution owned by another instance.
-    // No provider POST is possible from this invocation.
-    return loadRealSeriesState(env);
-  }
-  logPayneTiming('ATOMIC_CLAIM_GRANTED',trace(),executionStartMs,Date.now(),'EXCLUSIVE');
-  logPayneTiming('PROVIDER_WRITE_ELIGIBLE',trace(),executionStartMs,Date.now(),'PRE_PROVIDER_GATES_PASSED');
+  // AUTO-style direct submission: the durable SUBMITTING latch is written
+  // before invoking the existing shared Kalshi writer. No atomic claim gate.
+  // Historical coordinator-owned attempts retain their original reconciliation.
+  attempt={...attempt,status:'SUBMITTING',executionHandoff:'DIRECT_KALSHI_WRITER_V1',
+    attemptNo:providerAttemptNoCandidate,providerAttemptNo:providerAttemptNoCandidate,
+    providerAttemptCounted:false,providerSubmitStartedAt:new Date().toISOString()};
+  series={...series,status:'ENTRY_SUBMITTING',currentAttempt:attempt,unresolvedEntry:true};
+  await persistAttempt(env,{runId:seriesId,result:'SUBMITTING',...attempt});
+  await appendRealLedger(env,'ENTRY_DIRECT_SUBMITTING',{
+    seriesId,attemptId,intentNo,attemptNo:providerAttemptNoCandidate,
+    ticker:candidate.ticker,clientOrderId,fireSpecimenId:attempt.fireSpecimenId,
+    writerInvoked:false,providerPostStarted:false
+  });
+  await saveRealSeriesState(env,series);
+  logPayneTiming('PROVIDER_WRITE_ELIGIBLE',trace(),executionStartMs,Date.now(),'DIRECT_SUBMITTING_PERSISTED');
   let response,proof,writerInvoked=false,providerPostStarted=false;
   try{
     const out=await postImpl(env,'ENTRY',payload,payneRealScope(control,series,'ENTRY',null,{attemptsBefore:started,priorAttemptClean:interlock.clear,entryDebitUsd:sizing.totalDebitUsd}));
@@ -4128,7 +4126,7 @@ export async function runPayneRealExecutionCycle(env,{postImpl=kalshiPayneOrderP
         seriesId,attemptId,intentNo,attemptNo:null,specimenId:series.fireLatch?.specimenId||null,ticker:candidate.ticker,clientOrderId,
         error:String(error?.message||error),writerInvoked,providerPostStarted:false,providerAttemptCounted:false,finalResult:'INVALIDATED_BEFORE_POST'
       });
-      const released=await releaseProvenNoPost(env,{
+      const released=attempt.executionHandoff==='DIRECT_KALSHI_WRITER_V1' ? {granted:true,direct:true} : await releaseProvenNoPost(env,{
         seriesId,attemptNo:providerAttemptNoCandidate,specimenId:series.fireLatch?.specimenId,
         clientOrderId,ticker:candidate.ticker,side:candidate.outcomeSide,windowClose:candidate.closeTime
       });
@@ -4170,7 +4168,7 @@ export async function runPayneRealExecutionCycle(env,{postImpl=kalshiPayneOrderP
       seriesId,attemptId,intentNo,attemptNo:null,ticker:candidate.ticker,clientOrderId,
       error:'PROVIDER_POST_BOUNDARY_NOT_PROVEN',writerInvoked,providerPostStarted:false,providerAttemptCounted:false,finalResult:'INVALIDATED_BEFORE_POST'
     });
-    const released=await releaseProvenNoPost(env,{
+    const released=attempt.executionHandoff==='DIRECT_KALSHI_WRITER_V1' ? {granted:true,direct:true} : await releaseProvenNoPost(env,{
       seriesId,attemptNo:providerAttemptNoCandidate,specimenId:series.fireLatch?.specimenId,
       clientOrderId,ticker:candidate.ticker,side:candidate.outcomeSide,windowClose:candidate.closeTime
     });
@@ -4211,7 +4209,7 @@ export async function runPayneRealExecutionCycle(env,{postImpl=kalshiPayneOrderP
   series.currentAttempt=attempt;
 
   if(result.state==='NO_FILL'){
-    const atomicResult=await resolvePayneExecutionClaim(env,entryClaimIdentity,'NO_FILL');
+    const atomicResult=attempt.executionHandoff==='DIRECT_KALSHI_WRITER_V1' ? {granted:true,direct:true} : {granted:false,reason:'LEGACY_ENTRY_CLAIM_IDENTITY_MISSING'};
     if(!atomicResult.granted){
       series.status='ATOMIC_NO_FILL_RESOLUTION_UNKNOWN';
       series.unresolvedEntry=true;
@@ -4238,7 +4236,7 @@ export async function runPayneRealExecutionCycle(env,{postImpl=kalshiPayneOrderP
     return saveRealSeriesState(env,series);
   }
 
-  const atomicFilled=await resolvePayneExecutionClaim(env,entryClaimIdentity,'OPEN');
+  const atomicFilled=attempt.executionHandoff==='DIRECT_KALSHI_WRITER_V1' ? {granted:true,direct:true} : {granted:false,reason:'LEGACY_ENTRY_CLAIM_IDENTITY_MISSING'};
   if(!atomicFilled.granted){
     series.status='ATOMIC_FILLED_OWNERSHIP_RECONCILIATION_REQUIRED';
     series.unresolvedEntry=true;
