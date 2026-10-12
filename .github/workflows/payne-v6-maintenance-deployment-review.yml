@@ -1,0 +1,44 @@
+name: PAYNE V6 Maintenance Deployment Review Only
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  review-only:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      CI: 'true'
+    steps:
+      - name: Checkout exact validated PAYNE source
+        uses: actions/checkout@v4
+        with:
+          ref: 3b2394e9559a77c0f8106d462ae3e3a0d1d0b7c3
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Verify exact source and untouched trading source
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = 3b2394e9559a77c0f8106d462ae3e3a0d1d0b7c3
+          git diff --exit-code ed131c056a2f0b446a94c01af1554f11f9fa930a HEAD -- market-edge-lab/real/payne-kalshi-real/src/index.js market-edge-lab/real/payne-kalshi-real/src/payne-execution-coordinator.js
+          git diff --exit-code d5d92a39361c8eec464ff3b60c4d8f16e44bcbfd HEAD -- market-edge-lab/real/payne-kalshi-real/src/payne-paper-brain.js market-edge-lab/real/payne-kalshi-real/src/payne-kalshi-features.js market-edge-lab/real/payne-kalshi-real/src/kalshi-real-write.js market-edge-lab/real/baseline market-edge-lab/real/shared
+          node --check market-edge-lab/real/payne-kalshi-real/src/index.js
+          node --check market-edge-lab/real/payne-kalshi-real/src/payne-execution-coordinator.js
+          grep -q '^name = "market-edge-payne-kalshi-real"$' market-edge-lab/real/payne-kalshi-real/wrangler.toml
+          echo 'VALIDATED_SOURCE_AND_PROTECTED_PATHS=PASS'
+      - name: Offline tests
+        working-directory: market-edge-lab/real/payne-kalshi-real
+        run: npm test
+      - name: Offline Worker packaging only
+        working-directory: market-edge-lab/real/payne-kalshi-real
+        run: npx --yes wrangler@4 deploy --dry-run --outdir /tmp/payne-v6-maintenance-build
+      - name: Hard stop before production changes
+        run: |
+          echo 'REVIEW_ONLY_NO_PRODUCTION_DEPLOYMENT'
+          echo 'HISTORICAL_ZEC_REMAINS_UNRESOLVED'
+          echo 'CURRENT_ARM_AND_PROVIDER_EXPOSURE_REQUIRES_SEPARATE_VERIFICATION'
+          echo 'DIAGNOSTIC_SECRET_PRESENCE_REQUIRES_SEPARATE_VERIFICATION'
