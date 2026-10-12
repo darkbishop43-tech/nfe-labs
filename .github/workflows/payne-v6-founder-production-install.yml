@@ -76,7 +76,20 @@ jobs:
             (.currentAttempt.providerPostStarted!=true or
               (.currentAttempt.status|IN("NO_FILL","FILLED","CLOSED","SETTLED","NO_PROVIDER_EXECUTION"))) and
             (.currentAttempt.status//""|IN("PROVIDER_REJECTED_OR_UNKNOWN","WRITE_ERROR_UNKNOWN","RESULT_UNKNOWN","ENTRY_RECONCILIATION_REQUIRED")|not)
-          ' /tmp/payne-pre-series-kv.json >/dev/null || { echo 'BLOCKED: ACTIVE_OR_UNKNOWN_PROVIDER_EXPOSURE';exit 1; }
+          ' /tmp/payne-pre-series-kv.json >/dev/null || {
+            echo 'BLOCKED: ACTIVE_OR_UNKNOWN_PROVIDER_EXPOSURE'
+            jq -n --slurpfile s /tmp/payne-pre-series-kv.json --slurpfile c /tmp/payne-pre-control-kv.json '
+              ($s[0]) as $x | ($c[0]) as $ctl |
+              {
+                position_safe: ($x.position==null or (($x.position.owner//"")=="PAYNE_KALSHI_REAL" and ($x.position.status//""|IN("FLAT","CLOSED","SETTLED")))),
+                fire_latch_safe: (($x.fireLatch.state//"NONE")|IN("LATCHED","PROVIDER_POST_UNKNOWN","PRE_PROVIDER_VALIDATION","PROVIDER_POST_STARTED","PROVIDER_POST_CREATED")|not),
+                unresolved_safe: ($x.unresolvedEntry!=true or ($ctl.armed==false and $x.currentAttempt.writerInvoked==false and $x.currentAttempt.providerPostStarted==false and $x.currentAttempt.providerOrderId==null)),
+                post_started_safe: ($x.currentAttempt.providerPostStarted!=true or ($x.currentAttempt.status|IN("NO_FILL","FILLED","CLOSED","SETTLED","NO_PROVIDER_EXECUTION"))),
+                current_status_safe: (($x.currentAttempt.status//"")|IN("PROVIDER_REJECTED_OR_UNKNOWN","WRITE_ERROR_UNKNOWN","RESULT_UNKNOWN","ENTRY_RECONCILIATION_REQUIRED")|not)
+              } | with_entries(.value= (if .value then "PASS" else "FAIL" end))
+            '
+            exit 1
+          }
           jq -e '.source=="SCHEDULED_CRON" and (.at|type=="string")' /tmp/payne-pre-current-kv.json >/dev/null
           observed="$(date -u -d "$(jq -r '.at' /tmp/payne-pre-current-kv.json)" +%s)"
           now="$(date -u +%s)"
