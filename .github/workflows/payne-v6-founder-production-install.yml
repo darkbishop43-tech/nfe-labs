@@ -107,7 +107,20 @@ jobs:
           observed="$(date -u -d "$(jq -r '.at' /tmp/payne-pre-current-kv.json)" +%s)"
           now="$(date -u +%s)"
           age=$((now-observed))
-          if ((age<0 || age>300)); then echo 'BLOCKED: STALE_SCHEDULER_OBSERVATION';exit 1;fi
+          echo "SCHEDULER_EVIDENCE timestamp=$(jq -r '.at' /tmp/payne-pre-current-kv.json) age_seconds=$age"
+          jq -c '{armed,scanEnabled,openPositions,attemptTarget}' /tmp/payne-pre-control-kv.json
+          if ((age<0 || age>300)); then
+            if ! jq -e -s '
+              .[0].armed==false and .[0].openPositions==0 and
+              .[1].unresolvedEntry==false and .[1].position==null and
+              .[1].currentAttempt.status=="NO_PROVIDER_EXECUTION" and
+              .[1].currentAttempt.terminalClassification=="NO_PROVIDER_EXECUTION" and
+              .[1].currentAttempt.reconciliationReason=="PROVIDER_RECONCILED_NO_EXECUTION"
+            ' /tmp/payne-pre-control-kv.json /tmp/payne-pre-series-kv.json >/dev/null; then
+              echo 'BLOCKED: STALE_SCHEDULER_WITH_UNVERIFIED_EXPOSURE';exit 1
+            fi
+            echo 'STALE_HEARTBEAT_RETAINED; disarmed terminal audit-only software update; exposure checks passed'
+          fi
           echo 'PREDEPLOY_LIVE_STATE_EXPOSURE_CHECK=PASS'
           jq -c '{armed,threshold:.activeThreshold,stake:.maxEntryDebitUsd,attemptTarget,openPositions}' /tmp/payne-pre-control-kv.json
           jq -c '{seriesId,status,unresolvedEntry,attemptsStarted,fireLatchState:.fireLatch.state}' /tmp/payne-pre-series-kv.json
