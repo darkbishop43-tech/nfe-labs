@@ -1,0 +1,21 @@
+name: PAYNE Faithful FIRE Deployment Traffic Audit
+on:
+  push:
+    branches: [payne-faithful-fire-handoff-20261011]
+    paths: [".github/workflows/payne-faithful-fire-traffic-audit.yml"]
+permissions: {contents: read}
+jobs:
+  read-only:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify new Cloudflare version 100 percent production allocation
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          curl -fsS --max-time 25 -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/market-edge-payne-kalshi-real/deployments" -o /tmp/current-deployments.json
+          jq -e '.success==true' /tmp/current-deployments.json >/dev/null
+          jq -c '[.result.deployments[]?|{id,created_on,versions:[.versions[]?|{version_id,percentage}]}]|.[:2]' /tmp/current-deployments.json
+          jq -e '[.result.deployments[]?.versions[]?|select(.version_id=="ad7054bf-aad2-4d0f-877d-816f87f7b93b")|.percentage]|any(.==100)' /tmp/current-deployments.json >/dev/null || { echo 'BLOCKED: NEW_VERSION_NOT_100_PERCENT';exit 1; }
+          echo 'FAITHFUL_FIRE_VERSION_AT_100_PERCENT=PASS'
