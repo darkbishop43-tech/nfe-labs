@@ -1,6 +1,9 @@
 name: PAYNE V6 Maintenance Deployment Review Only
 on:
   workflow_dispatch:
+  push:
+    branches: [payne-v6-maintenance-deployment-review-20261012]
+    paths: ['.github/workflows/payne-v6-maintenance-deployment-review.yml']
 permissions:
   contents: read
 jobs:
