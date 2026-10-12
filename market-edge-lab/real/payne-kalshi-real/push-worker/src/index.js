@@ -102,7 +102,7 @@ document.querySelector('#enroll').onclick=async()=>{
   const reg=await navigator.serviceWorker.register('/push-sw.js');
   let sub=await reg.pushManager.getSubscription();
   if(!sub)sub=await reg.pushManager.subscribe({userVisibleOnly:true,applicationServerKey:keyBytes(cfg.publicKey)});
-  const token=document.querySelector('#enrollToken').value;\n  const r=await fetch('/push-enroll',{method:'POST',headers:{'content-type':'application/json','authorization':'Bearer '+token},body:JSON.stringify(sub)});
+  const token=document.querySelector('#enrollToken').value;  const r=await fetch('/push-enroll',{method:'POST',headers:{'content-type':'application/json','authorization':'Bearer '+token},body:JSON.stringify(sub)});
   if(!r.ok)throw Error('Enrollment failed');
   document.querySelector('#status').textContent='PAYNE PHONE ENROLLED';
  }catch(e){document.querySelector('#status').textContent=String(e.message||e)}
