@@ -3997,20 +3997,19 @@ export async function runPayneRealExecutionCycle(env,{postImpl=kalshiPayneOrderP
     candidate.outcomeSide==='YES'?preSubmit.market.yesAsk:preSubmit.market.noAsk,preSubmit.readAt);
   series.fireLatch={...series.fireLatch,preSubmit:'PASS',preSubmitAt:preSubmit.readAt,preSubmitBookEvidence};
 
-  const finalRefreshStartMs=Date.now();
-  const features=await readAuthoritativePayneFeatures(env,preSubmit?.market?[preSubmit.market]:[],nowMs,{forceRefresh:true});
-  logPayneTiming('FINAL_FEATURE_REFRESH',trace(),finalRefreshStartMs,Date.now(),features?.fresh?'SOURCE_FRESH':'SOURCE_UNAVAILABLE');
-  const finalFeature=featureForCandidate(features,candidate.ticker,candidate.outcomeSide,candidate.asset,cfg.threshold,preSubmit?.market||null);
-  const finalGate=payneStage(finalFeature,cfg.threshold,cfg.effectiveLockThreshold);
-  const finalFeatureEvidence=payneFeatureBoundaryEvidence(finalFeature,cfg.threshold,cfg.effectiveLockThreshold,'FINAL');
-  logPayneTiming('FINAL_FEATURE_GATE',trace(),executionStartMs,Date.now(),!finalFeature.available?'FEATURE_UNAVAILABLE':finalGate.pullTrigger?'PASS':'PULL_REJECTED');
-  if(!finalFeature.available || !finalGate.pullTrigger){
-    return invalidateFireSpecimen(env,series,'FINAL_FEATURE_REQUALIFICATION_FAILED',{
-      identityMatch:'PASS',freshLock:'PASS',preSubmit:'PASS',finalFeature:'FAIL',
-      finalFeatureEvidence,freshLockBookEvidence,preSubmitBookEvidence
-    },nowMs);
-  }
-  series.fireLatch={...series.fireLatch,finalFeature:'PASS',finalFeatureEvidence};
+  // PAYNE already qualified and durably latched this exact FIRE specimen.
+  // Execution validates contract/price/funding/ownership but must not become
+  // a second independent strategy decision by refreshing feature mathematics.
+  const finalFeature={
+    score:latch.observedScore,
+    move:latch.observedMove,
+    edge:latch.observedEdge,
+    fair:latch.observedFair,
+    directionalMove:latch.fireFeatureEvidence?.directionalMove??null,
+  };
+  const finalFeatureEvidence=latch.fireFeatureEvidence||null;
+  logPayneTiming('PAYNE_DURABLE_FIRE_HANDOFF',trace(),executionStartMs,Date.now(),'LATCHED_PAPER_DECISION_PRESERVED');
+  series.fireLatch={...series.fireLatch,finalFeature:'ORIGINAL_FIRE_PRESERVED',finalFeatureEvidence};
 
   const ask=candidate.outcomeSide==='YES'?Number(preSubmit.market.yesAsk):Number(preSubmit.market.noAsk);
   const sizing=estimateKalshiFeeSafeSize(ask,cfg.maxEntryDebitUsd);
@@ -4045,7 +4044,7 @@ export async function runPayneRealExecutionCycle(env,{postImpl=kalshiPayneOrderP
     marketCloseTime:candidate.closeTime,freshLockAt:freshLock.readAt,preSubmitAt:preSubmit.readAt,
     freshLockResult:'PASS',freshLockPrice:candidate.outcomeSide==='YES'?freshLock.market.yesAsk:freshLock.market.noAsk,
     preSubmitResult:'PASS',preSubmitPrice:ask,
-    finalFeatureRequalification:'PASS',
+    finalFeatureRequalification:'ORIGINAL_FIRE_PRESERVED',
     feeSafeSizingResult:'PASS',
     fundingResult:'PASS',
     fireBookEvidence:series.fireLatch?.fireBookEvidence||null,
