@@ -1,3 +1,4 @@
+# Founder-authorized deployment retry following screenshot-confirmed DISARM; existing exposure gate retained.
 name: Founder Authorized PAYNE V6 Pinned Production Installation
 on:
   push:
