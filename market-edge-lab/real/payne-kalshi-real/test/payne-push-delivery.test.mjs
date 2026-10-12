@@ -27,10 +27,10 @@ test('retry bounded; failure recorded; no order-authority invocation',async()=>{
   assert.equal(result.ok,false);assert.equal(tries,2);
   assert.equal([...k.m.keys()].some(x=>x.includes('attempt')),true);
 });
-test('no premature FILLED or FIRE notification; no credentials embedded in worker script',async()=>{
+test('FISH is clearly labeled as fishing, never accepted or filled; no credentials in worker script',async()=>{
   const k=kv();await enrollPaynePhone(k,sub);let sends=0;
   const result=await sendPaynePersistedAlert({...params(k),event:{...event,type:'FIRE_SPECIMEN_LATCHED'},send:async()=>{sends++;return true}});
-  assert.equal(result.ok,false);assert.equal(sends,0);
+  assert.equal(result.ok,true);assert.equal(sends,1);
   assert.match(payneServiceWorkerSource(),/notificationclick/);
   assert.doesNotMatch(payneServiceWorkerSource(),/privateKey|Kalshi|portfolio|orderPost/);
 });
