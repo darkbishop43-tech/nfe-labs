@@ -44,7 +44,7 @@ jobs:
       - name: Checkout exact V5 authenticated Cloudflare KV gate
         uses: actions/checkout@v4
         with:
-          ref: 621a0f9fb237cd9defb420605dd5c384489a84bb
+          ref: 1121e1ca563afb636ef73328611b269f9c7d2c4b
           path: existing-approved-gate
           persist-credentials: false
       - name: V5 Cloudflare KV safety gate PRE
