@@ -1,0 +1,34 @@
+name: PAYNE Direct Submission Pinned Offline Tests
+on:
+  push:
+    branches: [payne-auto-direct-submission-isolated-20261012]
+    paths: ['.github/workflows/payne-direct-pinned-offline-tests.yml']
+permissions:
+  contents: read
+jobs:
+  pinned-offline:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      CI: 'true'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 546bd4c56cc8a59ffea85c0844e9f3e050887188
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Verify exact approved source and offline environment
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "CHECKED_OUT_SHA=$(git rev-parse HEAD)"
+          test "$(git rev-parse HEAD)" = 546bd4c56cc8a59ffea85c0844e9f3e050887188
+          node --version
+          npm --version
+          echo "TEST_COMMAND=npm test"
+          echo "NO_PRODUCTION_SECRETS_NO_DEPLOYMENT"
+      - name: Execute existing PAYNE tests without production credentials
+        working-directory: market-edge-lab/real/payne-kalshi-real
+        run: npm test
