@@ -32,7 +32,8 @@ function fixture(initial) {
         currentAttempt:{providerAttemptNoCandidate:1,fireSpecimenId:specimenId,
           clientOrderId:identity.clientOrderId,marketTicker:identity.ticker,
           outcomeSide:identity.side,marketCloseTime:identity.windowClose}
-      }):null
+      }):null,
+      put:async()=>{throw new Error('OFFLINE_DIAGNOSTIC_KV_WRITE_FORBIDDEN');}
     }
   };
   const route=(header=token)=>worker.fetch(new Request(
