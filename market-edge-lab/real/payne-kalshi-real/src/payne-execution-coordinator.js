@@ -4,6 +4,20 @@
 export class PayneExecutionCoordinator {
   constructor(state) { this.state=state; }
   async fetch(request) {
+    if(request.method==='GET' && new URL(request.url).pathname==='/internal/inspect') {
+      const attemptNo=Number(new URL(request.url).searchParams.get('attemptNo'));
+      if(!Number.isSafeInteger(attemptNo)||attemptNo<1)
+        return Response.json({ok:false,status:'ERROR',reason:'INVALID_ATTEMPT_NUMBER'},{status:400});
+      try {
+        const prior=await this.state.storage.get('attempt:'+attemptNo);
+        return Response.json(prior===undefined
+          ? {ok:true,status:'NOT_FOUND',exists:false,claim:null}
+          : {ok:true,status:'FOUND',exists:true,claim:prior},
+          {headers:{'cache-control':'no-store'}});
+      }catch{
+        return Response.json({ok:false,status:'ERROR',reason:'STORAGE_READ_FAILED'},{status:500});
+      }
+    }
     if(request.method!=='POST') return new Response('METHOD_NOT_ALLOWED',{status:405});
     let input;
     try {input=await request.json();}catch{return Response.json({granted:false,reason:'INVALID_CLAIM'},{status:400});}
@@ -76,6 +90,28 @@ export class PayneExecutionCoordinator {
       return {granted:true,reason:'ATOMIC_CLAIM_PERSISTED',occupiedBefore:occupied};
     });
     return Response.json(outcome);
+  }
+}
+
+
+// Read-only coordinator inspection. This handler never enters a storage transaction,
+// writes, claims, releases, or resolves. The Durable Object is reachable only through
+// its Worker binding; caller authentication is enforced by the parent Worker.
+export async function inspectPayneCoordinatorClaim(env,seriesId,attemptNo) {
+  if (!seriesId || !Number.isSafeInteger(attemptNo) || attemptNo < 1)
+    return {ok:false,status:'ERROR',reason:'INVALID_INSPECTION_IDENTITY'};
+  const binding=env?.PAYNE_EXECUTION_COORDINATOR;
+  if (!binding?.idFromName || !binding?.get)
+    return {ok:false,status:'ERROR',reason:'COORDINATOR_UNBOUND'};
+  try {
+    const id=binding.idFromName(seriesId);
+    const url='https://payne-coordinator.internal/internal/inspect?attemptNo='+encodeURIComponent(attemptNo);
+    const response=await binding.get(id).fetch(url,{method:'GET'});
+    const result=await response.json();
+    if (!response.ok) return {ok:false,status:'ERROR',reason:String(result?.reason||'INSPECTION_FAILED')};
+    return result;
+  } catch {
+    return {ok:false,status:'ERROR',reason:'COORDINATOR_READ_FAILED'};
   }
 }
 
