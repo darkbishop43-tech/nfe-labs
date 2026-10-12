@@ -31,7 +31,7 @@ export function payneRealNotification(row){
   return {id,time:timestamp,kind:ALLOWED[row.type],payload:{title:'NFE-OS · PAYNE REAL · '+ALLOWED[row.type],body,url:'/',tag:id}};
 }
 export function validPayneLedger(doc){
-  return doc?.ok===true&&doc?.schema==='PAYNE_REAL_LEDGER_EXPORT_V1'&&doc?.readOnly===true&&
+  return doc?.ok===true&&doc?.complete===true&&doc?.schema==='PAYNE_REAL_LEDGER_EXPORT_V1'&&doc?.readOnly===true&&
     doc.providerWrites===0&&doc.ordersSubmittedByThisRead===0&&doc.capitalMovedUsd===0&&
     Number.isInteger(doc.count)&&doc.count===doc.rows?.length&&doc.rows.length<200;
 }
