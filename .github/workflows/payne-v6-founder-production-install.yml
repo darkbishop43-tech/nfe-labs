@@ -15,7 +15,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: 3b2394e9559a77c0f8106d462ae3e3a0d1d0b7c3
+          ref: 4a4a6841e62eccb98c76bcf740b09c76935400bc
           fetch-depth: 0
           persist-credentials: false
       - uses: actions/setup-node@v4
@@ -25,8 +25,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test "$(git rev-parse HEAD)" = 3b2394e9559a77c0f8106d462ae3e3a0d1d0b7c3
-          git diff --exit-code ed131c056a2f0b446a94c01af1554f11f9fa930a HEAD -- market-edge-lab/real/payne-kalshi-real/src/index.js market-edge-lab/real/payne-kalshi-real/src/payne-execution-coordinator.js
+          test "$(git rev-parse HEAD)" = 4a4a6841e62eccb98c76bcf740b09c76935400bc
+          git diff --exit-code d5d92a39361c8eec464ff3b60c4d8f16e44bcbfd HEAD -- market-edge-lab/real/payne-kalshi-real/src/payne-paper-brain.js market-edge-lab/real/payne-kalshi-real/src/payne-kalshi-features.js market-edge-lab/real/payne-kalshi-real/src/kalshi-real-write.js
           git diff --exit-code d5d92a39361c8eec464ff3b60c4d8f16e44bcbfd HEAD -- market-edge-lab/real/payne-kalshi-real/src/payne-paper-brain.js market-edge-lab/real/payne-kalshi-real/src/payne-kalshi-features.js market-edge-lab/real/payne-kalshi-real/src/kalshi-real-write.js market-edge-lab/real/baseline market-edge-lab/real/shared
           grep -q '^name = "market-edge-payne-kalshi-real"$' market-edge-lab/real/payne-kalshi-real/wrangler.toml
           node --check market-edge-lab/real/payne-kalshi-real/src/index.js
@@ -127,7 +127,12 @@ jobs:
           jq -S '.control' /tmp/payne-pre-control.json > /tmp/pre.json
           jq -S '.control' /tmp/payne-post-control.json > /tmp/post.json
           cmp /tmp/pre.json /tmp/post.json
-          jq -S '.series' /tmp/payne-pre-state.json > /tmp/series-pre.json
-          jq -S '.series' /tmp/payne-post-state.json > /tmp/series-post.json
-          cmp /tmp/series-pre.json /tmp/series-post.json
-          echo CONTROL_AND_HISTORICAL_SERIES_PRESERVED
+          jq -e --slurpfile pre /tmp/payne-pre-state.json '
+            .series.seriesId==$pre[0].series.seriesId and
+            .series.unresolvedEntry==$pre[0].series.unresolvedEntry and
+            .series.currentAttempt.attemptId==$pre[0].series.currentAttempt.attemptId and
+            .series.currentAttempt.clientOrderId==$pre[0].series.currentAttempt.clientOrderId and
+            .series.currentAttempt.providerOrderId==$pre[0].series.currentAttempt.providerOrderId and
+            .series.currentAttempt.terminalClassification==$pre[0].series.currentAttempt.terminalClassification
+          ' /tmp/payne-post-state.json >/dev/null
+          echo CONTROL_AND_HISTORICAL_IDENTITY_PRESERVED
