@@ -41,62 +41,41 @@ jobs:
           jq -e '.ok==true and .control.armed==false and .control.openPositions==0' /tmp/payne-pre-control.json
           jq -e '.ok==true and .control.armed==false and .series.unresolvedEntry==true' /tmp/payne-pre-state.json
           echo FOUNDER_DISARM_AND_HISTORICAL_STATE_READ=PASS
-      - name: Authenticated Kalshi account-wide GET verification
+      - name: Authenticated existing Cloudflare Worker provider-read verification
         shell: bash
-        env:
-          KALSHI_EXECUTION_KEY_ID: ${{ secrets.KALSHI_EXECUTION_KEY_ID }}
-          KALSHI_EXECUTION_PRIVATE_KEY: ${{ secrets.KALSHI_EXECUTION_PRIVATE_KEY }}
         run: |
           set -euo pipefail
-          node --input-type=module <<'NODE'
-          import {kalshiGetOnly} from './market-edge-lab/real/payne-kalshi-real/src/kalshi-get-only.js';
-          const env={KALSHI_EXECUTION_KEY_ID:process.env.KALSHI_EXECUTION_KEY_ID,
-                     KALSHI_EXECUTION_PRIVATE_KEY:process.env.KALSHI_EXECUTION_PRIVATE_KEY};
-          if(!env.KALSHI_EXECUTION_KEY_ID||!env.KALSHI_EXECUTION_PRIVATE_KEY){
-            console.error('BLOCKED: GITHUB_ACTIONS_KALSHI_EXECUTION_READ_CREDENTIALS_MISSING');
-            process.exit(47);
+          base='https://market-edge-payne-kalshi-real.darkbishop43.workers.dev'
+          for endpoint in proof real-state; do
+            out="/tmp/payne-${endpoint}-verified.json"
+            status="$(curl --silent --show-error --max-time 35 --output "$out" --write-out '%{http_code}' "$base/$endpoint")" || {
+              echo "BLOCKED: WORKER_READ_TRANSPORT_ERROR GET_/$endpoint"
+              exit 54
+            }
+            echo "WORKER_GET_/$endpoint HTTP_$status"
+            if [[ "$status" != 200 ]]; then
+              jq -c '{ok,error,reason}' "$out" 2>/dev/null || true
+              echo "BLOCKED: WORKER_READ_HTTP_$status GET_/$endpoint"
+              exit 55
+            fi
+          done
+          jq -e '.kalshi.authenticatedGet=="PROVEN"' /tmp/payne-proof-verified.json >/dev/null || {
+            jq -c '{authentication:.kalshi.authentication,httpStatus:.kalshi.httpStatus,failureStage:.kalshi.failureStage,errorClass:.kalshi.errorClass}' /tmp/payne-proof-verified.json
+            echo BLOCKED_AUTHENTICATED_KALSHI_GET_NOT_PROVEN
+            exit 56
           }
-          const get=async(path)=>{
-            let response;
-            try {response=await kalshiGetOnly(env,path);}
-            catch(e){console.error('BLOCKED: AUTHENTICATED_GET_EXCEPTION path='+path+' code='+String(e?.message||'UNKNOWN'));process.exit(48);}
-            console.log('KALSHI_GET '+path+' HTTP_'+response.status);
-            if(!response.ok){console.error('BLOCKED: KALSHI_GET_HTTP_'+response.status+' path='+path);process.exit(49);}
-            const body=await response.json().catch(()=>null);
-            if(!body||typeof body!=='object'){console.error('BLOCKED: KALSHI_GET_INVALID_JSON path='+path);process.exit(50);}
-            return body;
-          };
-          const collect=async(endpoint,key,extra='')=>{
-            let cursor='',rows=[],page=0;
-            do {
-              if(++page>50){console.error('BLOCKED: PROVIDER_PAGINATION_INCOMPLETE '+endpoint);process.exit(51);}
-              const path='/trade-api/v2/'+endpoint+'?limit=200&subaccount=0'+extra+(cursor?'&cursor='+encodeURIComponent(cursor):'');
-              const body=await get(path);
-              if(!Array.isArray(body[key])){console.error('BLOCKED: PROVIDER_SCHEMA_UNKNOWN '+endpoint);process.exit(52);}
-              rows.push(...body[key]);cursor=String(body.cursor||'');
-            }while(cursor);
-            console.log('KALSHI_VERIFIED_ROWS '+endpoint+'='+rows.length);
-            return rows;
-          };
-          const orders=await collect('portfolio/orders','orders');
-          const positions=await collect('portfolio/positions','market_positions');
-          const fills=await collect('portfolio/fills','fills');
-          const historic=await collect('historical/fills','fills');
-          const settlements=await collect('portfolio/settlements','settlements');
-          const active=orders.filter(o=>!['canceled','cancelled','executed','filled','rejected','expired','settled'].includes(String(o.status||o.order_status||'').toLowerCase()));
-          const exposure=positions.filter(p=>Number(p.position??p.position_count??p.total_traded??0)!==0);
-          console.log('EVIDENCE_COUNTS active_or_unknown_orders='+active.length+
-                      ' nonzero_or_uncertain_positions='+exposure.length+
-                      ' current_fills='+fills.length+' historical_fills='+historic.length+
-                      ' settlements='+settlements.length);
-          if(active.length||exposure.length){
-            console.error('BLOCKED: PROVIDER_OPEN_OR_UNMANAGED_EXPOSURE');
-            console.error('ORDER_IDENTITIES '+JSON.stringify(active.map(x=>({ticker:x.ticker,order_id:x.order_id,status:x.status})).slice(0,20)));
-            console.error('POSITION_IDENTITIES '+JSON.stringify(exposure.map(x=>({ticker:x.ticker,position:x.position})).slice(0,20)));
-            process.exit(53);
+          jq -e '.ok==true and .control.armed==false and .control.openPositions==0' /tmp/payne-real-state-verified.json >/dev/null || {
+            echo BLOCKED_FOUNDER_DISARM_OR_OWNED_EXPOSURE
+            exit 57
           }
-          console.log('ACCOUNT_WIDE_PROVIDER_GET_EVIDENCE_CLEAN');
-          NODE
+          jq -c '{providerAuth:.kalshi.authenticatedGet,providerGets:.kalshi.providerGets,accountBalanceGet:.kalshi.accountBalanceGet}' /tmp/payne-proof-verified.json
+          jq -c '{armed:.control.armed,openPositions:.control.openPositions,unresolvedEntry:.series.unresolvedEntry,providerPostStarted:.series.currentAttempt.providerPostStarted,providerOrderId:.series.currentAttempt.providerOrderId,fireLatch:.series.fireLatch.state}' /tmp/payne-real-state-verified.json
+          # /proof performs authenticated balance/markets GETs. /real-state is
+          # persisted internal state. Neither is a provider account-wide orders/
+          # positions/fills/settlements report, so the required exposure proof
+          # is not established by a successful response.
+          echo 'BLOCKED: EXISTING_CLOUDFLARE_READ_SERVICE_NO_ACCOUNT_WIDE_KALSHI_EXPOSURE_RESPONSE'
+          exit 58
       - name: Execute Wrangler installation only after verified exposure
         working-directory: market-edge-lab/real/payne-kalshi-real
         env:
