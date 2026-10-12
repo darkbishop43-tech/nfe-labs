@@ -51,6 +51,42 @@ jobs:
           for name in CLOUDFLARE_API_TOKEN CLOUDFLARE_ACCOUNT_ID PAYNE_PUBLIC PAYNE_PRIVATE PAYNE_ENROLL; do
             if [ -n "${!name:-}" ]; then echo "BINDING_PRESENT=$name"; else echo "BINDING_MISSING=$name"; fi
           done
+      - name: Read only Cloudflare PAYNE Worker binding metadata
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          target='market-edge-payne-real-push'
+          if [[ -z "${CLOUDFLARE_API_TOKEN:-}" || -z "${CLOUDFLARE_ACCOUNT_ID:-}" ]]; then
+            echo CLOUDFLARE_DEPLOYMENT_AUTHORITY=NOT_AVAILABLE
+            exit 0
+          fi
+          base="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers"
+          code="$(curl --silent --show-error --max-time 25 -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -o /tmp/payne-cf-worker-list.json -w '%{http_code}' "$base/scripts")"
+          echo "CLOUDFLARE_WORKER_LIST_HTTP=$code"
+          if [[ "$code" != 200 ]]; then echo "PAYNE_PUSH_WORKER=UNKNOWN_METADATA_DENIED";exit 0;fi
+          if ! jq -e '.success==true and (.result|type=="array")' /tmp/payne-cf-worker-list.json >/dev/null; then echo "PAYNE_PUSH_WORKER=UNKNOWN_INVALID_RESPONSE";exit 0;fi
+          if ! jq -e --arg target "$target" 'any(.result[]?; .id==$target)' /tmp/payne-cf-worker-list.json >/dev/null; then
+            echo "PAYNE_PUSH_WORKER=ABSENT_FROM_ACCESSIBLE_ACCOUNT"
+            exit 0
+          fi
+          echo "PAYNE_PUSH_WORKER=PRESENT"
+          code="$(curl --silent --show-error --max-time 25 -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -o /tmp/payne-cf-settings.json -w '%{http_code}' "$base/scripts/$target/settings")"
+          echo "CLOUDFLARE_PAYNE_SETTINGS_HTTP=$code"
+          if [[ "$code" != 200 ]]; then echo "PAYNE_PUSH_BINDINGS=UNKNOWN_METADATA_DENIED";exit 0;fi
+          jq -e '.success==true and (.result.bindings|type=="array")' /tmp/payne-cf-settings.json >/dev/null || { echo "PAYNE_PUSH_BINDINGS=UNKNOWN_INVALID_RESPONSE";exit 0; }
+          for binding in NFE_PUSH_VAPID_PUBLIC_KEY NFE_PUSH_VAPID_PRIVATE_KEY PAYNE_ENROLL_TOKEN; do
+            if jq -e --arg n "$binding" 'any(.result.bindings[]?; .name==$n and .type=="secret_text")' /tmp/payne-cf-settings.json >/dev/null; then
+              echo "PAYNE_BINDING_$binding=PRESENT_SECRET_TEXT"
+            elif jq -e --arg n "$binding" 'any(.result.bindings[]?; .name==$n)' /tmp/payne-cf-settings.json >/dev/null; then
+              echo "PAYNE_BINDING_$binding=PRESENT_NON_SECRET_TYPE"
+            else
+              echo "PAYNE_BINDING_$binding=ABSENT"
+            fi
+          done
+          echo "SECRET_CONTENT_NOT_PRINTED"
       - name: Browser preview current cockpit and existing enrollment page
         shell: bash
         run: |
