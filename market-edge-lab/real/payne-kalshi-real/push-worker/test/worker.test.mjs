@@ -5,7 +5,7 @@ const fixture={ok:true,schema:'PAYNE_REAL_LEDGER_EXPORT_V1',readOnly:true,provid
 {type:'ENTRY_PROVIDER_POST_STARTED',seriesId:'S',attemptId:'A',at:'2026-10-09T10:00:00Z'},
 {type:'ENTRY_NO_FILL',seriesId:'S',attemptId:'A',at:'2026-10-09T10:01:00Z'},
 {type:'ENTRY_WRITE_ERROR_UNKNOWN',seriesId:'S',attemptId:'A',at:'2026-10-09T10:02:00Z'},
-{type:'POSITION_OWNERSHIP_ESTABLISHED',seriesId:'S',attemptId:'A',entryOrderId:'ORDER',at:'2026-10-09T10:03:00Z'},
+{type:'POSITION_OWNERSHIP_ESTABLISHED',seriesId:'S',attemptId:'A',entryOrderId:'ORDER',filledCount:2,at:'2026-10-09T10:03:00Z'},
 {type:'PAYNE_PAPER_BRAIN_EXIT_CLOSED',seriesId:'S',attemptId:'A',status:'CLOSED',at:'2026-10-09T10:04:00Z'},
 {type:'PROVIDER_RECONCILED_FLAT',seriesId:'S',attemptId:'A',reconciliationState:'FLAT',at:'2026-10-09T10:05:00Z'},
 {type:'FIRE_SPECIMEN_LATCHED',seriesId:'S',attemptId:'A',at:'2026-10-09T10:06:00Z'}
