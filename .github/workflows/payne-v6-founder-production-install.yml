@@ -41,39 +41,62 @@ jobs:
           jq -e '.ok==true and .control.armed==false and .control.openPositions==0' /tmp/payne-pre-control.json
           jq -e '.ok==true and .control.armed==false and .series.unresolvedEntry==true' /tmp/payne-pre-state.json
           echo FOUNDER_DISARM_AND_HISTORICAL_STATE_READ=PASS
-      - name: Collect authenticated current exposure evidence with existing Worker GET paths
+      - name: Authenticated Kalshi account-wide GET verification
         shell: bash
+        env:
+          KALSHI_EXECUTION_KEY_ID: ${{ secrets.KALSHI_EXECUTION_KEY_ID }}
+          KALSHI_EXECUTION_PRIVATE_KEY: ${{ secrets.KALSHI_EXECUTION_PRIVATE_KEY }}
         run: |
           set -euo pipefail
-          base='https://market-edge-payne-kalshi-real.darkbishop43.workers.dev'
-          for endpoint in proof display-market-feed real-state ui-state; do
-            file="/tmp/payne-exposure-${endpoint}.json"
-            status=$(curl --silent --show-error --max-time 35 -o "$file" -w '%{http_code}' "$base/$endpoint") || { echo "BLOCKED: GET_$endpoint_TRANSPORT_FAILED"; exit 43; }
-            echo "GET_$endpoint HTTP_$status"
-            if [[ "$status" != 200 ]]; then
-              jq -c '{ok,error,reason}' "$file" 2>/dev/null || true
-              echo "BLOCKED: GET_$endpoint_HTTP_$status"
-              exit 43
-            fi
-            jq -e 'type=="object"' "$file" >/dev/null || { echo "BLOCKED: GET_$endpoint_INVALID_JSON"; exit 43; }
-          done
-          jq -e '.kalshi.authenticatedGet=="PROVEN"' /tmp/payne-exposure-proof.json >/dev/null || {
-            jq -c '{authenticatedGet:.kalshi.authenticatedGet,accountBalanceGet:.kalshi.accountBalanceGet,failureStage:.kalshi.failureStage,errorClass:.kalshi.errorClass}' /tmp/payne-exposure-proof.json
-            echo 'BLOCKED: AUTHENTICATED_KALSHI_GET_NOT_PROVEN'
-            exit 44
+          node --input-type=module <<'NODE'
+          import {kalshiGetOnly} from './market-edge-lab/real/payne-kalshi-real/src/kalshi-get-only.js';
+          const env={KALSHI_EXECUTION_KEY_ID:process.env.KALSHI_EXECUTION_KEY_ID,
+                     KALSHI_EXECUTION_PRIVATE_KEY:process.env.KALSHI_EXECUTION_PRIVATE_KEY};
+          if(!env.KALSHI_EXECUTION_KEY_ID||!env.KALSHI_EXECUTION_PRIVATE_KEY){
+            console.error('BLOCKED: GITHUB_ACTIONS_KALSHI_EXECUTION_READ_CREDENTIALS_MISSING');
+            process.exit(47);
           }
-          jq -c '{authenticatedGet:.kalshi.authenticatedGet,accountBalanceGet:.kalshi.accountBalanceGet,providerGets:.kalshi.providerGets}' /tmp/payne-exposure-proof.json
-          jq -c '{displayFeedOk:.ok,orders:.orders,providerGets:.providerGets,providerWrites:.providerWrites}' /tmp/payne-exposure-display-market-feed.json
-          jq -c '{armed:.control.armed,openPositions:.control.openPositions,unresolvedEntry:.series.unresolvedEntry,position:.series.position,status:.series.status,fireLatchState:.series.fireLatch.state,providerPost:.series.fireLatch.providerPost}' /tmp/payne-exposure-real-state.json
-          jq -e '.control.armed==false and .control.openPositions==0 and .series.unresolvedEntry==true' /tmp/payne-exposure-real-state.json >/dev/null || {
-            echo 'BLOCKED: CONTROL_OR_HISTORICAL_STATE_CHANGED'
-            exit 45
+          const get=async(path)=>{
+            let response;
+            try {response=await kalshiGetOnly(env,path);}
+            catch(e){console.error('BLOCKED: AUTHENTICATED_GET_EXCEPTION path='+path+' code='+String(e?.message||'UNKNOWN'));process.exit(48);}
+            console.log('KALSHI_GET '+path+' HTTP_'+response.status);
+            if(!response.ok){console.error('BLOCKED: KALSHI_GET_HTTP_'+response.status+' path='+path);process.exit(49);}
+            const body=await response.json().catch(()=>null);
+            if(!body||typeof body!=='object'){console.error('BLOCKED: KALSHI_GET_INVALID_JSON path='+path);process.exit(50);}
+            return body;
+          };
+          const collect=async(endpoint,key,extra='')=>{
+            let cursor='',rows=[],page=0;
+            do {
+              if(++page>50){console.error('BLOCKED: PROVIDER_PAGINATION_INCOMPLETE '+endpoint);process.exit(51);}
+              const path='/trade-api/v2/'+endpoint+'?limit=200&subaccount=0'+extra+(cursor?'&cursor='+encodeURIComponent(cursor):'');
+              const body=await get(path);
+              if(!Array.isArray(body[key])){console.error('BLOCKED: PROVIDER_SCHEMA_UNKNOWN '+endpoint);process.exit(52);}
+              rows.push(...body[key]);cursor=String(body.cursor||'');
+            }while(cursor);
+            console.log('KALSHI_VERIFIED_ROWS '+endpoint+'='+rows.length);
+            return rows;
+          };
+          const orders=await collect('portfolio/orders','orders');
+          const positions=await collect('portfolio/positions','market_positions');
+          const fills=await collect('portfolio/fills','fills');
+          const historic=await collect('historical/fills','fills');
+          const settlements=await collect('portfolio/settlements','settlements');
+          const active=orders.filter(o=>!['canceled','cancelled','executed','filled','rejected','expired','settled'].includes(String(o.status||o.order_status||'').toLowerCase()));
+          const exposure=positions.filter(p=>Number(p.position??p.position_count??p.total_traded??0)!==0);
+          console.log('EVIDENCE_COUNTS active_or_unknown_orders='+active.length+
+                      ' nonzero_or_uncertain_positions='+exposure.length+
+                      ' current_fills='+fills.length+' historical_fills='+historic.length+
+                      ' settlements='+settlements.length);
+          if(active.length||exposure.length){
+            console.error('BLOCKED: PROVIDER_OPEN_OR_UNMANAGED_EXPOSURE');
+            console.error('ORDER_IDENTITIES '+JSON.stringify(active.map(x=>({ticker:x.ticker,order_id:x.order_id,status:x.status})).slice(0,20)));
+            console.error('POSITION_IDENTITIES '+JSON.stringify(exposure.map(x=>({ticker:x.ticker,position:x.position})).slice(0,20)));
+            process.exit(53);
           }
-          # The returned display feed and state are scoped to PAYNE and do not
-          # certify account-wide resting orders, all positions or in-flight claims.
-          # They MUST NOT be interpreted as CLEAN without those provider records.
-          echo 'BLOCKED: EXISTING_GET_RESPONSES_LACK_ACCOUNT_WIDE_OPEN_ORDER_POSITION_AND_CLAIM_EVIDENCE'
-          exit 46
+          console.log('ACCOUNT_WIDE_PROVIDER_GET_EVIDENCE_CLEAN');
+          NODE
       - name: Execute Wrangler installation only after verified exposure
         working-directory: market-edge-lab/real/payne-kalshi-real
         env:
