@@ -3864,28 +3864,36 @@ async function manageAllPayneRealPositions(env,control,series,postImpl,nowMs){
   return saveRealSeriesState(env,series);
 }
 
-// Suppress overlapping entry cycles within this Worker isolate.
-// This is NOT a cross-isolate or distributed lock; KV remains non-atomic.
-const activePayneExecutionSeries=new Set();
-const submittedPayneFireSpecimens=new Set();
-export async function runPayneRealExecutionCycle(env,options={}) {
-  const series=await loadRealSeriesState(env);
-  const identity=String(series?.seriesId||'UNIDENTIFIED_SERIES');
-  const specimen=series?.fireLatch?.specimenId;
-  const submitKey=specimen?identity+'|'+specimen:null;
-  if(activePayneExecutionSeries.has(identity) || (submitKey && submittedPayneFireSpecimens.has(submitKey)))
-    return loadRealSeriesState(env);
-  activePayneExecutionSeries.add(identity);
+// Serialize entry cycles inside this isolate.
+// Reservation is synchronous.
+// Does not protect across isolates.
+
+let payneExecutionMutex = Promise.resolve();
+
+export async function runPayneRealExecutionCycle(
+  env,
+  options = {}
+) {
+  const prior = payneExecutionMutex;
+
+  let release;
+
+  payneExecutionMutex = new Promise(r => {
+    release = r;
+  });
+
+  await prior;
+
   try {
-    const outcome=await runPayneRealExecutionCycleOwned(env,options);
-    const attempted=outcome?.currentAttempt;
-    if(submitKey && attempted?.fireSpecimenId===specimen && attempted?.providerPostStarted===true)
-      submittedPayneFireSpecimens.add(submitKey);
-    return outcome;
+    return await runPayneRealExecutionCycleOwned(
+      env,
+      options
+    );
   } finally {
-    activePayneExecutionSeries.delete(identity);
+    release();
   }
 }
+
 async function runPayneRealExecutionCycleOwned(env,{postImpl=kalshiPayneOrderPost,nowMs=Date.now(),skipManagement=false}={}) {
   const executionStartMs=Date.now();
   let control=await loadControl(env);
