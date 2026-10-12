@@ -4,6 +4,7 @@ export {PayneExecutionCoordinator};
 import { kalshiReadOnlyProof, kalshiGetOnly } from './kalshi-get-only.js';
 import { kalshiPayneOrderPost, PAYNE_WRITE_CONTRACT } from './kalshi-real-write.js';
 import { cockpitHtml } from './cockpit-html.js';
+import { sanitizeKalshiError, auditStage } from './payne-execution-audit.js';
 import {logPayneTiming,payneTimingIdentity,paynePriorityBeforeScan} from './payne-execution-timing.js';
 import { buildPayneOwnedFeatureState, payneFeatureIdentity } from './payne-kalshi-features.js';
 import {
@@ -2915,6 +2916,44 @@ export function summarizeHistoricalAttempt({attempt={},ledgerRows=[],position=nu
   };
 }
 
+export async function buildPayneAuditView(env, requestedId) {
+  const active=await loadRealSeriesState(env);
+  const seriesId=String(requestedId||active?.seriesId||'').trim();
+  if(!seriesId)return {ok:true,readOnly:true,seriesId:null,attempts:[]};
+  if(!/^[a-zA-Z0-9-]{1,100}$/.test(seriesId))throw new Error('AUDIT_SERIES_ID_INVALID');
+  const attempts=await listRealAttemptsForSeries(env,seriesId);
+  const cards=attempts.slice(-20).map(a=>{
+    const actualEvents=[
+      ['FIRE',a.fireAt||a.fireTimestamp],
+      ['EXECUTION_INTENT',a.createdAt||a.at],
+      ['PROVIDER_POST_BOUNDARY',a.providerSubmitStartedAt],
+      ['RECONCILED',a.reconciledAt],
+    ].filter(([,at])=>typeof at==='string'&&at.length>0).map(([type,at])=>({type,at,source:'PERSISTED_ATTEMPT_FIELD'}));
+    return {
+      attemptId:a.attemptId||null,attemptNo:a.attemptNo??a.intentNo??null,
+      seriesId,ticker:a.marketTicker||null,asset:a.asset||null,
+      side:a.outcomeSide||null,clientOrderId:a.clientOrderId||null,
+      fireAt:a.fireAt||a.fireTimestamp||null,
+      createdAt:a.createdAt||a.at||null,writerInvoked:a.writerInvoked===true,
+      providerPostStarted:a.providerPostStarted===true,
+      httpStatus:a.providerHttpStatus??null,
+      providerResponseState:a.providerResponseState||null,
+      providerErrorCode:a.providerErrorCode||null,
+      providerErrorMessage:a.providerErrorMessage||null,
+      providerErrorEvidence:a.providerErrorEvidence||'MESSAGE_NOT_RECORDED',
+      providerResponseAt:a.providerResponseAt||null,
+      providerOrderId:a.providerOrderId||null,
+      fillCount:a.providerResult?.fillCount??null,
+      terminalClassification:a.terminalClassification||null,
+      reconciliationReason:a.reconciliationReason||null,
+      stage:auditStage(a),events:actualEvents
+    };
+  });
+  return {ok:true,readOnly:true,schema:'PAYNE_EXECUTION_AUDIT_VIEW_V1',seriesId,
+    count:cards.length,attempts:cards,historySource:'EXISTING_PERSISTED_ATTEMPTS',
+    eventsSource:'PERSISTED_ATTEMPT_TIMESTAMPS_ONLY',providerWrites:0,ordersSubmittedByThisRead:0};
+}
+
 export async function buildHistoricalSeriesReport(env,seriesId) {
   const id=String(seriesId||'').trim();
   if(!id) throw new Error('PAYNE_HISTORY_SERIES_ID_REQUIRED');
@@ -3840,7 +3879,8 @@ async function managePayneRealPosition(env,control,series,postImpl=kalshiPayneOr
     await settleSeriesControl(env,series,1,{failClosed:true});
     return saveRealSeriesState(env,series);
   }
-  const body=await response.json().catch(()=>({}));
+  let providerResponseReadable=true;
+  const body=await response.json().catch(()=>{providerResponseReadable=false;return {};});
   if(!response.ok){
     position.status='EXIT_RECONCILIATION_REQUIRED';position.exitProviderStatus=response.status;series.status='EXIT_PROVIDER_UNKNOWN_RECONCILIATION_REQUIRED';
     await appendRealLedger(env,'EXIT_PROVIDER_REJECTED',{seriesId:series.seriesId,attemptId:position.attemptId,ticker:position.marketTicker,httpStatus:response.status,proof});
@@ -4242,10 +4282,11 @@ async function runPayneRealExecutionCycleOwned(env,{postImpl=kalshiPayneOrderPos
     series.status='ENTRY_RECONCILIATION_REQUIRED';
     series.unresolvedEntry=true;
     series.fireLatch={...series.fireLatch,state:'PROVIDER_POST_CREATED',providerPost:'YES',providerOrderId:null,finalResult:'REJECTED_OR_UNKNOWN'};
-    attempt={...attempt,status:'PROVIDER_REJECTED_OR_UNKNOWN',providerHttpStatus:response.status,providerResponseState:'HTTP_REJECTED_OR_UNKNOWN',terminalClassification:'PROVIDER_REJECTED_OR_UNKNOWN'};
+    const sanitizedError=sanitizeKalshiError(body,providerResponseReadable);
+    attempt={...attempt,status:'PROVIDER_REJECTED_OR_UNKNOWN',providerHttpStatus:response.status,providerResponseState:'HTTP_REJECTED_OR_UNKNOWN',terminalClassification:'PROVIDER_REJECTED_OR_UNKNOWN',providerErrorCode:sanitizedError.errorCode,providerErrorMessage:sanitizedError.errorMessage,providerErrorEvidence:sanitizedError.errorEvidence,providerResponseAt:new Date().toISOString()};
     series.currentAttempt=attempt;
     await persistAttempt(env,{runId:seriesId,result:'PROVIDER_REJECTED_OR_UNKNOWN',...attempt});
-    await appendRealLedger(env,'ENTRY_PROVIDER_REJECTED_OR_UNKNOWN',{seriesId,attemptId,intentNo,attemptNo,ticker:candidate.ticker,httpStatus:response.status,writerInvoked:true,providerPostStarted:true,providerAttemptCounted:true,proof});
+    await appendRealLedger(env,'ENTRY_PROVIDER_REJECTED_OR_UNKNOWN',{seriesId,attemptId,intentNo,attemptNo,ticker:candidate.ticker,httpStatus:response.status,providerErrorCode:sanitizedError.errorCode,providerErrorMessage:sanitizedError.errorMessage,providerErrorEvidence:sanitizedError.errorEvidence,providerResponseAt:attempt.providerResponseAt,writerInvoked:true,providerPostStarted:true,providerAttemptCounted:true,proof});
     await settleSeriesControl(env,series,0);
     return saveRealSeriesState(env,series);
   }
@@ -4456,6 +4497,7 @@ export default {
     }
     if (url.pathname === '/real-history') {
       try{
+        if(url.searchParams.get('view')==='audit')return Response.json(await buildPayneAuditView(env,url.searchParams.get('seriesId')),{headers:{'cache-control':'no-store'}});
         const report=await buildHistoricalSeriesReport(env,url.searchParams.get('seriesId'));
         return Response.json(report,{headers:{'cache-control':'no-store'}});
       }catch(error){
