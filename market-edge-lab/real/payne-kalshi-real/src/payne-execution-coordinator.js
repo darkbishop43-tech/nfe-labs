@@ -55,9 +55,10 @@ export class PayneExecutionCoordinator {
         return {granted:true,reason:'PROVEN_NO_POST_RELEASED'};
       }
       if(action==='RESOLVE_ENTRY'){
-        if(!prior||prior.seriesId!==seriesId||prior.specimenId!==specimenId||prior.clientOrderId!==clientOrderId||
+        if(!prior)return {granted:false,reason:'CLAIM_NOT_FOUND'};
+        if(prior.seriesId!==seriesId||prior.specimenId!==specimenId||prior.clientOrderId!==clientOrderId||
            prior.ticker!==ticker||prior.side!==side||prior.windowClose!==windowClose)
-          return {granted:false,reason:'CLAIM_IDENTITY_MISMATCH'};
+          return {granted:false,reason:'CLAIM_DIFFERENT_IDENTITY'};
         const resolution=String(input.resolution||'');
         if(!['OPEN','NO_FILL','CLOSED','UNKNOWN','NO_PROVIDER_EXECUTION'].includes(resolution))
           return {granted:false,reason:'INVALID_RESOLUTION'};
