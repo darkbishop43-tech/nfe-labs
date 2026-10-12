@@ -40,7 +40,7 @@ test('full, partial and zero provider results remain distinguished by fill count
 });
 test('provider ambiguity persists UNKNOWN and does not auto-replay within cycle',()=>{
  assert.match(source,/status:'WRITE_ERROR_UNKNOWN'/);
- assert.match(source,/status:'ENTRY_RECONCILIATION_REQUIRED'/);
+ assert.match(source,/series\.status='ENTRY_RECONCILIATION_REQUIRED'/);
  assert.match(source,/if\(series\?\.unresolvedEntry===true\)/);
 });
 test('legacy current ZEC incident is never direct migrated in-place',()=>{
