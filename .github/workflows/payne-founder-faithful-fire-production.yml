@@ -1,0 +1,78 @@
+name: PAYNE Founder Faithful FIRE Production Promotion
+on:
+  push:
+    branches: [payne-faithful-fire-handoff-20261011]
+    paths: [".github/workflows/payne-founder-faithful-fire-production.yml"]
+permissions:
+  contents: read
+concurrency:
+  group: deploy-payne-kalshi-real-zero-money
+  cancel-in-progress: false
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 280d134ddfb99899409950ec52acc7142a61ba83
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          ref: 621a0f9fb237cd9defb420605dd5c384489a84bb
+          path: existing-approved-gate
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Verify exact pinned source and preservation
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = 280d134ddfb99899409950ec52acc7142a61ba83
+          grep -q '^name = "market-edge-payne-kalshi-real"$' market-edge-lab/real/payne-kalshi-real/wrangler.toml
+          node --check market-edge-lab/real/payne-kalshi-real/src/index.js
+          node --test market-edge-lab/real/payne-kalshi-real/test/faithful-fire-handoff.test.mjs
+          git diff --exit-code f243f7de350f5081a79cf628f0c715bc0bfb2537 HEAD -- market-edge-lab/real/payne-kalshi-real/src/payne-paper-brain.js market-edge-lab/real/payne-kalshi-real/src/payne-kalshi-features.js market-edge-lab/real/payne-kalshi-real/src/kalshi-real-write.js market-edge-lab/real/payne-kalshi-real/src/payne-execution-coordinator.js market-edge-lab/real/payne-kalshi-real/src/payne-live-order-watch.js market-edge-lab/real/shared market-edge-lab/real/baseline
+          echo 'PINNED_FAITHFUL_FIRE_SOURCE=PASS'
+      - name: Existing Cloudflare KV safety gate PRE
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: bash existing-approved-gate/.github/scripts/payne-kv-deployment-safety.sh pre
+      - name: Production disarmed state readback
+        run: |
+          set -euo pipefail
+          base=https://market-edge-payne-kalshi-real.darkbishop43.workers.dev
+          curl -fsS --max-time 25 "$base/real-state" -o /tmp/payne-before.json
+          jq -c '{armed:.control.armed,threshold:.control.activeThreshold,stake:.control.maxEntryDebitUsd,attemptTarget:.control.attemptTarget,maxPositions:.control.maxPositions,unresolvedEntry:.series.unresolvedEntry,status:.series.status}' /tmp/payne-before.json
+          jq -e '.control.armed==false and .control.openPositions==0 and .control.attemptTarget==5 and .control.maxPositions==3 and .series.unresolvedEntry==false' /tmp/payne-before.json >/dev/null || { echo 'BLOCKED: PAYNE_NOT_DISARMED_OR_CLEAN';exit 1; }
+      - name: Wrangler build preflight
+        working-directory: market-edge-lab/real/payne-kalshi-real
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: npx --yes wrangler@4 deploy --dry-run --outdir /tmp/payne-faithful-fire-build
+      - name: Deploy exact approved source
+        working-directory: market-edge-lab/real/payne-kalshi-real
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          npx --yes wrangler@4 deploy | tee /tmp/payne-deploy.log
+          grep 'Current Version ID:' /tmp/payne-deploy.log
+      - name: Existing Cloudflare KV safety gate POST
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: bash existing-approved-gate/.github/scripts/payne-kv-deployment-safety.sh post
+      - name: Production state and continuity readback
+        run: |
+          set -euo pipefail
+          curl -fsS --max-time 25 https://market-edge-payne-kalshi-real.darkbishop43.workers.dev/real-state -o /tmp/payne-after.json
+          jq -e '.control.armed==false and .control.attemptTarget==5 and .control.maxPositions==3 and .series.unresolvedEntry==false' /tmp/payne-after.json >/dev/null
+          jq -S '{armed:.control.armed,threshold:.control.activeThreshold,stake:.control.maxEntryDebitUsd,attemptTarget:.control.attemptTarget,maxPositions:.control.maxPositions}' /tmp/payne-before.json >/tmp/before-settings
+          jq -S '{armed:.control.armed,threshold:.control.activeThreshold,stake:.control.maxEntryDebitUsd,attemptTarget:.control.attemptTarget,maxPositions:.control.maxPositions}' /tmp/payne-after.json >/tmp/after-settings
+          cmp /tmp/before-settings /tmp/after-settings
+          jq -c '{armed:.control.armed,threshold:.control.activeThreshold,stake:.control.maxEntryDebitUsd,attemptTarget:.control.attemptTarget,maxPositions:.control.maxPositions,unresolvedEntry:.series.unresolvedEntry,status:.series.status}' /tmp/payne-after.json
+          echo 'PRODUCTION_CONFIG_AND_CLEAN_CONTINUITY=PASS'
