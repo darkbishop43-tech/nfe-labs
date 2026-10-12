@@ -9,33 +9,40 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: Read existing live history ledger and state
+      - name: Independent existing reads with exact transport evidence
         shell: bash
         run: |
-          set -euo pipefail
+          set -uo pipefail
           base=https://market-edge-payne-kalshi-real.darkbishop43.workers.dev
-          curl --fail --silent --show-error --retry 0 --max-time 50 "$base/real-state" -o state.json
-          curl --fail --silent --show-error --retry 0 --max-time 50 "$base/real-ledger?limit=1000" -o ledger.json
-          curl --fail --silent --show-error --retry 0 --max-time 50 "$base/real-history" -o history.json
-          python3 - <<'PY'
-          import json
-          for name in ['state','ledger','history']:
-            d=json.load(open(name+'.json'))
-            print('DATASET',name,'TYPE',type(d).__name__,'KEYS',list(d) if isinstance(d,dict) else 'array',flush=True)
-            if name=='state':
-              s=d.get('series') or {}
-              print('STATE',json.dumps({'seriesId':s.get('seriesId'),'status':s.get('status'),'attemptsStarted':s.get('attemptsStarted'),'unresolvedEntry':s.get('unresolvedEntry'),'controlArmed':(d.get('control') or {}).get('armed')}),flush=True)
-            if name=='ledger':
-              rows=d.get('rows') or []
-              print('LEDGER_COUNT',len(rows),flush=True)
-              for row in rows:
-                if not isinstance(row,dict): continue
-                t=str(row.get('type') or row.get('event') or '')
-                if any(p in t for p in ('ENTRY_','EXECUTION_','PROVIDER_','FIRE_')):
-                  print('LEDGER',json.dumps(row,default=str)[:2000],flush=True)
-            if name=='history':
-              print('HISTORY_DATA',json.dumps(d,default=str)[:18000],flush=True)
+          for item in 'ledger|real-ledger?limit=1000' 'history|real-history' 'state|real-state'; do
+            label="${item%%|*}"
+            endpoint="${item#*|}"
+            echo "REQUEST_START=${label}"
+            curl --retry 0 --connect-timeout 12 --max-time 35 --silent --show-error \
+              --output "${label}.json" --write-out "READ_METRICS_${label} HTTP=%{http_code} SECONDS=%{time_total} BYTES=%{size_download}\\n" \
+              "$base/$endpoint" 2>"${label}.error"
+            result=$?
+            echo "CURL_EXIT_${label}=$result"
+            echo "TRANSPORT_ERROR_${label}=$(cat "${label}.error")"
+            if [ "$result" -eq 0 ] && python3 -m json.tool "${label}.json" >/dev/null 2>&1; then
+              python3 - "${label}.json" "${label}" <<'PY'
+          import json,sys
+          d=json.load(open(sys.argv[1]));label=sys.argv[2]
+          print('DATASET',label,'SCHEMA',d.get('schema'),'COUNT',d.get('count'),'KEYS',list(d))
+          if label=='ledger':
+            for row in d.get('rows',[]):
+              if isinstance(row,dict):
+                print('LEDGER_ROW',json.dumps(row,separators=(',',':'),default=str)[:5000])
+          elif label=='history':
+            print('HISTORY_DATA',json.dumps(d,separators=(',',':'),default=str)[:70000])
+          else:
+            x=d.get('series') or {}
+            print('STATE_SUMMARY',json.dumps({'seriesId':x.get('seriesId'),'attemptsStarted':x.get('attemptsStarted'),'unresolvedEntry':x.get('unresolvedEntry')}))
           PY
+            else
+              echo "READ_UNAVAILABLE_${label}"
+            fi
+          done
       - uses: actions/upload-artifact@v4
         with:
           name: payne-five-attempt-existing-reads
