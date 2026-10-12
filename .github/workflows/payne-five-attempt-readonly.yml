@@ -9,70 +9,47 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: Independent existing reads with exact transport evidence
-        shell: bash
-        run: |
-          set -uo pipefail
-          set +e
-          base=https://market-edge-payne-kalshi-real.darkbishop43.workers.dev
-          for item in 'ledger|real-ledger?limit=50' 'history|real-history?seriesId=367facf0-a0ab-4361-99b6-0dbe4c786660' 'state|real-state'; do
-            label="${item%%|*}"
-            endpoint="${item#*|}"
-            echo "REQUEST_START=${label}"
-            curl --retry 0 --connect-timeout 12 --max-time 35 --silent --show-error \
-              --output "${label}.json" --write-out "READ_METRICS_${label} HTTP=%{http_code} SECONDS=%{time_total} BYTES=%{size_download}\\n" \
-              "$base/$endpoint" 2>"${label}.error"
-            result=$?
-            echo "CURL_EXIT_${label}=$result"
-            echo "TRANSPORT_ERROR_${label}=$(cat "${label}.error")"
-            if [ "$result" -eq 0 ] && python3 -m json.tool "${label}.json" >/dev/null 2>&1; then
-              python3 - "${label}.json" "${label}" <<'PY'
-          import json,sys
-          d=json.load(open(sys.argv[1]));label=sys.argv[2]
-          print('DATASET',label,'SCHEMA',d.get('schema'),'COUNT',d.get('count'),'KEYS',list(d))
-          if label=='ledger':
-            for row in d.get('rows',[]):
-              if isinstance(row,dict):
-                print('LEDGER_ROW',json.dumps(row,separators=(',',':'),default=str)[:5000])
-          elif label=='history':
-            print('HISTORY_DATA',json.dumps(d,separators=(',',':'),default=str)[:70000])
-          else:
-            x=d.get('series') or {}
-            print('STATE_SUMMARY',json.dumps({'seriesId':x.get('seriesId'),'attemptsStarted':x.get('attemptsStarted'),'unresolvedEntry':x.get('unresolvedEntry')}))
-          PY
-            else
-              echo "READ_UNAVAILABLE_${label}"
-            fi
-          done
-      - name: Existing Cloudflare KV October 12 key discovery and exact value reads
+      - name: Read existing October 12 KV ledger values in parallel read-only
         shell: bash
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: |
           set -euo pipefail
-          base="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/storage/kv/namespaces/03352b0ccb034f1bb8206f663a04b125"
-          for prefix in 'payne-kalshi:real-ledger:2026-10-12' 'payne-kalshi:real-attempt:'; do
-            enc=$(jq -rn --arg x "$prefix" '$x|@uri')
-            case "$prefix" in *real-ledger*) label=oct12-ledger;; *) label=attempts;; esac
-            status=$(curl --retry 0 -sS --max-time 35 -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -o "$label-keys.json" -w '%{http_code}' "$base/keys?prefix=$enc&limit=1000")
-            echo "KV_LIST_$label HTTP=$status"
-            test "$status" = 200 || exit 1
-            jq -c '{success,result_info,keyCount:(.result|length),errors}' "$label-keys.json"
-          done
           python3 - <<'PY'
-          import json
-          for name in ['oct12-ledger','attempts']:
-            d=json.load(open(name+'-keys.json'))
-            keys=[v['name'] for v in d.get('result',[])]
-            print('KEYSET',name,'TOTAL',len(keys),'CURSOR',d.get('result_info',{}).get('cursor'))
-            print('KEYS',json.dumps(keys[:100]))
+          import os,json,urllib.request,urllib.parse,concurrent.futures,time
+          base=f"https://api.cloudflare.com/client/v4/accounts/{os.environ['CLOUDFLARE_ACCOUNT_ID']}/storage/kv/namespaces/03352b0ccb034f1bb8206f663a04b125"
+          header={'Authorization':'Bearer '+os.environ['CLOUDFLARE_API_TOKEN']}
+          prefix='payne-kalshi:real-ledger:2026-10-12'
+          url=base+'/keys?prefix='+urllib.parse.quote(prefix,safe='')+'&limit=1000'
+          with urllib.request.urlopen(urllib.request.Request(url,headers=header),timeout=40) as resp: listing=json.load(resp)
+          assert listing.get('success'),listing.get('errors')
+          keys=[x['name'] for x in listing['result']]
+          print('OCT12_KEYS',len(keys),'CURSOR',bool(listing.get('result_info',{}).get('cursor')),flush=True)
+          def get(key):
+            req=urllib.request.Request(base+'/values/'+urllib.parse.quote(key,safe=''),headers=header)
+            try:
+              with urllib.request.urlopen(req,timeout=35) as resp:
+                return key,json.load(resp),None
+            except Exception as e:return key,None,str(e)
+          records=[];fail=[]
+          with concurrent.futures.ThreadPoolExecutor(max_workers=12) as pool:
+            for key,row,error in pool.map(get,keys):
+              if error:fail.append([key,error])
+              elif isinstance(row,dict):records.append(row)
+          print('VALUES_RECOVERED',len(records),'FAILED',len(fail),flush=True)
+          for key,error in fail[:15]:print('KV_VALUE_ERROR',key,error,flush=True)
+          records.sort(key=lambda x:x.get('at',''))
+          with open('oct12-evidence.json','w') as f:json.dump(records,f)
+          important=[r for r in records if any(w in (str(r.get('type',''))) for w in ['ENTRY','FIRE','SERIES','PROVIDER','ATTEMPT','POSITION'])]
+          print('IMPORTANT_ROWS',len(important),flush=True)
+          for row in important:
+            fields=['at','type','seriesId','attemptId','attemptNo','intentNo','ticker','marketTicker','clientOrderId','outcomeSide','writerInvoked','providerPostStarted','httpStatus','providerHttpStatus','providerOrderId','terminalClassification','reconciliationReason','result','reason','status']
+            slim={k:row[k] for k in fields if k in row}
+            print('EVIDENCE_ROW',json.dumps(slim,separators=(',',':'),default=str),flush=True)
           PY
       - uses: actions/upload-artifact@v4
         with:
-          name: payne-five-attempt-existing-reads
-          path: |
-            state.json
-            ledger.json
-            history.json
+          name: payne-oct12-kv-evidence
+          path: oct12-evidence.json
           retention-days: 1
