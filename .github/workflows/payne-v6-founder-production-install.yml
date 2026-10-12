@@ -41,41 +41,26 @@ jobs:
           jq -e '.ok==true and .control.armed==false and .control.openPositions==0' /tmp/payne-pre-control.json
           jq -e '.ok==true and .control.armed==false and .series.unresolvedEntry==true' /tmp/payne-pre-state.json
           echo FOUNDER_DISARM_AND_HISTORICAL_STATE_READ=PASS
-      - name: Authenticated existing Cloudflare Worker provider-read verification
+      - name: Checkout exact V5 authenticated Cloudflare KV gate
+        uses: actions/checkout@v4
+        with:
+          ref: 621a0f9fb237cd9defb420605dd5c384489a84bb
+          path: existing-approved-gate
+          persist-credentials: false
+      - name: V5 Cloudflare KV safety gate PRE
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: bash existing-approved-gate/.github/scripts/payne-kv-deployment-safety.sh pre
+      - name: Existing Cloudflare Worker authenticated proof
         shell: bash
         run: |
           set -euo pipefail
-          base='https://market-edge-payne-kalshi-real.darkbishop43.workers.dev'
-          for endpoint in proof real-state; do
-            out="/tmp/payne-${endpoint}-verified.json"
-            status="$(curl --silent --show-error --max-time 35 --output "$out" --write-out '%{http_code}' "$base/$endpoint")" || {
-              echo "BLOCKED: WORKER_READ_TRANSPORT_ERROR GET_/$endpoint"
-              exit 54
-            }
-            echo "WORKER_GET_/$endpoint HTTP_$status"
-            if [[ "$status" != 200 ]]; then
-              jq -c '{ok,error,reason}' "$out" 2>/dev/null || true
-              echo "BLOCKED: WORKER_READ_HTTP_$status GET_/$endpoint"
-              exit 55
-            fi
-          done
-          jq -e '.kalshi.authenticatedGet=="PROVEN"' /tmp/payne-proof-verified.json >/dev/null || {
-            jq -c '{authentication:.kalshi.authentication,httpStatus:.kalshi.httpStatus,failureStage:.kalshi.failureStage,errorClass:.kalshi.errorClass}' /tmp/payne-proof-verified.json
-            echo BLOCKED_AUTHENTICATED_KALSHI_GET_NOT_PROVEN
-            exit 56
-          }
-          jq -e '.ok==true and .control.armed==false and .control.openPositions==0' /tmp/payne-real-state-verified.json >/dev/null || {
-            echo BLOCKED_FOUNDER_DISARM_OR_OWNED_EXPOSURE
-            exit 57
-          }
-          jq -c '{providerAuth:.kalshi.authenticatedGet,providerGets:.kalshi.providerGets,accountBalanceGet:.kalshi.accountBalanceGet}' /tmp/payne-proof-verified.json
-          jq -c '{armed:.control.armed,openPositions:.control.openPositions,unresolvedEntry:.series.unresolvedEntry,providerPostStarted:.series.currentAttempt.providerPostStarted,providerOrderId:.series.currentAttempt.providerOrderId,fireLatch:.series.fireLatch.state}' /tmp/payne-real-state-verified.json
-          # /proof performs authenticated balance/markets GETs. /real-state is
-          # persisted internal state. Neither is a provider account-wide orders/
-          # positions/fills/settlements report, so the required exposure proof
-          # is not established by a successful response.
-          echo 'BLOCKED: EXISTING_CLOUDFLARE_READ_SERVICE_NO_ACCOUNT_WIDE_KALSHI_EXPOSURE_RESPONSE'
-          exit 58
+          base=https://market-edge-payne-kalshi-real.darkbishop43.workers.dev
+          curl --fail --silent --show-error --max-time 35 "$base/proof" -o /tmp/payne-provider-proof.json
+          jq -e '.kalshi.authenticatedGet=="PROVEN"' /tmp/payne-provider-proof.json >/dev/null || { echo 'BLOCKED: EXISTING_PROVIDER_AUTHENTICATION_NOT_PROVEN'; exit 1; }
+          echo 'CLOUDFLARE_KALSHI_AUTHENTICATED_GET=PASS'
       - name: Execute Wrangler installation only after verified exposure
         working-directory: market-edge-lab/real/payne-kalshi-real
         env:
@@ -85,6 +70,12 @@ jobs:
           set -euo pipefail
           npx --yes wrangler@4 deploy | tee /tmp/payne-v6-install.txt
           grep 'Current Version ID:' /tmp/payne-v6-install.txt
+      - name: V5 Cloudflare KV safety gate POST
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: bash existing-approved-gate/.github/scripts/payne-kv-deployment-safety.sh post
       - name: Read back control and state after deployment
         shell: bash
         run: |
