@@ -1,0 +1,26 @@
+name: PAYNE Legacy Collision Offline Validation
+on:
+  push:
+    branches: [payne-legacy-hype-zec-collision-repair-20261012]
+    paths: ['.github/workflows/payne-legacy-collision-offline.yml']
+permissions: {contents: read}
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Report SHA and enforce protected sources
+        run: |
+          set -euo pipefail
+          git rev-parse HEAD
+          node --version
+          git diff --exit-code 3b2394e9559a77c0f8106d462ae3e3a0d1d0b7c3 HEAD -- market-edge-lab/real/baseline market-edge-lab/real/shared market-edge-lab/real/payne-kalshi-real/src/payne-paper-brain.js market-edge-lab/real/payne-kalshi-real/src/kalshi-real-write.js
+      - name: Run PAYNE offline regression suite
+        working-directory: market-edge-lab/real/payne-kalshi-real
+        run: npm test
