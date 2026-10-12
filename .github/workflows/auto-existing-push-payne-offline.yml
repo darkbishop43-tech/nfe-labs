@@ -36,3 +36,20 @@ jobs:
           npm install --ignore-scripts --no-audit --no-fund
           npx wrangler deploy --dry-run --outdir /tmp/auto-payne-push-offline
           echo ZERO_LIVE_DEPLOYMENT=PASS
+      - name: Read-only active AUTO Cloudflare deployment identity
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${CLOUDFLARE_API_TOKEN:-}" || -z "${CLOUDFLARE_ACCOUNT_ID:-}" ]]; then echo 'AUTO_CF_VERSION=UNVERIFIED_CREDENTIALS'; exit 0;fi
+          base="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers"
+          for route in "scripts/market-edge-baseline-real/deployments" "scripts/market-edge-baseline-real/versions";do
+            code="$(curl -sS --max-time 25 -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -o /tmp/auto-deploy.json -w '%{http_code}' "$base/$route")"
+            echo "AUTO_CF_ENDPOINT=$route HTTP=$code"
+            if [[ "$code" == 200 ]];then
+              jq -c '{success,versions:(.result.versions//[]|map({id,version_id,percentage})),deployments:(.result.deployments//[]|map({id,created_on,versions:(.versions//[]|map({version_id,percentage}))})),count:(.result|if type=="array" then length else null end)}' /tmp/auto-deploy.json
+            fi
+          done
+          echo "NO_SOURCE_HASH_CLAIM_WITHOUT_EXPLICIT_PROVENANCE"
