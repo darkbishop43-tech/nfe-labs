@@ -1,0 +1,32 @@
+name: PAYNE Faithful FIRE Handoff Zero-Money Validation
+on:
+  push:
+    branches: [payne-faithful-fire-handoff-20261011]
+    paths: [".github/workflows/payne-faithful-fire-zero-money.yml"]
+permissions: {contents: read}
+jobs:
+  zero-money:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Pin original PAYNE decision source and preserve other systems
+        shell: bash
+        run: |
+          set -euo pipefail
+          base=f243f7de350f5081a79cf628f0c715bc0bfb2537
+          git diff --exit-code "$base" HEAD -- market-edge-lab/real/payne-kalshi-real/src/payne-paper-brain.js market-edge-lab/real/payne-kalshi-real/src/payne-kalshi-features.js market-edge-lab/real/payne-kalshi-real/src/kalshi-real-write.js market-edge-lab/real/payne-kalshi-real/src/payne-execution-coordinator.js market-edge-lab/real/payne-kalshi-real/src/payne-live-order-watch.js market-edge-lab/real/shared market-edge-lab/real/baseline
+          git diff --unified=12 "$base" HEAD -- market-edge-lab/real/payne-kalshi-real/src/index.js
+          echo 'PAPER_MATH_WRITER_COORDINATOR_AUTO_UNCHANGED=PASS'
+      - name: Verify source compiles and handoff invariants
+        run: |
+          set -euo pipefail
+          node --check market-edge-lab/real/payne-kalshi-real/src/index.js
+          node --test market-edge-lab/real/payne-kalshi-real/test/faithful-fire-handoff.test.mjs
+      - name: No production operations
+        run: echo 'TEST_ONLY_NO_DEPLOY_NO_ARM_NO_PROVIDER_WRITE'
