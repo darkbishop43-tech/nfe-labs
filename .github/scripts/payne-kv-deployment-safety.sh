@@ -44,7 +44,7 @@ verify_safety() {
        ((.position//null)==null))) and
     ((.position // null)==null or
       ((.position.owner//"")=="PAYNE_KALSHI_REAL" and
-       (.position.status//""|IN("OPEN","FLAT","CLOSED","SETTLED")))) and
+       (.position.status//""|IN("FLAT","CLOSED","SETTLED")))) and
     ((.fireLatch.state // "NONE") |
       (IN("LATCHED","PROVIDER_POST_UNKNOWN")|not)) and
     # A disarmed terminal historical attempt may retain an obsolete pre-provider
@@ -89,7 +89,7 @@ verify_safety() {
          then "BLOCKED: HISTORICAL_UNRESOLVED_RESULT_NOT_TERMINAL"
       elif ((.position//null)!=null and
           ((.position.owner//"")!="PAYNE_KALSHI_REAL" or
-           (.position.status//""|IN("OPEN","FLAT","CLOSED","SETTLED")|not)))
+           (.position.status//""|IN("FLAT","CLOSED","SETTLED")|not)))
          then "BLOCKED: POSITION_OWNERSHIP_OR_STATUS"
       elif (.fireLatch.state//"NONE"|IN("LATCHED","PROVIDER_POST_UNKNOWN"))
          then "BLOCKED: ACTIVE_FIRE_LATCH"
