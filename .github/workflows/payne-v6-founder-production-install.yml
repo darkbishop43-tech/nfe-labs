@@ -41,18 +41,39 @@ jobs:
           jq -e '.ok==true and .control.armed==false and .control.openPositions==0' /tmp/payne-pre-control.json
           jq -e '.ok==true and .control.armed==false and .series.unresolvedEntry==true' /tmp/payne-pre-state.json
           echo FOUNDER_DISARM_AND_HISTORICAL_STATE_READ=PASS
-      - name: Verify authenticated Kalshi exposure before software installation
+      - name: Collect authenticated current exposure evidence with existing Worker GET paths
         shell: bash
         run: |
           set -euo pipefail
           base='https://market-edge-payne-kalshi-real.darkbishop43.workers.dev'
-          curl --fail --show-error --silent --max-time 35 "$base/proof" -o /tmp/payne-provider-proof.json
-          jq -e '.kalshi.authenticatedGet=="PROVEN"' /tmp/payne-provider-proof.json
-          # Existing /proof verifies balance/market GET, not account-wide orders,
-          # positions, active submissions or coordinator claim safety.
-          # No current approved endpoint exposes complete account-wide evidence.
-          echo 'BLOCKED: AUTHENTICATED_ACCOUNT_WIDE_PROVIDER_EXPOSURE_READ_UNAVAILABLE'
-          exit 42
+          for endpoint in proof display-market-feed real-state ui-state; do
+            file="/tmp/payne-exposure-${endpoint}.json"
+            status=$(curl --silent --show-error --max-time 35 -o "$file" -w '%{http_code}' "$base/$endpoint") || { echo "BLOCKED: GET_$endpoint_TRANSPORT_FAILED"; exit 43; }
+            echo "GET_$endpoint HTTP_$status"
+            if [[ "$status" != 200 ]]; then
+              jq -c '{ok,error,reason}' "$file" 2>/dev/null || true
+              echo "BLOCKED: GET_$endpoint_HTTP_$status"
+              exit 43
+            fi
+            jq -e 'type=="object"' "$file" >/dev/null || { echo "BLOCKED: GET_$endpoint_INVALID_JSON"; exit 43; }
+          done
+          jq -e '.kalshi.authenticatedGet=="PROVEN"' /tmp/payne-exposure-proof.json >/dev/null || {
+            jq -c '{authenticatedGet:.kalshi.authenticatedGet,accountBalanceGet:.kalshi.accountBalanceGet,failureStage:.kalshi.failureStage,errorClass:.kalshi.errorClass}' /tmp/payne-exposure-proof.json
+            echo 'BLOCKED: AUTHENTICATED_KALSHI_GET_NOT_PROVEN'
+            exit 44
+          }
+          jq -c '{authenticatedGet:.kalshi.authenticatedGet,accountBalanceGet:.kalshi.accountBalanceGet,providerGets:.kalshi.providerGets}' /tmp/payne-exposure-proof.json
+          jq -c '{displayFeedOk:.ok,orders:.orders,providerGets:.providerGets,providerWrites:.providerWrites}' /tmp/payne-exposure-display-market-feed.json
+          jq -c '{armed:.control.armed,openPositions:.control.openPositions,unresolvedEntry:.series.unresolvedEntry,position:.series.position,status:.series.status,fireLatchState:.series.fireLatch.state,providerPost:.series.fireLatch.providerPost}' /tmp/payne-exposure-real-state.json
+          jq -e '.control.armed==false and .control.openPositions==0 and .series.unresolvedEntry==true' /tmp/payne-exposure-real-state.json >/dev/null || {
+            echo 'BLOCKED: CONTROL_OR_HISTORICAL_STATE_CHANGED'
+            exit 45
+          }
+          # The returned display feed and state are scoped to PAYNE and do not
+          # certify account-wide resting orders, all positions or in-flight claims.
+          # They MUST NOT be interpreted as CLEAN without those provider records.
+          echo 'BLOCKED: EXISTING_GET_RESPONSES_LACK_ACCOUNT_WIDE_OPEN_ORDER_POSITION_AND_CLAIM_EVIDENCE'
+          exit 46
       - name: Execute Wrangler installation only after verified exposure
         working-directory: market-edge-lab/real/payne-kalshi-real
         env:
