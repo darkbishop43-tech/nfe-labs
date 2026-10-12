@@ -47,6 +47,46 @@ jobs:
           ref: 09709b828bd0072115265ca202d89d1b23e5a464
           path: existing-approved-gate
           persist-credentials: false
+      - name: Six offline persisted-state safety scenarios
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json, subprocess, pathlib
+          script=pathlib.Path('existing-approved-gate/.github/scripts/payne-kv-deployment-safety.sh').read_text()
+          start=script.index("jq -e --slurpfile c \"$c\" '")+len("jq -e --slurpfile c \"$c\" '")
+          end=script.index("' \"$s\" >/dev/null || {",start)
+          predicate=script[start:end]
+          c=dict(realControlSchema='PAYNE_REAL_CONTROL_V2_PAPER_BRAIN',
+                 armed=False,openPositions=0,requiredExchangeIndex=2,
+                 activeThreshold=0.6,attemptTarget=5,maxEntryDebitUsd=1,scanEnabled=True)
+          s=dict(schema='PAYNE_REAL_SERIES_V1',owner='PAYNE_KALSHI_REAL',
+                 requiredExchangeIndex=2,unresolvedEntry=True,position=None,
+                 currentAttempt=dict(providerPostStarted=False,writerInvoked=False,providerOrderId=None),
+                 fireLatch=dict(state='PRE_PROVIDER_VALIDATION',providerPost='NOT_STARTED'),
+                 configFrozen=False)
+          cases=[
+            ('A_SAFE_NULL_POSITION',{}, {},True),
+            ('B_ACTIVE_POSITION',{'position':{'owner':'PAYNE_KALSHI_REAL','status':'OPEN'}},{},False),
+            ('C_PROVIDER_POST_STARTED',{'currentAttempt':{**s['currentAttempt'],'providerPostStarted':True}},{},False),
+            ('D_WRITER_INVOCATION_UNKNOWN',{'currentAttempt':{**s['currentAttempt'],'writerInvoked':None}},{},False),
+            ('E_ACTIVE_FIRE_LATCH',{'fireLatch':{'state':'LATCHED','providerPost':'NOT_STARTED'}},{},False),
+            ('F_FOUNDER_ARMED',{}, {'armed':True},False),
+          ]
+          for name,series_changes,control_changes,expected in cases:
+            series={**s,**series_changes}
+            control={**c,**control_changes}
+            controlfile='/tmp/payne-v6-case-control.json'
+            pathlib.Path(controlfile).write_text(json.dumps(control))
+            p=subprocess.run(['jq','-e','--slurpfile','c',controlfile,predicate],
+                             input=json.dumps(series),text=True,capture_output=True)
+            control_predicate=not control['armed'] and control['openPositions']==0
+            actual=(p.returncode==0) and control_predicate
+            print(name, 'PASS' if actual==expected else 'FAIL',flush=True)
+            if actual!=expected:
+              print('jq_exit',p.returncode,'stderr',p.stderr[:500],flush=True)
+              raise SystemExit(1)
+          PY
       - name: V5 Cloudflare KV safety gate PRE
         shell: bash
         env:
