@@ -13,6 +13,7 @@ jobs:
         shell: bash
         run: |
           set -uo pipefail
+          set +e
           base=https://market-edge-payne-kalshi-real.darkbishop43.workers.dev
           for item in 'ledger|real-ledger?limit=1000' 'history|real-history' 'state|real-state'; do
             label="${item%%|*}"
