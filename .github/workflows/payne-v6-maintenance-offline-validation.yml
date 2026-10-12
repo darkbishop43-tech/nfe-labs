@@ -1,0 +1,33 @@
+name: PAYNE V6 Exact Maintenance Offline Validation
+on:
+  push:
+    branches: [payne-direct-diagnostic-maintenance-20261012-v6]
+    paths: ['.github/workflows/payne-v6-maintenance-offline-validation.yml']
+permissions:
+  contents: read
+jobs:
+  offline-only:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      CI: 'true'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ed131c056a2f0b446a94c01af1554f11f9fa930a
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Verify exact maintenance source and protected files
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "ed131c056a2f0b446a94c01af1554f11f9fa930a"
+          git diff --exit-code d5d92a39361c8eec464ff3b60c4d8f16e44bcbfd HEAD -- market-edge-lab/real/payne-kalshi-real/src/payne-paper-brain.js market-edge-lab/real/payne-kalshi-real/src/payne-kalshi-features.js market-edge-lab/real/payne-kalshi-real/src/kalshi-real-write.js market-edge-lab/real/baseline market-edge-lab/real/shared
+          node --check market-edge-lab/real/payne-kalshi-real/src/index.js
+          node --check market-edge-lab/real/payne-kalshi-real/src/payne-execution-coordinator.js
+          echo 'EXACT_PIN_AND_PROTECTED_SOURCE=PASS'
+      - name: Run entire PAYNE offline npm test suite
+        working-directory: market-edge-lab/real/payne-kalshi-real
+        run: npm test
