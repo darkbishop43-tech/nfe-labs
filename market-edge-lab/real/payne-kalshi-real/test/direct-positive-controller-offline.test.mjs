@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {generateKeyPairSync} from 'node:crypto';
-import {runPayneRealExecutionCycle,defaultControlState,defaultRealSeriesState,fireSpecimenFingerprint,effectiveLockThreshold} from '../src/index.js';
+import {runPayneRealExecutionCycle,defaultControlState,defaultRealSeriesState,fireSpecimenFingerprint,effectiveLockThreshold,buildPayneAuditView} from '../src/index.js';
 import {kalshiPayneOrderPost} from '../src/kalshi-real-write.js';
 
 const {privateKey}=generateKeyPairSync('rsa',{modulusLength:2048});
@@ -30,6 +30,7 @@ function createFixture(kind='FILLED',opts={}){
     posts++;
     const p=JSON.parse(init.body);
     if(kind==='REJECT')return json({error:{code:'reject'}},409);
+    if(kind==='AUDIT403')return json({error:{code:'TEST_ORDER_REJECTED',message:'Offline simulated rejection'}},403);
     if(kind==='AMBIGUOUS')return json({unexpected:true});
     const count=Number(p.count);
     const fill=kind==='ZERO'?0:kind==='PARTIAL'?Math.min(1,count/2):count;
@@ -100,4 +101,51 @@ test('ACTUAL FIRE controller: concurrent calls expose real invocation count',{co
  const f=createFixture();
  await Promise.allSettled([f.execute(),f.execute()]);
  assert.equal(f.posts,1,'CONCURRENT_DUPLICATE_PROVIDER_POST');
+});
+
+test('OFFLINE END-TO-END: 403 provider handler -> persisted attempt -> existing ledger -> audit read -> panel contract',{concurrency:false},async()=>{
+ const f=createFixture('AUDIT403');
+ const before=[...f.state.keys()];
+ await f.execute();
+ assert.equal(f.posts,1);
+ const attempt=f.attempt;
+ assert.equal(attempt.providerHttpStatus,403);
+ assert.equal(attempt.providerErrorCode,'TEST_ORDER_REJECTED');
+ assert.equal(attempt.providerErrorMessage,'Offline simulated rejection');
+ assert.equal(attempt.providerErrorEvidence,'SANITIZED_ERROR');
+ assert.equal(attempt.terminalClassification,'PROVIDER_REJECTED_OR_UNKNOWN');
+ assert.equal(attempt.marketTicker,ticker);
+ assert.ok(attempt.attemptId);
+ assert.ok(Date.parse(attempt.providerResponseAt)>0);
+ const ledger=[...f.state.entries()].filter(([k])=>k.startsWith('payne-kalshi:real-ledger:')).map(([,v])=>JSON.parse(v));
+ const entry=ledger.find(x=>x.type==='ENTRY_PROVIDER_REJECTED_OR_UNKNOWN');
+ assert.ok(entry);
+ assert.equal(entry.httpStatus,403);
+ assert.equal(entry.providerErrorCode,attempt.providerErrorCode);
+ assert.equal(entry.providerErrorMessage,attempt.providerErrorMessage);
+ assert.equal(entry.attemptId,attempt.attemptId);
+ assert.equal(entry.ticker,ticker);
+ assert.ok(Date.parse(entry.at)>0);
+ assert.equal(entry.providerResponseAt,attempt.providerResponseAt);
+ const view=await buildPayneAuditView(f.env,f.series.seriesId);
+ assert.equal(view.count,1);
+ const card=view.attempts[0];
+ assert.equal(card.attemptId,attempt.attemptId);
+ assert.equal(card.ticker,ticker);
+ assert.equal(card.httpStatus,403);
+ assert.equal(card.providerErrorCode,'TEST_ORDER_REJECTED');
+ assert.equal(card.providerErrorMessage,'Offline simulated rejection');
+ assert.equal(card.terminalClassification,'PROVIDER_REJECTED_OR_UNKNOWN');
+ assert.equal(card.providerOrderId,null);
+ assert.equal(card.stage,'HTTP_RESPONSE_RECEIVED');
+ assert.equal(view.providerWrites,0);
+ assert.ok(!JSON.stringify(view).includes('PRIVATE KEY'));
+ const {cockpitHtml}=await import('../src/cockpit-html.js');
+ const html=cockpitHtml();
+ assert.ok(html.includes('PAYNE EXECUTION AUDIT'));
+ assert.ok(html.includes('payneAuditCards'));
+ assert.ok(html.includes('providerErrorMessage'));
+ assert.ok(html.includes('NOT RECORDED'));
+ assert.equal(before.filter(k=>k.startsWith('payne-kalshi:real-ledger:')).length,0);
+ console.log('OFFLINE_AUDIT_CHAIN_PASS',JSON.stringify({attemptId:card.attemptId,ticker:card.ticker,httpStatus:card.httpStatus,errorCode:card.providerErrorCode,errorMessage:card.providerErrorMessage,terminalClassification:card.terminalClassification}));
 });
