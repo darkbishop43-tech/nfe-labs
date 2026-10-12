@@ -32,9 +32,9 @@ test('no second independent feature refresh after pre-submit',()=>{
 });
 test('exact market and clock checks remain before handoff',()=>{
  assert.match(cycle,/kalshiCandidateTimeSafe/);
- assert.match(cycle,/freshLock\.market\?\.ticker!==candidate\.ticker/);
- assert.match(cycle,/preSubmit\.market\?\.ticker!==candidate\.ticker/);
- assert.match(cycle,/preSubmit\.market\?\.closeTime/);
+ assert.match(cycle,/freshLock\?\.market\?\.ticker!==candidate\.ticker/);
+ assert.match(cycle,/preSubmit\?\.market\?\.ticker!==candidate\.ticker/);
+ assert.match(cycle,/preSubmit\?\.market\?\.closeTime/);
 });
 test('price and quantity derived from final provider book and approved debit',()=>{
  const portion=between('const ask=candidate.outcomeSide','const providerAttemptNoCandidate=');
