@@ -28,6 +28,7 @@ function fixture(initial) {
     },
     PAYNE_KALSHI_STATE:{
       get:async key=>key==='payne-kalshi:real-series:v1'?JSON.stringify({
+        schema:'PAYNE_REAL_SERIES_V1',owner:'PAYNE_KALSHI_REAL',
         seriesId,fireLatch:{specimenId,marketCloseTime:identity.windowClose},
         currentAttempt:{providerAttemptNoCandidate:1,fireSpecimenId:specimenId,
           clientOrderId:identity.clientOrderId,marketTicker:identity.ticker,
