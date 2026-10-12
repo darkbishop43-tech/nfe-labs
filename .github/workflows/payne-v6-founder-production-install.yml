@@ -69,7 +69,19 @@ jobs:
           jq -e --slurpfile c /tmp/payne-pre-control-kv.json '.control.armed==$c[0].armed and .control.activeThreshold==$c[0].activeThreshold and .control.maxEntryDebitUsd==$c[0].maxEntryDebitUsd and .control.attemptTarget==$c[0].attemptTarget' /tmp/payne-pre-state.json >/dev/null
           jq -e --slurpfile c /tmp/payne-pre-control-kv.json '
             (.position==null or ((.position.owner//"")=="PAYNE_KALSHI_REAL" and (.position.status//""|IN("FLAT","CLOSED","SETTLED")))) and
-            ((.fireLatch.state//"NONE")|IN("LATCHED","PROVIDER_POST_UNKNOWN","PRE_PROVIDER_VALIDATION","PROVIDER_POST_STARTED","PROVIDER_POST_CREATED")|not) and
+            (
+              ((.fireLatch.state//"NONE")|IN("LATCHED","PROVIDER_POST_UNKNOWN","PRE_PROVIDER_VALIDATION","PROVIDER_POST_STARTED","PROVIDER_POST_CREATED")|not)
+              or
+              (
+                $c[0].armed==false and .unresolvedEntry==false and (.position//null)==null and
+                .currentAttempt.status=="NO_PROVIDER_EXECUTION" and
+                .currentAttempt.terminalClassification=="NO_PROVIDER_EXECUTION" and
+                .currentAttempt.reconciliationReason=="PROVIDER_RECONCILED_NO_EXECUTION" and
+                (.currentAttempt.providerOrderId//null)==null and
+                (.fireLatch.state//"NONE" | IN("PRE_PROVIDER_VALIDATION","PROVIDER_POST_CREATED","INVALIDATED_BEFORE_POST")) and
+                (.fireLatch.finalResult//"") == "NO_PROVIDER_EXECUTION"
+              )
+            ) and
             (.unresolvedEntry!=true or
               ($c[0].armed==false and .currentAttempt.writerInvoked==false and
               .currentAttempt.providerPostStarted==false and .currentAttempt.providerOrderId==null)) and
@@ -78,11 +90,12 @@ jobs:
             (.currentAttempt.status//""|IN("PROVIDER_REJECTED_OR_UNKNOWN","WRITE_ERROR_UNKNOWN","RESULT_UNKNOWN","ENTRY_RECONCILIATION_REQUIRED")|not)
           ' /tmp/payne-pre-series-kv.json >/dev/null || {
             echo 'BLOCKED: ACTIVE_OR_UNKNOWN_PROVIDER_EXPOSURE'
+            jq -c '{armed:null,seriesId,seriesStatus:.status,fireLatchState:.fireLatch.state,fireLatchFinalResult:.fireLatch.finalResult,currentStatus:.currentAttempt.status,currentTerminal:.currentAttempt.terminalClassification,reconciliationReason:.currentAttempt.reconciliationReason,unresolvedEntry,positionStatus:.position.status}' /tmp/payne-pre-series-kv.json
             jq -n --slurpfile s /tmp/payne-pre-series-kv.json --slurpfile c /tmp/payne-pre-control-kv.json '
               ($s[0]) as $x | ($c[0]) as $ctl |
               {
                 position_safe: ($x.position==null or (($x.position.owner//"")=="PAYNE_KALSHI_REAL" and ($x.position.status//""|IN("FLAT","CLOSED","SETTLED")))),
-                fire_latch_safe: (($x.fireLatch.state//"NONE")|IN("LATCHED","PROVIDER_POST_UNKNOWN","PRE_PROVIDER_VALIDATION","PROVIDER_POST_STARTED","PROVIDER_POST_CREATED")|not),
+                fire_latch_safe: ((($x.fireLatch.state//"NONE")|IN("LATCHED","PROVIDER_POST_UNKNOWN","PRE_PROVIDER_VALIDATION","PROVIDER_POST_STARTED","PROVIDER_POST_CREATED")|not) or ($ctl.armed==false and $x.unresolvedEntry==false and ($x.position//null)==null and $x.currentAttempt.status=="NO_PROVIDER_EXECUTION" and $x.currentAttempt.terminalClassification=="NO_PROVIDER_EXECUTION" and $x.currentAttempt.reconciliationReason=="PROVIDER_RECONCILED_NO_EXECUTION" and $x.currentAttempt.providerOrderId==null and (($x.fireLatch.state//"NONE")|IN("PRE_PROVIDER_VALIDATION","PROVIDER_POST_CREATED","INVALIDATED_BEFORE_POST")) and ($x.fireLatch.finalResult//"")=="NO_PROVIDER_EXECUTION")),
                 unresolved_safe: ($x.unresolvedEntry!=true or ($ctl.armed==false and $x.currentAttempt.writerInvoked==false and $x.currentAttempt.providerPostStarted==false and $x.currentAttempt.providerOrderId==null)),
                 post_started_safe: ($x.currentAttempt.providerPostStarted!=true or ($x.currentAttempt.status|IN("NO_FILL","FILLED","CLOSED","SETTLED","NO_PROVIDER_EXECUTION"))),
                 current_status_safe: (($x.currentAttempt.status//"")|IN("PROVIDER_REJECTED_OR_UNKNOWN","WRITE_ERROR_UNKNOWN","RESULT_UNKNOWN","ENTRY_RECONCILIATION_REQUIRED")|not)
