@@ -10,7 +10,7 @@ test('PAYNE notifications require authoritative persisted event classifications'
   assert.equal(classifyPayneRealAlert({...base,type:'ENTRY_NO_FILL'}).category,'NO_FILL');
   assert.equal(classifyPayneRealAlert({...base,type:'ENTRY_WRITE_ERROR_UNKNOWN'}).category,'CHECK_KALSHI');
   assert.equal(classifyPayneRealAlert({...base,type:'POSITION_OWNERSHIP_ESTABLISHED'}),null);
-  assert.equal(classifyPayneRealAlert({...base,type:'POSITION_OWNERSHIP_ESTABLISHED',entryOrderId:'PROVIDER-1'}).category,'FILLED');
+  assert.equal(classifyPayneRealAlert({...base,type:'POSITION_OWNERSHIP_ESTABLISHED',entryOrderId:'PROVIDER-1',filledCount:2}).category,'FILLED');
   assert.equal(classifyPayneRealAlert({...base,type:'PAYNE_PAPER_BRAIN_EXIT_CLOSED'}),null);
   assert.equal(classifyPayneRealAlert({...base,type:'PAYNE_PAPER_BRAIN_EXIT_CLOSED',status:'CLOSED'}).category,'CLOSED');
   assert.equal(classifyPayneRealAlert({...base,type:'EXIT_PROVIDER_RESULT',result:{state:'UNKNOWN'}}),null);
