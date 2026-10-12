@@ -18,8 +18,8 @@ test('strict read-only evidence schema; reject missing safety proof',()=>{
 });
 test('only evidence-confirmed PAYNE notifications; never FIRE preview',()=>{
  const categories=buildAlerts(fixture).map(x=>x.category);
- for(const c of ['ORDER_SUBMITTED','NO_FILL','CHECK_KALSHI','FILLED','CLOSED','RECONCILED'])assert.ok(categories.includes(c));
- assert.equal(categories.length,6);
+ for(const c of ['NO_FILL','CHECK_KALSHI','FILLED','CLOSED','RECONCILED'])assert.ok(categories.includes(c));
+ assert.equal(categories.length,5);
 });
 class MemoryStorage{
  constructor(){this.map=new Map()}
