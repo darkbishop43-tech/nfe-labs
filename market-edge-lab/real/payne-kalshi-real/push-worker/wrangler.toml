@@ -8,6 +8,7 @@ workers_dev = true
 [vars]
 PAYNE_EVIDENCE_URL = "https://market-edge-payne-kalshi-real.darkbishop43.workers.dev/real-ledger?limit=200"
 PAYNE_COCKPIT_URL = "https://market-edge-payne-kalshi-real.darkbishop43.workers.dev/"
+PAYNE_PUSH_DISPATCH_ENABLED = "FALSE"
 
 [[durable_objects.bindings]]
 name = "PUSH_STATE"
@@ -18,4 +19,4 @@ tag = "v1"
 new_sqlite_classes = ["PaynePushState"]
 
 [triggers]
-crons = []
+crons = ["* * * * *"]
