@@ -4,7 +4,7 @@ import {dispatchPayneUsingExistingPush,payneRealNotification,validPayneLedger,PA
 function memory(){const m=new Map();return {m,get:async k=>m.get(k),put:async(k,v)=>m.set(k,v)}}
 const at='2026-10-12T22:00:00Z';
 const row=(type,more={})=>({type,seriesId:'SERIES',attemptId:'ATT',at,ticker:'KXBTC15M-TEST',...more});
-const doc=(rows)=>({ok:true,schema:'PAYNE_REAL_LEDGER_EXPORT_V1',readOnly:true,providerWrites:0,ordersSubmittedByThisRead:0,capitalMovedUsd:0,count:rows.length,rows});
+const doc=(rows)=>({ok:true,schema:'PAYNE_REAL_LEDGER_EXPORT_V1',readOnly:true,complete:true,providerWrites:0,ordersSubmittedByThisRead:0,capitalMovedUsd:0,count:rows.length,rows});
 test('read-only ledger evidence must be complete and cannot claim provider writes',()=>{
  assert.equal(validPayneLedger(doc([])),true);
  assert.equal(validPayneLedger({...doc([]),providerWrites:1}),false);
@@ -46,3 +46,5 @@ test('failed push not marked delivered; never sends old backlog; AUTO namespace 
  assert.equal(count,2);
  assert.equal([...kv.m.keys()].some(k=>k.startsWith('notification:delivery:v1:')),false);
 });
+
+test('incomplete PAYNE ledger must not initialize baseline or send alerts',async()=>{const kv=memory();let sent=0;const result=await dispatchPayneUsingExistingPush({kv,readLedger:async()=>({...doc([row('ENTRY_NO_FILL')]),complete:false}),send:async()=>{sent++;return {delivered:true}}});assert.equal(result.ok,false);assert.equal(sent,0);assert.equal(kv.m.size,0);});
