@@ -1,0 +1,44 @@
+name: PAYNE Direct Deployment Readiness GET Only
+on:
+  push:
+    branches: [payne-auto-direct-submission-isolated-20261012]
+    paths: [".github/workflows/payne-direct-readiness-get-only.yml"]
+permissions: {contents: read}
+jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: d5d92a39361c8eec464ff3b60c4d8f16e44bcbfd
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          ref: 621a0f9fb237cd9defb420605dd5c384489a84bb
+          path: approved-payne-gate
+          persist-credentials: false
+      - name: Exact direct engine commit verification
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = d5d92a39361c8eec464ff3b60c4d8f16e44bcbfd
+          node --check market-edge-lab/real/payne-kalshi-real/src/index.js
+          echo 'APPROVED_DIRECT_ENGINE_PINNED=PASS'
+      - name: Authenticated existing Cloudflare KV gate and exact read-only evidence
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          ns=03352b0ccb034f1bb8206f663a04b125
+          for row in 'payne-kalshi:control:v1 control' 'payne-kalshi:real-series:v1 series'; do
+            key="${row% *}";label="${row#* }"
+            encoded=$(jq -nr --arg value "$key" '$value|@uri')
+            code=$(curl --silent --show-error --max-time 25 -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -o "/tmp/$label.json" -w '%{http_code}' "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/storage/kv/namespaces/$ns/values/$encoded")
+            echo "KV_$label=$code"
+            test "$code" = 200 || exit 1
+          done
+          jq -c '{armed,openPositions,activeThreshold,maxEntryDebitUsd,attemptTarget,maxPositions,requiredExchangeIndex,scanEnabled}' /tmp/control.json
+          jq -c '{seriesId,status,unresolvedEntry,fireLatch:{state:.fireLatch.state,providerPost:.fireLatch.providerPost},attempt:{attemptId:.currentAttempt.attemptId,ticker:.currentAttempt.marketTicker,clientOrderId:.currentAttempt.clientOrderId,writerInvoked:.currentAttempt.writerInvoked,providerPostStarted:.currentAttempt.providerPostStarted,providerOrderId:.currentAttempt.providerOrderId,terminalClassification:.currentAttempt.terminalClassification},position,positions}' /tmp/series.json
+          bash approved-payne-gate/.github/scripts/payne-kv-deployment-safety.sh pre
+          echo 'ORIGINAL_PAYNE_DEPLOYMENT_GATE=PASS'
