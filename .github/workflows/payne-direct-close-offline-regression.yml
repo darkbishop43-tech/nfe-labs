@@ -2,9 +2,11 @@ name: PAYNE Direct Writer Closure Offline Regression
 on:
   push:
     branches:
-      - payne-direct-writer-close-offline-20261013
+      - payne-closure-maintenance-exception-offline-20261013
     paths:
       - .github/workflows/payne-direct-close-offline-regression.yml
+      - .github/scripts/payne-closure-maintenance-offline.mjs
+      - .github/tests/payne-closure-maintenance-offline.test.mjs
       - market-edge-lab/real/payne-kalshi-real/test/direct-writer-closure-offline.test.mjs
 permissions:
   contents: read
@@ -78,3 +80,10 @@ jobs:
             }
           }' /tmp/payne-control-diagnostic.json
           echo PERSISTED_CONTROL_DIAGNOSTIC_READ_ONLY=PASS
+
+      - name: Execute one-time maintenance exception offline fixtures
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --test .github/tests/payne-closure-maintenance-offline.test.mjs
+          echo MAINTENANCE_EXCEPTION_OFFLINE_ONLY=PASS
