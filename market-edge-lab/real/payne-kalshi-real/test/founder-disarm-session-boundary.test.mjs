@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {updateFounderControl,defaultControlState,defaultRealSeriesState,loadRealSeriesState} from '../src/index.js';
+import {updateFounderControl,defaultControlState,defaultRealSeriesState,loadRealSeriesState,founderSessionProgressDisplay} from '../src/index.js';
 const CONTROL='payne-kalshi:control:v1',SERIES='payne-kalshi:real-series:v1';
 function setup({started=1,target=5,fireLatch=null,positions=[],unresolvedEntry=false,currentAttempt=null}={}){
  const control={...defaultControlState(),armed:true,attempts:started,attemptTarget:target};
@@ -83,4 +83,18 @@ test('disarm is idempotent when already disarmed; no extra session record',async
  const n=[...f.data.keys()].filter(k=>k.startsWith('payne-kalshi:real-ledger:')).length;
  await updateFounderControl(f.env,'DISARM');
  assert.equal([...f.data.keys()].filter(k=>k.startsWith('payne-kalshi:real-ledger:')).length,n);
+});
+
+test('explicit Founder idle projects 0/0 without deleting historical session counters',async()=>{
+ const f=setup({started:4});
+ await updateFounderControl(f.env,'DISARM');
+ const d=founderSessionProgressDisplay(f.read(CONTROL),await loadRealSeriesState(f.env),{attempted:4,target:5,remaining:1});
+ assert.equal(d.attempted,0);assert.equal(d.target,0);assert.equal(d.remaining,0);
+ assert.deepEqual(d.closedSessionHistory,{seriesId:'old-session-4',attempted:4,target:5});
+});
+test('arm does not invent a new session if provider order status remains uncertain',async()=>{
+ const f=setup({currentAttempt:{attemptId:'A',status:'WRITE_ERROR_UNKNOWN',providerOrderId:'P'}});
+ await updateFounderControl(f.env,'DISARM');
+ await assert.rejects(()=>updateFounderControl(f.env,'ARM'),/PROVIDER_ORDER_REQUIRES_RECONCILIATION/);
+ assert.equal((await loadRealSeriesState(f.env)).currentAttempt.providerOrderId,'P');
 });
