@@ -25,10 +25,11 @@ jobs:
         run: |
           set -euo pipefail
           url='https://market-edge-payne-kalshi-real.darkbishop43.workers.dev'
-          for path in real real-state real-history?view=audit; do
+          for path in real-state ui-state display-market-feed 'real-history?view=audit'; do
             code=$(curl -sS --max-time 25 -o /tmp/payne-read.json -w '%{http_code}' "$url/$path")
             echo "PAYNE_READ_ENDPOINT=$path HTTP=$code"
             if [[ "$code" != 200 ]];then continue;fi
+            echo "RESPONSE_TOP_KEYS=$(jq -r 'keys|join(\",\")' /tmp/payne-read.json)"
             jq -c '{
               seriesId:(.series.seriesId//.seriesId//null),
               seriesStatus:(.series.status//null),
