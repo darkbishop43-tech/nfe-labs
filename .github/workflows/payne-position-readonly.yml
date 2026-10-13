@@ -1,0 +1,23 @@
+name: PAYNE Persisted Position Read Only
+on:
+  push:
+    branches: [payne-closure-bootstrap-stage1-offline-20261013]
+    paths: [".github/workflows/payne-position-readonly.yml"]
+permissions:
+  contents: read
+jobs:
+  evidence:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Read exact persisted PAYNE position (Cloudflare KV GET)
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          key="$(jq -nr --arg k 'payne-kalshi:real-series:v1' '$k|@uri')"
+          url="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/storage/kv/namespaces/03352b0ccb034f1bb8206f663a04b125/values/$key"
+          curl --fail --silent --show-error --max-time 25 -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "$url" -o /tmp/payne-position.json
+          jq -c '{seriesId,position:{owner:.position.owner,status:.position.status,reconciliationState:.position.reconciliationState},positionType:(.position|type)}' /tmp/payne-position.json
+          echo PAYNE_POSITION_GET_READ_ONLY=PASS
