@@ -19,8 +19,8 @@ jobs:
           persist-credentials: false
       - uses: actions/checkout@v4
         with:
-          ref: 621a0f9fb237cd9defb420605dd5c384489a84bb
-          path: existing-payne-safety-source
+          ref: 7ca20a9d5e4448118d6723521c6db6c6af3c469e
+          path: maintenance-source
           persist-credentials: false
       - uses: actions/setup-node@v4
         with:
@@ -46,12 +46,23 @@ jobs:
         run: |
           test -n "$CLOUDFLARE_API_TOKEN"
           test -n "$CLOUDFLARE_ACCOUNT_ID"
+      - name: Prepare authenticated PAYNE maintenance proof read-only
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          PAYNE_COORDINATOR_DIAGNOSTIC_TOKEN: ${{ secrets.PAYNE_COORDINATOR_DIAGNOSTIC_TOKEN }}
+          PAYNE_APPROVED_CLOSURE_BLOB: 76c6ff7a2f7f6967def859012b2fcf3b66f7b2f9
+        run: |
+          set -euo pipefail
+          rm -f /tmp/payne-kv-gate/maintenance-proof.json
+          node maintenance-source/.github/scripts/payne-maintenance-decision.mjs
       - name: Run existing authoritative PAYNE KV pre-deploy safety gate
         shell: bash
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-        run: bash existing-payne-safety-source/.github/scripts/payne-kv-deployment-safety.sh pre
+        run: bash maintenance-source/.github/scripts/payne-kv-deployment-safety-maintenance.sh pre
       - name: Verify Founder still disarmed immediately before promotion
         shell: bash
         run: |
@@ -81,7 +92,13 @@ jobs:
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-        run: bash existing-payne-safety-source/.github/scripts/payne-kv-deployment-safety.sh post
+          PAYNE_COORDINATOR_DIAGNOSTIC_TOKEN: ${{ secrets.PAYNE_COORDINATOR_DIAGNOSTIC_TOKEN }}
+          PAYNE_APPROVED_CLOSURE_BLOB: 76c6ff7a2f7f6967def859012b2fcf3b66f7b2f9
+        run: |
+          set -euo pipefail
+          rm -f /tmp/payne-kv-gate/maintenance-proof.json
+          node maintenance-source/.github/scripts/payne-maintenance-decision.mjs
+          bash maintenance-source/.github/scripts/payne-kv-deployment-safety-maintenance.sh post
       - name: Verify cockpit and existing Founder control read-only
         shell: bash
         run: |
