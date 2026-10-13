@@ -1,6 +1,9 @@
 name: PAYNE Stage 1 Read Only Bootstrap (Founder Manual Only)
 on:
   workflow_dispatch:
+  push:
+    branches: [payne-closure-bootstrap-stage1-offline-20261013]
+    paths: ['.github/workflows/payne-stage1-bootstrap-manual.yml']
 permissions:
   contents: read
 concurrency:
