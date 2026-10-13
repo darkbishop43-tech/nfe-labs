@@ -47,27 +47,33 @@ export async function payneClosureEvidence(env,control,series,{get=kalshiGetOnly
       if(!settlements.some(x=>x?.ticker===p.marketTicker))return reject('NO_EXACT_TICKER_SETTLEMENT');
     }
     const orders=await pages('/trade-api/v2/portfolio/orders?limit=200&subaccount=0','orders');
-    const exactEntry=orders.filter(o=>(o?.order_id||o?.id)===p.entryOrderId);
-    let entryVerified = exactEntry.length===1 &&
-      exactEntry[0]?.client_order_id===p.entryClientOrderId &&
-      exactEntry[0]?.ticker===p.marketTicker &&
-      String(exactEntry[0]?.side||'').toLowerCase()===p.outcomeSide.toLowerCase();
+    const exactEntry=orders.filter(o=>(o?.order_id??o?.orderId??o?.id)===p.entryOrderId);
+    const matchesOrder=o=>
+      o?.client_order_id===p.entryClientOrderId &&
+      (o?.ticker??o?.market_ticker)===p.marketTicker &&
+      String(o?.side??o?.outcome_side??'').toLowerCase()===p.outcomeSide.toLowerCase();
+    let entryVerified=exactEntry.length===1 && matchesOrder(exactEntry[0]);
     if(!entryVerified){
-      // Live orders often omit settled history. Accept one authenticated historical fill
-      // that matches the recorded provider order id, client order id, ticker and side.
-      const q='?limit=200&ticker='+encodeURIComponent(p.marketTicker);
-      const liveFills=await pages('/trade-api/v2/portfolio/fills?limit=200&subaccount=0&ticker='+encodeURIComponent(p.marketTicker),'fills');
-      const historicalFills=await pages('/trade-api/v2/historical/fills'+q,'fills');
-      const fills=[...liveFills,...historicalFills];
-      const sameOrder=fills.filter(f=>(f?.order_id??f?.orderId)===p.entryOrderId);
-      const exactFill=sameOrder.filter(f=>
-        (f?.client_order_id??f?.clientOrderId)===p.entryClientOrderId &&
+      // Published historical fills do not guarantee a client_order_id.
+      // Establish exact client identity from an authenticated order or fill that has it,
+      // and corroborate the same provider order with authenticated fill records.
+      const ticker=encodeURIComponent(p.marketTicker);
+      const historicalOrders=await pages('/trade-api/v2/historical/orders?limit=200&ticker='+ticker,'orders');
+      const liveFills=await pages('/trade-api/v2/portfolio/fills?limit=200&subaccount=0&ticker='+ticker,'fills');
+      const historicalFills=await pages('/trade-api/v2/historical/fills?limit=200&ticker='+ticker,'fills');
+      const sameOrders=[...exactEntry,...historicalOrders.filter(o=>(o?.order_id??o?.orderId??o?.id)===p.entryOrderId)];
+      const sameFills=[...liveFills,...historicalFills].filter(f=>(f?.order_id??f?.orderId)===p.entryOrderId);
+      const orderIdentity=sameOrders.length>0 && sameOrders.every(matchesOrder);
+      const fillIdentity=sameFills.length>0 && sameFills.every(f=>
         (f?.ticker??f?.market_ticker)===p.marketTicker &&
-        String(f?.side||'').toLowerCase()===p.outcomeSide.toLowerCase()
-      );
-      if(exactFill.length===0 || sameOrder.length!==exactFill.length)
+        String(f?.side??f?.outcome_side??'').toLowerCase()===p.outcomeSide.toLowerCase() &&
+        ((f?.client_order_id??f?.clientOrderId)==null ||
+         (f?.client_order_id??f?.clientOrderId)===p.entryClientOrderId));
+      const clientIdFromFill=sameFills.some(f=>(f?.client_order_id??f?.clientOrderId)===p.entryClientOrderId);
+      if(!fillIdentity || (sameOrders.length>0 && !orderIdentity) ||
+         !(orderIdentity||clientIdFromFill))
         return reject('PROVIDER_ENTRY_ORDER_IDENTITY_NOT_VERIFIED');
-      entryVerified = true;
+      entryVerified=true;
     }
     const terminal=new Set(['executed','canceled','cancelled','expired','rejected']);
     if(orders.some(o=>!o?.ticker||!o?.status ||
