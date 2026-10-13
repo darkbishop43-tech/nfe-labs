@@ -30,38 +30,68 @@ export function payneRealNotification(row){
   const body=[row.asset||row.ticker||'',row.direction||row.outcomeSide||'',row.score==null||!Number.isFinite(score)?'':'Score '+score.toFixed(2)].filter(Boolean).join(' · ');
   return {id,time:timestamp,kind:ALLOWED[row.type],payload:{title:'NFE-OS · PAYNE REAL · '+ALLOWED[row.type],body,url:'/',tag:id}};
 }
-export function validPayneLedger(doc){
-  return doc?.ok===true&&doc?.complete===true&&doc?.schema==='PAYNE_REAL_LEDGER_EXPORT_V1'&&doc?.readOnly===true&&
+// Continuation mode always starts strictly after the persisted source KV key.
+// Unlike a "latest 200" snapshot, this never jumps over an unseen page.
+const WATERMARK=PAYNE_PUSH_NAMESPACE+'source-watermark';
+const LEDGER_KEY_PREFIX='payne-kalshi:real-ledger:';
+export function validPayneLedger(doc,requestedKey){
+  if(!(doc?.ok===true&&doc?.complete===true&&
+    doc?.schema==='PAYNE_REAL_LEDGER_EXPORT_V1'&&doc?.readOnly===true&&
     doc.providerWrites===0&&doc.ordersSubmittedByThisRead===0&&doc.capitalMovedUsd===0&&
-    Number.isInteger(doc.count)&&doc.count===doc.rows?.length&&doc.rows.length<200;
+    Number.isInteger(doc.count)&&doc.count===doc.rows?.length&&doc.rows.length<=200&&
+    doc.afterKey===requestedKey&&typeof doc.nextKey==='string'&&
+    typeof doc.hasMore==='boolean'))return false;
+  if(doc.rows.length===0)return doc.nextKey===requestedKey&&!doc.hasMore;
+  let prior=requestedKey;
+  for(const row of doc.rows){
+    const key=row?.sourceLedgerKey;
+    if(typeof key!=='string'||!key.startsWith(LEDGER_KEY_PREFIX)||key<=prior)return false;
+    prior=key;
+  }
+  return prior===doc.nextKey;
 }
 export async function dispatchPayneUsingExistingPush({kv,readLedger,send,now=()=>Date.now()}){
-  if(!kv||typeof readLedger!=='function'||typeof send!=='function')return {ok:false,reason:'MISSING_READ_ONLY_DEPENDENCY'};
-  const doc=await readLedger();
-  if(!validPayneLedger(doc))return {ok:false,reason:'INVALID_OR_TRUNCATED_LEDGER'};
+  if(!kv||typeof readLedger!=='function'||typeof send!=='function')
+    return {ok:false,reason:'MISSING_READ_ONLY_DEPENDENCY'};
   const existing=await kv.get(BASELINE);
   if(!existing){
-    // Timestamp-only cutoff suppresses all historical events, even if older ledger rows
-    // fell outside this bounded read. Never send anything on first initialization.
+    // No historical flood: a timestamp-key cutoff covers *all* old KV pages,
+    // including events outside a bounded 200-row window.
     const cutoff=now();
+    const startKey=LEDGER_KEY_PREFIX+new Date(cutoff).toISOString()+':~';
     await kv.put(BASELINE,JSON.stringify({atMs:cutoff,source:'PAYNE_REAL',initialized:true}));
+    await kv.put(WATERMARK,startKey);
     return {ok:true,baselineEstablished:true,sent:0};
   }
   let state;try{state=JSON.parse(existing);}catch{return {ok:false,reason:'INVALID_BASELINE'};}
-  if(!Number.isFinite(state?.atMs)||state.source!=='PAYNE_REAL')return {ok:false,reason:'INVALID_BASELINE'};
-  let sent=0,duplicates=0;
+  if(!Number.isFinite(state?.atMs)||state.source!=='PAYNE_REAL')
+    return {ok:false,reason:'INVALID_BASELINE'};
+  let watermark=await kv.get(WATERMARK);
+  if(typeof watermark!=='string'||!watermark.startsWith(LEDGER_KEY_PREFIX))
+    return {ok:false,reason:'SOURCE_WATERMARK_NOT_ESTABLISHED'};
+  const doc=await readLedger({afterKey:watermark,limit:200});
+  if(!validPayneLedger(doc,watermark))
+    return {ok:false,reason:'INCOMPLETE_OR_DISCONTINUOUS_LEDGER',sent:0};
+  let sent=0,duplicates=0,processed=0;
   for(const row of doc.rows){
+    const key=row.sourceLedgerKey;
     const alert=payneRealNotification(row);
-    if(!alert||alert.time<=state.atMs)continue;
-    const key=SENT+encodeURIComponent(alert.id);
-    if(await kv.get(key)){duplicates++;continue;}
-    // The existing sender has its own deduplication, keyed by PAYNE-prefixed eventId.
-    const response=await send(alert.id,alert.payload);
-    if(response?.delivered||response?.duplicateSuppressed){
-      await kv.put(key,JSON.stringify({atMs:now(),source:'PAYNE_REAL'}));
-      sent+=response.delivered?1:0;
+    if(alert&&alert.time>state.atMs){
+      const dedupeKey=SENT+encodeURIComponent(alert.id);
+      if(await kv.get(dedupeKey))duplicates++;
+      else{
+        const response=await send(alert.id,alert.payload);
+        if(!(response?.delivered===true||response?.duplicateSuppressed===true))
+          return {ok:false,reason:'DELIVERY_UNCONFIRMED',sent,processed,
+            hasMore:true,watermarkUnchangedForFailedEvent:true};
+        await kv.put(dedupeKey,JSON.stringify({atMs:now(),source:'PAYNE_REAL'}));
+        if(response.delivered)sent++;
+      }
     }
-    // A failed/unknown delivery is not marked as delivered.
+    // Advance only after the preceding event was handled, or safely ignored.
+    // Future polls resume from this exact source key, never from the newest row.
+    await kv.put(WATERMARK,key);
+    watermark=key;processed++;
   }
-  return {ok:true,sent,duplicates};
+  return {ok:true,sent,duplicates,processed,hasMore:doc.hasMore};
 }
