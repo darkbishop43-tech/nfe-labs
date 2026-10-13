@@ -1,0 +1,23 @@
+name: PAYNE New Fire Readonly Audit
+on:
+  push:
+    branches: [payne-legacy-first-arm-offline-proof-20261012]
+    paths: [".github/workflows/payne-new-fire-readonly-audit.yml"]
+permissions:
+  contents: read
+jobs:
+  observe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Read current PAYNE attempt and exact series audit
+        shell: bash
+        run: |
+          set -euo pipefail
+          base='https://market-edge-payne-kalshi-real.darkbishop43.workers.dev'
+          for ep in 'real-state' 'real-history?view=audit&seriesId=2d5fc45d-25fd-4923-bb1f-b9e361fbaa25'; do
+            code=$(curl -sS --max-time 25 -o /tmp/payne-audit.json -w '%{http_code}' "$base/$ep")
+            echo "ENDPOINT=$ep HTTP=$code"
+            if [ "$code" != 200 ]; then head -c 300 /tmp/payne-audit.json; echo; continue; fi
+            jq -c '{ok,schema,control:(.control|if type=="object" then {armed,attempts,attemptTarget} else null end),series:(.series|if type=="object" then {seriesId,status,attemptsStarted,unresolvedEntry,currentAttempt,fireLatch} else null end),seriesId,attempts:(.attempts|if type=="array" then map(select((.attemptNo==1) or (.attemptId|tostring|contains("2d5fc45d")))) else null end),events:(.events|if type=="array" then .[-20:] else null end)}' /tmp/payne-audit.json
+          done
+          echo READ_ONLY_NO_POST=PASS
