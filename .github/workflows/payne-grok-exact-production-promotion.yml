@@ -15,7 +15,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: 9d7294c9671e434631f5755b18cbe5a9ba3a664e
+          ref: ccb6e4cfd56fbf5c77b6e5b4bfba0f4c538ebcba
           persist-credentials: false
       - uses: actions/checkout@v4
         with:
@@ -29,12 +29,14 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test "$(git rev-parse HEAD)" = 9d7294c9671e434631f5755b18cbe5a9ba3a664e
+          test "$(git rev-parse HEAD)" = ccb6e4cfd56fbf5c77b6e5b4bfba0f4c538ebcba
           test "$(git rev-parse HEAD:market-edge-lab/real/payne-kalshi-real/src/index.js)" = 76c6ff7a2f7f6967def859012b2fcf3b66f7b2f9
+          test "$(git rev-parse HEAD:market-edge-lab/real/payne-kalshi-real/src/payne-closure-evidence.js)" = d6bffce2e2481c26d698d87b368bb5bb4fd1e8f5
           grep -q '^name = "market-edge-payne-kalshi-real"$' market-edge-lab/real/payne-kalshi-real/wrangler.toml
           test -f market-edge-lab/real/payne-kalshi-real/src/payne-execution-coordinator.js
           test -f market-edge-lab/real/payne-kalshi-real/src/kalshi-real-write.js
           node --check market-edge-lab/real/payne-kalshi-real/src/index.js
+          node --check market-edge-lab/real/payne-kalshi-real/src/payne-closure-evidence.js
           echo 'EXACT_GROK_ASSEMBLY_AND_PROTECTED_BLOB=PASS'
       - name: Check existing Cloudflare deploy credentials
         shell: bash
