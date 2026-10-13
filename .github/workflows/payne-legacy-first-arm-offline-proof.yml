@@ -1,0 +1,21 @@
+name: PAYNE Legacy First ARM Offline Proof
+on:
+  push:
+    branches: [payne-legacy-first-arm-offline-proof-20261012]
+permissions:
+  contents: read
+jobs:
+  proof:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Verify pinned deployed source and run legacy offline fixture
+        working-directory: market-edge-lab/real/payne-kalshi-real
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD:market-edge-lab/real/payne-kalshi-real/src/index.js)" = 53367dc1aa0bba209389ee13d8118ff6675d7977
+          node --test test/legacy-first-arm-offline.test.mjs
+          echo NO_PRODUCTION_MUTATION=PASS
