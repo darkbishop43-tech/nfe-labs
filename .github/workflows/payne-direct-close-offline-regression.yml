@@ -1,0 +1,35 @@
+name: PAYNE Direct Writer Closure Offline Regression
+on:
+  push:
+    branches:
+      - payne-direct-writer-close-offline-20261013
+    paths:
+      - .github/workflows/payne-direct-close-offline-regression.yml
+permissions:
+  contents: read
+jobs:
+  offline-proof:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Verify exact approved repaired PAYNE source
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD:market-edge-lab/real/payne-kalshi-real/src/index.js)" = 76c6ff7a2f7f6967def859012b2fcf3b66f7b2f9
+          node --check market-edge-lab/real/payne-kalshi-real/src/index.js
+          echo "TESTED_SOURCE_COMMIT=7b42db3e1699933d8fe981e7f2d709ab4e454671"
+          echo "TESTED_SOURCE_BLOB=76c6ff7a2f7f6967def859012b2fcf3b66f7b2f9"
+      - name: Run existing PAYNE executable offline tests
+        working-directory: market-edge-lab/real/payne-kalshi-real
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm test
+          echo "PRODUCTION_MUTATIONS=NONE"
