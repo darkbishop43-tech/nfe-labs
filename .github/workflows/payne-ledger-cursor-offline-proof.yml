@@ -25,13 +25,13 @@ jobs:
         run: |
           set -euo pipefail
           url='https://market-edge-payne-kalshi-real.darkbishop43.workers.dev'
-          for path in real-state 'real-history?view=audit'; do
+          for path in real real-state real-history?view=audit; do
             code=$(curl -sS --max-time 25 -o /tmp/payne-read.json -w '%{http_code}' "$url/$path")
             echo "PAYNE_READ_ENDPOINT=$path HTTP=$code"
             if [[ "$code" != 200 ]];then continue;fi
             jq -c '{
               seriesId:(.series.seriesId//.seriesId//null),
-              seriesStatus:(.series.status//null),
+              seriesStatus:(.series.status//null),\n              observedAt:(.lastRunAt//.lastScanAt//.scan.lastRunAt//.scan.lastScanAt//null),\n              scheduler:(.scheduler//.schedulerState//.schedulerHeartbeat//null),\n              scan:(.scan//.latestScan//null),\n              radar:(.radar//.series.radar//null),\n              pull:(.pull//.series.pull//null),
               currentAttempt:(.series.currentAttempt|if type=="object" then {attemptId,attemptNo,ticker,createdAt,at,fireAt,providerSubmitStartedAt,providerPostStarted,providerOrderId,terminalClassification,status,closeTime} else null end),
               latch:(.series.fireLatch|if type=="object" then {specimenId,attemptNo,ticker,marketOpenTime,marketCloseTime,latchedAt,invalidatedAt,invalidationReason,freshLockAt,preSubmitAt,state} else null end),
               attemptedAudit:(.attempts|if type=="array" then map({attemptId,attemptNo,ticker,fireAt,createdAt,providerSubmitStartedAt,terminalClassification})|.[-3:] else null end)
