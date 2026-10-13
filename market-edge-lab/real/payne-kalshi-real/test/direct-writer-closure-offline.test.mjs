@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {generateKeyPairSync} from 'node:crypto';
-import {runPayneRealExecutionCycle,defaultControlState,defaultRealSeriesState,payneCapacityEvidence} from '../src/index.js';
+import {runPayneRealExecutionCycle,defaultControlState,defaultRealSeriesState} from '../src/index.js';
 
 const {privateKey}=generateKeyPairSync('rsa',{modulusLength:2048});
 const privatePem=privateKey.export({type:'pkcs8',format:'pem'});
