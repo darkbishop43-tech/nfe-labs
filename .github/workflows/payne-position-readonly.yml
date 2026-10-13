@@ -21,3 +21,26 @@ jobs:
           curl --fail --silent --show-error --max-time 25 -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "$url" -o /tmp/payne-position.json
           jq -c '{seriesId,position:{owner:.position.owner,status:.position.status,reconciliationState:.position.reconciliationState},positionType:(.position|type)}' /tmp/payne-position.json
           echo PAYNE_POSITION_GET_READ_ONLY=PASS
+
+      - name: Read protected Kalshi closure evidence (GET only)
+        shell: bash
+        env:
+          PAYNE_COORDINATOR_DIAGNOSTIC_TOKEN: ${{ secrets.PAYNE_COORDINATOR_DIAGNOSTIC_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [[ -z "$PAYNE_COORDINATOR_DIAGNOSTIC_TOKEN" ]]; then
+            echo 'AUTHORIZATION=FAIL_MISSING_EXISTING_DIAGNOSTIC_TOKEN'
+            echo 'MAINTENANCE_DECISION=BLOCK'
+            exit 1
+          fi
+          code="$(curl --silent --show-error --max-time 45 --output /tmp/payne-live-closure-evidence.json --write-out '%{http_code}' --header "x-payne-diagnostic-token: $PAYNE_COORDINATOR_DIAGNOSTIC_TOKEN" 'https://market-edge-payne-kalshi-real.darkbishop43.workers.dev/internal/closure-maintenance-evidence')"
+          echo "LIVE_ENDPOINT_HTTP_STATUS=$code"
+          if [[ "$code" != 200 ]];then
+            echo 'AUTHORIZATION_OR_PROVIDER_EVIDENCE=FAIL'
+            jq -c '{ok,complete,reason}' /tmp/payne-live-closure-evidence.json || true
+            echo 'MAINTENANCE_DECISION=BLOCK'
+            exit 1
+          fi
+          jq -c '{ok,complete,reason,positionIdentity,provider:{authenticated:.provider.authenticated,complete:.provider.complete,positionReadOk:.provider.positionReadOk,positionQuantity:.provider.positionQuantity,ordersReadOk:.provider.ordersReadOk,ordersComplete:.provider.ordersComplete,openOrUnknownOrderCount:([.provider.orders[]? | select((.status|ascii_downcase|IN("executed","canceled","cancelled","expired","rejected"))|not)]|length),otherUnresolvedExposure:.provider.otherUnresolvedExposure}}' /tmp/payne-live-closure-evidence.json
+          jq -e '.ok==true and .complete==true and .positionIdentity.seriesId=="49bcacb2-4649-4217-ae1e-8bd998c37fa1" and .positionIdentity.providerOrderId=="01a133da-f108-7df4-9287-3f45cfa348ed" and .positionIdentity.ticker=="KXNEAR15M-26OCT130215-15" and .positionIdentity.side=="NO" and .provider.authenticated==true and .provider.positionQuantity==0 and .provider.ordersComplete==true and .provider.otherUnresolvedExposure==false' /tmp/payne-live-closure-evidence.json >/dev/null || { echo 'MAINTENANCE_DECISION=BLOCK'; exit 1; }
+          echo 'PROVIDER_EVIDENCE_CHECK=PASS'
