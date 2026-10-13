@@ -139,3 +139,21 @@ jobs:
               else:print('RESOURCE_ITEM_TYPE',type(x).__name__)
           else:print('RESOURCES_VALUE_TYPE_ONLY',type(obj).__name__)
           PY
+      - name: Classify script resource provenance fields without source or secrets
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          url="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/market-edge-baseline-real/versions/fa172049-50f4-41f0-8e28-0af9c1ba8b8c/content"
+          curl -fsS --max-time 25 -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -o /tmp/cf-resources.json "$url"
+          python3 - <<'PY'
+          import json
+          obj=json.load(open('/tmp/cf-resources.json'))['result']['resources']['script']
+          print('SCRIPT_ETAG',str(obj.get('etag'))[:120])
+          print('SCRIPT_LAST_DEPLOYED_FROM',str(obj.get('last_deployed_from'))[:150])
+          print('SCRIPT_HANDLERS_KIND',type(obj.get('handlers')).__name__)
+          print('SCRIPT_NAMED_HANDLERS_KIND',type(obj.get('named_handlers')).__name__)
+          print('EXPLICIT_SOURCE_REFERENCE_KEYS',sorted(k for k in obj if any(x in k.lower() for x in ('url','module','source','path','content'))))
+          PY
