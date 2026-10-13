@@ -2,6 +2,7 @@ import {liveOrderWatchProjection,paynePositionRecords,payneCapacityEvidence,upse
 import {PayneExecutionCoordinator,claimPayneExecution,releaseProvenNoPost,resolvePayneExecutionClaim,claimPayneExit,inspectPayneCoordinatorClaim} from './payne-execution-coordinator.js';
 export {PayneExecutionCoordinator};
 import { kalshiReadOnlyProof, kalshiGetOnly } from './kalshi-get-only.js';
+import {payneClosureEvidence} from './payne-closure-evidence.js';
 import { kalshiPayneOrderPost, PAYNE_WRITE_CONTRACT } from './kalshi-real-write.js';
 import { cockpitHtml } from './cockpit-html.js';
 import { sanitizeKalshiError, auditStage } from './payne-execution-audit.js';
@@ -4560,6 +4561,23 @@ export default {
 
     if (request.method !== 'GET') return Response.json({ ok:false, reason:'GET_ONLY_PROVIDER_AUTHORITY / CONTROL_POSTS_LOCAL_ONLY' }, { status:405 });
 
+    if (url.pathname === '/internal/closure-maintenance-evidence') {
+      // Uses the existing non-trading diagnostic secret; never output the token.
+      const secret=env?.PAYNE_COORDINATOR_DIAGNOSTIC_TOKEN;
+      const supplied=request.headers.get('x-payne-diagnostic-token');
+      if(typeof secret!=='string'||secret.length<32||typeof supplied!=='string'||supplied.length!==secret.length)
+        return Response.json({ok:false,complete:false,reason:'UNAUTHORIZED'},{status:403,headers:{'cache-control':'no-store'}});
+      const [a,b]=await Promise.all([
+        crypto.subtle.digest('SHA-256',new TextEncoder().encode(secret)),
+        crypto.subtle.digest('SHA-256',new TextEncoder().encode(supplied))
+      ]);
+      let mismatch=0;const x=new Uint8Array(a),y=new Uint8Array(b);
+      for(let i=0;i<x.length;i++)mismatch|=x[i]^y[i];
+      if(mismatch!==0)return Response.json({ok:false,complete:false,reason:'UNAUTHORIZED'},{status:403,headers:{'cache-control':'no-store'}});
+      const control=await loadControl(env),series=await loadRealSeriesState(env);
+      const evidence=await payneClosureEvidence(env,control,series);
+      return Response.json(evidence,{status:evidence.ok?200:409,headers:{'cache-control':'no-store'}});
+    }
     if (url.pathname === '/internal/atomic-claim-diagnostic') {
       // Fail closed unless a separate encrypted, non-trading diagnostic secret
       // has explicitly been provisioned. Never reflect or log the supplied token.
