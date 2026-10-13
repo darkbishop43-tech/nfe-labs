@@ -3274,7 +3274,12 @@ export async function buildRealExecutionObservability(env) {
     listRealLedger(env,1000),
   ]);
   const summary=summarizeRealExecutionState({control,series,ledger,asOf:new Date().toISOString()});
-  return {...summary,liveOrderWatch:liveOrderWatchProjection(series,[],ledger),
+  const founderIdle=control.armed!==true&&series?.terminalReason==='EXPLICIT_FOUNDER_DISARM';
+  const display=founderIdle?{
+    ...summary,attempted:0,target:0,remaining:0,
+    closedSessionHistory:{seriesId:series.seriesId,attempted:summary.attempted,target:summary.target},
+  }:summary;
+  return {...display,liveOrderWatch:liveOrderWatchProjection(series,[],ledger),
     positionCapacity:payneCapacityEvidence(series,control.maxPositions)};
 }
 
