@@ -1,0 +1,60 @@
+name: PAYNE Stage 1 Read Only Bootstrap (Founder Manual Only)
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: deploy-payne-kalshi-real-zero-money
+  cancel-in-progress: false
+jobs:
+  bootstrap:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Pin exact baseline plus read-only bootstrap source
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD:market-edge-lab/real/payne-kalshi-real/src/index.js)" = bcea107f1bbe4ef4e5e8b6ef0591fee63978e510
+          grep -q '^name = "market-edge-payne-kalshi-real"$' market-edge-lab/real/payne-kalshi-real/wrangler.toml
+          node --check market-edge-lab/real/payne-kalshi-real/src/index.js
+      - name: Existing PAYNE KV safety with exact read-only bootstrap allowance
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          PAYNE_BOOTSTRAP_APPROVED_SOURCE_BLOB: bcea107f1bbe4ef4e5e8b6ef0591fee63978e510
+        run: bash .github/scripts/payne-kv-stage1-bootstrap-safety.sh pre
+      - name: Verify Founder remains disarmed
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error --max-time 20 'https://market-edge-payne-kalshi-real.darkbishop43.workers.dev/control' -o /tmp/payne-stage1-control.json
+          jq -e '.ok==true and .control.armed==false' /tmp/payne-stage1-control.json >/dev/null
+      - name: Dry run exact Stage 1 source
+        working-directory: market-edge-lab/real/payne-kalshi-real
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: npx --yes wrangler@4 deploy --dry-run --outdir /tmp/payne-stage1-build
+      - name: Deploy exact Stage 1 bootstrap
+        working-directory: market-edge-lab/real/payne-kalshi-real
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: npx --yes wrangler@4 deploy
+      - name: Existing PAYNE KV post-deploy safety
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          PAYNE_BOOTSTRAP_APPROVED_SOURCE_BLOB: bcea107f1bbe4ef4e5e8b6ef0591fee63978e510
+        run: bash .github/scripts/payne-kv-stage1-bootstrap-safety.sh post

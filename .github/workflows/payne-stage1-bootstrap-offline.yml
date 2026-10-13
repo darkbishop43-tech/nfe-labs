@@ -1,0 +1,30 @@
+name: PAYNE Stage 1 Bootstrap Offline Proof
+on:
+  push:
+    branches: [payne-closure-bootstrap-stage1-offline-20261013]
+    paths: [".github/workflows/payne-stage1-bootstrap-offline.yml"]
+permissions:
+  contents: read
+jobs:
+  offline:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Check Stage 1 exact source and diff-only additions
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD:market-edge-lab/real/payne-kalshi-real/src/index.js)" = bcea107f1bbe4ef4e5e8b6ef0591fee63978e510
+          node --check market-edge-lab/real/payne-kalshi-real/src/index.js
+          ruby -e 'require "yaml"; YAML.load_file(".github/workflows/payne-stage1-bootstrap-manual.yml")'
+          echo BOOTSTRAP_SOURCE_IDENTITY=PASS
+      - name: Existing PAYNE regression
+        working-directory: market-edge-lab/real/payne-kalshi-real
+        run: npm test
+      - name: Stage 1 protected GET and safety proof
+        run: node --test .github/tests/payne-stage1-bootstrap.test.mjs
