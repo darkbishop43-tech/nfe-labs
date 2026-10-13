@@ -53,3 +53,25 @@ jobs:
             fi
           done
           echo "NO_SOURCE_HASH_CLAIM_WITHOUT_EXPLICIT_PROVENANCE"
+      - name: Read-only Cloudflare deployed AUTO version provenance
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          target='fa172049-50f4-41f0-8e28-0af9c1ba8b8c'
+          base="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/market-edge-baseline-real"
+          for tail in "versions/$target" "versions/$target/content"; do
+            code="$(curl -sS --max-time 30 -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -o /tmp/auto-version-metadata -w '%{http_code}' "$base/$tail")"
+            echo "AUTO_VERSION_READ=$tail HTTP=$code"
+            if [[ "$code" == 200 ]]; then
+              if [[ "$tail" == */content ]];then
+                sha256sum /tmp/auto-version-metadata | sed 's@/tmp/auto-version-metadata@DEPLOYED_BUNDLE@'
+                echo "DEPLOYED_CONTENT_BYTES=$(wc -c </tmp/auto-version-metadata)"
+              else
+                jq -c 'if .success == true then {success, version_id:(.result.id//.result.version.id//null), created_on:(.result.created_on//null), annotations:(.result.annotations//null), deployment_id:(.result.deployment_id//null), source_commit:(.result.source_commit//.result.metadata.source_commit//null)} else {success, errors:(.errors|map({code,message}))} end' /tmp/auto-version-metadata
+              fi
+            fi
+          done
+          echo NO_PRODUCTION_CHANGES
