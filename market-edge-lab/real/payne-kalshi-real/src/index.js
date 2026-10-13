@@ -213,6 +213,28 @@ export async function updateFounderControl(env, action, rawValue = null) {
       throw new Error('PAYNE_REAL_PRIOR_PROVIDER_ORDER_REQUIRES_RECONCILIATION');
     if(series?.fireLatch?.state==='LATCHED'&&!series?.completedAt)
       throw new Error('PAYNE_REAL_PRIOR_FIRE_REQUIRES_DISARM_FINALIZATION');
+    // Archive a pre-repair explicitly disarmed session before replacing its KV slot.
+    // Existing run namespace; never reset orders, fills, exposure, or ledgers.
+    if(before.armed===false && series?.seriesId){
+      const archiveKey=RUN_PREFIX+series.seriesId+':founder-disarm-snapshot';
+      const kv=binding(env);
+      const existing=await kvGetJson(env,archiveKey);
+      if(!existing){
+        const closed={...series,status:'TERMINAL_FOUNDER_DISARMED',
+          terminalReason:'EXPLICIT_FOUNDER_DISARM',
+          completedAt:series.completedAt||new Date().toISOString()};
+        try{
+          await kvPutJson(env,archiveKey,closed);
+          const confirmed=await kvGetJson(env,archiveKey);
+          if(!confirmed || JSON.stringify(confirmed)!==JSON.stringify(closed))
+            throw new Error('ARCHIVE_READBACK_MISMATCH');
+        }catch{
+          throw new Error('PAYNE_LEGACY_SESSION_ARCHIVE_NOT_VERIFIED');
+        }
+      }else if(existing.seriesId!==series.seriesId){
+        throw new Error('PAYNE_LEGACY_SESSION_ARCHIVE_IDENTITY_MISMATCH');
+      }
+    }
     const armedSeries={
       ...defaultRealSeriesState(),
       seriesId:crypto.randomUUID(),
