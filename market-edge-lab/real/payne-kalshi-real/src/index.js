@@ -203,37 +203,62 @@ export async function updateFounderControl(env, action, rawValue = null) {
     if (series?.position && SERIES_BLOCKING_POSITION_STATUSES.includes(String(series.position.status||''))) throw new Error('PAYNE_REAL_OPEN_POSITION_EXISTS');
     const superseded=await reconcileDisarmedSupersededSeries(env,series,before);
     series=superseded.series;
-    const started=Number(series?.attemptsStarted||0);
-    const priorTarget=Number(series?.attemptTarget||1);
-    let armedSeries;
-    if (!seriesTerminal(series) && started>0 && started<priorTarget) {
-      // Only repaired provider-boundary accounting series may resume. Legacy unfinished series must quarantine first.
-      if(series?.accountingSemantics!==PROVIDER_ATTEMPT_ACCOUNTING_SEMANTICS || series?.legacyQuarantined===true) {
-        throw new Error('PAYNE_LEGACY_SERIES_NON_RESUMABLE');
-      }
-      // An unfinished governed repaired series: ARM resumes it with its FROZEN config. It never re-snapshots or resets the count.
-      const frozen=frozenSeriesConfig(series);
-      if (!frozen.ok) throw new Error('PAYNE_REAL_SERIES_IN_PROGRESS_NOT_FROZEN');
-      if (frozen.attemptTarget!==cfgTarget || frozen.threshold!==cfgThreshold || frozen.effectiveLockThreshold!==effectiveLockThreshold(cfgThreshold) || frozen.maxEntryDebitUsd!==cfgStake) throw new Error('PAYNE_REAL_SERIES_IN_PROGRESS_CONFIG_MISMATCH');
-      const gate=seriesInterlock(series);
-      if (!gate.clear) throw new Error('PAYNE_REAL_SERIES_PRIOR_ATTEMPT_NOT_CLEAN_'+gate.reason);
-      armedSeries={...series,status:'ARMED_WAITING',requiredExchangeIndex:2,completedAt:null};
-      next.attempts=started; next.openPositions=0;
-    } else {
-      // New governed series: snapshot the validated founder config into the series.
-      armedSeries={
-        ...defaultRealSeriesState(),
-        seriesId:(started===0&&series?.seriesId)?series.seriesId:crypto.randomUUID(),
-        status:'ARMED_WAITING',attemptsStarted:0,
-        attemptTarget:cfgTarget,threshold:cfgThreshold,effectiveLockThreshold:effectiveLockThreshold(cfgThreshold),maxEntryDebitUsd:cfgStake,requiredExchangeIndex:2,
-        configFrozen:true,frozenAt:new Date().toISOString(),completedAt:null,
-      };
-      next.attempts=0; next.openPositions=0;
-    }
+    // Founder DISARM ends a fishing session. Do not resume an unfinished
+    // previous run or reuse its specimen, counter, ticker, or frozen configuration.
+    // Provider ownership evidence is NEVER used as authority to clear exposure.
+    if(paynePositionRecords(series).some(p=>String(p.status||'').toUpperCase()!=='CLOSED'))
+      throw new Error('PAYNE_REAL_PRIOR_PROVIDER_POSITION_REQUIRES_RECONCILIATION');
+    if(['SUBMITTING','WRITE_ERROR_UNKNOWN','PROVIDER_REJECTED_OR_UNKNOWN','UNKNOWN'].includes(
+      String(series?.currentAttempt?.status||'').toUpperCase()))
+      throw new Error('PAYNE_REAL_PRIOR_PROVIDER_ORDER_REQUIRES_RECONCILIATION');
+    if(series?.fireLatch?.state==='LATCHED'&&!series?.completedAt)
+      throw new Error('PAYNE_REAL_PRIOR_FIRE_REQUIRES_DISARM_FINALIZATION');
+    const armedSeries={
+      ...defaultRealSeriesState(),
+      seriesId:crypto.randomUUID(),
+      status:'ARMED_WAITING',
+      attemptsStarted:0,
+      attemptTarget:cfgTarget,
+      threshold:cfgThreshold,
+      effectiveLockThreshold:effectiveLockThreshold(cfgThreshold),
+      maxEntryDebitUsd:cfgStake,
+      requiredExchangeIndex:2,
+      configFrozen:true,
+      frozenAt:new Date().toISOString(),
+      completedAt:null,
+    };
+    next.attempts=0;
+    next.openPositions=0;
     await saveRealSeriesState(env,armedSeries);
     await persistRun(env,{runId:armedSeries.seriesId,threshold:armedSeries.threshold,effectiveLockThreshold:armedSeries.effectiveLockThreshold,maxEntryDebitUsd:armedSeries.maxEntryDebitUsd,attemptTarget:armedSeries.attemptTarget,requiredExchangeIndex:2,accountingSemantics:armedSeries.accountingSemantics,frozenAt:armedSeries.frozenAt||null});
     next.armed=true;
-  } else if (name==='DISARM') next.armed=false;
+  } else if (name==='DISARM') {
+    next.armed=false;
+    next.attempts=0;
+    // Keep the Founder-selected target configuration; idle display is 0/0.
+    if(before.armed===true){
+      const series=await loadRealSeriesState(env);
+      if(series?.seriesId && !series.completedAt){
+        const closedAt=new Date().toISOString();
+        const closed={
+          ...series,status:'TERMINAL_FOUNDER_DISARMED',completedAt:closedAt,
+          terminalReason:'EXPLICIT_FOUNDER_DISARM',
+          // Leave real position ownership, outstanding provider orders and
+          // unresolved entry evidence untouched for management/reconciliation.
+        };
+        await kvPutJson(env,RUN_PREFIX+series.seriesId+':founder-disarm-snapshot',closed);
+        await appendRealLedger(env,'FOUNDER_FISHING_SESSION_CLOSED',{
+          seriesId:series.seriesId,attemptsStarted:series.attemptsStarted,
+          attemptTarget:series.attemptTarget,fireSpecimenId:series.fireLatch?.specimenId||null,
+          currentAttemptId:series.currentAttempt?.attemptId||null,
+          unresolvedEntry:series.unresolvedEntry===true,
+          positionCount:paynePositionRecords(series).length,
+          historicalRecordsPreserved:true,providerWrites:0,capitalMovedUsd:0,
+        });
+        await saveRealSeriesState(env,closed);
+      }
+    }
+  }
   else if (name==='SET_THRESHOLD') {
     const parsed=parseFounderThreshold(rawValue);
     if (!parsed.ok) throw new Error(parsed.error);
@@ -3326,7 +3351,9 @@ async function buildFastUiState(env) {
     capitalMovedUsd:0,
     control:{
       armed:control.armed===true,
-      attemptTarget:control.attemptTarget,
+      attemptTarget:control.armed===true?control.attemptTarget:0,
+      configuredAttemptTarget:control.attemptTarget,
+      attempts:control.armed===true?Number(control.attempts||0):0,
       maxEntryDebitUsd:control.maxEntryDebitUsd,
       threshold:control.activeThreshold,
       effectiveLockThreshold:effectiveLockThreshold(control.activeThreshold),
