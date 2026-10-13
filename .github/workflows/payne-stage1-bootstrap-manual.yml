@@ -40,7 +40,7 @@ jobs:
           set -euo pipefail
           curl --fail --silent --show-error --max-time 20 'https://market-edge-payne-kalshi-real.darkbishop43.workers.dev/control' -o /tmp/payne-stage1-control.json
           jq -e '.ok==true and .control.armed==false' /tmp/payne-stage1-control.json >/dev/null
-      - name: Dry run exact Stage 1 source
+      - name: Dry run exact Stage 1 source with bounded evidence status allowance
         working-directory: market-edge-lab/real/payne-kalshi-real
         shell: bash
         env:
