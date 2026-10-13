@@ -33,6 +33,26 @@ test('legacy previous series remains durable in historical run records after fir
  const keys=[...f.map.keys()].filter(k=>k.startsWith('payne-kalshi:run:')&&k.includes(f.series.seriesId));
  assert.ok(keys.length>0,'old series lacks durable history snapshot when ARM overwrites real-series');
 });
+test('failed legacy archive persistence prevents ARM and leaves original series intact',async()=>{
+ const f=fixture();
+ const save=f.env.PAYNE_KALSHI_STATE.put;
+ f.env.PAYNE_KALSHI_STATE.put=async(k,v)=>{
+  if(k.includes(':founder-disarm-snapshot'))throw Error('SIMULATED_KV_WRITE_FAILURE');
+  return save(k,v);
+ };
+ await assert.rejects(()=>updateFounderControl(f.env,'ARM'),/PAYNE_LEGACY_SESSION_ARCHIVE_NOT_VERIFIED/);
+ assert.equal((await loadRealSeriesState(f.env)).seriesId,f.series.seriesId);
+ assert.equal(JSON.parse(f.map.get(C)).armed,false);
+});
+test('repeated attempts after an archived disarm do not duplicate archived snapshot',async()=>{
+ const f=fixture();
+ await updateFounderControl(f.env,'ARM');
+ const oldKey='payne-kalshi:run:'+f.series.seriesId+':founder-disarm-snapshot';
+ const first=f.map.get(oldKey);
+ assert.ok(first);
+ assert.equal([...f.map.keys()].filter(k=>k===oldKey).length,1);
+ assert.equal(f.map.get(oldKey),first);
+});
 test('persisted unresolved entry still blocks first ARM',async()=>{
  const f=fixture({unresolved:true});
  await assert.rejects(()=>updateFounderControl(f.env,'ARM'),/ENTRY_RECONCILIATION_REQUIRED/);
