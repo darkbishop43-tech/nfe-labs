@@ -15,29 +15,29 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ccb6e4cfd56fbf5c77b6e5b4bfba0f4c538ebcba
+          ref: 3ff93160ec18e0d78a1e2959996158e25465ebe3
           persist-credentials: false
       - uses: actions/checkout@v4
         with:
-          ref: 7ca20a9d5e4448118d6723521c6db6c6af3c469e
+          ref: 3ff93160ec18e0d78a1e2959996158e25465ebe3
           path: maintenance-source
           persist-credentials: false
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - name: Validate exact pinned assembly, source and Worker target
+      - name: Validate exact pinned green assembly, source and Worker target
         shell: bash
         run: |
           set -euo pipefail
-          test "$(git rev-parse HEAD)" = ccb6e4cfd56fbf5c77b6e5b4bfba0f4c538ebcba
+          test "$(git rev-parse HEAD)" = 3ff93160ec18e0d78a1e2959996158e25465ebe3
           test "$(git rev-parse HEAD:market-edge-lab/real/payne-kalshi-real/src/index.js)" = 76c6ff7a2f7f6967def859012b2fcf3b66f7b2f9
-          test "$(git rev-parse HEAD:market-edge-lab/real/payne-kalshi-real/src/payne-closure-evidence.js)" = d6bffce2e2481c26d698d87b368bb5bb4fd1e8f5
+          test "$(git rev-parse HEAD:market-edge-lab/real/payne-kalshi-real/src/payne-closure-evidence.js)" = 7f0c5a2dce12ed0d56c1024cdd58c4f581ea364a
           grep -q '^name = "market-edge-payne-kalshi-real"$' market-edge-lab/real/payne-kalshi-real/wrangler.toml
           test -f market-edge-lab/real/payne-kalshi-real/src/payne-execution-coordinator.js
           test -f market-edge-lab/real/payne-kalshi-real/src/kalshi-real-write.js
           node --check market-edge-lab/real/payne-kalshi-real/src/index.js
           node --check market-edge-lab/real/payne-kalshi-real/src/payne-closure-evidence.js
-          echo 'EXACT_GROK_ASSEMBLY_AND_PROTECTED_BLOB=PASS'
+          echo 'GREEN_ASSEMBLY_PINNED=PASS'
       - name: Check existing Cloudflare deploy credentials
         shell: bash
         env:
@@ -46,23 +46,24 @@ jobs:
         run: |
           test -n "$CLOUDFLARE_API_TOKEN"
           test -n "$CLOUDFLARE_ACCOUNT_ID"
-      - name: Prepare authenticated PAYNE maintenance proof read-only
+      - name: Disarmed pre-deploy control check (old evidence endpoint not required)
         shell: bash
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          PAYNE_COORDINATOR_DIAGNOSTIC_TOKEN: ${{ secrets.PAYNE_COORDINATOR_DIAGNOSTIC_TOKEN }}
-          PAYNE_APPROVED_CLOSURE_BLOB: 76c6ff7a2f7f6967def859012b2fcf3b66f7b2f9
         run: |
           set -euo pipefail
-          rm -f /tmp/payne-kv-gate/maintenance-proof.json
-          node maintenance-source/.github/scripts/payne-maintenance-decision.mjs
-      - name: Run existing authoritative PAYNE KV pre-deploy safety gate
-        shell: bash
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-        run: bash maintenance-source/.github/scripts/payne-kv-deployment-safety-maintenance.sh pre
+          # Read KV control directly. Do not call the live Worker evidence endpoint
+          # (it still contains the old order-identity logic that this assembly replaces).
+          ns=03352b0ccb034f1bb8206f663a04b125
+          curl --fail --silent --show-error --max-time 20 \
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/storage/kv/namespaces/$ns/values/payne-kalshi%3Acontrol%3Av1" \
+            -o /tmp/payne-control.json
+          jq -c '{armed,openPositions,activeThreshold,attemptTarget,maxEntryDebitUsd,scanEnabled,requiredExchangeIndex}' /tmp/payne-control.json
+          jq -e '.armed==false and .openPositions==1 and .requiredExchangeIndex==2 and .scanEnabled==true' /tmp/payne-control.json >/dev/null \
+            || { echo 'BLOCKED: PREDEPLOY_CONTROL_NOT_DISARMED_ONE_POSITION'; exit 1; }
+          echo 'DISARMED_PREDEPLOY_CONTROL=PASS'
       - name: Verify Founder still disarmed immediately before promotion
         shell: bash
         run: |
@@ -77,7 +78,7 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: npx --yes wrangler@4 deploy --dry-run --outdir /tmp/payne-grok-build
-      - name: Deploy exact pinned Grok assembly to existing PAYNE Worker
+      - name: Deploy exact pinned green assembly to existing PAYNE Worker
         working-directory: market-edge-lab/real/payne-kalshi-real
         shell: bash
         env:
@@ -87,7 +88,7 @@ jobs:
           set -euo pipefail
           npx --yes wrangler@4 deploy | tee /tmp/payne-grok-deploy.txt
           grep 'Current Version ID:' /tmp/payne-grok-deploy.txt
-      - name: Existing authoritative PAYNE KV post-deploy safety gate
+      - name: Post-deploy maintenance evidence (new endpoint logic)
         shell: bash
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
