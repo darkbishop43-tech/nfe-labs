@@ -1,7 +1,7 @@
 name: PAYNE Grok Exact Pinned Production Promotion
 on:
   push:
-    branches: [payne-grok-exact-deployment-package-20261011]
+    branches: [payne-legacy-first-arm-offline-proof-20261012]
     paths: [".github/workflows/payne-grok-exact-production-promotion.yml"]
 permissions:
   contents: read
@@ -15,7 +15,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ea8a0c78d638d9cfef8d3b1ba220f92b142149e8
+          ref: 853cc6901eae1b5b604b0b845c68de1515495256
           persist-credentials: false
       - uses: actions/checkout@v4
         with:
@@ -29,8 +29,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test "$(git rev-parse HEAD)" = ea8a0c78d638d9cfef8d3b1ba220f92b142149e8
-          test "$(git rev-parse HEAD:market-edge-lab/real/payne-kalshi-real/src/index.js)" = 8f5335b1ae27074c4db56cca4dad720514004c01
+          test "$(git rev-parse HEAD)" = 853cc6901eae1b5b604b0b845c68de1515495256
+          test "$(git rev-parse HEAD:market-edge-lab/real/payne-kalshi-real/src/index.js)" = 6dee1e93154d54eb80aa41164649f1dfccb20336
           grep -q '^name = "market-edge-payne-kalshi-real"$' market-edge-lab/real/payne-kalshi-real/wrangler.toml
           test -f market-edge-lab/real/payne-kalshi-real/src/payne-execution-coordinator.js
           test -f market-edge-lab/real/payne-kalshi-real/src/kalshi-real-write.js
