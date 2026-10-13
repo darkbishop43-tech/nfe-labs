@@ -27,7 +27,7 @@ jobs:
           test "$(git rev-parse HEAD:market-edge-lab/real/payne-kalshi-real/src/index.js)" = bcea107f1bbe4ef4e5e8b6ef0591fee63978e510
           grep -q '^name = "market-edge-payne-kalshi-real"$' market-edge-lab/real/payne-kalshi-real/wrangler.toml
           node --check market-edge-lab/real/payne-kalshi-real/src/index.js
-      - name: Existing PAYNE KV safety with exact read-only bootstrap allowance
+      - name: Existing PAYNE KV safety with exact read-only bootstrap allowance (reconciliation status verified)
         shell: bash
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
