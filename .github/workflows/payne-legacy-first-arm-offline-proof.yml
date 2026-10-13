@@ -16,6 +16,6 @@ jobs:
         working-directory: market-edge-lab/real/payne-kalshi-real
         run: |
           set -euo pipefail
-          test "$(git rev-parse HEAD:market-edge-lab/real/payne-kalshi-real/src/index.js)" = 53367dc1aa0bba209389ee13d8118ff6675d7977
-          node --test test/legacy-first-arm-offline.test.mjs
+          test "$(git rev-parse HEAD:market-edge-lab/real/payne-kalshi-real/src/index.js)" = 6dee1e93154d54eb80aa41164649f1dfccb20336
+          npm test
           echo NO_PRODUCTION_MUTATION=PASS
