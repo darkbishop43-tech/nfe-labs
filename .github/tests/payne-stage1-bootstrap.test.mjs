@@ -66,3 +66,26 @@ test('bootstrap workflow is Founder-authorized and scoped to Stage 1 branch',()=
  assert.match(w,/payne-kv-stage1-bootstrap-safety.sh post/);
  assert.match(w,/armed==false/);
 });
+
+for(const [kind,expected] of [['FLAT',200],['UNKNOWN',409]]){
+ test('RECONCILIATION_UNKNOWN permits provider read but '+kind+' remains evidence-governed',{concurrency:false},async()=>{
+  const saved=position.status;position.status='RECONCILIATION_UNKNOWN';
+  const original=globalThis.fetch;let gets=0;
+  globalThis.fetch=async(url,init)=>{
+   assert.equal(init.method,'GET');gets++;
+   if(kind==='UNKNOWN')return new Response('{}',{status:503});
+   if(String(url).includes('/portfolio/positions'))return Response.json({market_positions:[{ticker:'NEAR-TEST',position_fp:'0'}],cursor:''});
+   if(String(url).includes('/portfolio/orders'))return Response.json({orders:[{order_id:'o',client_order_id:'c',ticker:'NEAR-TEST',side:'no',status:'executed'}],cursor:''});
+   throw Error('UNMOCKED_PATH');
+  };
+  try{
+   const response=await worker.fetch(new Request('https://offline/internal/closure-maintenance-evidence',
+    {headers:{'x-payne-diagnostic-token':'x'.repeat(40)}}),env());
+   const body=await response.json();
+   assert.equal(response.status,expected);
+   assert.ok(gets>0,'provider read reached');
+   assert.equal(body.ok,kind==='FLAT');
+   assert.equal(body.complete,kind==='FLAT');
+  }finally{position.status=saved;globalThis.fetch=original;}
+ });
+}

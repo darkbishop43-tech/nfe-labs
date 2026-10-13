@@ -5,7 +5,7 @@ export async function payneClosureEvidence(env,control,series,{get=kalshiGetOnly
   const reject=reason=>({ok:false,complete:false,reason,providerWrites:0});
   const p=series?.position,a=series?.currentAttempt;
   if(control?.armed!==false||control?.openPositions!==1)return reject('CONTROL_NOT_MAINTENANCE_DISARMED');
-  if(!p||p.seriesId!==series?.seriesId||p.owner!=='PAYNE_KALSHI_REAL'||p.status!=='OPEN'||!p.attemptId||
+  if(!p||p.seriesId!==series?.seriesId||p.owner!=='PAYNE_KALSHI_REAL'||!['OPEN','RECONCILIATION_UNKNOWN'].includes(p.status)||!p.attemptId||
     !p.entryOrderId||!p.entryClientOrderId||!p.marketTicker||!['YES','NO'].includes(p.outcomeSide))
     return reject('POSITION_IDENTITY_INCOMPLETE');
   if(a?.executionHandoff!=='DIRECT_KALSHI_WRITER_V1'||a.attemptId!==p.attemptId||
