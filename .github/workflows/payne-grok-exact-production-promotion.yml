@@ -15,7 +15,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: 9d7294c9671e434631f5755b18cbe5a9ba3a664e
+          ref: d426303ab98f1c32fdd5149ac59399d66990a152
           persist-credentials: false
       - uses: actions/checkout@v4
         with:
@@ -29,8 +29,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test "$(git rev-parse HEAD)" = 9d7294c9671e434631f5755b18cbe5a9ba3a664e
-          test "$(git rev-parse HEAD:market-edge-lab/real/payne-kalshi-real/src/index.js)" = 76c6ff7a2f7f6967def859012b2fcf3b66f7b2f9
+          test "$(git rev-parse HEAD)" = d426303ab98f1c32fdd5149ac59399d66990a152
+          test "$(git rev-parse HEAD:market-edge-lab/real/payne-kalshi-real/src/index.js)" = 8094c492fcb290c84db7a0347bd4b5aeb123d18a
           grep -q '^name = "market-edge-payne-kalshi-real"$' market-edge-lab/real/payne-kalshi-real/wrangler.toml
           test -f market-edge-lab/real/payne-kalshi-real/src/payne-execution-coordinator.js
           test -f market-edge-lab/real/payne-kalshi-real/src/kalshi-real-write.js
@@ -44,12 +44,23 @@ jobs:
         run: |
           test -n "$CLOUDFLARE_API_TOKEN"
           test -n "$CLOUDFLARE_ACCOUNT_ID"
+      - name: Prepare authenticated PAYNE maintenance proof read-only
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          PAYNE_COORDINATOR_DIAGNOSTIC_TOKEN: ${{ secrets.PAYNE_COORDINATOR_DIAGNOSTIC_TOKEN }}
+          PAYNE_APPROVED_CLOSURE_BLOB: 76c6ff7a2f7f6967def859012b2fcf3b66f7b2f9
+        run: |
+          set -euo pipefail
+          rm -f /tmp/payne-kv-gate/maintenance-proof.json
+          node .github/scripts/payne-maintenance-decision.mjs
       - name: Run existing authoritative PAYNE KV pre-deploy safety gate
         shell: bash
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-        run: bash existing-payne-safety-source/.github/scripts/payne-kv-deployment-safety.sh pre
+        run: bash .github/scripts/payne-kv-deployment-safety-maintenance.sh pre
       - name: Verify Founder still disarmed immediately before promotion
         shell: bash
         run: |
@@ -79,7 +90,13 @@ jobs:
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-        run: bash existing-payne-safety-source/.github/scripts/payne-kv-deployment-safety.sh post
+          PAYNE_COORDINATOR_DIAGNOSTIC_TOKEN: ${{ secrets.PAYNE_COORDINATOR_DIAGNOSTIC_TOKEN }}
+          PAYNE_APPROVED_CLOSURE_BLOB: 76c6ff7a2f7f6967def859012b2fcf3b66f7b2f9
+        run: |
+          set -euo pipefail
+          rm -f /tmp/payne-kv-gate/maintenance-proof.json
+          node .github/scripts/payne-maintenance-decision.mjs
+          bash .github/scripts/payne-kv-deployment-safety-maintenance.sh post
       - name: Verify cockpit and existing Founder control read-only
         shell: bash
         run: |
