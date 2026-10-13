@@ -4319,10 +4319,12 @@ export default {
       if(env?.PAYNE_REAL_PUSH_ROUTING_ENABLED==="TRUE"){
         ctx.waitUntil(dispatchPayneUsingExistingPush({
           kv:env.BASELINE_REAL_SHADOW_STATE,
-          readLedger:async()=>{
+          readLedger:async({afterKey,limit})=>{
+            const ledgerUrl=new URL("https://market-edge-payne-kalshi-real.darkbishop43.workers.dev/real-ledger");
+            ledgerUrl.searchParams.set("limit",String(limit));
+            ledgerUrl.searchParams.set("afterKey",afterKey);
             const response=await env.PAYNE_REAL_READ.fetch(
-              new Request("https://market-edge-payne-kalshi-real.darkbishop43.workers.dev/real-ledger?limit=200",
-              {headers:{accept:"application/json"}}));
+              new Request(ledgerUrl,{headers:{accept:"application/json"}}));
             if(!response.ok)throw Error("PAYNE_LEDGER_READ_FAILED_"+response.status);
             return response.json();
           },
