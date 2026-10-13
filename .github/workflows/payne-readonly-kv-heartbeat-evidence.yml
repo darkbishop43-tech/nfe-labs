@@ -1,0 +1,42 @@
+name: PAYNE Read Only KV Heartbeat Evidence
+on:
+  push:
+    branches: [payne-founder-disarm-new-session-offline-20261012]
+    paths: [".github/workflows/payne-readonly-kv-heartbeat-evidence.yml"]
+permissions:
+  contents: read
+jobs:
+  observe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Read existing PAYNE KV without mutation
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          base="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/storage/kv/namespaces/03352b0ccb034f1bb8206f663a04b125/values"
+          for name in control current; do
+            if [[ "$name" == control ]]; then key="payne-kalshi:control:v1"; else key="payne-kalshi:current:v1"; fi
+            encoded=$(jq -rn --arg x "$key" '$x|@uri')
+            status=$(curl -fsS --max-time 25 -o "/tmp/payne-$name.json" -w '%{http_code}' -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "$base/$encoded")
+            echo "KV_$name HTTP=$status"
+          done
+          jq -c '{armed,scanEnabled,attempts,attemptTarget,openPositions,requiredExchangeIndex}' /tmp/payne-control.json
+          jq -c '{at,source}' /tmp/payne-current.json
+          python3 - <<'PY'
+          from datetime import datetime,timezone
+          import json
+          x=json.load(open('/tmp/payne-current.json'))
+          at=x.get('at')
+          try:
+            stamp=datetime.fromisoformat(at.replace('Z','+00:00'))
+            read=datetime.now(timezone.utc)
+            print('READ_UTC',read.isoformat())
+            print('HEARTBEAT_AGE_MS',round((read-stamp).total_seconds()*1000))
+            print('HEARTBEAT_FRESH_WITHIN_300000MS',0 <= (read-stamp).total_seconds()*1000 <= 300000)
+          except Exception as e:
+            print('HEARTBEAT_TIMESTAMP_INVALID',type(e).__name__)
+          PY
+          echo READ_ONLY_NO_KV_WRITES=PASS
