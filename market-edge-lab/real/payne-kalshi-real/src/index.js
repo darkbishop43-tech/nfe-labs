@@ -3843,11 +3843,36 @@ async function settleSeriesControl(env,series,openPositions,{failClosed=false}={
   return next;
 }
 
+// Read-only terminal-exposure gate. Unknown order evidence must never release a slot.
+async function confirmPayneNoOpenOrders(env,position,flatEvidence) {
+  try {
+    let cursor='';
+    const seen=new Set();
+    do {
+      const path='/trade-api/v2/portfolio/orders?limit=200&subaccount=0'+(cursor?'&cursor='+encodeURIComponent(cursor):'');
+      const response=await kalshiGetOnly(env,path);
+      if(!response.ok)return {classification:'UNKNOWN',reason:'OPEN_ORDERS_HTTP_'+response.status};
+      const body=await response.json().catch(()=>null);
+      if(!body||!Array.isArray(body.orders))return {classification:'UNKNOWN',reason:'OPEN_ORDERS_SCHEMA_UNKNOWN'};
+      const sameMarket=body.orders.filter(order=>String(order?.ticker||order?.market_ticker||'')===String(position.marketTicker));
+      const terminal=new Set(['executed','canceled','cancelled','expired','rejected']);
+      if(sameMarket.some(order=>!terminal.has(String(order?.status||'').toLowerCase())))
+        return {classification:'UNKNOWN',reason:'OPEN_MARKET_ORDER_REQUIRES_RECONCILIATION'};
+      const next=typeof body.cursor==='string'?body.cursor:'';
+      if(next && seen.has(next))return {classification:'UNKNOWN',reason:'OPEN_ORDERS_CURSOR_REPEATED'};
+      if(next)seen.add(next);
+      cursor=next;
+    } while(cursor);
+    return flatEvidence;
+  }catch(error){return {classification:'UNKNOWN',reason:'OPEN_ORDERS_CHECK_FAILED'};}
+}
+
 async function reconcileOwnedPaynePosition(env,position) {
   if(!position || position.owner!==REAL_OWNER || Number(position.exchangeIndex)!==2 || !position.entryOrderId || !position.entryClientOrderId) {
     return {classification:'UNKNOWN',reason:'PAYNE_OWNERSHIP_IDENTITY_INCOMPLETE'};
   }
   const evidence=await providerTickerPositionEvidence(env,position.marketTicker);
+  if(evidence.classification==='FLAT') return await confirmPayneNoOpenOrders(env,position,evidence);
   if(evidence.classification!=='ABSENT') return evidence;
   try{
     const path='/trade-api/v2/portfolio/settlements?limit=200&subaccount=0&ticker='+encodeURIComponent(position.marketTicker);
@@ -3856,7 +3881,7 @@ async function reconcileOwnedPaynePosition(env,position) {
     const body=await response.json().catch(()=>null);
     const rows=Array.isArray(body?.settlements)?body.settlements:[];
     const exact=rows.find(x=>String(x?.ticker||'')===String(position.marketTicker));
-    if(exact) return {classification:'FLAT',reason:'EXACT_TICKER_SETTLEMENT_CONFIRMED',settlement:exact};
+    if(exact) return await confirmPayneNoOpenOrders(env,position,{classification:'FLAT',reason:'EXACT_TICKER_SETTLEMENT_CONFIRMED',settlement:exact});
   }catch{}
   return {classification:'UNKNOWN',reason:'TICKER_ABSENT_SETTLEMENT_NOT_PROVEN'};
 }
@@ -3875,7 +3900,16 @@ async function managePayneRealPosition(env,control,series,postImpl=kalshiPayneOr
   position.reconciliationReason=rec.reason;
   position.reconciledAt=new Date(nowMs).toISOString();
   if(rec.classification==='FLAT'){
-    if(position.entryFireSpecimenId&&position.marketCloseTime){
+    // Direct writer owns no legacy entry claim. Verify the persisted attempt,
+    // rather than inferring direct ownership from the ticker or current run.
+    const persistedAttempts=await listRealAttemptsForSeries(env,position.seriesId);
+    const matchingAttempts=persistedAttempts.filter(a=>
+      a?.attemptId===position.attemptId &&
+      a?.providerOrderId===position.entryOrderId &&
+      a?.clientOrderId===position.entryClientOrderId);
+    const directWriter=matchingAttempts.length===1 &&
+      matchingAttempts[0].executionHandoff==='DIRECT_KALSHI_WRITER_V1';
+    if(position.entryFireSpecimenId&&position.marketCloseTime&&!directWriter){
       const atomicClosed=await resolvePayneExecutionClaim(env,{
         seriesId:position.seriesId,attemptNo:Number(position.attemptNo),
         specimenId:position.entryFireSpecimenId,clientOrderId:position.entryClientOrderId,
