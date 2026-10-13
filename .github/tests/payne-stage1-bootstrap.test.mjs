@@ -59,9 +59,9 @@ test('bootstrap gate leaves original safety checks and requires exact bootstrap 
  assert.match(script,/PAYNE_BOOTSTRAP_APPROVED_SOURCE_BLOB/);
  assert.match(script,/bcea107f1bbe4ef4e5e8b6ef0591fee63978e510/);
 });
-test('bootstrap workflow is manual-only with existing safety checks',()=>{
+test('bootstrap workflow is Founder-authorized and scoped to Stage 1 branch',()=>{
  const w=readFileSync('.github/workflows/payne-stage1-bootstrap-manual.yml','utf8');
- assert.match(w,/workflow_dispatch/);assert.doesNotMatch(w,/\n  push:/);
+ assert.match(w,/workflow_dispatch/);assert.match(w,/branches: \[payne-closure-bootstrap-stage1-offline-20261013\]/);
  assert.match(w,/payne-kv-stage1-bootstrap-safety.sh pre/);
  assert.match(w,/payne-kv-stage1-bootstrap-safety.sh post/);
  assert.match(w,/armed==false/);

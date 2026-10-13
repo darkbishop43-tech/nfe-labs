@@ -2,7 +2,7 @@ name: PAYNE Stage 1 Bootstrap Offline Proof
 on:
   push:
     branches: [payne-closure-bootstrap-stage1-offline-20261013]
-    paths: [".github/workflows/payne-stage1-bootstrap-offline.yml"]
+    paths: [".github/workflows/payne-stage1-bootstrap-offline.yml", ".github/scripts/payne-kv-stage1-bootstrap-safety.sh", ".github/tests/payne-stage1-bootstrap.test.mjs"]
 permissions:
   contents: read
 jobs:

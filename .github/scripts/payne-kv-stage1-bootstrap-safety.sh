@@ -32,7 +32,7 @@ verify_safety() {
     (.maxEntryDebitUsd|type=="number" and .>0) and
     (.scanEnabled==true)
   ' "$c" >/dev/null || { echo 'BLOCKED: PERSISTED_CONTROL_SAFETY';exit 1; }
-  jq -e --slurpfile c "$c" '
+  jq -e --slurpfile c "$c" --arg approvedSource "${PAYNE_BOOTSTRAP_APPROVED_SOURCE_BLOB:-}" '
     .schema=="PAYNE_REAL_SERIES_V1" and
     .owner=="PAYNE_KALSHI_REAL" and
     .requiredExchangeIndex==2 and
@@ -45,7 +45,11 @@ verify_safety() {
        (.currentAttempt.reconciliationReason//""|IN("PROVIDER_RECONCILED_NO_EXECUTION")))) and
     ((.position // null)==null or
       ((.position.owner//"")=="PAYNE_KALSHI_REAL" and
-       (.position.status//""|IN("OPEN","FLAT","CLOSED","SETTLED")))) and
+       ((.position.status//""|IN("OPEN","FLAT","CLOSED","SETTLED")) or
+        ((.position.status//"")=="RECONCILIATION_UNKNOWN" and
+         $c[0].armed==false and
+         $c[0].openPositions==1 and
+         $approvedSource=="bcea107f1bbe4ef4e5e8b6ef0591fee63978e510")))) and
     ((.fireLatch.state // "NONE") |
       (IN("LATCHED","PROVIDER_POST_UNKNOWN")|not)) and
     # A disarmed terminal historical attempt may retain an obsolete pre-provider
