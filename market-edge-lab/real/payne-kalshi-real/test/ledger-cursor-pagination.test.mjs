@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {listRealLedgerWithEvidence} from '../src/index.js';
+import {listRealLedgerWithEvidence,listRealLedgerAfter} from '../src/index.js';
 const prefix='payne-kalshi:real-ledger:';
 const mk=(n,{repeat=false,bad=false}={})=>{
  const map=new Map(Array.from({length:n},(_,i)=>{
@@ -33,4 +33,28 @@ test('incomplete page missing cursor must fail closed',async()=>{
 });
 test('read-only and preserved original persisted records',async()=>{
  const {env}=mk(1100);const x=await listRealLedgerWithEvidence(env,200);assert.equal(x.scannedKeys,1100);assert.equal(x.rows.length,200);
+});
+
+test('notification continuation drains >200 events using exact KV key watermark',async()=>{
+ const {env}=mk(1205);
+ const begin=prefix+'2026-10-12T00:00:00.000Z:~';
+ const first=await listRealLedgerAfter(env,begin,200);
+ const second=await listRealLedgerAfter(env,first.nextKey,200);
+ assert.equal(first.rows.length,200);
+ assert.equal(second.rows.length,200);
+ assert.equal(first.hasMore,true);
+ assert.equal(second.hasMore,true);
+ assert.ok(second.rows[0].sourceLedgerKey>first.nextKey);
+ let cursor=second.nextKey,seen=new Set([...first.rows,...second.rows].map(x=>x.sourceLedgerKey));
+ for(let i=0;i<5;i++){
+   const page=await listRealLedgerAfter(env,cursor,200);
+   for(const row of page.rows){assert.ok(!seen.has(row.sourceLedgerKey));seen.add(row.sourceLedgerKey);}
+   cursor=page.nextKey;
+   if(!page.hasMore)break;
+ }
+ assert.equal(seen.size,1205);
+});
+test('continuation rejects bad cursor evidence and incomplete reads',async()=>{
+ const {env}=mk(1205,{bad:true});
+ await assert.rejects(()=>listRealLedgerAfter(env,prefix+'2026-10-12T00:00:00.000Z:~',200),/CURSOR_INVALID/);
 });
