@@ -75,3 +75,34 @@ jobs:
             fi
           done
           echo NO_PRODUCTION_CHANGES
+      - name: Inspect Cloudflare version content representation only
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          target='fa172049-50f4-41f0-8e28-0af9c1ba8b8c'
+          endpoint="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/market-edge-baseline-real/versions/$target/content"
+          status="$(curl -sS --max-time 30 -D /tmp/cf-content-headers -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -o /tmp/cf-content-payload -w '%{http_code}' "$endpoint")"
+          echo "CONTENT_HTTP=$status"
+          echo "CONTENT_TYPE=$(grep -i '^content-type:' /tmp/cf-content-headers | tail -1 | tr -d '\r' | cut -d' ' -f2-)"
+          echo "CONTENT_LENGTH=$(wc -c </tmp/cf-content-payload)"
+          file -b /tmp/cf-content-payload
+          head -c 100 /tmp/cf-content-payload | od -An -tx1 | tr '\n' ' ';echo
+          python3 - <<'PY'
+          import re, pathlib, json
+          p=pathlib.Path('/tmp/cf-content-payload').read_bytes()
+          print('STARTS_JSON',p.lstrip()[:1] in (b'{',b'['))
+          if p.lstrip()[:1] in (b'{',b'['):
+            try:
+              j=json.loads(p)
+              print('JSON_TOP_KEYS',sorted(j) if isinstance(j,dict) else 'ARRAY')
+              if isinstance(j,dict):
+                print('JSON_RESULT_TYPE',type(j.get('result')).__name__)
+                print('JSON_RESULT_KEYS',sorted(j['result']) if isinstance(j.get('result'),dict) else [])
+            except Exception as e: print('JSON_PARSE_ERROR',type(e).__name__)
+          print('MULTIPART_START',p.startswith(b'--'))
+          print('MODULE_NAMES',sorted(set(x.decode(errors='replace') for x in re.findall(rb'(?:name|filename)="([^"]{1,200})"',p)))[:30])
+          print('SOURCE_HINTS',{'export_default':b'export default' in p,'addEventListener':b'addEventListener' in p,'modules_field':b'"modules"' in p})
+          PY
