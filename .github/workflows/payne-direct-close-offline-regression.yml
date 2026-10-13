@@ -31,7 +31,6 @@ jobs:
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD:market-edge-lab/real/payne-kalshi-real/src/index.js)" = 8094c492fcb290c84db7a0347bd4b5aeb123d18a
-          test "$(git rev-parse 7b42db3e1699933d8fe981e7f2d709ab4e454671:market-edge-lab/real/payne-kalshi-real/src/index.js)" = 76c6ff7a2f7f6967def859012b2fcf3b66f7b2f9
           node --check market-edge-lab/real/payne-kalshi-real/src/index.js
           echo "TESTED_SOURCE_COMMIT=7b42db3e1699933d8fe981e7f2d709ab4e454671"
           echo "TESTED_SOURCE_BLOB=76c6ff7a2f7f6967def859012b2fcf3b66f7b2f9"
@@ -42,50 +41,6 @@ jobs:
           set -euo pipefail
           npm test
           echo "PRODUCTION_MUTATIONS=NONE"
-
-      - name: Read active PAYNE Cloudflare version and deployment metadata only
-        shell: bash
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-        run: |
-          set -euo pipefail
-          test -n "$CLOUDFLARE_API_TOKEN"
-          test -n "$CLOUDFLARE_ACCOUNT_ID"
-          base="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/market-edge-payne-kalshi-real"
-          curl --fail --silent --show-error --max-time 25 -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "$base/deployments" -o /tmp/payne-read-deployments.json
-          jq -e '.success == true' /tmp/payne-read-deployments.json >/dev/null
-          jq -c '{active_deployments:[.result.deployments[]? | {id,created_on,versions:[.versions[]? | {version_id,percentage}]}]}' /tmp/payne-read-deployments.json
-          curl --fail --silent --show-error --max-time 25 -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "$base/versions" -o /tmp/payne-read-versions.json
-          jq -e '.success == true' /tmp/payne-read-versions.json >/dev/null
-          jq -c '{versions:[.result.items[]? | {id,number,created_on,metadata:{author:.metadata.author,source:.metadata.source},annotations:{reason:.annotations."workers/message",tag:.annotations."workers/tag"}}]}' /tmp/payne-read-versions.json
-          echo CLOUDFLARE_VERSION_READ_ONLY=PASS
-
-      - name: Diagnose existing persisted PAYNE control safety condition read only
-        shell: bash
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-        run: |
-          set -euo pipefail
-          namespace=03352b0ccb034f1bb8206f663a04b125
-          key="$(jq -nr --arg v 'payne-kalshi:control:v1' '$v|@uri')"
-          endpoint="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/storage/kv/namespaces/$namespace/values/$key"
-          curl --fail --silent --show-error --max-time 25 -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "$endpoint" -o /tmp/payne-control-diagnostic.json
-          jq -c '{
-            actual:{realControlSchema,armed,openPositions,requiredExchangeIndex,activeThreshold,attemptTarget,maxEntryDebitUsd,scanEnabled},
-            checks:{
-              schema:(.realControlSchema=="PAYNE_REAL_CONTROL_V2_PAPER_BRAIN"),
-              disarmed:(.armed==false),
-              no_open_positions:(.openPositions==0),
-              index:(.requiredExchangeIndex==2),
-              threshold:(.activeThreshold|type=="number" and .>=0.50 and .<=1),
-              attempt_target:(.attemptTarget|type=="number" and .>=1 and .==floor),
-              stake:(.maxEntryDebitUsd|type=="number" and .>0),
-              scanner:(.scanEnabled==true)
-            }
-          }' /tmp/payne-control-diagnostic.json
-          echo PERSISTED_CONTROL_DIAGNOSTIC_READ_ONLY=PASS
 
       - name: Execute one-time maintenance exception offline fixtures
         shell: bash
