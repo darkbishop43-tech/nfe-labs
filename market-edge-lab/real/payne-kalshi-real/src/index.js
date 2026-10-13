@@ -3267,13 +3267,13 @@ export function summarizeRealExecutionState({control={},series={},ledger=[],asOf
   };
 }
 
-export export function founderSessionProgressDisplay(control,series,summary){
+export function founderSessionProgressDisplay(control,series,summary){
   if(control?.armed===true||series?.terminalReason!=='EXPLICIT_FOUNDER_DISARM')return summary;
   return {...summary,attempted:0,target:0,remaining:0,
     closedSessionHistory:{seriesId:series.seriesId,attempted:summary.attempted,target:summary.target}};
 }
 
-async function buildRealExecutionObservability(env) {
+export async function buildRealExecutionObservability(env) {
   const [control,series,ledger]=await Promise.all([
     loadControl(env),
     loadRealSeriesState(env),
