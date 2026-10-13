@@ -2821,6 +2821,38 @@ export async function listRealLedgerWithEvidence(env,limit=200) {
     scannedKeys:keys.length,returnedRows:rows.length,
     omittedOlderKeys:Math.max(0,keys.length-rows.length)};
 }
+// Notification-only continuation view: walks the existing KV keyspace, then
+// returns the FIRST page strictly after an acknowledged source-key watermark.
+// 'hasMore' means additional rows must be pulled on later polls, not lost.
+export async function listRealLedgerAfter(env,afterKey,limit=200){
+  if(typeof afterKey!=='string'||!afterKey.startsWith(REAL_LEDGER_PREFIX)||
+     afterKey.length>REAL_LEDGER_PREFIX.length+160)
+    throw new Error('PAYNE_LEDGER_WATERMARK_INVALID');
+  const kv=binding(env);
+  if(typeof kv?.list!=='function')throw new Error('PAYNE_LEDGER_KV_LIST_UNAVAILABLE');
+  const safeLimit=Math.max(1,Math.min(200,Number(limit)||200));
+  const allKeys=[],cursors=new Set();
+  let cursor;
+  for(;;){
+    const page=await kv.list({prefix:REAL_LEDGER_PREFIX,limit:1000,...(cursor?{cursor}:{})});
+    if(!page||!Array.isArray(page.keys)||typeof page.list_complete!=='boolean')
+      throw new Error('PAYNE_LEDGER_PAGE_INCOMPLETE_OR_INVALID');
+    allKeys.push(...page.keys.map(k=>k.name));
+    if(page.list_complete)break;
+    if(typeof page.cursor!=='string'||!page.cursor||cursors.has(page.cursor))
+      throw new Error('PAYNE_LEDGER_CURSOR_INVALID');
+    cursor=page.cursor;cursors.add(cursor);
+  }
+  const pending=allKeys.sort().filter(k=>k>afterKey);
+  const chosen=pending.slice(0,safeLimit),rows=[];
+  for(const key of chosen){
+    const record=await kvGetJson(env,key);
+    if(!record)throw new Error('PAYNE_LEDGER_RECORD_UNREADABLE');
+    rows.push({...record,sourceLedgerKey:key});
+  }
+  return {rows,complete:true,afterKey,nextKey:chosen.at(-1)||afterKey,
+    hasMore:pending.length>chosen.length,scannedKeys:allKeys.length};
+}
 export async function listRealLedger(env,limit=200){
   return (await listRealLedgerWithEvidence(env,limit)).rows;
 }
@@ -4519,11 +4551,16 @@ export default {
       const requested=Number(url.searchParams.get('limit')||200);
       const seriesId=String(url.searchParams.get('seriesId')||'').trim();
       try {
-        const result=await listRealLedgerWithEvidence(env,requested);
+        const watermark=url.searchParams.get('afterKey');
+        const continuation=watermark!==null;
+        const result=continuation
+          ?await listRealLedgerAfter(env,watermark,requested)
+          :await listRealLedgerWithEvidence(env,requested);
         let rows=result.rows;
         if(seriesId) rows=rows.filter(x=>String(x?.seriesId||'')===seriesId);
         return Response.json({ok:true,schema:'PAYNE_REAL_LEDGER_EXPORT_V1',readOnly:true,
-          complete:result.complete,scannedKeys:result.scannedKeys,omittedOlderKeys:result.omittedOlderKeys,
+          complete:result.complete,scannedKeys:result.scannedKeys,omittedOlderKeys:result.omittedOlderKeys??0,
+          ...(continuation?{afterKey:result.afterKey,nextKey:result.nextKey,hasMore:result.hasMore}:{}),
           seriesId:seriesId||null,count:rows.length,rows,
           providerWrites:0,ordersSubmittedByThisRead:0,capitalMovedUsd:0},{headers:{'cache-control':'no-store'}});
       } catch(error) {
