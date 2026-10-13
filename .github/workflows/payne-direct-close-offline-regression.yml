@@ -55,3 +55,10 @@ jobs:
           set -euo pipefail
           node --test .github/tests/payne-closure-full-chain.test.mjs
           echo FULL_MAINTENANCE_CHAIN_OFFLINE=PASS
+
+      - name: Validate staged PAYNE promotion workflow YAML offline
+        shell: bash
+        run: |
+          set -euo pipefail
+          ruby -e 'require "yaml"; YAML.load_file(".github/workflows/payne-grok-exact-production-promotion.yml")'
+          echo STAGED_PROMOTION_WORKFLOW_SYNTAX=PASS

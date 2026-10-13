@@ -4,6 +4,7 @@ import {mkdtempSync,mkdirSync,writeFileSync,rmSync,chmodSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join,resolve} from 'node:path';
 import {spawnSync} from 'node:child_process';
+import {generateKeyPairSync} from 'node:crypto';
 import {payneClosureEvidence} from '../../market-edge-lab/real/payne-kalshi-real/src/payne-closure-evidence.js';
 import {verifyPayneMaintenanceChain} from '../scripts/payne-maintenance-decision.mjs';
 import worker from '../../market-edge-lab/real/payne-kalshi-real/src/index.js';
@@ -99,4 +100,35 @@ test('unauthorized worker evidence request blocked without provider read',{concu
  const res=await worker.fetch(new Request('https://worker.example/internal/closure-maintenance-evidence'),
  {PAYNE_COORDINATOR_DIAGNOSTIC_TOKEN:'x'.repeat(40)});
  assert.equal(res.status,403);assert.equal((await res.json()).reason,'UNAUTHORIZED');
+});
+
+test('authorized protected Worker endpoint -> Kalshi GET mocks -> decision -> gate',{concurrency:false},async()=>{
+ const f=setup();
+ const {privateKey}=generateKeyPairSync('rsa',{modulusLength:2048});
+ const pem=privateKey.export({type:'pkcs8',format:'pem'});
+ const store=new Map([['payne-kalshi:control:v1',JSON.stringify(f.control)],
+  ['payne-kalshi:real-series:v1',JSON.stringify(f.series)]]);
+ const env={PAYNE_COORDINATOR_DIAGNOSTIC_TOKEN:'x'.repeat(40),
+  KALSHI_EXECUTION_KEY_ID:'offline-only',KALSHI_EXECUTION_PRIVATE_KEY:pem,
+  PAYNE_KALSHI_STATE:{get:async k=>store.get(k)||null,
+   put:async()=>{throw Error('KV_WRITE_PROHIBITED')},
+   list:async()=>({keys:[],list_complete:true})}};
+ const old=globalThis.fetch;const gets=[];
+ globalThis.fetch=async(url,init={})=>{
+   assert.equal(init.method,'GET');gets.push(String(url));
+   return mockKalshi(f)({},new URL(String(url)).pathname+new URL(String(url)).search);
+ };
+ try{
+   const response=await worker.fetch(new Request('https://worker.example/internal/closure-maintenance-evidence',
+    {headers:{'x-payne-diagnostic-token':'x'.repeat(40)}}),env);
+   assert.equal(response.status,200);
+   const providerResponse=await response.json();
+   assert.equal(providerResponse.ok,true);
+   const d=await verifyPayneMaintenanceChain({control:f.control,series:f.series,
+     providerResponse,sourceBlob:blob,expectedBlob:blob});
+   assert.equal(d.allowed,true);
+   const gate=runActualGate(f,d);assert.equal(gate.status,0,gate.stdout+'\n'+gate.stderr);
+   assert.ok(gets.some(x=>x.includes('/portfolio/positions')));
+   assert.ok(gets.some(x=>x.includes('/portfolio/orders')));
+ }finally{globalThis.fetch=old;}
 });
