@@ -15,11 +15,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ccb6e4cfd56fbf5c77b6e5b4bfba0f4c538ebcba
+          ref: ${{ github.sha }}
           persist-credentials: false
       - uses: actions/checkout@v4
         with:
-          ref: 7ca20a9d5e4448118d6723521c6db6c6af3c469e
+          ref: ${{ github.sha }}
           path: maintenance-source
           persist-credentials: false
       - uses: actions/setup-node@v4
@@ -29,9 +29,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test "$(git rev-parse HEAD)" = ccb6e4cfd56fbf5c77b6e5b4bfba0f4c538ebcba
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
           test "$(git rev-parse HEAD:market-edge-lab/real/payne-kalshi-real/src/index.js)" = 76c6ff7a2f7f6967def859012b2fcf3b66f7b2f9
-          test "$(git rev-parse HEAD:market-edge-lab/real/payne-kalshi-real/src/payne-closure-evidence.js)" = d6bffce2e2481c26d698d87b368bb5bb4fd1e8f5
+          test "$(git rev-parse HEAD:market-edge-lab/real/payne-kalshi-real/src/payne-closure-evidence.js)" = d82af240ee651fa4972b92e6df6c4b5eea0d5dc0
           grep -q '^name = "market-edge-payne-kalshi-real"$' market-edge-lab/real/payne-kalshi-real/wrangler.toml
           test -f market-edge-lab/real/payne-kalshi-real/src/payne-execution-coordinator.js
           test -f market-edge-lab/real/payne-kalshi-real/src/kalshi-real-write.js

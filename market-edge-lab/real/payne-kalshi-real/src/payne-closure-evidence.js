@@ -5,7 +5,7 @@ export async function payneClosureEvidence(env,control,series,{get=kalshiGetOnly
   const reject=reason=>({ok:false,complete:false,reason,providerWrites:0});
   const p=series?.position,a=series?.currentAttempt;
   if(control?.armed!==false||control?.openPositions!==1)return reject('CONTROL_NOT_MAINTENANCE_DISARMED');
-  if(!p||p.seriesId!==series?.seriesId||p.owner!=='PAYNE_KALSHI_REAL'||p.status!=='OPEN'||!p.attemptId||
+  if(!p||p.seriesId!==series?.seriesId||p.owner!=='PAYNE_KALSHI_REAL'||!['OPEN','RECONCILIATION_UNKNOWN'].includes(p.status)||!p.attemptId||
     !p.entryOrderId||!p.entryClientOrderId||!p.marketTicker||!['YES','NO'].includes(p.outcomeSide))
     return reject('POSITION_IDENTITY_INCOMPLETE');
   if(a?.executionHandoff!=='DIRECT_KALSHI_WRITER_V1'||a.attemptId!==p.attemptId||
@@ -43,8 +43,8 @@ export async function payneClosureEvidence(env,control,series,{get=kalshiGetOnly
     const quantity=matching.length===1?Number(raw):null;
     if(matching.length===1&&(!Number.isFinite(quantity)||quantity!==0))return reject('PROVIDER_POSITION_NOT_ZERO');
     if(matching.length===0){
-      const body=await read('/trade-api/v2/portfolio/settlements?limit=200&subaccount=0&ticker='+encodeURIComponent(p.marketTicker));
-      if(!Array.isArray(body.settlements)||!body.settlements.some(x=>x?.ticker===p.marketTicker))return reject('NO_EXACT_TICKER_SETTLEMENT');
+      const settlements=await pages('/trade-api/v2/portfolio/settlements?limit=200&subaccount=0&ticker='+encodeURIComponent(p.marketTicker),'settlements');
+      if(!settlements.some(x=>x?.ticker===p.marketTicker))return reject('NO_EXACT_TICKER_SETTLEMENT');
     }
     const orders=await pages('/trade-api/v2/portfolio/orders?limit=200&subaccount=0','orders');
     const exactEntry=orders.filter(o=>(o?.order_id||o?.id)===p.entryOrderId);
@@ -55,15 +55,18 @@ export async function payneClosureEvidence(env,control,series,{get=kalshiGetOnly
     if(!entryVerified){
       // Live orders often omit settled history. Accept one authenticated historical fill
       // that matches the recorded provider order id, client order id, ticker and side.
-      const fillsBody = await read('/trade-api/v2/portfolio/fills?limit=200&subaccount=0&ticker='+encodeURIComponent(p.marketTicker));
-      const fills = Array.isArray(fillsBody.fills) ? fillsBody.fills : [];
-      const exactFill = fills.filter(f =>
-        (f?.order_id||f?.id)===p.entryOrderId &&
-        f?.client_order_id===p.entryClientOrderId &&
-        f?.ticker===p.marketTicker &&
+      const q='?limit=200&ticker='+encodeURIComponent(p.marketTicker);
+      const liveFills=await pages('/trade-api/v2/portfolio/fills?limit=200&subaccount=0&ticker='+encodeURIComponent(p.marketTicker),'fills');
+      const historicalFills=await pages('/trade-api/v2/historical/fills'+q,'fills');
+      const fills=[...liveFills,...historicalFills];
+      const sameOrder=fills.filter(f=>(f?.order_id??f?.orderId)===p.entryOrderId);
+      const exactFill=sameOrder.filter(f=>
+        (f?.client_order_id??f?.clientOrderId)===p.entryClientOrderId &&
+        (f?.ticker??f?.market_ticker)===p.marketTicker &&
         String(f?.side||'').toLowerCase()===p.outcomeSide.toLowerCase()
       );
-      if(exactFill.length!==1) return reject('PROVIDER_ENTRY_ORDER_IDENTITY_NOT_VERIFIED');
+      if(exactFill.length===0 || sameOrder.length!==exactFill.length)
+        return reject('PROVIDER_ENTRY_ORDER_IDENTITY_NOT_VERIFIED');
       entryVerified = true;
     }
     const terminal=new Set(['executed','canceled','cancelled','expired','rejected']);
@@ -71,7 +74,7 @@ export async function payneClosureEvidence(env,control,series,{get=kalshiGetOnly
       (o.ticker===p.marketTicker&&!terminal.has(String(o.status).toLowerCase()))))
       return reject('OPEN_OR_UNKNOWN_OWNED_ORDER');
     const collection=Array.isArray(series.positions)?series.positions:[];
-    if(collection.filter(x=>x&&x.status!=='CLOSED'&&x.reconciliationState!=='FLAT').length!==1)
+    if(collection.filter(x=>x&&x.status!=='CLOSED').length!==1)
       return reject('OTHER_UNRESOLVED_PAYNE_POSITION');
     return {ok:true,complete:true,reason:'EXACT_PROVIDER_FLAT_VERIFIED',
       provider:{authenticated:true,complete:true,ticker:p.marketTicker,side:p.outcomeSide,

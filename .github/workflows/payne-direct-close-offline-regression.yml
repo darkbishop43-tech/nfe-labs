@@ -2,10 +2,13 @@ name: PAYNE Direct Writer Closure Offline Regression
 on:
   push:
     branches:
-      - payne-direct-writer-close-offline-20261013
+      - payne-direct-writer-closure-assembly-validation-20261013
     paths:
       - .github/workflows/payne-direct-close-offline-regression.yml
       - market-edge-lab/real/payne-kalshi-real/test/direct-writer-closure-offline.test.mjs
+      - market-edge-lab/real/payne-kalshi-real/test/payne-closure-assembly-offline.test.mjs
+      - market-edge-lab/real/payne-kalshi-real/src/payne-closure-evidence.js
+      - .github/scripts/payne-closure-maintenance-offline.mjs
 permissions:
   contents: read
 jobs:
