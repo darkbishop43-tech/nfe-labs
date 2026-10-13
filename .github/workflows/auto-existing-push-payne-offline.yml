@@ -106,3 +106,36 @@ jobs:
           print('MODULE_NAMES',sorted(set(x.decode(errors='replace') for x in re.findall(rb'(?:name|filename)="([^"]{1,200})"',p)))[:30])
           print('SOURCE_HINTS',{'export_default':b'export default' in p,'addEventListener':b'addEventListener' in p,'modules_field':b'"modules"' in p})
           PY
+      - name: Inspect existing Cloudflare version resources only
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          url="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/market-edge-baseline-real/versions/fa172049-50f4-41f0-8e28-0af9c1ba8b8c/content"
+          code=$(curl -sS --max-time 25 -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -o /tmp/version-resource.json -w '%{http_code}' "$url")
+          echo "RESOURCES_HTTP=$code"
+          if [[ "$code" != 200 ]];then exit 0;fi
+          python3 - <<'PY'
+          import json
+          r=json.load(open('/tmp/version-resource.json'))
+          obj=r.get('result',{}).get('resources')
+          print('RESOURCES_TYPE',type(obj).__name__)
+          if isinstance(obj,dict):
+            print('RESOURCES_KEYS',sorted(obj))
+            for k,v in obj.items():
+              print('RESOURCE_ENTRY',k,'TYPE',type(v).__name__,'COUNT',len(v) if isinstance(v,(list,dict)) else 'N/A')
+              if isinstance(v,list):
+                for x in v[:12]:
+                  if isinstance(x,dict):
+                    print('RESOURCE_DESCRIPTOR',k,{a:x.get(a) for a in ('name','type','id','content_type','contentType','module','url','path') if a in x})
+                  else:print('RESOURCE_ITEM_TYPE',type(x).__name__)
+              elif isinstance(v,dict):print('RESOURCE_CHILD_KEYS',k,sorted(v))
+          elif isinstance(obj,list):
+            print('RESOURCES_COUNT',len(obj))
+            for x in obj[:30]:
+              if isinstance(x,dict):print('RESOURCE_DESCRIPTOR',{a:x.get(a) for a in ('name','type','id','content_type','contentType','module','url','path') if a in x})
+              else:print('RESOURCE_ITEM_TYPE',type(x).__name__)
+          else:print('RESOURCES_VALUE_TYPE_ONLY',type(obj).__name__)
+          PY
