@@ -1,0 +1,51 @@
+{
+  "schema": "NFE_OS_KALSHI_RECENT_ACTIVITY_SUMMARY_V1",
+  "source": "Kalshi-Recent-Activity-All(3).csv",
+  "rows": 1429,
+  "dateRangeUtc": {
+    "first": "2026-10-01T04:00:06.448Z",
+    "last": "2026-10-14T14:00:04.098Z"
+  },
+  "typeCounts": {
+    "Order": 567,
+    "Trade": 543,
+    "Settlement": 316,
+    "Deposit": 2,
+    "Withdrawal": 1
+  },
+  "uniqueMarketTickers": 379,
+  "visibleTradeFees": 8,
+  "afterRealizedPnlCutoff": {
+    "rows": 457,
+    "typeCounts": {
+      "Order": 210,
+      "Trade": 148,
+      "Settlement": 99
+    },
+    "visibleTradeFees": 2.72,
+    "tradeRowsByAsset": {
+      "NEAR": 72,
+      "ZEC": 41,
+      "SOL": 14,
+      "DOGE": 10,
+      "HYPE": 9,
+      "XRP": 2
+    }
+  },
+  "payneFirstFillCorroboration": {
+    "series": "49bcacb2-4649-4217-ae1e-8bd998c37fa1",
+    "attempt": 2,
+    "ticker": "KXNEAR15M-26OCT130215-15",
+    "preservedProviderOrderId": "01a133da-f108-7df4-9287-3f45cfa348ed",
+    "activityTradeAt": "2026-10-13T06:02:29.256Z",
+    "activityDirection": "NO",
+    "activityPriceCents": 22,
+    "ownershipStatus": "PAYNE_ENTRY_ALREADY_VERIFIED; ACTIVITY ROW COMPOSITE-CORROBORATION ONLY"
+  },
+  "integrity": [
+    "Activity-All Market_Id is not treated as the preserved PAYNE provider order ID.",
+    "Ticker alone does not attribute other activity to PAYNE or AUTO.",
+    "Activity-All does not overwrite the Oct-10 realized-P/L accounting layer.",
+    "Orders, Trades and Settlements are provider activity events and are not counted as independent strategy trades."
+  ]
+}
