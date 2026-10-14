@@ -1,0 +1,28 @@
+{
+  "schema": "NFE_OS_MASTER_TRADE_DATASET_SUMMARY_V1",
+  "generatedAt": "2026-10-14",
+  "sourceCutoff": "2026-10-10",
+  "providerRows": 683,
+  "provisionalLogicalPositions": 545,
+  "providerGrossPl": -24.60016,
+  "providerFees": 20.72704,
+  "providerNetPl": -45.3272,
+  "ownership": {
+    "autoVerifiedLogicalGroups": 3,
+    "founderManualProvisionalGroups": 3,
+    "founderManualAuthoritativeEpisodes": 1,
+    "unknownProviderLogicalGroups": 539,
+    "payneProviderGroupsInsideExport": 0
+  },
+  "attemptEvidence": {
+    "autoRecords": 21,
+    "payneRecords": 8
+  },
+  "rules": [
+    "Ticker, asset, timing, or Index 2 alone never establishes AUTO or PAYNE ownership.",
+    "Provider rows are financial truth but not automatically independent trades.",
+    "Logical grouping is ticker + side + open_timestamp + close_timestamp and is provisional only.",
+    "Unknown ownership remains UNKNOWN.",
+    "PAYNE Oct 13+ real fills occur after the current provider export cutoff and are not inserted into provider P/L without a newer provider source."
+  ]
+}
