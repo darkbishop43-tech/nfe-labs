@@ -24,5 +24,46 @@
     "Logical grouping is ticker + side + open_timestamp + close_timestamp and is provisional only.",
     "Unknown ownership remains UNKNOWN.",
     "PAYNE Oct 13+ real fills occur after the current provider export cutoff and are not inserted into provider P/L without a newer provider source."
-  ]
+  ],
+  "latestActivity": {
+    "source": "Kalshi-Recent-Activity-All(3).csv",
+    "sourceCutoff": "2026-10-14T14:00:04.098Z",
+    "rows": 1429,
+    "typeCounts": {
+      "Order": 567,
+      "Trade": 543,
+      "Settlement": 316,
+      "Deposit": 2,
+      "Withdrawal": 1
+    },
+    "uniqueMarketTickers": 379,
+    "visibleTradeFees": 8,
+    "afterRealizedPnlCutoff": {
+      "period": "2026-10-11 through 2026-10-14 UTC",
+      "rows": 457,
+      "typeCounts": {
+        "Order": 210,
+        "Trade": 148,
+        "Settlement": 99
+      },
+      "visibleTradeFees": 2.72,
+      "tradeRowsByAsset": {
+        "NEAR": 72,
+        "ZEC": 41,
+        "SOL": 14,
+        "DOGE": 10,
+        "HYPE": 9,
+        "XRP": 2
+      }
+    },
+    "payneFirstFillCorroboration": {
+      "ticker": "KXNEAR15M-26OCT130215-15",
+      "activityTradeAt": "2026-10-13T06:02:29.256Z",
+      "direction": "NO",
+      "priceCents": 22,
+      "status": "COMPOSITE_MATCH_CORROBORATES_ALREADY_VERIFIED_PAYNE_ENTRY",
+      "ownershipLimit": "Activity-All does not expose the preserved PAYNE provider/client order IDs; other rows on the same ticker remain unassigned."
+    },
+    "accountingRule": "Keep Activity-All separate from realized-P/L accounting until a newer realized-P/L export or exact provider financial join is available."
+  }
 }
