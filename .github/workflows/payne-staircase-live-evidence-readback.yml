@@ -1,0 +1,31 @@
+name: PAYNE Compact Staircase Live Evidence Readback
+on:
+  push:
+    branches: [payne-staircase-live-evidence-20261015]
+permissions:
+  contents: read
+jobs:
+  evidence:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify direct watch observation and existing ledger readback
+        shell: bash
+        run: |
+          set -euo pipefail
+          base='https://market-edge-payne-kalshi-real.darkbishop43.workers.dev'
+          curl -fsS --max-time 25 "$base/shadow-staircase/observe" -o /tmp/observe.json
+          jq -c '{ok,ownedPosition,watching,ticker,side,currentExecutableExitBid,observationAt,reason,providerWrites,orders}' /tmp/observe.json
+          jq -e '.ok==true and .providerWrites==0 and .orders==0' /tmp/observe.json >/dev/null
+          ticker="$(jq -r '.ticker//empty' /tmp/observe.json)"
+          series="$(jq -r '.seriesId//empty' /tmp/observe.json)"
+          attempt="$(jq -r '.attemptId//empty' /tmp/observe.json)"
+          if [[ -n "$ticker" && -n "$series" && -n "$attempt" ]];then
+            query="$(jq -nr --arg s "$series" --arg a "$attempt" '"?seriesId="+($s|@uri)+"&attemptId="+($a|@uri)')"
+            curl -fsS --max-time 25 "$base/shadow-staircase/history$query" -o /tmp/history.json
+            jq -c '{ok,complete,count,omittedOlderKeys}' /tmp/history.json
+            jq -e --arg t "$ticker" '.ok==true and any(.observations[]; .ticker==$t and .evidenceSource=="KALSHI_AUTHENTICATED_MARKET_GET")' /tmp/history.json >/dev/null && echo LIVE_VERIFIED_OBSERVATION_LEDGER_READBACK=PASS || echo LIVE_VERIFIED_OBSERVATION_LEDGER_READBACK=NOT_PROVEN
+          else
+            echo LIVE_WATCH_NOT_SELECTED_NO_LEDGER_PROOF
+          fi
+          echo FOUNDER_CONTROL_UNCHANGED_BY_READBACK
