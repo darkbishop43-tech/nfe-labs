@@ -1,3 +1,4 @@
+import {readKalshiIdentityBundle} from './provider-identity-pagination.js';
 import {firstPullbackShadow} from './first-pullback-shadow.js';
 import {payneHistoryAll,payneHistoryPage,payneExecutionCsv,PAYNE_EXECUTION_EXPORT_FIELDS} from './payne-real-history-view.js';
 import {liveOrderWatchProjection,paynePositionRecords,payneCapacityEvidence,upsertPaynePosition,unresolvedPaynePositions} from './payne-live-order-watch.js';
@@ -3548,35 +3549,35 @@ export async function reconcileUnresolvedEntryFromProvider(env,nowMs=Date.now())
     }
   };
   const q='?limit=200&subaccount=0&ticker='+encodeURIComponent(ticker);
-  const [positionEvidence,ordersRead,fillsRead,historicalFillsRead,settlementsRead]=await Promise.all([
+  const [positionEvidence,identities,settlementsRead]=await Promise.all([
     providerTickerPositionEvidence(env,ticker),
-    readJson('/trade-api/v2/portfolio/orders'+q),
-    readJson('/trade-api/v2/portfolio/fills'+q),
-    readJson('/trade-api/v2/historical/fills'+q),
+    readKalshiIdentityBundle(path=>kalshiGetOnly(env,path),{ticker,subaccount:0,pageLimit:200}),
     readJson('/trade-api/v2/portfolio/settlements'+q),
   ]);
-
-  const providerReadsComplete=positionEvidence?.ok===true && ordersRead.ok && fillsRead.ok && historicalFillsRead.ok && settlementsRead.ok;
+  const ordersRead=identities.kinds.activeOrders;
+  const historicalOrdersRead=identities.kinds.historicalOrders;
+  const fillsRead=identities.kinds.fills;
+  const historicalFillsRead=identities.kinds.historicalFills;
+  const providerReadsComplete=positionEvidence?.ok===true && identities.complete===true && settlementsRead.ok;
   if(!providerReadsComplete){
     series.status='ENTRY_RECONCILIATION_REQUIRED';
     await appendRealLedger(env,'ENTRY_RECONCILIATION_STILL_UNKNOWN',{
       seriesId:series.seriesId,attemptId:attempt.attemptId,ticker,clientOrderId,
       reason:'PROVIDER_RECONCILIATION_READ_INCOMPLETE',
       position:positionEvidence?.classification||'UNKNOWN',
-      orderHttpStatus:ordersRead.httpStatus,fillHttpStatus:fillsRead.httpStatus,
+      orderHttpStatus:ordersRead.httpStatus,historicalOrderHttpStatus:historicalOrdersRead.httpStatus,fillHttpStatus:fillsRead.httpStatus,
       historicalFillHttpStatus:historicalFillsRead.httpStatus,settlementHttpStatus:settlementsRead.httpStatus,
     });
     await saveRealSeriesState(env,series);
     return {ok:false,classification:'UNKNOWN',reason:'PROVIDER_RECONCILIATION_READ_INCOMPLETE',series,control:await loadControl(env),providerWrites:0,orders:0,capitalMovedUsd:0};
   }
 
-  const orderRows=Array.isArray(ordersRead.body?.orders)?ordersRead.body.orders:
-    (ordersRead.body?.order?[ordersRead.body.order]:[]);
+  const orderRows=[...ordersRead.rows,...historicalOrdersRead.rows];
   const exactOrders=orderRows.filter(x=>String(x?.client_order_id||x?.clientOrderId||'')===clientOrderId);
   const providerOrderIds=new Set(exactOrders.map(x=>String(x?.order_id||x?.orderId||'')).filter(Boolean));
   const allFillRows=[
-    ...(Array.isArray(fillsRead.body?.fills)?fillsRead.body.fills:[]),
-    ...(Array.isArray(historicalFillsRead.body?.fills)?historicalFillsRead.body.fills:[]),
+    ...fillsRead.rows,
+    ...historicalFillsRead.rows,
   ];
   const exactFills=allFillRows.filter(x=>{
     if(String(x?.ticker||x?.market_ticker||'')!==ticker) return false;
