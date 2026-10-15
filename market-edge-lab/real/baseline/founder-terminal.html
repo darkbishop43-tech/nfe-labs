@@ -527,4 +527,38 @@ setInterval(()=>setText('clock',new Date().toISOString().slice(11,19)+' UTC'),10
 })();
 </script>
 
+
+<div id="nfeExchangeMaintenance" role="status" aria-live="polite" style="border:1px solid #35516a;border-radius:7px;padding:7px 10px;margin:8px 0;font-size:12px">NEXT EXCHANGE MAINTENANCE: Thursday 3:00–5:00 AM ET · calculating…</div>
+<script>
+(function(){
+  const el=document.getElementById('nfeExchangeMaintenance');
+  if(!el)return;
+  const zone='America/New_York';
+  const clock=new Intl.DateTimeFormat('en-US',{timeZone:zone,weekday:'short',hour:'2-digit',hourCycle:'h23',minute:'2-digit'});
+  function parts(t){const p={};for(const x of clock.formatToParts(new Date(t)))if(x.type!=='literal')p[x.type]=x.value;return p;}
+  function state(now){
+    const start=Math.floor(now/3600000)*3600000;
+    let next=null,active=null;
+    // Search actual ET wall-clock hours. EST/EDT are resolved by Intl.
+    for(let i=-3;i<=8*24;i++){
+      const t=start+i*3600000,p=parts(t);
+      if(p.weekday!=='Thu'||Number(p.hour)!==3||Number(p.minute)!==0)continue;
+      const end=t+2*3600000;
+      if(now>=t&&now<end){active={start:t,end};break;}
+      if(t>now&&(next===null||t<next.start))next={start:t,end};
+    }
+    return active?{mode:'MAINTENANCE',remaining:active.end-now}:next?{mode:'NEXT',remaining:next.start-now}:{mode:'UNKNOWN',remaining:null};
+  }
+  const fmt=ms=>{const n=Math.max(0,Math.ceil(ms/1000));return Math.floor(n/86400)+'d '+String(Math.floor(n%86400/3600)).padStart(2,'0')+':'+String(Math.floor(n%3600/60)).padStart(2,'0')+':'+String(n%60).padStart(2,'0');};
+  function draw(){
+    const s=state(Date.now());
+    el.textContent=s.mode==='MAINTENANCE'
+      ?'SCHEDULED EXCHANGE MAINTENANCE · Trading expected unavailable until 5:00 AM ET · Scheduled end in '+fmt(s.remaining)+' · Provider availability unverified'
+      :s.mode==='NEXT'
+      ?'NEXT EXCHANGE MAINTENANCE: Thursday 3:00–5:00 AM ET · Starts in '+fmt(s.remaining)+' · Provider live status must be verified separately'
+      :'EXCHANGE MAINTENANCE SCHEDULE: Thursday 3:00–5:00 AM ET · Countdown unavailable';
+  }
+  draw();setInterval(draw,1000);
+})();
+</script>
 </body></html>
