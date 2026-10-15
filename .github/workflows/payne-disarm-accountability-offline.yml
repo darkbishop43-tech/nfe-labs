@@ -18,4 +18,4 @@ jobs:
         with:
           node-version: '22'
       - run: node --check src/index.js
-      - run: node --test test/disarm-accountability-v1.test.mjs
+      - run: node --test test/disarm-accountability-v1.test.mjs test/disarm-accountability-runtime.test.mjs
