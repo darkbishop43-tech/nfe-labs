@@ -1,7 +1,7 @@
 import test from 'node:test';import assert from 'node:assert/strict';import {cockpitHtml} from '../src/cockpit-html.js';import {readFile} from 'node:fs/promises';
 const html=cockpitHtml();const src=await readFile(new URL('../src/index.js',import.meta.url),'utf8');
 test('phone-friendly staircase scorecard shows required evidence labels',()=>{
- for(const key of ['DYNAMIC STAIRCASE','Entry price','Highest verified exit bid','Current executable exit bid','Proposed protected level','Market phase','Original PAYNE decision','Shadow HOLD/EXIT assessment','Last observation']) assert.ok(html.includes(key),key);
+ for(const key of ['DYNAMIC STAIRCASE','verified exit bid','Observed high:','Current bid:','Protected level:','Market phase:','Original PAYNE:','Shadow:','Last:']) assert.ok(html.includes(key),key);
 });
 test('the cockpit polls the separate existing-worker read observation route',()=>{
  assert.ok(html.includes("fetch('/shadow-staircase/observe'"));
@@ -12,8 +12,8 @@ test('the cockpit polls the separate existing-worker read observation route',()=
  assert.doesNotMatch(route,/kalshiPayneOrderPost|saveRealSeriesState|settleSeriesControl|updateFounderControl/);
 });
 test('unknown data and proposed protection remain evidence-gated',()=>{
- assert.ok(html.includes("protectedLevelStatus==='NOT_ESTABLISHED'"));
- assert.ok(html.includes("SHADOW DATA UNKNOWN"));
+ assert.ok(html.includes('Protected level: NOT ESTABLISHED'));
+ assert.ok(html.includes("AWAITING OBSERVATIONS"));
  assert.ok(src.includes("evidenceSource:verifiedBid!==null?'KALSHI_AUTHENTICATED_MARKET_GET'"));
  assert.ok(src.includes("marketPhase:'UNKNOWN'"));
 });

@@ -32,7 +32,7 @@ test('ledger is historical source and missing complete scan blocks lifetime high
 test('cockpit shows live values and records observations through existing handler',()=>{
  assert.ok(html.includes('/shadow-staircase/observe'));
  assert.ok(html.includes('setInterval(update,10000)'));
- for(const word of ['Highest verified exit bid','Current executable exit bid','NOT ESTABLISHED','Shadow HOLD/EXIT assessment','Last observation'])assert.ok(html.includes(word),word);
+ for(const word of ['Verified Kalshi exit bid','Current bid:','NOT ESTABLISHED','Shadow:','Last:'])assert.ok(html.includes(word),word);
 });
 test('shadow evaluator fails closed when independent directional evidence missing',()=>{
  const x=firstPullbackShadow({marketPresent:true,featureAvailable:false,featureFresh:false});
