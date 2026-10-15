@@ -4696,13 +4696,45 @@ export default {
         const established=history.map(x=>x.verifiedExitBid).filter(x=>typeof x==='number' && Number.isFinite(x));
         const historicalHigh=prior.omittedOlderKeys===0&&established.length?Math.max(...established):null;
         if(!owned){
-          return Response.json({ok:true,readOnlyTrading:true,ownedPosition:false,entryPrice:null,
-            highestVerifiedExitBid:null,currentExecutableExitBid:null,protectedLevel:null,
-            protectedLevelStatus:'NOT_ESTABLISHED',marketPhase:'UNKNOWN',originalPayneDecision:null,
-            shadowAssessment:'UNKNOWN',actualPayneAction:null,providerOutcome:null,
-            observationAt:null,reason:'NO_VERIFIED_CURRENT_OWNED_POSITION',
-            historicalCoverage:prior.omittedOlderKeys===0?'COMPLETE':'INCOMPLETE',
-            providerWrites:0,orders:0},{headers:{'cache-control':'no-store'}});
+          // Observe the existing PAYNE-selected candidate, never invent or choose a
+          // different market. The persisted selection is merely a ticker hint:
+          // eligibility and current bid must be reverified by direct Kalshi GET.
+          const saved=await kvGetJson(env,CURRENT_KEY);
+          const watch=saved?.selected||null;
+          const ticker=typeof watch?.ticker==='string'?watch.ticker:'';
+          const side=watch?.outcomeSide;
+          if(!ticker||!['YES','NO'].includes(side))return Response.json({
+            ok:true,readOnlyTrading:true,ownedPosition:false,watching:false,
+            protectedLevelStatus:'NOT_ESTABLISHED',currentExecutableExitBid:null,
+            observationAt:null,marketPhase:'UNKNOWN',shadowAssessment:'UNKNOWN',
+            reason:'NO_PAYNE_SELECTED_WATCH_CONTRACT',providerWrites:0,orders:0
+          },{headers:{'cache-control':'no-store'}});
+          const observed=await exactMarketRead(env,ticker,watch.asset||null);
+          const market=observed.ok===true&&observed.market?.ticker===ticker?observed.market:null;
+          const closeMs=Date.parse(market?.closeTime||''),atMs=Date.parse(observed.readAt||'');
+          const active=Boolean(market&&['open','active'].includes(String(market.status||'').toLowerCase())
+            &&Number.isFinite(closeMs)&&Number.isFinite(atMs)&&atMs<closeMs);
+          const rawBid=active?(side==='YES'?market.yesBid:market.noBid):null;
+          const bid=typeof rawBid==='number'&&Number.isFinite(rawBid)&&rawBid>0&&rawBid<1?rawBid:null;
+          const watchSeries='WATCH:'+ticker,watchAttempt='WATCH:'+side;
+          // Only verified live bids enter the observation ledger. No fake history
+          // is inserted for stale, closed, or unresolved selections.
+          if(bid!==null)await appendRealLedger(env,'SHADOW_STAIRCASE_OBSERVATION',{
+            seriesId:watchSeries,attemptId:watchAttempt,ticker,side,
+            observationAt:observed.readAt,entryPrice:null,verifiedExitBid:bid,
+            originalPayneDecision:null,shadowAssessment:'UNKNOWN',marketPhase:'UNKNOWN',
+            actualPayneAction:null,providerOutcome:null,protectedLevel:null,
+            protectedLevelStatus:'NOT_ESTABLISHED',evidenceFresh:true,
+            evidenceSource:'KALSHI_AUTHENTICATED_MARKET_GET',reason:'WATCH_ONLY_PROVIDER_BID'
+          });
+          return Response.json({ok:true,readOnlyTrading:true,ownedPosition:false,watching:true,
+            seriesId:watchSeries,attemptId:watchAttempt,ticker,side,entryPrice:null,
+            currentExecutableExitBid:bid,highestVerifiedExitBid:null,
+            protectedLevel:null,protectedLevelStatus:'NOT_ESTABLISHED',
+            marketPhase:'UNKNOWN',originalPayneDecision:null,shadowAssessment:'UNKNOWN',
+            observationAt:observed.readAt,reason:bid!==null?'WATCH_ONLY_DIRECT_KALSHI_BID':
+              'WATCH_CONTRACT_NOT_ACTIVE_OR_BID_UNAVAILABLE',providerWrites:0,orders:0
+          },{headers:{'cache-control':'no-store'}});
         }
         const observed=await exactMarketRead(env,p.marketTicker,p.asset);
         const market=observed.ok===true && observed.market?.ticker===p.marketTicker?observed.market:null;

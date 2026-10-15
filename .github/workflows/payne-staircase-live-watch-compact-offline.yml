@@ -1,0 +1,23 @@
+name: PAYNE Compact Live Watch Staircase Offline
+on:
+  push:
+    branches: [payne-staircase-live-watch-compact-20261015]
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Validate read-only watch and regressions
+        working-directory: market-edge-lab/real/payne-kalshi-real
+        run: |
+          set -euo pipefail
+          node --check src/index.js
+          node --check src/cockpit-html.js
+          node --test test/staircase-live-watch-compact.test.mjs
+          npm test
+          echo PRODUCTION_MUTATIONS=NONE
