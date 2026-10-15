@@ -1,0 +1,71 @@
+name: Deploy AUTO Maintenance Notice Existing Baseline
+on:
+  push:
+    branches: [auto-maintenance-current-assembly-20261015]
+    paths: [.github/workflows/auto-maintenance-current-production.yml]
+permissions:
+  contents: read
+concurrency:
+  group: deploy-baseline-real-worker
+  cancel-in-progress: false
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Verify exact AUTO working source and approved notice
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD:market-edge-lab/real/baseline/src/index.js)" = 408d704fb2133427a9b756100c8db8afd382b2da
+          test "$(git rev-parse HEAD:market-edge-lab/real/baseline/wrangler.toml)" = e8347a8398decdd0e4065d128bd32159873ccb72
+          test "$(git rev-parse HEAD:market-edge-lab/real/baseline/founder-terminal.html)" = d5db8edd4fc889f24a2a593890394df63c9f8bff
+          node --test market-edge-lab/real/baseline/test/auto-maintenance-notice-offline.test.mjs
+          echo 'AUTO_EXACT_SOURCE_NOTICE_TESTS=PASS'
+      - name: Check existing Cloudflare active deployment BEFORE any mutation
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+          base="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/market-edge-baseline-real"
+          curl -fsS --max-time 25 -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "$base/deployments" -o /tmp/auto-before.json
+          jq -c '.result.deployments[0] | {id,versions}' /tmp/auto-before.json
+          jq -e '.success==true and (.result.deployments[0].versions | any(.version_id=="5f44af27-1cf6-4fdd-ab9e-5cdf3d9e3d69" and .percentage==100))' /tmp/auto-before.json > /dev/null || { echo 'BLOCKED: AUTO_ACTIVE_SOURCE_NOT_VERIFIED';exit 1; }
+      - name: Dry-run approved AUTO baseline
+        working-directory: market-edge-lab/real/baseline
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: npx --yes wrangler@4 deploy --dry-run --outdir /tmp/auto-notice-build
+      - name: Deploy approved AUTO baseline with existing Wrangler
+        working-directory: market-edge-lab/real/baseline
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          npx --yes wrangler@4 deploy | tee /tmp/auto-notice-deployment.txt
+          grep 'Current Version ID:' /tmp/auto-notice-deployment.txt
+      - name: Verify live notice and production traffic
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          base="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/market-edge-baseline-real"
+          curl -fsS --max-time 25 -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "$base/deployments" -o /tmp/auto-after.json
+          jq -e '.success==true and (.result.deployments[0].versions | any(.percentage==100))' /tmp/auto-after.json >/dev/null
+          jq -c '.result.deployments[0] | {id,versions}' /tmp/auto-after.json
+          curl -fsS --max-time 25 'https://market-edge-baseline-real.darkbishop43.workers.dev/' -o /tmp/auto-live.html
+          grep -q 'nfeExchangeMaintenance' /tmp/auto-live.html
+          grep -q 'SCHEDULED EXCHANGE MAINTENANCE' /tmp/auto-live.html
+          echo 'AUTO_LIVE_NOTICE=PASS'
