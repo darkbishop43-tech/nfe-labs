@@ -145,3 +145,52 @@ test('production-default dispatch is explicitly disabled',async()=>{
  const res=await obj.fetch(new Request('https://internal/dispatch',{method:'POST',body:JSON.stringify(buildAlerts(fixture))}));
  assert.equal(res.status,403);assert.equal((await res.json()).reason,'DISPATCH_DISABLED');
 });
+
+
+test('read-only status separates stored enrollment from handset delivery',async()=>{
+ const store=new MemoryStorage();
+ const obj=new PaynePushState({storage:store},{});
+ let status=await (await obj.fetch(new Request('https://internal/status'))).json();
+ assert.equal(status.enrolled,false);assert.equal(status.lastNotification,null);
+ await obj.fetch(new Request('https://internal/enroll',{method:'POST',body:JSON.stringify({
+  endpoint:'https://fcm.googleapis.com/fcm/send/test',keys:{auth:'test',p256dh:'test'}
+ })}));
+ status=await (await obj.fetch(new Request('https://internal/status'))).json();
+ assert.equal(status.enrolled,true);assert.equal(status.lastNotification,null);
+});
+test('synthetic test push records provider acceptance, never handset display',async()=>{
+ const store=new MemoryStorage();let count=0;
+ const env={NFE_PUSH_VAPID_PUBLIC_KEY:'fixture-public',NFE_PUSH_VAPID_PRIVATE_KEY:'fixture-private',
+ __testSender:async(_sub,payload)=>{count++;assert.match(payload.title,/PAYNE REAL/);return true;}};
+ const obj=new PaynePushState({storage:store},env);
+ await obj.fetch(new Request('https://internal/enroll',{method:'POST',body:JSON.stringify({
+ endpoint:'https://fcm.googleapis.com/fcm/send/test',keys:{auth:'a',p256dh:'b'}})}));
+ const output=await (await obj.fetch(new Request('https://internal/test',{method:'POST'}))).json();
+ assert.equal(output.ok,true);assert.equal(output.phoneDisplayConfirmed,false);
+ const status=await (await obj.fetch(new Request('https://internal/status'))).json();
+ assert.equal(status.lastNotification.state,'PUSH_SERVICE_ACCEPTED');
+ assert.equal(status.lastNotification.type,'TEST');
+ assert.equal(status.lastNotification.phoneDisplayConfirmed,false);
+ assert.equal(count,1);
+});
+test('send test rejects missing enrollment and missing VAPID without sending',async()=>{
+ const store=new MemoryStorage(),obj=new PaynePushState({storage:store},{});
+ let result=await obj.fetch(new Request('https://internal/test',{method:'POST'}));
+ assert.equal(result.status,409);
+ await obj.fetch(new Request('https://internal/enroll',{method:'POST',body:JSON.stringify({
+ endpoint:'https://fcm.googleapis.com/fcm/send/test',keys:{auth:'a',p256dh:'b'}})}));
+ result=await obj.fetch(new Request('https://internal/test',{method:'POST'}));
+ assert.equal(result.status,503);
+});
+test('failed synthetic test send reports delivery unknown, not a real delivered phone alert',async()=>{
+ const store=new MemoryStorage();
+ const obj=new PaynePushState({storage:store},{NFE_PUSH_VAPID_PUBLIC_KEY:'test',
+ NFE_PUSH_VAPID_PRIVATE_KEY:'test',__testSender:async()=>{throw Error('timeout')}});
+ await obj.fetch(new Request('https://internal/enroll',{method:'POST',body:JSON.stringify({
+ endpoint:'https://fcm.googleapis.com/fcm/send/test',keys:{auth:'a',p256dh:'b'}})}));
+ const result=await obj.fetch(new Request('https://internal/test',{method:'POST'}));
+ assert.equal(result.status,502);
+ const status=await (await obj.fetch(new Request('https://internal/status'))).json();
+ assert.equal(status.lastNotification.state,'DELIVERY_UNKNOWN');
+ assert.equal(status.lastNotification.phoneDisplayConfirmed,false);
+});
