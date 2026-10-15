@@ -25,5 +25,5 @@ test('durable PAYNE ledger readback required after writing transition',()=>{
 });
 test('accountability required fields present',()=>{
  for(const field of ['seriesId:','previousArmed:','newArmed:','actor,triggeringFunction',
- 'reasonCode:', 'attemptsStarted:', 'attemptTarget:', 'completedAt:', 'ownedPositions:', 'unresolvedEntry:', 'failClosedReason:', 'eventTimestamp:'])has(field);
+ 'reasonCode:', 'attemptsStarted:', 'attemptTarget:', 'completedAt:', 'ownedPositions:', 'unresolvedEntry:', 'failClosedReason:', 'eventTimestamp,'])has(field);
 });
