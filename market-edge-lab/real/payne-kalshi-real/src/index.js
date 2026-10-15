@@ -1,3 +1,4 @@
+import {firstPullbackShadow} from './first-pullback-shadow.js';
 import {payneHistoryAll,payneHistoryPage,payneExecutionCsv,PAYNE_EXECUTION_EXPORT_FIELDS} from './payne-real-history-view.js';
 import {liveOrderWatchProjection,paynePositionRecords,payneCapacityEvidence,upsertPaynePosition,unresolvedPaynePositions} from './payne-live-order-watch.js';
 import {PayneExecutionCoordinator,claimPayneExecution,releaseProvenNoPost,resolvePayneExecutionClaim,claimPayneExit,inspectPayneCoordinatorClaim} from './payne-execution-coordinator.js';
@@ -4680,6 +4681,80 @@ export default {
     if (url.pathname === '/display-market-feed') return Response.json(await buildDisplayMarketFeed(env),{headers:{'cache-control':'no-store'}});
     if (url.pathname === '/ui-state') {
       return Response.json(await buildFastUiState(env),{headers:{'cache-control':'no-store'}});
+    }
+    if (url.pathname === '/shadow-staircase/observe') {
+      // Observes market GETs, persists observation-only records in the existing
+      // PAYNE real ledger; never changes positions, controls, or trade actions.
+      try {
+        const series=await loadRealSeriesState(env);
+        const p=series?.position;
+        const owned=p?.owner===REAL_OWNER && p?.reconciliationState==='OPEN' && p?.status==='OPEN';
+        const prior=await listRealLedgerWithEvidence(env,1000);
+        const history=prior.rows.filter(x=>x?.type==='SHADOW_STAIRCASE_OBSERVATION'
+          && x.seriesId===series.seriesId && x.attemptId===p?.attemptId
+          && x.ticker===p?.marketTicker && x.side===p?.outcomeSide);
+        const established=history.map(x=>x.verifiedExitBid).filter(x=>typeof x==='number' && Number.isFinite(x));
+        const historicalHigh=prior.omittedOlderKeys===0&&established.length?Math.max(...established):null;
+        if(!owned){
+          return Response.json({ok:true,readOnlyTrading:true,ownedPosition:false,entryPrice:null,
+            highestVerifiedExitBid:null,currentExecutableExitBid:null,protectedLevel:null,
+            protectedLevelStatus:'NOT_ESTABLISHED',marketPhase:'UNKNOWN',originalPayneDecision:null,
+            shadowAssessment:'UNKNOWN',actualPayneAction:null,providerOutcome:null,
+            observationAt:null,reason:'NO_VERIFIED_CURRENT_OWNED_POSITION',
+            historicalCoverage:prior.omittedOlderKeys===0?'COMPLETE':'INCOMPLETE',
+            providerWrites:0,orders:0},{headers:{'cache-control':'no-store'}});
+        }
+        const observed=await exactMarketRead(env,p.marketTicker,p.asset);
+        const market=observed.ok===true && observed.market?.ticker===p.marketTicker?observed.market:null;
+        const liveStatus=String(market?.status||'').toLowerCase();
+        const closeMs=Date.parse(market?.closeTime||'');
+        const readMs=Date.parse(observed.readAt||'');
+        const fresh=Boolean(market&&Number.isFinite(readMs)&&Number.isFinite(closeMs)
+          && readMs<closeMs && ['open','active'].includes(liveStatus));
+        const bid=fresh?(p.outcomeSide==='YES'?market.yesBid:market.noBid):null;
+        const verifiedBid=typeof bid==='number' && Number.isFinite(bid) && bid>0 && bid<1?bid:null;
+        const originalDecision=p.originalPaperDecision??p.entryPaperDecision??null;
+        const currentDecision=p.currentPaperDecision??null;
+        const shadow=firstPullbackShadow({
+          seriesId:series.seriesId,attemptId:p.attemptId,ticker:p.marketTicker,side:p.outcomeSide,
+          at:observed.readAt,originalScore:typeof p.entryScore==='number'?p.entryScore:null,
+          originalDecision:originalDecision,entrySignalAtEntry:originalDecision,
+          marketPresent:!!market,featureAvailable:false,featureFresh:false,
+          actualPayneAction:null,actualPayneReason:null,providerOutcome:null
+        });
+        const entry=typeof p.entryAverageFillPrice==='number'?p.entryAverageFillPrice:
+          typeof p.entryPrice==='number'?p.entryPrice:null;
+        const high=prior.omittedOlderKeys===0
+          ? (verifiedBid!==null?Math.max(verifiedBid,historicalHigh??verifiedBid):historicalHigh)
+          : null;
+        const record={seriesId:series.seriesId,attemptId:p.attemptId,ticker:p.marketTicker,side:p.outcomeSide,
+          observationAt:observed.readAt,entryPrice:entry,verifiedExitBid:verifiedBid,
+          highestVerifiedExitBid:high,marketStatus:market?.status??null,contractCloseTime:market?.closeTime??null,
+          originalPayneDecision:originalDecision,currentPayneDecision:currentDecision,
+          shadowAssessment:shadow.shadowManagement,marketPhase:'UNKNOWN',
+          actualPayneAction:null,providerOutcome:null,
+          evidenceSource:verifiedBid!==null?'KALSHI_AUTHENTICATED_MARKET_GET':'PROVIDER_BID_NOT_VERIFIED',
+          evidenceFresh:fresh,reason:shadow.reason,protectedLevel:null,
+          protectedLevelStatus:'NOT_ESTABLISHED',historicalCoverage:prior.omittedOlderKeys===0?'COMPLETE':'INCOMPLETE'};
+        await appendRealLedger(env,'SHADOW_STAIRCASE_OBSERVATION',record);
+        return Response.json({ok:true,readOnlyTrading:true,ownedPosition:true,...record,
+          currentExecutableExitBid:verifiedBid,providerWrites:0,orders:0},
+          {headers:{'cache-control':'no-store'}});
+      }catch(e){
+        return Response.json({ok:false,readOnlyTrading:true,reason:String(e?.message||'SHADOW_EVIDENCE_UNKNOWN'),
+          providerWrites:0,orders:0},{status:503,headers:{'cache-control':'no-store'}});
+      }
+    }
+    if (url.pathname === '/shadow-staircase/history') {
+      try{
+        const rows=await listRealLedgerWithEvidence(env,1000);
+        const seriesId=url.searchParams.get('seriesId'),attemptId=url.searchParams.get('attemptId');
+        const observations=rows.rows.filter(x=>x.type==='SHADOW_STAIRCASE_OBSERVATION'
+          && (!seriesId||x.seriesId===seriesId)&&(!attemptId||x.attemptId===attemptId));
+        return Response.json({ok:true,readOnly:true,complete:rows.omittedOlderKeys===0,
+          count:observations.length,observations,omittedOlderKeys:rows.omittedOlderKeys,
+          providerWrites:0,orders:0},{headers:{'cache-control':'no-store'}});
+      }catch(e){return Response.json({ok:false,complete:false,error:String(e?.message||'SHADOW_HISTORY_UNAVAILABLE')},{status:503});}
     }
     if (url.pathname === '/real-state') {
       const control=await loadControl(env);
