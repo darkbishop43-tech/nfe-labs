@@ -14,13 +14,12 @@ test('existing position GET handles pagination but aggregates all account owners
  assert.match(a,/MATCHED_TICKER_NONZERO/);
  assert.doesNotMatch(a,/client_order_id|fill_id/);
 });
-test('single-page historical identity read does not establish full orders and fills coverage',()=>{
- const x=payne.slice(payne.indexOf('async function reconcileUnresolvedEntryFromProvider'),payne.indexOf('async function reconcileUnresolvedEntryFromProvider')+3400);
- assert.match(x,/portfolio\/orders/);
- assert.match(x,/portfolio\/fills/);
- assert.match(x,/historical\/fills/);
- assert.match(x,/\?limit=200&subaccount=0&ticker=/);
- assert.doesNotMatch(x,/while\s*\(\s*cursor\s*\)/);
+test('unresolved entry now requests paginated historical identity bundle',()=>{
+ const x=payne.slice(payne.indexOf('async function reconcileUnresolvedEntryFromProvider'),payne.indexOf('async function reconcileUnresolvedEntryFromProvider')+3900);
+ assert.match(x,/readKalshiIdentityBundle/);
+ assert.match(x,/identities\.complete===true/);
+ assert.match(x,/identities\.kinds\.historicalOrders/);
+ assert.match(x,/identities\.kinds\.historicalFills/);
 });
 test('AUTO execution-test state read does not prove old AUTO legacy identities or partial fills',()=>{
  const a=payne.slice(payne.indexOf('async function baselineAutoTickerConflict'),payne.indexOf('function payneRealScope'));
