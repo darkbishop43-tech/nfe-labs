@@ -19,8 +19,8 @@ test('unknown reason cannot be silently assigned to Founder',()=>{
  has("actor:'SYSTEM',triggeringFunction:'closeRealSeriesControl'");
 });
 test('durable PAYNE ledger readback required after writing transition',()=>{
- has("appendRealLedger(env,'PAYNE_ARM_TRANSITION_V1'");
- has("kvGetJson(env,REAL_LEDGER_PREFIX+row.at+':'+row.recordId)");
+ has("type:'PAYNE_ARM_TRANSITION_V1'");
+ has("kvGetJson(env,ledgerKey)");
  has("PAYNE_DISARM_LEDGER_READBACK_FAILED");
 });
 test('accountability required fields present',()=>{
