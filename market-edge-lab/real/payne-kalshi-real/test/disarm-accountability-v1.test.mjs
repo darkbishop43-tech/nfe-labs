@@ -21,7 +21,7 @@ test('unknown reason cannot be silently assigned to Founder',()=>{
 test('durable PAYNE ledger readback required after writing transition',()=>{
  has("type:'PAYNE_ARM_TRANSITION_V1'");
  has("kvGetJson(env,ledgerKey)");
- has("PAYNE_DISARM_LEDGER_READBACK_FAILED");
+ has("AUDIT_LEDGER_READBACK_FAILED");
 });
 test('accountability required fields present',()=>{
  for(const field of ['seriesId:','previousArmed:','newArmed:','actor,triggeringFunction',
