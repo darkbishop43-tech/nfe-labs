@@ -4655,6 +4655,29 @@ export default {
   async fetch(request, env) {
     const url = new URL(request.url);
 
+    if(request.method==='GET' && url.pathname==='/disarm-audit-status'){
+      try {
+        const kv=binding(env);let cursor;let incomplete=0,verified=0,unknown=0;
+        do {
+          const page=await kv.list({prefix:DISARM_AUDIT_PREFIX,cursor,limit:100});
+          for(const item of page.keys||[]){
+            const row=await kvGetJson(env,item.name);
+            if(row?.state==='VERIFIED')verified++;
+            else if(row?.state==='PENDING')incomplete++;
+            else unknown++;
+          }
+          cursor=page.list_complete?undefined:page.cursor;
+        }while(cursor);
+        return Response.json({ok:true,readOnly:true,verified,incomplete,unknown,
+          auditIncomplete:incomplete>0||unknown>0,blocksArm:false,blocksDeployment:false},
+          {headers:{'cache-control':'no-store'}});
+      }catch(e){
+        return Response.json({ok:false,readOnly:true,auditIncomplete:'UNKNOWN',
+          reason:'AUDIT_STATUS_UNAVAILABLE',blocksArm:false,blocksDeployment:false},
+          {status:503,headers:{'cache-control':'no-store'}});
+      }
+    }
+
     if (request.method === 'POST' && url.pathname === '/control') {
       let body={}; try { body=await request.json(); } catch {}
       try {
@@ -5000,7 +5023,11 @@ export default {
     return Response.json({ ok:false, error:'NOT_FOUND' }, { status:404 });
   },
 
-  async scheduled(controller, env) {
+  async scheduled(controller, env, ctx) {
+    // Background diagnostic recovery cannot prevent or delay existing scheduled trading.
+    try { ctx?.waitUntil?.(recoverPayneDisarmAudits(env).catch(e=>
+      console.error('PAYNE_DISARM_AUDIT_RECOVERY_INCOMPLETE',String(e?.message||e)))); }
+    catch(e){console.error('PAYNE_DISARM_AUDIT_RECOVERY_SCHEDULE_FAILED',String(e?.message||e));}
     const schedulerStartedMs=Date.now();
     await initializeDisarmed(env);
     const control=await loadControl(env);
