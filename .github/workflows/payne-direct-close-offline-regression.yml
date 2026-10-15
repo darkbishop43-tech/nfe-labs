@@ -2,7 +2,7 @@ name: PAYNE Direct Writer Closure Offline Regression
 on:
   push:
     branches:
-      - payne-hold-repair-production-assembly-20261015
+      - payne-real-history-export-isolated-20261015
     paths:
       - .github/workflows/payne-direct-close-offline-regression.yml
       - market-edge-lab/real/payne-kalshi-real/test/direct-writer-closure-offline.test.mjs
@@ -11,6 +11,9 @@ on:
       - .github/scripts/payne-closure-maintenance-offline.mjs
       - market-edge-lab/real/payne-kalshi-real/src/index.js
       - market-edge-lab/real/payne-kalshi-real/test/payne-missing-feature-hold-offline.test.mjs
+      - market-edge-lab/real/payne-kalshi-real/src/payne-real-history-view.js
+      - market-edge-lab/real/payne-kalshi-real/src/cockpit-html.js
+      - market-edge-lab/real/payne-kalshi-real/test/payne-history-export-offline.test.mjs
 permissions:
   contents: read
 jobs:
@@ -28,10 +31,12 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test "$(git rev-parse HEAD:market-edge-lab/real/payne-kalshi-real/src/index.js)" = ca3abd01212be2cc631f998c078498505a448fec
+          test "$(git rev-parse HEAD:market-edge-lab/real/payne-kalshi-real/src/index.js)" = cc8d10e51a259f9c536e5d560641211d1660caa9
           node --check market-edge-lab/real/payne-kalshi-real/src/index.js
-          echo "TESTED_SOURCE_COMMIT=7b42db3e1699933d8fe981e7f2d709ab4e454671"
-          echo "TESTED_SOURCE_BLOB=76c6ff7a2f7f6967def859012b2fcf3b66f7b2f9"
+          node --check market-edge-lab/real/payne-kalshi-real/src/cockpit-html.js
+          node --check market-edge-lab/real/payne-kalshi-real/src/payne-real-history-view.js
+          echo "TESTED_SOURCE_COMMIT=$GITHUB_SHA"
+          echo "TESTED_SOURCE_BLOB=cc8d10e51a259f9c536e5d560641211d1660caa9"
       - name: Run existing PAYNE executable offline tests
         working-directory: market-edge-lab/real/payne-kalshi-real
         shell: bash
