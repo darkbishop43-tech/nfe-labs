@@ -728,21 +728,27 @@ export function managementDecision({ heldMs, owned = true, marketPresent = true,
  * A missing/stale feature is not evidence that a fresh PULL has failed.
  * Every deferral remains bounded by the existing five-minute max hold.
  */
-export function payneRealHoldEvidenceDecision({heldMs,marketPresent,featureAvailable,featureFresh,decisionLabel}={}) {
-  // The clock must be established; unknown age cannot create unlimited holding.
-  if(!Number.isFinite(heldMs) || heldMs<0)
-    return {action:'RECONCILE',reason:'HOLD_AGE_UNKNOWN'};
-  // Preserve the existing max-hold priority, even if features are missing.
-  if(heldMs>=PAYNE_PAPER_RULES.maxHoldMs)
-    return managementDecision({heldMs,owned:true,marketPresent,decisionLabel});
-  // A failed market read is not a validated strategy failure; preserve
-  // the existing market_missing exit path and its executable-bid guard.
+export function payneRealHoldEvidenceDecision({heldMs,marketPresent,marketStatus,contractCloseTime,nowMs,featureAvailable,featureFresh,decisionLabel}={}) {
+  // Real-only adapter. PAYNE Paper's 300s limit and strategy source are untouched.
+  if(!Number.isFinite(heldMs)||heldMs<0||!Number.isFinite(nowMs))
+    return {action:'RECONCILE',reason:'HOLD_CLOCK_UNKNOWN'};
   if(marketPresent!==true)
-    return managementDecision({heldMs,owned:true,marketPresent:false,decisionLabel});
-  if(featureAvailable!==true || featureFresh!==true)
+    return {action:'RECONCILE',reason:'PROVIDER_MARKET_UNKNOWN'};
+  const closeMs=Date.parse(contractCloseTime||'');
+  if(!Number.isFinite(closeMs))
+    return {action:'RECONCILE',reason:'PROVIDER_CLOSE_TIME_UNKNOWN'};
+  const status=String(marketStatus||'').toLowerCase();
+  if(nowMs>=closeMs || ['closed','settled','finalized','determined'].includes(status))
+    return {action:'RECONCILE',reason:'PROVIDER_CONTRACT_CLOSED'};
+  if(!['open','active'].includes(status))
+    return {action:'RECONCILE',reason:'PROVIDER_MARKET_STATUS_UNKNOWN'};
+  if(featureAvailable!==true||featureFresh!==true)
     return {action:'HOLD',reason:featureFresh===false?'FEATURE_STALE':'FEATURE_UNAVAILABLE'};
-  // Only a fresh available feature may establish decision_exit.
-  return managementDecision({heldMs,owned:true,marketPresent:true,decisionLabel});
+  if(decisionLabel==='PULL TRIGGER')
+    return {action:'HOLD',reason:'PULL_TRIGGER_REMAINS_QUALIFIED'};
+  if(!decisionLabel||decisionLabel==='MISSING'||decisionLabel==='UNAVAILABLE')
+    return {action:'HOLD',reason:'FEATURE_UNAVAILABLE'};
+  return {action:'EXIT',reason:'decision_exit'};
 }
 
 export async function recordManagementObservation(env, observation) {
@@ -3987,7 +3993,10 @@ async function managePayneRealPosition(env,control,series,postImpl=kalshiPayneOr
     : {label:'MISSING'};
   const decision=payneRealHoldEvidenceDecision({
     heldMs:ageMs,
-    marketPresent:quote?.ok===true,
+    marketPresent:quote?.ok===true && quote?.market?.ticker===position.marketTicker,
+    marketStatus:quote?.market?.status,
+    contractCloseTime:quote?.market?.closeTime,
+    nowMs,
     featureAvailable:feature?.available===true,
     featureFresh:featureState?.fresh===true,
     decisionLabel:currentPaperDecision.label,
@@ -3998,7 +4007,8 @@ async function managePayneRealPosition(env,control,series,postImpl=kalshiPayneOr
   position.holdDurationMs=Number.isFinite(ageMs)?ageMs:null;
   if(decision.action==='RECONCILE'){
     position.status='RECONCILIATION_UNKNOWN';
-    series.status='MANAGEMENT_TIME_UNKNOWN';
+    series.status='MANAGEMENT_PROVIDER_RECONCILIATION_REQUIRED';
+    position.reconciliationReason=decision.reason;
     await settleSeriesControl(env,series,1,{failClosed:true});
     return saveRealSeriesState(env,series);
   }
