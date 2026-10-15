@@ -1,17 +1,19 @@
-import test from 'node:test';import assert from 'node:assert/strict';import {cockpitHtml} from '../src/cockpit-html.js';
-const html=cockpitHtml();
-test('phone-friendly staircase exists with all required fields',()=>{
- for(const term of ['DYNAMIC STAIRCASE','Entry price','Highest verified exit bid','Proposed protected level','Market phase','Original PAYNE decision','Shadow HOLD / EXIT','Last observation']) assert.ok(html.includes(term),term);
+import test from 'node:test';import assert from 'node:assert/strict';import {cockpitHtml} from '../src/cockpit-html.js';import {readFile} from 'node:fs/promises';
+const html=cockpitHtml();const src=await readFile(new URL('../src/index.js',import.meta.url),'utf8');
+test('phone-friendly staircase scorecard shows required evidence labels',()=>{
+ for(const key of ['DYNAMIC STAIRCASE','Entry price','Highest verified exit bid','Current executable exit bid','Proposed protected level','Market phase','Original PAYNE decision','Shadow HOLD/EXIT assessment','Last observation']) assert.ok(html.includes(key),key);
 });
-test('scorecard uses only GET and persists no mutable stop or authority',()=>{
- const code=html.slice(html.indexOf('<section class="card" id="payneStaircaseShadow"'),html.indexOf('</script>',html.indexOf('id="payneStaircaseShadow"'))+9);
- assert.match(code,/fetch\('\/real-state'/);
- assert.match(code,/setInterval\(draw,10000\)/);
- assert.doesNotMatch(code,/fetch\([^\n]+method:\s*['"]POST|ARM|DISARM|orderSubmit|kv\.put/);
+test('the cockpit polls the separate existing-worker read observation route',()=>{
+ assert.ok(html.includes("fetch('/shadow-staircase/observe'"));
+ assert.ok(html.includes('setInterval(update,10000)'));
+ assert.ok(src.includes("if (url.pathname === '/shadow-staircase/observe')"));
+ const route=src.slice(src.indexOf("if (url.pathname === '/shadow-staircase/observe')"),src.indexOf("if (url.pathname === '/real-state')"));
+ assert.ok(route.includes('exactMarketRead(env,p.marketTicker,p.asset)'));
+ assert.doesNotMatch(route,/kalshiPayneOrderPost|saveRealSeriesState|settleSeriesControl|updateFounderControl/);
 });
-test('unknown when evidence not verified and bid cannot be fabricated',()=>{
- assert.ok(html.includes('verifiedExitBidObservations'));
- assert.ok(html.includes("x?.source==='KALSHI_PROVIDER_GET'"));
- assert.ok(html.includes('shadowProtectedLevelVerified===true'));
- assert.ok(html.includes('shadowEvidenceFresh===true'));
+test('unknown data and proposed protection remain evidence-gated',()=>{
+ assert.ok(html.includes("protectedLevelStatus==='NOT_ESTABLISHED'"));
+ assert.ok(html.includes("SHADOW DATA UNKNOWN"));
+ assert.ok(src.includes("evidenceSource:verifiedBid!==null?'KALSHI_AUTHENTICATED_MARKET_GET'"));
+ assert.ok(src.includes("marketPhase:'UNKNOWN'"));
 });
