@@ -1,0 +1,21 @@
+name: PAYNE Direct Kalshi Data Path Read Only Proof
+on:
+  push:
+    branches: [payne-direct-data-path-proof-isolated-20261015]
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Verify exact direct data path and guard
+        working-directory: market-edge-lab/real/payne-kalshi-real
+        run: |
+          set -euo pipefail
+          node --test test/direct-kalshi-path-proof-offline.test.mjs
+          npm test
+          echo PRODUCTION_MUTATIONS=NONE
