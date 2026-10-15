@@ -311,7 +311,7 @@ export async function updateFounderControl(env, action, rawValue = null) {
 
   await kvPutJson(env,CONTROL_KEY,next);
   if(name==='DISARM' && before.armed===true){
-    await recordPayneDisarm(env,before,next,await loadRealSeriesState(env),{
+    await recordPayneDisarm(env,before,next,await loadRealSeriesState(env).catch(()=>null),{
       actor:'FOUNDER',triggeringFunction:'updateFounderControl',
       reasonCode:'FOUNDER_DISARM'
     });
@@ -3870,30 +3870,73 @@ function realizedPnlFromPosition(position) {
 }
 
 // Diagnostic-only event: no change to entry, exit, disarm or safety decisions.
+// Diagnostic-only. A failed audit never prevents or reverses a safety disarm.
+// The existing KV store cannot atomically commit control and ledger records.
+const DISARM_AUDIT_PREFIX='payne:disarm-audit:v1:';
 async function recordPayneDisarm(env,previous,next,series,{actor='SYSTEM',triggeringFunction='UNKNOWN',reasonCode='UNKNOWN',failClosedReason=null}={}) {
   if(previous?.armed!==true || next?.armed!==false)return null;
-  const row=await appendRealLedger(env,'PAYNE_ARM_TRANSITION_V1',{
-    seriesId:series?.seriesId||null,
+  const eventTimestamp=new Date().toISOString();
+  const transitionId=crypto.randomUUID();
+  const payload={
+    transitionId,seriesId:series?.seriesId||null,eventTimestamp,
     previousArmed:true,newArmed:false,actor,triggeringFunction,
     reasonCode:String(reasonCode||'UNKNOWN'),failClosedReason:failClosedReason||null,
     attemptsStarted:Number(series?.attemptsStarted??next.attempts??0),
     attemptTarget:Number(series?.attemptTarget??next.attemptTarget??0),
     completedAt:series?.completedAt||null,
     ownedPositions:Number(next?.openPositions??0),
-    unresolvedEntry:series?.unresolvedEntry===true,
-    eventTimestamp:new Date().toISOString()
-  });
-  // Existing durable PAYNE KV ledger readback. Errors remain visible, never claim success.
-  const proof=await kvGetJson(env,REAL_LEDGER_PREFIX+row.at+':'+row.recordId);
-  if(!proof || proof.recordId!==row.recordId)throw Error('PAYNE_DISARM_LEDGER_READBACK_FAILED');
-  return row;
+    unresolvedEntry:series?.unresolvedEntry===true
+  };
+  const key=DISARM_AUDIT_PREFIX+transitionId;
+  try {
+    await kvPutJson(env,key,{state:'PENDING',payload});
+    const pending=await kvGetJson(env,key);
+    if(pending?.payload?.transitionId!==transitionId)throw Error('AUDIT_PENDING_READBACK_FAILED');
+  }catch(e){
+    // Diagnostics are best effort. Incomplete audit must not become a control gate.
+    console.error('PAYNE_DISARM_AUDIT_INCOMPLETE',String(e?.message||e));
+  }
+  try {
+    const proof=await appendRealLedger(env,'PAYNE_ARM_TRANSITION_V1',payload);
+    const readback=await kvGetJson(env,REAL_LEDGER_PREFIX+proof.at+':'+proof.recordId);
+    if(!readback||readback.transitionId!==transitionId)throw Error('AUDIT_LEDGER_READBACK_FAILED');
+    try { await kvPutJson(env,key,{state:'VERIFIED',payload,ledgerRecordId:proof.recordId}); }
+    catch(e){ console.error('PAYNE_DISARM_AUDIT_MARKER_INCOMPLETE',String(e?.message||e)); }
+    return {state:'VERIFIED',transitionId};
+  }catch(e){
+    console.error('PAYNE_DISARM_AUDIT_INCOMPLETE',transitionId,String(e?.message||e));
+    return {state:'INCOMPLETE',transitionId};
+  }
+}
+// Idempotent recovery reuses original transition IDs; it never touches trading controls.
+export async function recoverPayneDisarmAudits(env){
+  const kv=binding(env);let cursor,checked=0,repaired=0,incomplete=0;
+  do{
+    const page=await kv.list({prefix:DISARM_AUDIT_PREFIX,cursor,limit:100});
+    for(const item of page.keys||[]){
+      const rec=await kvGetJson(env,item.name);
+      if(!rec?.payload?.transitionId||rec.state==='VERIFIED')continue;
+      checked++;
+      try{
+        // Avoid a duplicate ledger entry when a prior append succeeded but readback failed.
+        const existing=(await listRealLedger(env,1000)).find(x=>x.transitionId===rec.payload.transitionId && x.type==='PAYNE_ARM_TRANSITION_V1');
+        const row=existing||await appendRealLedger(env,'PAYNE_ARM_TRANSITION_V1',rec.payload);
+        const confirmed=await kvGetJson(env,REAL_LEDGER_PREFIX+row.at+':'+row.recordId);
+        if(!confirmed||confirmed.transitionId!==rec.payload.transitionId)throw Error('AUDIT_LEDGER_READBACK_FAILED');
+        await kvPutJson(env,item.name,{...rec,state:'VERIFIED',ledgerRecordId:row.recordId});
+        repaired++;
+      }catch(e){incomplete++;console.error('PAYNE_DISARM_AUDIT_RECOVERY_INCOMPLETE',String(e?.message||e));}
+    }
+    cursor=page.list_complete?undefined:page.cursor;
+  }while(cursor);
+  return {checked,repaired,incomplete,readOnlyTrading:true};
 }
 async function closeRealSeriesControl(env,attempts=1,openPositions=0,reasonCode='UNKNOWN',seriesSnapshot=null) {
   const control=await loadControl(env);
   const next={...control,armed:false,attempts,openPositions,providerWriteAuthority:'BUILT_INACTIVE_DISARMED',providerPostAuthority:'BUILT_INACTIVE_DISARMED',realExecution:'BUILT_INACTIVE_DISARMED',fundingAuthority:'INDEX2_ONLY_INACTIVE_DISARMED',requiredExchangeIndex:2,realControlSchema:REAL_CONTROL_SCHEMA};
   await kvPutJson(env,CONTROL_KEY,next);
   if(control.armed===true){
-    const series=seriesSnapshot||await loadRealSeriesState(env);
+    const series=seriesSnapshot||await loadRealSeriesState(env).catch(()=>null);
     await recordPayneDisarm(env,control,next,series,{
       actor:'SYSTEM',triggeringFunction:'closeRealSeriesControl',
       reasonCode,failClosedReason:reasonCode.startsWith('FAIL_CLOSED_')?reasonCode:null
