@@ -527,4 +527,26 @@ setInterval(()=>setText('clock',new Date().toISOString().slice(11,19)+' UTC'),10
 })();
 </script>
 
+
+<div id="nfe-exchange-maintenance" role="status" aria-live="polite" style="position:relative;margin:8px;padding:10px 12px;border:1px solid #526579;border-radius:8px;background:#111c29;color:#e8f3ff;font:12px/1.45 system-ui,sans-serif;z-index:2">NEXT EXCHANGE MAINTENANCE: THURSDAY 3:00–5:00 AM ET · COUNTDOWN: calculating</div>
+<script>
+(()=>{
+'use strict';
+const el=document.getElementById('nfe-exchange-maintenance');
+const zone='America/New_York';
+const fmt=new Intl.DateTimeFormat('en-US',{timeZone:zone,weekday:'short',hour:'2-digit',minute:'2-digit',hourCycle:'h23'});
+const fields=ms=>Object.fromEntries(fmt.formatToParts(new Date(ms)).filter(p=>['weekday','hour','minute'].includes(p.type)).map(p=>[p.type,p.value]));
+const isBoundary=(ms,h)=>{const p=fields(ms);return p.weekday==='Thu'&&Number(p.hour)===h&&Number(p.minute)===0};
+function nextBoundary(now,h){const start=Math.floor(now/60000)*60000;for(let t=start;t<=now+8*86400000;t+=60000){if(t>now&&isBoundary(t,h))return t;}return null;}
+let start=null,end=null;
+function tick(){const now=Date.now();if(start===null||end===null||now>=end){start=nextBoundary(now,3);end=nextBoundary(now,5);}
+const p=fields(now);const during=p.weekday==='Thu'&&Number(p.hour)>=3&&Number(p.hour)<5;
+const target=during?end:start;const remaining=Math.max(0,Math.ceil(((target??now)-now)/1000));
+const days=Math.floor(remaining/86400),hours=Math.floor(remaining%86400/3600),minutes=Math.floor(remaining%3600/60),seconds=remaining%60;
+const countdown=[days?days+'d':null,String(hours).padStart(2,'0')+'h',String(minutes).padStart(2,'0')+'m',String(seconds).padStart(2,'0')+'s'].filter(Boolean).join(' ');
+el.textContent=during?'SCHEDULED EXCHANGE MAINTENANCE · Trading expected to be unavailable until 5:00 AM ET · TIME UNTIL SCHEDULED END: '+countdown:'NEXT EXCHANGE MAINTENANCE: THURSDAY 3:00–5:00 AM ET · COUNTDOWN: '+countdown;
+}
+tick();setInterval(tick,1000);
+})();
+</script>
 </body></html>
