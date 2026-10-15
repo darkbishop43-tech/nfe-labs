@@ -3897,10 +3897,12 @@ async function recordPayneDisarm(env,previous,next,series,{actor='SYSTEM',trigge
     console.error('PAYNE_DISARM_AUDIT_INCOMPLETE',String(e?.message||e));
   }
   try {
-    const proof=await appendRealLedger(env,'PAYNE_ARM_TRANSITION_V1',payload);
-    const readback=await kvGetJson(env,REAL_LEDGER_PREFIX+proof.at+':'+proof.recordId);
+    const ledgerKey=REAL_LEDGER_PREFIX+eventTimestamp+':'+transitionId;
+    const row={schema:'PAYNE_REAL_LEDGER_V1',recordId:transitionId,at:eventTimestamp,owner:REAL_OWNER,type:'PAYNE_ARM_TRANSITION_V1',...payload};
+    await kvPutJson(env,ledgerKey,row);
+    const readback=await kvGetJson(env,ledgerKey);
     if(!readback||readback.transitionId!==transitionId)throw Error('AUDIT_LEDGER_READBACK_FAILED');
-    try { await kvPutJson(env,key,{state:'VERIFIED',payload,ledgerRecordId:proof.recordId}); }
+    try { await kvPutJson(env,key,{state:'VERIFIED',payload,ledgerRecordId:transitionId}); }
     catch(e){ console.error('PAYNE_DISARM_AUDIT_MARKER_INCOMPLETE',String(e?.message||e)); }
     return {state:'VERIFIED',transitionId};
   }catch(e){
@@ -3918,12 +3920,14 @@ export async function recoverPayneDisarmAudits(env){
       if(!rec?.payload?.transitionId||rec.state==='VERIFIED')continue;
       checked++;
       try{
-        // Avoid a duplicate ledger entry when a prior append succeeded but readback failed.
-        const existing=(await listRealLedger(env,1000)).find(x=>x.transitionId===rec.payload.transitionId && x.type==='PAYNE_ARM_TRANSITION_V1');
-        const row=existing||await appendRealLedger(env,'PAYNE_ARM_TRANSITION_V1',rec.payload);
-        const confirmed=await kvGetJson(env,REAL_LEDGER_PREFIX+row.at+':'+row.recordId);
-        if(!confirmed||confirmed.transitionId!==rec.payload.transitionId)throw Error('AUDIT_LEDGER_READBACK_FAILED');
-        await kvPutJson(env,item.name,{...rec,state:'VERIFIED',ledgerRecordId:row.recordId});
+        const p=rec.payload;
+        const ledgerKey=REAL_LEDGER_PREFIX+p.eventTimestamp+':'+p.transitionId;
+        const existing=await kvGetJson(env,ledgerKey);
+        if(existing && existing.transitionId!==p.transitionId)throw Error('AUDIT_IDENTITY_COLLISION');
+        if(!existing)await kvPutJson(env,ledgerKey,{schema:'PAYNE_REAL_LEDGER_V1',recordId:p.transitionId,at:p.eventTimestamp,owner:REAL_OWNER,type:'PAYNE_ARM_TRANSITION_V1',...p});
+        const confirmed=await kvGetJson(env,ledgerKey);
+        if(!confirmed||confirmed.transitionId!==p.transitionId)throw Error('AUDIT_LEDGER_READBACK_FAILED');
+        await kvPutJson(env,item.name,{...rec,state:'VERIFIED',ledgerRecordId:p.transitionId});
         repaired++;
       }catch(e){incomplete++;console.error('PAYNE_DISARM_AUDIT_RECOVERY_INCOMPLETE',String(e?.message||e));}
     }
