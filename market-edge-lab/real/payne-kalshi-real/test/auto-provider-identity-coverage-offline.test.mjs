@@ -1,7 +1,7 @@
 import test from 'node:test';import assert from 'node:assert/strict';import {readFile} from 'node:fs/promises';
 const payne=await readFile(new URL('../src/index.js',import.meta.url),'utf8');
-const auto=await readFile(new URL('../../baseline/src/index.js',import.meta.url),'utf8');
-test('AUTO execution-test generated ID prefix exists, but prefix alone is not proof',()=>{assert.match(auto,/nfe-test-/);assert.match(auto,/executionTestClientOrderId/);});
+
+test('PAYNE reconciliation does not derive AUTO ownership from a prefix',()=>{const guard=payne.slice(payne.indexOf('async function baselineAutoTickerConflict'),payne.indexOf('function payneRealScope'));assert.doesNotMatch(guard,/nfe-test-/);});
 test('current PAYNE FIRE guard fails closed if AUTO service is unavailable',()=>{
  assert.match(payne,/const auto=await baselineAutoTickerConflict\(env,candidate\.ticker\)/);
  assert.match(payne,/if\(!auto\.ok \|\| auto\.conflict!==false\)/);
