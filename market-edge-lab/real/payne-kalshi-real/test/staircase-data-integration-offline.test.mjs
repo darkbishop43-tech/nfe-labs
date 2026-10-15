@@ -30,9 +30,9 @@ test('ledger is historical source and missing complete scan blocks lifetime high
  assert.ok(route.includes('complete:rows.omittedOlderKeys===0'));
 });
 test('cockpit shows live values and records observations through existing handler',()=>{
- assert.ok(html.includes('/shadow-staircase/observe'));
- assert.ok(html.includes('setInterval(update,10000)'));
- for(const word of ['Verified Kalshi exit bid','Current bid:','NOT ESTABLISHED','Shadow:','Last:'])assert.ok(html.includes(word),word);
+ assert.ok(html.includes('/shadow-staircase/top3-v2'));
+ assert.ok(html.includes('setInterval(poll,10000)'));
+ for(const word of ['DIRECT KALSHI','High ','Read age','INSUFFICIENT OBSERVATIONS'])assert.ok(html.includes(word),word);
 });
 test('shadow evaluator fails closed when independent directional evidence missing',()=>{
  const x=firstPullbackShadow({marketPresent:true,featureAvailable:false,featureFresh:false});

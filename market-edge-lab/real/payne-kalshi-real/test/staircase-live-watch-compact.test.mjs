@@ -15,8 +15,8 @@ test('watch-only observations append to existing ledger without position or cont
  assert.doesNotMatch(route,/kalshiPayneOrderPost|saveRealSeriesState|settleSeriesControl|updateFounderControl/);
 });
 test('compact graph remains above exports and supports watching without owned position',()=>{
- assert.match(html,/height:158px/);
+ assert.match(html,/height:88px/);
  assert.ok(html.indexOf('id="payneStaircaseShadow"')<html.indexOf('DATA EXPORT'));
- assert.match(html,/!live.ownedPosition&&!live.watching/);
- assert.match(html,/setInterval\(update,10000\)/);
+ assert.match(html,/shadow-staircase\/top3-v2/);
+ assert.match(html,/setInterval\(poll,10000\)/);
 });

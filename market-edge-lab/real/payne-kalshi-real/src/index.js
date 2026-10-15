@@ -1,3 +1,4 @@
+import {rankVerifiedStaircase} from './staircase-top3-v2.js';
 import {firstPullbackShadow} from './first-pullback-shadow.js';
 import {payneHistoryAll,payneHistoryPage,payneExecutionCsv,PAYNE_EXECUTION_EXPORT_FIELDS} from './payne-real-history-view.js';
 import {liveOrderWatchProjection,paynePositionRecords,payneCapacityEvidence,upsertPaynePosition,unresolvedPaynePositions} from './payne-live-order-watch.js';
@@ -4681,6 +4682,50 @@ export default {
     if (url.pathname === '/display-market-feed') return Response.json(await buildDisplayMarketFeed(env),{headers:{'cache-control':'no-store'}});
     if (url.pathname === '/ui-state') {
       return Response.json(await buildFastUiState(env),{headers:{'cache-control':'no-store'}});
+    }
+    if (url.pathname === '/shadow-staircase/top3-v2') {
+      // Direct Kalshi market GETs. Research KV/ledger writes only; no trading state.
+      try {
+        const nowMs=Date.now();
+        const discovery=await discoverCockpitMarkets(env,{nowMs});
+        const key='payne-kalshi:staircase-top3:v2';
+        const previous=await kvGetJson(env,key);
+        const retained=Array.isArray(previous?.samples)?previous.samples.filter(x=>
+          Number.isFinite(Date.parse(x?.at))&&Date.parse(x.at)>=nowMs-20*60_000):[];
+        const fresh=discovery.markets.filter(m=>
+          m?.ticker&&m.providerReadAt&&['open','active'].includes(String(m.status||'').toLowerCase())
+          &&Date.parse(m.closeTime)>nowMs);
+        const samples=[];
+        for(const m of fresh){
+          for(const side of ['YES','NO']){
+            const bid=side==='YES'?m.yesBid:m.noBid;
+            if(typeof bid==='number'&&Number.isFinite(bid)&&bid>0&&bid<1)
+              samples.push({ticker:m.ticker,asset:m.asset,side,bid,at:m.providerReadAt,
+                closeTime:m.closeTime,source:'DIRECT_KALSHI_GET'});
+          }
+        }
+        // Missing provider observations NEVER produce synthetic price samples.
+        const merged=[...retained,...samples].slice(-1500);
+        if(samples.length){
+          await kvPutJson(env,key,{schema:'PAYNE_STAIRCASE_TOP3_V2',samples:merged,updatedAt:new Date().toISOString()});
+          await appendRealLedger(env,'SHADOW_STAIRCASE_TOP3_OBSERVATION',{
+            readOnlyTrading:true,observationAt:new Date().toISOString(),
+            observations:samples,providerReadCount:discovery.providerGets,
+            observationSource:'DIRECT_KALSHI_GET'});
+        }
+        const top3=rankVerifiedStaircase(fresh,merged,nowMs);
+        return Response.json({ok:true,readOnlyTrading:true,schema:'PAYNE_STAIRCASE_TOP3_V2',
+          top3,observedAt:new Date().toISOString(),providerGets:discovery.providerGets,
+          availableMarketCount:fresh.length,failedMarketReads:discovery.assets.filter(a=>!a.ok).length,
+          refreshMs:10000,source:'DIRECT_KALSHI_GET',
+          providerWrites:0,orders:0,capitalMovedUsd:0},
+          {headers:{'cache-control':'no-store'}});
+      }catch(error){
+        return Response.json({ok:false,readOnlyTrading:true,
+          reason:String(error?.message||'TOP3_READ_UNKNOWN'),top3:[],
+          providerWrites:0,orders:0,capitalMovedUsd:0},
+          {status:503,headers:{'cache-control':'no-store'}});
+      }
     }
     if (url.pathname === '/shadow-staircase/observe') {
       // Observes market GETs, persists observation-only records in the existing
