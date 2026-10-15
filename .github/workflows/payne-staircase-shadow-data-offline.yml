@@ -1,0 +1,23 @@
+name: PAYNE Staircase Shadow Data Integration Offline
+on:
+  push:
+    branches: [payne-staircase-shadow-data-isolated-20261015]
+permissions:
+  contents: read
+jobs:
+  proof:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Verify isolated shadow and existing trading regressions
+        working-directory: market-edge-lab/real/payne-kalshi-real
+        run: |
+          set -euo pipefail
+          node --check src/index.js
+          node --check src/cockpit-html.js
+          node --test test/staircase-data-integration-offline.test.mjs test/first-pullback-shadow-offline.test.mjs
+          npm test
+          echo PRODUCTION_MUTATIONS=NONE
