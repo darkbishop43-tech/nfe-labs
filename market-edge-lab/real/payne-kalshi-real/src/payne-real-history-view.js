@@ -2,7 +2,7 @@
 const PREFIX={attempt:'payne-kalshi:attempt:',ledger:'payne-kalshi:real-ledger:',position:'payne-kalshi:position:'};
 const fields=['seriesId','attemptId','attemptNo','at','asset','ticker','side','entryScore','entryPrice','executionStage','terminalStatus','managementStatus','exitResult','reconciliationStatus','clientOrderId','providerOrderId','fillId','entryTime','exitTime','exitPrice','quantity','fees','realizedPnlUsd','evidenceSource'];
 async function keys(kv,prefix){
- if(typeof kv?.list!=='function' throw Error('HISTORY_KV_LIST_MISSING');
+ if(typeof kv?.list!=='function') throw Error('HISTORY_KV_LIST_MISSING');
  const out=[],seen=new Set();let cursor;
  while(true){
   const page=await kv.list({prefix,limit:1000,...(cursor?{cursor}:{})});
