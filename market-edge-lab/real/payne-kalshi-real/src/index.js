@@ -1,3 +1,4 @@
+import {payneHistoryAll,payneHistoryPage,payneExecutionCsv,PAYNE_EXECUTION_EXPORT_FIELDS} from './payne-real-history-view.js';
 import {liveOrderWatchProjection,paynePositionRecords,payneCapacityEvidence,upsertPaynePosition,unresolvedPaynePositions} from './payne-live-order-watch.js';
 import {PayneExecutionCoordinator,claimPayneExecution,releaseProvenNoPost,resolvePayneExecutionClaim,claimPayneExit,inspectPayneCoordinatorClaim} from './payne-execution-coordinator.js';
 export {PayneExecutionCoordinator};
@@ -2409,6 +2410,15 @@ async function buildExportResponse(env, url, nowMs=Date.now()) {
   const bounds=exportRangeBounds(url.searchParams.get('range')||'current',url,nowMs);
   const format=String(url.searchParams.get('format')||'json').toLowerCase();
   if (!['json','csv'].includes(format)) throw new Error('EXPORT_FORMAT_NOT_ALLOWED');
+  if(String(url.searchParams.get('category')||'observations')==='executions'){
+    const history=await payneHistoryAll(binding(env),bounds);
+    const rows=history.rows;
+    const stamp=new Date(nowMs).toISOString().replace(/[:.]/g,'-');
+    const headers={'cache-control':'no-store','content-disposition':'attachment; filename="payne-real-executions-'+bounds.range+'-'+stamp+'.'+format+'"'};
+    if(format==='csv')
+      return new Response(payneExecutionCsv(rows),{headers:{...headers,'content-type':'text/csv; charset=utf-8'}});
+    return new Response(JSON.stringify({schema:'PAYNE_REAL_EXECUTION_EXPORT_V1',range:bounds.range,from:bounds.fromMs===null?null:new Date(bounds.fromMs).toISOString(),to:bounds.toMs===null?null:new Date(bounds.toMs).toISOString(),complete:history.complete,coverage:history.coverage,rowCount:rows.length,fields:PAYNE_EXECUTION_EXPORT_FIELDS,rows},null,2),{headers:{...headers,'content-type':'application/json; charset=utf-8'}});
+  }
   const snapshots=await listExportSnapshots(env,bounds);
   const currentRealExecution=await buildRealExecutionObservability(env);
   const rows=exportRowsFromSnapshots(snapshots,currentRealExecution);
@@ -4697,6 +4707,16 @@ export default {
           complete:false,error:String(error?.message||'PAYNE_LEDGER_READ_INCOMPLETE'),
           providerWrites:0,ordersSubmittedByThisRead:0,capitalMovedUsd:0},
           {status:503,headers:{'cache-control':'no-store'}});
+      }
+    }
+    if (url.pathname === '/real-history' && url.searchParams.get('view')==='cycles') {
+      try {
+        const range=String(url.searchParams.get('range')||'current');
+        const bounds=exportRangeBounds(range,url);
+        const history=await payneHistoryAll(binding(env),bounds);
+        return Response.json({ok:true,readOnly:true,schema:'PAYNE_REAL_CYCLES_V1',...payneHistoryPage(history,url.searchParams.get('page'),url.searchParams.get('limit'))},{headers:{'cache-control':'no-store'}});
+      } catch(e) {
+        return Response.json({ok:false,complete:false,error:String(e?.message||'HISTORY_READ_FAILED')},{status:503,headers:{'cache-control':'no-store'}});
       }
     }
     if (url.pathname === '/real-history') {
