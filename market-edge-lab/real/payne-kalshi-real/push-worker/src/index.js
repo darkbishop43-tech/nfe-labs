@@ -23,13 +23,31 @@ export class PaynePushState {
   constructor(state,env){this.state=state;this.env=env;this.sender=env?.__testSender||sendPushNotification;}
   async fetch(req){
     const u=new URL(req.url);
-    if(u.pathname==='/status')return json({ok:true,enrolled:Boolean(await this.state.storage.get('subscription'))});
+    if(u.pathname==='/status')return json({ok:true,enrolled:Boolean(await this.state.storage.get('subscription')),baselineReady:Boolean(await this.state.storage.get('baseline')),lastNotification:await this.state.storage.get('lastNotification')||null});
     if(u.pathname==='/enroll' && req.method==='POST'){
       const s=await req.json().catch(()=>null);
       if(!s||typeof s.endpoint!=='string'||typeof s.keys?.p256dh!=='string'||typeof s.keys?.auth!=='string')return json({ok:false,error:'INVALID_SUBSCRIPTION'},400);
       try{if(new URL(s.endpoint).protocol!=='https:')throw Error();}catch{return json({ok:false,error:'INVALID_ENDPOINT'},400);}
       await this.state.storage.put('subscription',{endpoint:s.endpoint,keys:{auth:s.keys.auth,p256dh:s.keys.p256dh}});
       return json({ok:true});
+    }
+    if(u.pathname==='/test' && req.method==='POST'){
+      const sub=await this.state.storage.get('subscription');
+      if(!sub)return json({ok:false,reason:'NO_PHONE_ENROLLED'},409);
+      if(!this.env.NFE_PUSH_VAPID_PUBLIC_KEY||!this.env.NFE_PUSH_VAPID_PRIVATE_KEY)return json({ok:false,reason:'VAPID_NOT_CONFIGURED'},503);
+      const at=new Date().toISOString();
+      try{
+        const accepted=await this.sender(sub,{title:'NFE-OS PAYNE REAL · TEST',body:'PAYNE phone notification test. No trade occurred.',url:this.env.PAYNE_COCKPIT_URL,tag:'payne-phone-test'},{
+          publicKey:this.env.NFE_PUSH_VAPID_PUBLIC_KEY,privateKey:this.env.NFE_PUSH_VAPID_PRIVATE_KEY,
+          subject:'https://github.com/darkbishop43-tech/nfe-labs'
+        },{ttl:300,urgency:'normal',timeoutMs:8000});
+        const state=accepted?'PUSH_SERVICE_ACCEPTED':'REJECTED';
+        await this.state.storage.put('lastNotification',{state,at,type:'TEST',phoneDisplayConfirmed:false});
+        return json({ok:!!accepted,state,phoneDisplayConfirmed:false},accepted?200:502);
+      }catch(e){
+        await this.state.storage.put('lastNotification',{state:'DELIVERY_UNKNOWN',at,type:'TEST',phoneDisplayConfirmed:false});
+        return json({ok:false,state:'DELIVERY_UNKNOWN',phoneDisplayConfirmed:false},502);
+      }
     }
     if(u.pathname==='/baseline' && req.method==='POST'){
       const evidence=await req.json().catch(()=>null);
@@ -79,9 +97,11 @@ export class PaynePushState {
             subject:'https://github.com/darkbishop43-tech/nfe-labs'
           },{ttl:300,urgency:'high',topic:await topicFromString(alert.id),timeoutMs:8000});
           await this.state.storage.put(key,{state:accepted?'PUSH_SERVICE_ACCEPTED':'REJECTED',at:new Date().toISOString()});
+          await this.state.storage.put('lastNotification',{state:accepted?'PUSH_SERVICE_ACCEPTED':'REJECTED',at:new Date().toISOString(),type:'PAYNE_EVENT',phoneDisplayConfirmed:false});
           if(accepted)delivered++;else failed++;
         }catch(error){
           failed++;
+          await this.state.storage.put('lastNotification',{state:'DELIVERY_UNKNOWN',at:new Date().toISOString(),type:'PAYNE_EVENT',phoneDisplayConfirmed:false});
           await this.state.storage.put(key,{state:'DELIVERY_UNKNOWN_NO_AUTO_RETRY',at:new Date().toISOString(),reason:String(error?.message||error).slice(0,120)});
         }
       }
@@ -91,8 +111,23 @@ export class PaynePushState {
   }
 }
 const sw=`self.addEventListener('push',event=>{let p={};try{p=event.data.json()}catch{};event.waitUntil(self.registration.showNotification(p.title||'NFE-OS PAYNE REAL',{body:p.body||'',tag:p.tag||undefined,data:{url:p.url||'/'}}))});self.addEventListener('notificationclick',event=>{event.notification.close();event.waitUntil(self.clients.openWindow(event.notification.data?.url||'/'))});`;
-const page=`<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1"><title>PAYNE REAL mobile alerts</title><h2>PAYNE REAL · MOBILE FISH ALERTS</h2><p>Notification-only. Your trading controls are unchanged.</p><input id="enrollToken" type="password" autocomplete="off" placeholder="PAYNE enrollment code"><button id="enroll">ENABLE NFE-OS NOTIFICATIONS</button><p id="status">NOT ENROLLED</p><script>
+const page=`<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1"><title>PAYNE REAL mobile alerts</title><h2>PAYNE REAL · MOBILE FISH ALERTS</h2><p>Notification-only. Your trading controls are unchanged.</p><input id="enrollToken" type="password" autocomplete="off" placeholder="PAYNE enrollment code"><button id="enroll">ENABLE NFE-OS NOTIFICATIONS</button><button id="sendTest" disabled>SEND TEST</button><p id="status">NOT VERIFIED</p><p id="delivery">LAST NOTIFICATION: NOT VERIFIED</p><script>
 const keyBytes=k=>Uint8Array.from(atob(k.replace(/-/g,'+').replace(/_/g,'/')),c=>c.charCodeAt(0));
+async function refreshStatus(){
+ try{const r=await(await fetch('/push-status',{cache:'no-store'})).json();
+ document.querySelector('#status').textContent=r.enrolled?'PUSH ENABLED · SUBSCRIPTION STORED':'PUSH DISABLED · NO SUBSCRIPTION';
+ document.querySelector('#sendTest').disabled=!r.enrolled;
+ document.querySelector('#delivery').textContent='LAST NOTIFICATION: '+(r.lastNotification? r.lastNotification.state+' · '+r.lastNotification.at+' · PHONE DISPLAY NOT VERIFIED':'NOT VERIFIED');
+ }catch{document.querySelector('#status').textContent='PUSH STATUS UNKNOWN';}
+}
+document.querySelector('#sendTest').onclick=async()=>{
+ try{const token=document.querySelector('#enrollToken').value;
+ const r=await fetch('/push-test',{method:'POST',headers:{authorization:'Bearer '+token}});
+ const result=await r.json();if(!r.ok)throw Error(result.error||result.reason||result.state||'Test request failed');
+ await refreshStatus();
+ }catch(e){document.querySelector('#delivery').textContent='TEST ERROR: '+String(e.message||e);}
+};
+refreshStatus();
 document.querySelector('#enroll').onclick=async()=>{
  try{
   const cfg=await(await fetch('/push-config')).json();
@@ -104,7 +139,7 @@ document.querySelector('#enroll').onclick=async()=>{
   if(!sub)sub=await reg.pushManager.subscribe({userVisibleOnly:true,applicationServerKey:keyBytes(cfg.publicKey)});
   const token=document.querySelector('#enrollToken').value;\n  const r=await fetch('/push-enroll',{method:'POST',headers:{'content-type':'application/json','authorization':'Bearer '+token},body:JSON.stringify(sub)});
   if(!r.ok)throw Error('Enrollment failed');
-  document.querySelector('#status').textContent='PAYNE PHONE ENROLLED';
+  document.querySelector('#status').textContent='PAYNE PHONE ENROLLED';await refreshStatus();
  }catch(e){document.querySelector('#status').textContent=String(e.message||e)}
 };
 </script>`;
@@ -115,6 +150,10 @@ export default {
     if(req.method==='GET'&&u.pathname==='/push-sw.js')return new Response(sw,{headers:{'content-type':'application/javascript','service-worker-allowed':'/'}});
     if(req.method==='GET'&&u.pathname==='/push-config')return json({publicKey:env.NFE_PUSH_VAPID_PUBLIC_KEY||null});
     if(req.method==='GET'&&u.pathname==='/push-status')return endpoint(env).fetch('https://internal/status');
+    if(req.method==='POST'&&u.pathname==='/push-test'){
+      if(!env.PAYNE_ENROLL_TOKEN || req.headers.get('authorization')!=='Bearer '+env.PAYNE_ENROLL_TOKEN)return json({ok:false,error:'TEST_NOT_AUTHORIZED'},403);
+      return endpoint(env).fetch(new Request('https://internal/test',{method:'POST'}));
+    }
     if(req.method==='POST'&&u.pathname==='/push-enroll'){
       if(!env.PAYNE_ENROLL_TOKEN || req.headers.get('authorization')!=='Bearer '+env.PAYNE_ENROLL_TOKEN)return json({ok:false,error:'ENROLLMENT_NOT_AUTHORIZED'},403);
       return endpoint(env).fetch(new Request('https://internal/enroll',{method:'POST',body:req.body,headers:{'content-type':'application/json'}}));
