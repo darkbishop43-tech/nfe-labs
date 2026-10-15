@@ -2,10 +2,11 @@ name: PAYNE Direct Writer Closure Offline Regression
 on:
   push:
     branches:
-      - payne-direct-writer-close-offline-20261013
+      - payne-real-missing-feature-hold-offline-20261014
     paths:
       - .github/workflows/payne-direct-close-offline-regression.yml
       - market-edge-lab/real/payne-kalshi-real/test/direct-writer-closure-offline.test.mjs
+      - market-edge-lab/real/payne-kalshi-real/test/payne-missing-feature-hold-offline.test.mjs
 permissions:
   contents: read
 jobs:
@@ -23,7 +24,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test "$(git rev-parse HEAD:market-edge-lab/real/payne-kalshi-real/src/index.js)" = 76c6ff7a2f7f6967def859012b2fcf3b66f7b2f9
+          test "$(git rev-parse HEAD:market-edge-lab/real/payne-kalshi-real/src/index.js)" = 091394fc6a6c0c9647a6af7af3170a84669ae5c5
           node --check market-edge-lab/real/payne-kalshi-real/src/index.js
           echo "TESTED_SOURCE_COMMIT=7b42db3e1699933d8fe981e7f2d709ab4e454671"
           echo "TESTED_SOURCE_BLOB=76c6ff7a2f7f6967def859012b2fcf3b66f7b2f9"

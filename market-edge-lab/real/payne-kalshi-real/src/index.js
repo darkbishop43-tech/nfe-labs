@@ -723,6 +723,28 @@ export function managementDecision({ heldMs, owned = true, marketPresent = true,
   return paperManagementDecision({heldMs,owned,marketPresent,decisionLabel});
 }
 
+/**
+ * Real-position evidence adapter only. It does not modify Paper strategy.
+ * A missing/stale feature is not evidence that a fresh PULL has failed.
+ * Every deferral remains bounded by the existing five-minute max hold.
+ */
+export function payneRealHoldEvidenceDecision({heldMs,marketPresent,featureAvailable,featureFresh,decisionLabel}={}) {
+  // The clock must be established; unknown age cannot create unlimited holding.
+  if(!Number.isFinite(heldMs) || heldMs<0)
+    return {action:'RECONCILE',reason:'HOLD_AGE_UNKNOWN'};
+  // Preserve the existing max-hold priority, even if features are missing.
+  if(heldMs>=PAYNE_PAPER_RULES.maxHoldMs)
+    return managementDecision({heldMs,owned:true,marketPresent,decisionLabel});
+  // A failed market read is not a validated strategy failure; preserve
+  // the existing market_missing exit path and its executable-bid guard.
+  if(marketPresent!==true)
+    return managementDecision({heldMs,owned:true,marketPresent:false,decisionLabel});
+  if(featureAvailable!==true || featureFresh!==true)
+    return {action:'HOLD',reason:featureFresh===false?'FEATURE_STALE':'FEATURE_UNAVAILABLE'};
+  // Only a fresh available feature may establish decision_exit.
+  return managementDecision({heldMs,owned:true,marketPresent:true,decisionLabel});
+}
+
 export async function recordManagementObservation(env, observation) {
   return appendEvent(env, 'MANAGEMENT_OBSERVATION', observation);
 }
@@ -3963,16 +3985,23 @@ async function managePayneRealPosition(env,control,series,postImpl=kalshiPayneOr
   const currentPaperDecision=feature?.available
     ? paperDecision({score:feature.score,edge:feature.edge,move:feature.move,threshold:Number(series.threshold)})
     : {label:'MISSING'};
-  const decision=managementDecision({
+  const decision=payneRealHoldEvidenceDecision({
     heldMs:ageMs,
-    owned:true,
     marketPresent:quote?.ok===true,
+    featureAvailable:feature?.available===true,
+    featureFresh:featureState?.fresh===true,
     decisionLabel:currentPaperDecision.label,
   });
   position.currentPaperDecision=currentPaperDecision.label;
   position.currentScore=feature?.available?feature.score:null;
   position.currentMarketPrice=Number.isFinite(bid)?bid:null;
   position.holdDurationMs=Number.isFinite(ageMs)?ageMs:null;
+  if(decision.action==='RECONCILE'){
+    position.status='RECONCILIATION_UNKNOWN';
+    series.status='MANAGEMENT_TIME_UNKNOWN';
+    await settleSeriesControl(env,series,1,{failClosed:true});
+    return saveRealSeriesState(env,series);
+  }
   if(decision.action!=='EXIT'){
     position.status='OPEN';
     series.status=seriesTerminal(series)?'ATTEMPT_LIMIT_REACHED_MANAGING_POSITION':'MANAGING_POSITION_SERIES_CONTINUES';
