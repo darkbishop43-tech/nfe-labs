@@ -1,0 +1,29 @@
+name: PAYNE Staircase Live Readback
+on:
+  push:
+    branches: [payne-staircase-live-readback-20261015]
+permissions:
+  contents: read
+jobs:
+  readback:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Read existing production cockpit and Cloudflare deployment
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          b='https://market-edge-payne-kalshi-real.darkbishop43.workers.dev'
+          curl -fsS --max-time 25 "$b/" -o /tmp/live-cockpit
+          printf 'COCKPIT_BYTES='; wc -c </tmp/live-cockpit
+          for pattern in 'DYNAMIC STAIRCASE' 'shadow-staircase/observe' 'PAYNE REAL' 'payneStaircaseShadow';do
+            if grep -Fq "$pattern" /tmp/live-cockpit;then echo "LIVE_MARKER_PRESENT=$pattern";else echo "LIVE_MARKER_MISSING=$pattern";fi
+          done
+          curl -fsS --max-time 25 "$b/control" -o /tmp/control.json
+          jq -c '{armed:.control.armed,openPositions:.control.openPositions}' /tmp/control.json
+          curl -fsS --max-time 25 -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/market-edge-payne-kalshi-real/deployments" -o /tmp/deployments.json
+          jq -c '{current:.result.deployments[0].versions}' /tmp/deployments.json
+          echo READ_ONLY_LIVE_READBACK_COMPLETE
