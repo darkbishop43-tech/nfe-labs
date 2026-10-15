@@ -310,6 +310,12 @@ export async function updateFounderControl(env, action, rawValue = null) {
   next.fundingAuthority=next.armed?'INDEX2_ONLY':'INDEX2_ONLY_INACTIVE_DISARMED';
 
   await kvPutJson(env,CONTROL_KEY,next);
+  if(name==='DISARM' && before.armed===true){
+    await recordPayneDisarm(env,before,next,await loadRealSeriesState(env),{
+      actor:'FOUNDER',triggeringFunction:'updateFounderControl',
+      reasonCode:'FOUNDER_DISARM'
+    });
+  }
   await appendEvent(env,'FOUNDER_CONTROL_CHANGED',{
     action:name,
     armed:next.armed,
@@ -3863,10 +3869,36 @@ function realizedPnlFromPosition(position) {
   return Number((((exit-entry)*qty)-entryFee-exitFee).toFixed(4));
 }
 
-async function closeRealSeriesControl(env,attempts=1,openPositions=0) {
+// Diagnostic-only event: no change to entry, exit, disarm or safety decisions.
+async function recordPayneDisarm(env,previous,next,series,{actor='SYSTEM',triggeringFunction='UNKNOWN',reasonCode='UNKNOWN',failClosedReason=null}={}) {
+  if(previous?.armed!==true || next?.armed!==false)return null;
+  const row=await appendRealLedger(env,'PAYNE_ARM_TRANSITION_V1',{
+    seriesId:series?.seriesId||null,
+    previousArmed:true,newArmed:false,actor,triggeringFunction,
+    reasonCode:String(reasonCode||'UNKNOWN'),failClosedReason:failClosedReason||null,
+    attemptsStarted:Number(series?.attemptsStarted??next.attempts??0),
+    attemptTarget:Number(series?.attemptTarget??next.attemptTarget??0),
+    completedAt:series?.completedAt||null,
+    ownedPositions:Number(next?.openPositions??0),
+    unresolvedEntry:series?.unresolvedEntry===true,
+    eventTimestamp:new Date().toISOString()
+  });
+  // Existing durable PAYNE KV ledger readback. Errors remain visible, never claim success.
+  const proof=await kvGetJson(env,REAL_LEDGER_PREFIX+row.at+':'+row.recordId);
+  if(!proof || proof.recordId!==row.recordId)throw Error('PAYNE_DISARM_LEDGER_READBACK_FAILED');
+  return row;
+}
+async function closeRealSeriesControl(env,attempts=1,openPositions=0,reasonCode='UNKNOWN',seriesSnapshot=null) {
   const control=await loadControl(env);
   const next={...control,armed:false,attempts,openPositions,providerWriteAuthority:'BUILT_INACTIVE_DISARMED',providerPostAuthority:'BUILT_INACTIVE_DISARMED',realExecution:'BUILT_INACTIVE_DISARMED',fundingAuthority:'INDEX2_ONLY_INACTIVE_DISARMED',requiredExchangeIndex:2,realControlSchema:REAL_CONTROL_SCHEMA};
   await kvPutJson(env,CONTROL_KEY,next);
+  if(control.armed===true){
+    const series=seriesSnapshot||await loadRealSeriesState(env);
+    await recordPayneDisarm(env,control,next,series,{
+      actor:'SYSTEM',triggeringFunction:'closeRealSeriesControl',
+      reasonCode,failClosedReason:reasonCode.startsWith('FAIL_CLOSED_')?reasonCode:null
+    });
+  }
   return next;
 }
 
@@ -3876,7 +3908,10 @@ function seriesDisarmsOnStep(series,failClosed){return failClosed===true||series
 // otherwise stay armed (counters only) so the next attempt may proceed once the prior attempt is clean.
 async function settleSeriesControl(env,series,openPositions,{failClosed=false}={}) {
   const attempts=Number(series?.attemptsStarted||0);
-  if(seriesDisarmsOnStep(series,failClosed)) return closeRealSeriesControl(env,attempts,openPositions);
+  if(seriesDisarmsOnStep(series,failClosed))
+    return closeRealSeriesControl(env,attempts,openPositions,
+      failClosed?'FAIL_CLOSED_'+String(series?.status||'UNKNOWN'):
+      'SERIES_TERMINAL_'+String(series?.status||'UNKNOWN'),series);
   const control=await loadControl(env);
   const next={...control,attempts,openPositions,requiredExchangeIndex:2,realControlSchema:REAL_CONTROL_SCHEMA};
   await kvPutJson(env,CONTROL_KEY,next);
@@ -4198,22 +4233,22 @@ async function runPayneRealExecutionCycleOwned(env,{postImpl=kalshiPayneOrderPos
   const cfg=frozenSeriesConfig(series);
   if(!cfg.ok){
     series.status='ARMED_SERIES_CONFIG_NOT_FROZEN_FAIL_CLOSED';
-    await closeRealSeriesControl(env,started,series.position?1:0);
+    await closeRealSeriesControl(env,started,series.position?1:0,'FAIL_CLOSED_FROZEN_CONFIG_INVALID',series);
     return saveRealSeriesState(env,series);
   }
   if(Number(control.activeThreshold)!==cfg.threshold || Number(control.maxEntryDebitUsd)!==cfg.maxEntryDebitUsd || Number(control.attemptTarget)!==cfg.attemptTarget || Number(control.requiredExchangeIndex)!==2){
     series.status='ARMED_CONFIGURATION_INVALID_FAIL_CLOSED';
-    await closeRealSeriesControl(env,started,series.position?1:0);
+    await closeRealSeriesControl(env,started,series.position?1:0,'FAIL_CLOSED_FROZEN_CONFIG_MISMATCH',series);
     return saveRealSeriesState(env,series);
   }
   if(series.unresolvedEntry===true){
     series.status='ENTRY_RECONCILIATION_REQUIRED';
-    await closeRealSeriesControl(env,started,series.position?1:0);
+    await closeRealSeriesControl(env,started,series.position?1:0,'FAIL_CLOSED_UNRESOLVED_ENTRY',series);
     return saveRealSeriesState(env,series);
   }
   if(started>=cfg.attemptTarget){
     series.status='COMPLETE_ENTRY_AUTHORITY';
-    await closeRealSeriesControl(env,started,series.position?1:0);
+    await closeRealSeriesControl(env,started,series.position?1:0,'ATTEMPT_TARGET_COMPLETED',series);
     return saveRealSeriesState(env,series);
   }
   const interlock=seriesInterlock(series,control.maxPositions);
@@ -4370,7 +4405,7 @@ async function runPayneRealExecutionCycleOwned(env,{postImpl=kalshiPayneOrderPos
       seriesId,attemptId,intentNo,attemptNo:null,specimenId:series.fireLatch?.specimenId||null,ticker:candidate.ticker,
       reason:'ENTRY_AUTHORITY_REVOKED_AFTER_LATCH',writerInvoked:false,providerPostStarted:false,providerAttemptCounted:false,providerOrderId:null
     });
-    await closeRealSeriesControl(env,started,0);
+    await closeRealSeriesControl(env,started,0,'ENTRY_AUTHORITY_REVOKED_AFTER_LATCH',series);
     return saveRealSeriesState(env,series);
   }
 
