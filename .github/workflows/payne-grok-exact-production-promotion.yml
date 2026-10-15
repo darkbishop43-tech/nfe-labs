@@ -1,7 +1,7 @@
 name: PAYNE Grok Exact Pinned Production Promotion
 on:
   push:
-    branches: [payne-real-history-export-isolated-20261015]
+    branches: [payne-maintenance-notice-isolated-20261015]
     paths: [".github/workflows/payne-grok-exact-production-promotion.yml"]
 permissions:
   contents: read
@@ -54,7 +54,7 @@ jobs:
         run: |
           set -euo pipefail
           curl --fail --silent --show-error --max-time 25 -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/market-edge-payne-kalshi-real/deployments" -o /tmp/payne-deployments-pre.json
-          jq -e '.success==true and (.result.deployments[0].versions | any(.version_id=="3e69c1cc-dfa1-4d9e-b205-02a6b3dbe91c" and .percentage==100))' /tmp/payne-deployments-pre.json >/dev/null
+          jq -e '.success==true and (.result.deployments[0].versions | any(.version_id=="6e5cc3ac-7ce2-4ead-8904-e55c02c15979" and .percentage==100))' /tmp/payne-deployments-pre.json >/dev/null
           echo 'PRODUCTION_BASELINE_MATCH=PASS'
       - name: Prepare authenticated PAYNE maintenance proof read-only
         shell: bash
