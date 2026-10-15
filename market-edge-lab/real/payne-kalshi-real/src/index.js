@@ -723,6 +723,34 @@ export function managementDecision({ heldMs, owned = true, marketPresent = true,
   return paperManagementDecision({heldMs,owned,marketPresent,decisionLabel});
 }
 
+/**
+ * Real-position evidence adapter only. It does not modify Paper strategy.
+ * A missing/stale feature is not evidence that a fresh PULL has failed.
+ * Every deferral remains bounded by the existing five-minute max hold.
+ */
+export function payneRealHoldEvidenceDecision({heldMs,marketPresent,marketStatus,contractCloseTime,nowMs,featureAvailable,featureFresh,decisionLabel}={}) {
+  // Real-only adapter. PAYNE Paper's 300s limit and strategy source are untouched.
+  if(!Number.isFinite(heldMs)||heldMs<0||!Number.isFinite(nowMs))
+    return {action:'RECONCILE',reason:'HOLD_CLOCK_UNKNOWN'};
+  if(marketPresent!==true)
+    return {action:'RECONCILE',reason:'PROVIDER_MARKET_UNKNOWN'};
+  const closeMs=Date.parse(contractCloseTime||'');
+  if(!Number.isFinite(closeMs))
+    return {action:'RECONCILE',reason:'PROVIDER_CLOSE_TIME_UNKNOWN'};
+  const status=String(marketStatus||'').toLowerCase();
+  if(nowMs>=closeMs || ['closed','settled','finalized','determined'].includes(status))
+    return {action:'RECONCILE',reason:'PROVIDER_CONTRACT_CLOSED'};
+  if(!['open','active'].includes(status))
+    return {action:'RECONCILE',reason:'PROVIDER_MARKET_STATUS_UNKNOWN'};
+  if(featureAvailable!==true||featureFresh!==true)
+    return {action:'HOLD',reason:featureFresh===false?'FEATURE_STALE':'FEATURE_UNAVAILABLE'};
+  if(decisionLabel==='PULL TRIGGER')
+    return {action:'HOLD',reason:'PULL_TRIGGER_REMAINS_QUALIFIED'};
+  if(!decisionLabel||decisionLabel==='MISSING'||decisionLabel==='UNAVAILABLE')
+    return {action:'HOLD',reason:'FEATURE_UNAVAILABLE'};
+  return {action:'EXIT',reason:'decision_exit'};
+}
+
 export async function recordManagementObservation(env, observation) {
   return appendEvent(env, 'MANAGEMENT_OBSERVATION', observation);
 }
@@ -3963,16 +3991,27 @@ async function managePayneRealPosition(env,control,series,postImpl=kalshiPayneOr
   const currentPaperDecision=feature?.available
     ? paperDecision({score:feature.score,edge:feature.edge,move:feature.move,threshold:Number(series.threshold)})
     : {label:'MISSING'};
-  const decision=managementDecision({
+  const decision=payneRealHoldEvidenceDecision({
     heldMs:ageMs,
-    owned:true,
-    marketPresent:quote?.ok===true,
+    marketPresent:quote?.ok===true && quote?.market?.ticker===position.marketTicker,
+    marketStatus:quote?.market?.status,
+    contractCloseTime:quote?.market?.closeTime,
+    nowMs,
+    featureAvailable:feature?.available===true,
+    featureFresh:featureState?.fresh===true,
     decisionLabel:currentPaperDecision.label,
   });
   position.currentPaperDecision=currentPaperDecision.label;
   position.currentScore=feature?.available?feature.score:null;
   position.currentMarketPrice=Number.isFinite(bid)?bid:null;
   position.holdDurationMs=Number.isFinite(ageMs)?ageMs:null;
+  if(decision.action==='RECONCILE'){
+    position.status='RECONCILIATION_UNKNOWN';
+    series.status='MANAGEMENT_PROVIDER_RECONCILIATION_REQUIRED';
+    position.reconciliationReason=decision.reason;
+    await settleSeriesControl(env,series,1,{failClosed:true});
+    return saveRealSeriesState(env,series);
+  }
   if(decision.action!=='EXIT'){
     position.status='OPEN';
     series.status=seriesTerminal(series)?'ATTEMPT_LIMIT_REACHED_MANAGING_POSITION':'MANAGING_POSITION_SERIES_CONTINUES';
