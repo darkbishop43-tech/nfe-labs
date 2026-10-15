@@ -1,0 +1,21 @@
+name: AUTO Exchange Maintenance Notice Offline
+on:
+  push:
+    branches: [auto-maintenance-notice-isolated-20261015]
+permissions:
+  contents: read
+jobs:
+  offline:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Validate display-only notice
+        working-directory: market-edge-lab/real/baseline
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --test test/auto-maintenance-notice-offline.test.mjs
+          echo PRODUCTION_MUTATIONS=NONE
