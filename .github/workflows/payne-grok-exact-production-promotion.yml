@@ -1,7 +1,7 @@
 name: PAYNE Grok Exact Pinned Production Promotion
 on:
   push:
-    branches: [payne-hold-repair-production-assembly-20261015]
+    branches: [payne-real-history-export-isolated-20261015]
     paths: [".github/workflows/payne-grok-exact-production-promotion.yml"]
 permissions:
   contents: read
@@ -30,7 +30,7 @@ jobs:
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
-          test "$(git rev-parse HEAD:market-edge-lab/real/payne-kalshi-real/src/index.js)" = ca3abd01212be2cc631f998c078498505a448fec
+          test "$(git rev-parse HEAD:market-edge-lab/real/payne-kalshi-real/src/index.js)" = cc8d10e51a259f9c536e5d560641211d1660caa9
           test "$(git rev-parse HEAD:market-edge-lab/real/payne-kalshi-real/src/payne-closure-evidence.js)" = 7f0c5a2dce12ed0d56c1024cdd58c4f581ea364a
           grep -q '^name = "market-edge-payne-kalshi-real"$' market-edge-lab/real/payne-kalshi-real/wrangler.toml
           test -f market-edge-lab/real/payne-kalshi-real/src/payne-execution-coordinator.js
@@ -54,7 +54,7 @@ jobs:
         run: |
           set -euo pipefail
           curl --fail --silent --show-error --max-time 25 -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/market-edge-payne-kalshi-real/deployments" -o /tmp/payne-deployments-pre.json
-          jq -e '.success==true and (.result.deployments[0].versions | any(.version_id=="5683c0c1-4630-4786-be5b-8dd7c92ed065" and .percentage==100))' /tmp/payne-deployments-pre.json >/dev/null
+          jq -e '.success==true and (.result.deployments[0].versions | any(.version_id=="3e69c1cc-dfa1-4d9e-b205-02a6b3dbe91c" and .percentage==100))' /tmp/payne-deployments-pre.json >/dev/null
           echo 'PRODUCTION_BASELINE_MATCH=PASS'
       - name: Prepare authenticated PAYNE maintenance proof read-only
         shell: bash
