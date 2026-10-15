@@ -1,0 +1,32 @@
+name: PAYNE Existing Gate Field Proof Read Only
+on:
+  push:
+    branches: [payne-staircase-gate-field-proof-20261015]
+permissions:
+  contents: read
+jobs:
+  field-proof:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Read existing PAYNE control and evaluate each exact gate condition
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          namespace='03352b0ccb034f1bb8206f663a04b125'
+          key="$(jq -nr --arg value 'payne-kalshi:control:v1' '$value|@uri')"
+          curl -fsS --max-time 25 -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/storage/kv/namespaces/$namespace/values/$key" -o /tmp/control.json
+          jq -c '{
+            schema:{actual:.realControlSchema,expected:"PAYNE_REAL_CONTROL_V2_PAPER_BRAIN",pass:(.realControlSchema=="PAYNE_REAL_CONTROL_V2_PAPER_BRAIN")},
+            armed:{actual:.armed,expected:false,pass:(.armed==false)},
+            openPositions:{actual:.openPositions,expected:"0 or approved maintenance 1",pass:(.openPositions==0)},
+            requiredExchangeIndex:{actual:.requiredExchangeIndex,expected:2,pass:(.requiredExchangeIndex==2)},
+            activeThreshold:{actual:.activeThreshold,expected:"number 0.50 to 1.00",pass:(.activeThreshold|type=="number" and .>=0.50 and .<=1)},
+            attemptTarget:{actual:.attemptTarget,expected:"integer >=1",pass:(.attemptTarget|type=="number" and .>=1 and .==floor)},
+            maxEntryDebitUsd:{actual:.maxEntryDebitUsd,expected:"number >0",pass:(.maxEntryDebitUsd|type=="number" and .>0)},
+            scanEnabled:{actual:.scanEnabled,expected:true,pass:(.scanEnabled==true)}
+          }' /tmp/control.json
+          echo READ_ONLY_KV_GET_NO_MUTATIONS
