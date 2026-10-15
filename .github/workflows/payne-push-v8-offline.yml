@@ -1,0 +1,22 @@
+name: PAYNE push V8 offline verification
+on:
+  push:
+    branches:
+      - payne-push-cockpit-v8-isolated-20261015
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  test-push-only:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: market-edge-lab/real/payne-kalshi-real/push-worker
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm install --ignore-scripts --no-audit --no-fund
+      - run: npm run check
+      - run: npm test
