@@ -45,7 +45,7 @@ function project(attempt,events,position){
  entryScore:numeric(val(attempt.score,attempt.entryScore)),entryPrice:numeric(val(position?.entryAverageFillPrice,attempt.providerResult?.averageFillPrice)),
  executionStage:val(attempt.executionStage,attempt.executionHandoff),terminalStatus:terminal,managementStatus:val(position?.status),exitResult:val(exit?.result?.state,position?.exitReason),
  reconciliationStatus:val(position?.reconciliationState,reconciliation?.type,attempt.reconciliationReason),clientOrderId:val(attempt.clientOrderId,position?.entryClientOrderId),
- providerOrderId:val(attempt.providerOrderId,position?.entryOrderId),fillId:val(attempt.fillId,position?.entryFillId,fill?.fillId),
+ providerOrderId:val(attempt.providerOrderId,position?.entryOrderId),exitProviderOrderId:val(position?.exitOrderId),exitClientOrderId:val(position?.exitClientOrderId),fillId:val(attempt.fillId,position?.entryFillId,fill?.fillId),
  entryTime:val(position?.entryTime,attempt.filledAt),exitTime:val(position?.exitTime),exitPrice:numeric(val(position?.exitAverageFillPrice)),
  quantity:numeric(val(position?.filledCount,attempt.providerResult?.fillCount)),fees:numeric(val(position?.entryAverageFeePaid)),
  // No unverified local value is promoted to provider-verified P/L.
