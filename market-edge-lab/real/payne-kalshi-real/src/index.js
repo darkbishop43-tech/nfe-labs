@@ -5,6 +5,7 @@ import {liveOrderWatchProjection,paynePositionRecords,payneCapacityEvidence,upse
 import {PayneExecutionCoordinator,claimPayneExecution,releaseProvenNoPost,resolvePayneExecutionClaim,claimPayneExit,inspectPayneCoordinatorClaim} from './payne-execution-coordinator.js';
 export {PayneExecutionCoordinator};
 import { kalshiReadOnlyProof, kalshiGetOnly } from './kalshi-get-only.js';
+import {readPayneProviderHistory,enrichPayneCycles} from './payne-provider-history-enrichment.js';
 import { kalshiPayneOrderPost, PAYNE_WRITE_CONTRACT } from './kalshi-real-write.js';
 import { cockpitHtml } from './cockpit-html.js';
 import { sanitizeKalshiError, auditStage } from './payne-execution-audit.js';
@@ -4971,7 +4972,13 @@ export default {
         const range=String(url.searchParams.get('range')||'current');
         const bounds=exportRangeBounds(range,url);
         const history=await payneHistoryAll(binding(env),bounds);
-        return Response.json({ok:true,readOnly:true,schema:'PAYNE_REAL_CYCLES_V1',...payneHistoryPage(history,url.searchParams.get('page'),url.searchParams.get('limit'))},{headers:{'cache-control':'no-store'}});
+        const page=payneHistoryPage(history,url.searchParams.get('page'),url.searchParams.get('limit'));
+        const provider=await readPayneProviderHistory(path=>kalshiGetOnly(env,path));
+        page.rows=enrichPayneCycles(page.rows||[],provider,{readAt:provider.readAt,coverage:provider.coverage});
+        return Response.json({ok:true,readOnly:true,schema:'PAYNE_REAL_CYCLES_V1',...page,
+          providerCoverage:provider.coverage,providerReadComplete:provider.complete,
+          providerLastReadAt:provider.readAt,providerWrites:0,ordersSubmittedByThisRead:0},
+          {headers:{'cache-control':'no-store'}});
       } catch(e) {
         return Response.json({ok:false,complete:false,error:String(e?.message||'HISTORY_READ_FAILED')},{status:503,headers:{'cache-control':'no-store'}});
       }
