@@ -915,6 +915,51 @@ function firstFinancialDollarField(body,fields){
   }
   return {value:null,field:null};
 }
+// Display-only reconstruction: a P/L snapshot is not a financial transaction.
+// One strict, provider-flat-confirmed result per PAYNE-owned series + attempt.
+// An EXIT_PROVIDER_RESULT (including zero fills) never adds P/L directly.
+export function reconstructedClosedLedgerPnl(rows=[]){
+  const owned=(Array.isArray(rows)?rows:[]).filter(r=>r?.owner===REAL_OWNER && r?.seriesId && r?.attemptId && r?.ticker);
+  const groups=new Map();
+  for(const row of owned){
+    const id=String(row.seriesId)+'|'+String(row.attemptId);
+    if(!groups.has(id))groups.set(id,[]);
+    groups.get(id).push(row);
+  }
+  const results=[];
+  for(const [identity,group] of groups){
+    const entries=group.filter(r=>r.type==='POSITION_OWNERSHIP_ESTABLISHED');
+    const flat=group.filter(r=>r.type==='PROVIDER_RECONCILED_FLAT');
+    if(entries.length===0 && flat.length===0)continue;
+    const tickers=new Set(group.map(r=>r.ticker));
+    let value=null, status='UNKNOWN';
+    if(tickers.size===1 && entries.length && flat.length){
+      const quantities=[...new Set(entries.map(r=>finiteFinancialNumber(r.filledCount)))];
+      const quantity=quantities.length===1?quantities[0]:null;
+      const fills=group.filter(r=>r.type==='EXIT_PROVIDER_RESULT' && r.result?.state==='FILLED');
+      const seenOrders=new Set();
+      let sumFills=0, fillsValid=true;
+      for(const row of fills){
+        const o=row.result;
+        const fillCount=finiteFinancialNumber(o.fillCount);
+        const orderId=String(o.orderId||'');
+        if(!orderId || seenOrders.has(orderId) || fillCount===null || fillCount<=0 ||
+           finiteFinancialNumber(o.averageFillPrice)===null || finiteFinancialNumber(o.averageFeePaid)===null){
+          fillsValid=false;break;
+        }
+        seenOrders.add(orderId);sumFills+=fillCount;
+      }
+      const flatValues=[...new Set(flat.map(r=>finiteFinancialNumber(r.realizedPnlUsd)))];
+      if(quantity!==null && quantity>0 && fillsValid && fills.length &&
+         Math.abs(sumFills-quantity)<1e-9 && flatValues.length===1 && flatValues[0]!==null){
+        value=flatValues[0];status='RECONSTRUCTED_LEDGER_NOT_PROVIDER_CERTIFIED';
+      }
+    }
+    results.push({identity,value,status,at:group.find(r=>r.type==='PROVIDER_RECONCILED_FLAT')?.at||null});
+  }
+  return results;
+}
+
 export function buildAccountFinancialSummary({
   balanceBody={},
   ledger=[],
@@ -940,15 +985,15 @@ export function buildAccountFinancialSummary({
   const runRows=currentSeriesId?payneRows.filter(x=>String(x?.seriesId||'')===String(currentSeriesId)):[];
   const utcDay=new Date(nowMs).toISOString().slice(0,10);
   const dayRows=payneRows.filter(x=>String(x?.at||'').slice(0,10)===utcDay);
-  const realizedSum=rows=>Number(rows.reduce((sum,row)=>{
-    const value=finiteFinancialNumber(row?.realizedPnlUsd);
-    return sum+(value===null?0:value);
-  },0).toFixed(4));
-  const runRealizedEvents=runRows.filter(x=>finiteFinancialNumber(x?.realizedPnlUsd)!==null);
-  const dayRealizedEvents=dayRows.filter(x=>finiteFinancialNumber(x?.realizedPnlUsd)!==null);
+  const ledgerPnl=Array.isArray(ledger)?ledger:[];
+  const eligible=reconstructedClosedLedgerPnl(ledgerPnl);
+  const runPositions=eligible.filter(r=>r.identity.startsWith(String(currentSeriesId)+'|'));
+  const dayPositions=eligible.filter(r=>String(r.at||'').slice(0,10)===utcDay);
+  const sumClosed=positions=>positions.length && positions.every(p=>p.value!==null)
+    ? Number(positions.reduce((sum,p)=>sum+p.value,0).toFixed(4)):null;
   const runHasNoAttempt=Number(series?.attemptsStarted||0)===0;
-  const runPnlUsd=runRealizedEvents.length?realizedSum(runRealizedEvents):(currentSeriesId&&runHasNoAttempt?0:null);
-  const dayPnlUsd=dayRealizedEvents.length?realizedSum(dayRealizedEvents):0;
+  const runPnlUsd=runPositions.length?sumClosed(runPositions):(currentSeriesId&&runHasNoAttempt?0:null);
+  const dayPnlUsd=dayPositions.length?sumClosed(dayPositions):null;
 
   const position=series?.position||null;
   const entryFee=finiteFinancialNumber(position?.entryAverageFeePaid);
@@ -980,9 +1025,9 @@ export function buildAccountFinancialSummary({
     },
     payne:{
       currentRunPnlUsd:runPnlUsd,
-      currentRunPnlStatus:runPnlUsd===null?'UNKNOWN':'NFE CALCULATED — PAYNE REAL LEDGER REALIZED P/L ONLY',
+      currentRunPnlStatus:runPnlUsd===null?'UNKNOWN':'PAYNE RECONSTRUCTED LEDGER REALIZED P/L — NOT PROVIDER-CERTIFIED',
       utcDayPnlUsd:dayPnlUsd,
-      utcDayPnlStatus:'NFE CALCULATED — PAYNE REAL LEDGER REALIZED P/L ONLY',
+      utcDayPnlStatus:dayPnlUsd===null?'UNKNOWN':'PAYNE RECONSTRUCTED LEDGER REALIZED P/L — NOT PROVIDER-CERTIFIED',
       feesUsd:runFeesUsd,
       feesStatus:runFeesUsd===null?'UNKNOWN':'NFE CALCULATED — PAYNE CURRENT SERIES PROVIDER FEES ONLY',
       currentSeriesId,
