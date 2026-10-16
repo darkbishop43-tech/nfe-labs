@@ -4183,6 +4183,8 @@ async function managePayneRealPosition(env,control,series,postImpl=kalshiPayneOr
     position.status='EXIT_RETRY';series.status='EXIT_RETRY_REQUIRED';
   }else{
     position.status='EXIT_RECONCILIATION_REQUIRED';series.status='EXIT_RECONCILIATION_REQUIRED';
+    // FILLED needs the normal next provider-flat read, not immediate disarm.
+    position.exitFillAwaitingProviderReconciliation=true;
   }
   await appendRealLedger(env,'EXIT_PROVIDER_RESULT',{seriesId:series.seriesId,attemptId:position.attemptId,ticker:position.marketTicker,result,proof,exitReason:decision.reason,realizedPnlUsd:realizedPnlFromPosition(position)});
   await settleSeriesControl(env,series,1,{failClosed:result.state==='UNKNOWN'});
@@ -4198,7 +4200,7 @@ async function manageAllPayneRealPositions(env,control,series,postImpl,nowMs){
     series=upsertPaynePosition(managed,managed.position);
   }
   const remaining=unresolvedPaynePositions(series);
-  const failClosed=remaining.some(p=>['RECONCILIATION_UNKNOWN','EXIT_RECONCILIATION_REQUIRED'].includes(p.status));
+  const failClosed=remaining.some(p=>p.status==='RECONCILIATION_UNKNOWN' || (p.status==='EXIT_RECONCILIATION_REQUIRED' && p.exitFillAwaitingProviderReconciliation!==true));
   await settleSeriesControl(env,series,remaining.length,{failClosed});
   return saveRealSeriesState(env,series);
 }
