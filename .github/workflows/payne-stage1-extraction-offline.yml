@@ -21,6 +21,8 @@ jobs:
         run: |
           node --check .github/scripts/payne-stage1-extract.mjs
           node --test .github/scripts/test/payne-stage1-extract.test.mjs
+          node --test market-edge-lab/real/payne-kalshi-real/test/payne-provider-history-enrichment.test.mjs
+          node --test market-edge-lab/real/payne-kalshi-real/test/disarm-accountability-v1.test.mjs market-edge-lab/real/payne-kalshi-real/test/disarm-accountability-runtime.test.mjs
       - name: Preserve disarm audit source behavior
         run: |
           grep -Fq 'PAYNE_ARM_TRANSITION_V1' .github/workflows/payne-disarm-ledger-read-only.yml
