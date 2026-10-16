@@ -20,7 +20,7 @@ export function enrichPayneCycles(rows,provider,{readAt=null,coverage='UNKNOWN'}
   // Existing PAYNE identity is authoritative. Never join by ticker alone.
   const matchingOrders=orders.filter(o=>{
     const oid=id(o.order_id||o.orderId),cid=id(o.client_order_id||o.clientOrderId);
-    const ot=id(o.ticker||o.market_ticker),os=id(o.side).toLowerCase();
+    const ot=id(o.ticker||o.market_ticker),os=id(o.outcome_side||o.outcomeSide||o.yes_no).toLowerCase();
     return exact(ot,ticker)&&(!os||os===side)&&
       ((providerOrder&&exact(oid,providerOrder))||(client&&exact(cid,client)));
   });
@@ -38,14 +38,14 @@ export function enrichPayneCycles(rows,provider,{readAt=null,coverage='UNKNOWN'}
   const matches=[...allFills.values()].filter(f=>
     exact(id(f.order_id||f.orderId),entryId)&&
     exact(id(f.ticker||f.market_ticker),ticker)&&
-    (!id(f.side)||id(f.side).toLowerCase()===side));
+    (!id(f.outcome_side||f.outcomeSide||f.yes_no)||id(f.outcome_side||f.outcomeSide||f.yes_no).toLowerCase()===side));
   result.providerOrderStatus=order.status||null;
   result.providerOrderId=entryId;
   if(!matches.length){result.missingProviderFields.push('ENTRY_FILLS_NOT_FOUND');return result;}
   const counts=matches.map(f=>num(f.count??f.quantity??f.count_fp));
   if(counts.some(x=>x===null||x<=0)){result.missingProviderFields.push('FILL_QUANTITY_UNKNOWN');return result;}
   const qty=counts.reduce((a,b)=>a+b,0);
-  const prices=matches.map(f=>num(f.yes_price_dollars??f.price_dollars??f.price));
+  const prices=matches.map(f=>num((side==='no'?f.no_price_dollars:f.yes_price_dollars)??f.price_dollars));
   const fees=matches.map(f=>num(f.fee_cost??f.fee_cost_dollars??f.fee));
   result.quantity=qty;
   result.entryTime=matches.map(f=>f.created_time||f.created_at||f.ts||null).filter(Boolean).sort()[0]||null;
