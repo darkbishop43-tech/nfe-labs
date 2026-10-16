@@ -25,5 +25,5 @@ jobs:
         run: |
           grep -Fq 'PAYNE_ARM_TRANSITION_V1' .github/workflows/payne-disarm-ledger-read-only.yml
           grep -Fq 'c0c78742-2819-49e1-9025-ec0d67013aed' .github/workflows/payne-disarm-ledger-read-only.yml
-          grep -Fq 'GET-only' .github/scripts/payne-stage1-extract.mjs
+          grep -Fq 'No credentials, no POST' .github/scripts/payne-stage1-extract.mjs
           ! grep -Eiq 'method:.*(POST|PUT|PATCH|DELETE)' .github/scripts/payne-stage1-extract.mjs
