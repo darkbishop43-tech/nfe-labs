@@ -46,7 +46,7 @@ export function enrichPayneCycles(rows,provider,{readAt=null,coverage='UNKNOWN'}
   if(counts.some(x=>x===null||x<=0)){result.missingProviderFields.push('FILL_QUANTITY_UNKNOWN');return result;}
   const qty=counts.reduce((a,b)=>a+b,0);
   const prices=matches.map(f=>num((side==='no'?f.no_price_dollars:f.yes_price_dollars)??f.price_dollars));
-  const fees=matches.map(f=>num(f.fee_cost??f.fee_cost_dollars??f.fee));
+  const fees=matches.map(f=>num(f.fee_cost_dollars));
   result.quantity=qty;
   result.entryTime=matches.map(f=>f.created_time||f.created_at||f.ts||null).filter(Boolean).sort()[0]||null;
   result.fillId=matches.length===1?id(matches[0].fill_id||matches[0].fillId):null;
@@ -79,7 +79,7 @@ export function enrichPayneCycles(rows,provider,{readAt=null,coverage='UNKNOWN'}
   }
   const exitQty=eq.reduce((a,b)=>a+b,0);
   const exitPrices=exitFills.map(f=>num((side==='no'?f.no_price_dollars:f.yes_price_dollars)??f.price_dollars));
-  const exitFees=exitFills.map(f=>num(f.fee_cost??f.fee_cost_dollars??f.fee));
+  const exitFees=exitFills.map(f=>num(f.fee_cost_dollars));
   result.exitFilledQuantity=exitQty;
   result.remainingQuantity=Math.max(0,qty-exitQty);
   result.exitTime=exitFills.map(f=>f.created_time||f.created_at||f.ts||null).filter(Boolean).sort().at(-1)||null;
@@ -97,6 +97,7 @@ export function enrichPayneCycles(rows,provider,{readAt=null,coverage='UNKNOWN'}
   if([result.entryPrice,result.exitPrice,result.entryFeesUsd,result.exitFeesUsd].some(x=>x===null)){
     result.missingProviderFields.push('PRICE_OR_FEE_UNKNOWN','REALIZED_PNL_UNKNOWN');return result;
   }
+  result.fees=Number((result.entryFeesUsd+result.exitFeesUsd).toFixed(4));
   result.realizedPnlUsd=Number(((result.exitPrice-result.entryPrice)*qty-result.entryFeesUsd-result.exitFeesUsd).toFixed(4));
   result.coverage='EXACT_ENTRY_AND_EXIT_FILLS_VERIFIED';
   result.providerEvidenceComplete=true;
