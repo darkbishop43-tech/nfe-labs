@@ -57,7 +57,50 @@ export function enrichPayneCycles(rows,provider,{readAt=null,coverage='UNKNOWN'}
   result.coverage='ENTRY_VERIFIED_EXIT_UNMATCHED';
   // Never infer an exit order or profit from same-ticker activity owned by another agent.
   result.exitPrice=null;result.exitTime=null;result.exitFeesUsd=null;result.realizedPnlUsd=null;
-  result.missingProviderFields.push('EXIT_ORDER_IDENTITY_NOT_VERIFIED','EXIT_FILL_EVIDENCE_NOT_VERIFIED','REALIZED_PNL_UNKNOWN');
+  const exitOrderId=id(row.exitProviderOrderId),exitClientId=id(row.exitClientOrderId);
+  if(!exitOrderId||!exitClientId){
+    result.missingProviderFields.push('EXIT_ORDER_IDENTITY_NOT_VERIFIED','EXIT_FILL_EVIDENCE_NOT_VERIFIED','REALIZED_PNL_UNKNOWN');
+    return result;
+  }
+  const exitOrders=orders.filter(o=>exact(id(o.order_id||o.orderId),exitOrderId)
+     && exact(id(o.client_order_id||o.clientOrderId),exitClientId)
+     && exact(id(o.ticker||o.market_ticker),ticker)
+     && (!id(o.outcome_side||o.outcomeSide||o.yes_no)||id(o.outcome_side||o.outcomeSide||o.yes_no).toLowerCase()===side));
+  if(exitOrders.length!==1){
+    result.missingProviderFields.push('EXIT_ORDER_NOT_EXACTLY_MATCHED','REALIZED_PNL_UNKNOWN');return result;
+  }
+  result.exitOrderStatus=exitOrders[0].status||null;
+  const exitFills=[...allFills.values()].filter(f=>exact(id(f.order_id||f.orderId),exitOrderId)
+    && exact(id(f.ticker||f.market_ticker),ticker)
+    && (!id(f.outcome_side||f.outcomeSide||f.yes_no)||id(f.outcome_side||f.outcomeSide||f.yes_no).toLowerCase()===side));
+  const eq=exitFills.map(f=>num(f.count??f.quantity??f.count_fp));
+  if(!eq.length||eq.some(x=>x===null||x<=0)){
+    result.missingProviderFields.push('EXIT_FILLS_NOT_COMPLETE','REALIZED_PNL_UNKNOWN');return result;
+  }
+  const exitQty=eq.reduce((a,b)=>a+b,0);
+  const exitPrices=exitFills.map(f=>num((side==='no'?f.no_price_dollars:f.yes_price_dollars)??f.price_dollars));
+  const exitFees=exitFills.map(f=>num(f.fee_cost??f.fee_cost_dollars??f.fee));
+  result.exitFilledQuantity=exitQty;
+  result.remainingQuantity=Math.max(0,qty-exitQty);
+  result.exitTime=exitFills.map(f=>f.created_time||f.created_at||f.ts||null).filter(Boolean).sort().at(-1)||null;
+  result.exitPrice=exitPrices.every(x=>x!==null)?exitPrices.reduce((a,p,i)=>a+p*eq[i],0)/exitQty:null;
+  result.exitFeesUsd=exitFees.every(x=>x!==null)?exitFees.reduce((a,b)=>a+b,0):null;
+  if(exitQty!==qty){
+    result.coverage='PARTIAL_EXIT_FILLED';
+    result.missingProviderFields.push('REMAINING_POSITION_REQUIRES_PROVIDER_RECONCILIATION','REALIZED_PNL_UNKNOWN');
+    return result;
+  }
+  if(!provider.complete){
+    result.coverage='PROVIDER_HISTORY_INCOMPLETE';
+    result.missingProviderFields.push('PROVIDER_HISTORY_PAGINATION_OR_READ_INCOMPLETE','REALIZED_PNL_UNKNOWN');return result;
+  }
+  if([result.entryPrice,result.exitPrice,result.entryFeesUsd,result.exitFeesUsd].some(x=>x===null)){
+    result.missingProviderFields.push('PRICE_OR_FEE_UNKNOWN','REALIZED_PNL_UNKNOWN');return result;
+  }
+  result.realizedPnlUsd=Number(((result.exitPrice-result.entryPrice)*qty-result.entryFeesUsd-result.exitFeesUsd).toFixed(4));
+  result.coverage='EXACT_ENTRY_AND_EXIT_FILLS_VERIFIED';
+  result.providerEvidenceComplete=true;
+  result.evidenceSource='KALSHI_EXACT_ORDER_AND_FILL_IDS';
   return result;
  });
 }
