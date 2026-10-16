@@ -34,3 +34,18 @@ test('provider reads handle pages and missing historical coverage',async()=>{
  assert.equal(r.complete,false);assert.match(r.coverage,/historicalFills:HTTP_403/);
  assert.ok(history.some(x=>x.includes('cursor=next')));
 });
+
+test('exact exit identities yield verified full-cycle PnL only with complete coverage',()=>{
+ const exitOrder={order_id:'exit-1',client_order_id:'payne-a-exit1',ticker:base.ticker,outcome_side:'no',side:'sell',status:'executed'};
+ const exitFill={fill_id:'x1',order_id:'exit-1',ticker:base.ticker,outcome_side:'no',count:2,no_price_dollars:'0.80',fee_cost_dollars:'0.02',created_time:'2026-10-15T22:15:00Z'};
+ const row={...base,exitProviderOrderId:'exit-1',exitClientOrderId:'payne-a-exit1'};
+ const [r]=enrichPayneCycles([row],{complete:true,orders:[order,exitOrder],fills:[fill('a1',2,'0.65'),exitFill]},{coverage:'PROVIDER_READS_COMPLETE'});
+ assert.equal(r.exitPrice,0.8);assert.equal(r.exitFeesUsd,0.02);assert.equal(r.realizedPnlUsd,0.26);
+ assert.equal(r.providerEvidenceComplete,true);
+});
+test('partial exit cannot be labeled full realized PnL',()=>{
+ const e={order_id:'exit-1',client_order_id:'payne-a-exit1',ticker:base.ticker,outcome_side:'no',status:'partially_filled'};
+ const f={fill_id:'x1',order_id:'exit-1',ticker:base.ticker,outcome_side:'no',count:1,no_price_dollars:'0.80',fee_cost_dollars:'0.01'};
+ const [r]=enrichPayneCycles([{...base,exitProviderOrderId:'exit-1',exitClientOrderId:'payne-a-exit1'}],{complete:true,orders:[order,e],fills:[fill('a1',2,'0.65'),f]});
+ assert.equal(r.remainingQuantity,1);assert.equal(r.realizedPnlUsd,null);assert.equal(r.providerEvidenceComplete,false);
+});
