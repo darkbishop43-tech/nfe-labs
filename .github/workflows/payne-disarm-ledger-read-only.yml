@@ -34,7 +34,7 @@ jobs:
           jq -c '{verified,incomplete,unknown,auditIncomplete}' /tmp/payne-audit-status.json
 
   stage1-offline-extraction:
-    if: github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/payne-profit-intelligence-stage1-extraction-isolated-20261016')
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -48,7 +48,7 @@ jobs:
           node --test .github/scripts/test/payne-stage1-extract.test.mjs
       - name: Read existing PAYNE routes only
         env:
-          PAYNE_MODE: ${{ inputs.mode }}
+          PAYNE_MODE: ${{ github.event_name == 'push' && 'all' || inputs.mode }}
           PAYNE_SERIES_ID: ${{ inputs.series_id }}
         run: node .github/scripts/payne-stage1-extract.mjs
       - name: Retain read-only evidence without secrets
