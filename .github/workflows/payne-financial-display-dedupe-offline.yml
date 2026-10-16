@@ -1,0 +1,30 @@
+name: PAYNE Financial Display Accounting Offline
+on:
+  push:
+    branches: [payne-financial-display-dedupe-isolated-20261016]
+    paths:
+      - 'market-edge-lab/real/payne-kalshi-real/src/index.js'
+      - 'market-edge-lab/real/payne-kalshi-real/test/payne-display-ledger-dedupe.test.mjs'
+      - '.github/workflows/payne-financial-display-dedupe-offline.yml'
+permissions:
+  contents: read
+jobs:
+  offline:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Verify source syntax and offline P/L regressions
+        working-directory: market-edge-lab/real/payne-kalshi-real
+        run: |
+          set -euo pipefail
+          node --check src/index.js
+          node --test test/payne-display-ledger-dedupe.test.mjs
+          node --test test/payne-provider-history-enrichment.test.mjs
+          npm test
+      - name: Confirm no deployment or write steps
+        run: |
+          echo PRODUCTION_MUTATIONS=NONE
