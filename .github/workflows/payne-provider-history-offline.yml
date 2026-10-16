@@ -1,0 +1,24 @@
+name: PAYNE Provider History Offline
+on:
+  push:
+    branches: [payne-disarm-accountability-isolated-20261015]
+    paths: [".github/workflows/payne-provider-history-offline.yml","market-edge-lab/real/payne-kalshi-real/src/payne-provider-history-enrichment.js","market-edge-lab/real/payne-kalshi-real/test/payne-provider-history-enrichment.test.mjs"]
+permissions:
+  contents: read
+jobs:
+  offline:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Syntax check and exact provider history mocks
+        working-directory: market-edge-lab/real/payne-kalshi-real
+        run: |
+          node --check src/index.js
+          node --check src/payne-provider-history-enrichment.js
+          node --test test/payne-provider-history-enrichment.test.mjs
+      - name: Full existing PAYNE regressions
+        working-directory: market-edge-lab/real/payne-kalshi-real
+        run: npm test
