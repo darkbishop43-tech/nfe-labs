@@ -1,8 +1,20 @@
 name: PAYNE Disarm Ledger Read Only
 on:
   push:
-    branches: [payne-disarm-accountability-isolated-20261015]
+    branches: [payne-disarm-accountability-isolated-20261015, payne-profit-intelligence-stage1-extraction-isolated-20261016]
     paths: [".github/workflows/payne-disarm-ledger-read-only.yml"]
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'all, current, or series'
+        required: true
+        default: 'all'
+        type: choice
+        options: [all, current, series]
+      series_id:
+        description: 'Exact PAYNE series ID when mode=series'
+        required: false
+        type: string
 permissions:
   contents: read
 jobs:
@@ -20,3 +32,30 @@ jobs:
           jq -c --arg s "$series" '{route:"/real-ledger",seriesId:$s,matched:[.rows[]|select(.type=="PAYNE_ARM_TRANSITION_V1" and .seriesId==$s)|{transitionId,eventTimestamp,seriesId,actor,triggeringFunction,reasonCode,attemptsStarted,attemptTarget,completedAt,failClosedReason}],count,omittedOlderKeys,complete}' /tmp/payne-series-ledger.json
           curl --fail --silent --show-error --max-time 25 "$base/disarm-audit-status" -o /tmp/payne-audit-status.json
           jq -c '{verified,incomplete,unknown,auditIncomplete}' /tmp/payne-audit-status.json
+
+  stage1-offline-extraction:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Validate GET-only extractor
+        run: |
+          node --check .github/scripts/payne-stage1-extract.mjs
+          node --test .github/scripts/test/payne-stage1-extract.test.mjs
+      - name: Read existing PAYNE routes only
+        env:
+          PAYNE_MODE: ${{ inputs.mode }}
+          PAYNE_SERIES_ID: ${{ inputs.series_id }}
+        run: node .github/scripts/payne-stage1-extract.mjs
+      - name: Retain read-only evidence without secrets
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: payne-stage1-read-only-${{ github.run_id }}
+          path: payne-stage1-output/reconstruction.json
+          if-no-files-found: warn
+          retention-days: 7
