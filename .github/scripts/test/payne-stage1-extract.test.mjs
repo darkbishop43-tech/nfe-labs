@@ -1,4 +1,4 @@
-import test from 'node:test';import assert from 'node:assert/strict';import {collect} from '../payne-stage1-extract.mjs';
+import test from 'node:test';import assert from 'node:assert/strict';import {collect,redactSecrets} from '../payne-stage1-extract.mjs';
 function fixture({duplicate=false,missing=false}={}){
  const seen=[];
  const get=async path=>{
@@ -19,3 +19,5 @@ test('current series discovery from existing real-state',async()=>{const f=fixtu
 test('duplicate ledger key fails closed',async()=>{await assert.rejects(collect({get:fixture({duplicate:true}).get}),/DUPLICATE_LEDGER_KEY/)});
 test('unknown economics stay null and documented',async()=>{const f=fixture();const x=await collect({get:f.get});assert.equal(x.coverage.missingEvidence[0].reasons[0],'ENTRY_ORDER_NOT_FOUND');assert.equal(x.cycles[1].realizedPnlUsd,undefined)});
 test('only GET paths used and provider raw data not claimed',async()=>{const f=fixture();const x=await collect({get:f.get});assert.ok(f.seen.every(p=>p.startsWith('/')));assert.match(x.coverage.providerRawOrdersAndFills,/NOT_EXPOSED/)});
+
+test('secrets are redacted recursively while order IDs are preserved',()=>{const v=redactSecrets({entryOrderId:'order-1',nested:{authorization:'Bearer abc',KALSHI_PRIVATE_KEY:'abc'},items:[{access_token:'abc',fillId:'fill-1'}]});assert.equal(v.entryOrderId,'order-1');assert.equal(v.nested.authorization,'[REDACTED]');assert.equal(v.nested.KALSHI_PRIVATE_KEY,'[REDACTED]');assert.equal(v.items[0].access_token,'[REDACTED]');assert.equal(v.items[0].fillId,'fill-1')});
