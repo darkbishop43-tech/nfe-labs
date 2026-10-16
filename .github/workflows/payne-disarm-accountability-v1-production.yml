@@ -30,7 +30,7 @@ jobs:
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
-          test "$(git rev-parse HEAD:market-edge-lab/real/payne-kalshi-real/src/index.js)" = ef3d69fb12b97a98eac4bba8f493ca9092516a27
+          test "$(git rev-parse HEAD:market-edge-lab/real/payne-kalshi-real/src/index.js)" = 0a67220364a04022578ba175aa440a6fbbb42123
           test "$(git rev-parse HEAD:market-edge-lab/real/payne-kalshi-real/src/cockpit-html.js)" = 657e477c4c9385e337fd725769b7ab757dc81c77
           test "$(git rev-parse HEAD:market-edge-lab/real/payne-kalshi-real/src/payne-closure-evidence.js)" = 7f0c5a2dce12ed0d56c1024cdd58c4f581ea364a
           grep -q '^name = "market-edge-payne-kalshi-real"$' market-edge-lab/real/payne-kalshi-real/wrangler.toml
@@ -67,7 +67,7 @@ jobs:
         run: |
           set -euo pipefail
           curl --fail --silent --show-error --max-time 25 -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/market-edge-payne-kalshi-real/deployments" -o /tmp/payne-deployments-pre.json
-          jq -e '.success==true and (.result.deployments[0].versions | any(.version_id=="cdaf97eb-c338-4fab-a808-caf5dc28d55c" and .percentage==100))' /tmp/payne-deployments-pre.json >/dev/null
+          jq -e '.success==true and (.result.deployments[0].versions | any(.version_id=="7688980d-24d6-4b9c-a0ca-ec90a8e1d724" and .percentage==100))' /tmp/payne-deployments-pre.json >/dev/null
           echo 'PRODUCTION_BASELINE_MATCH=PASS'
       - name: Prepare authenticated PAYNE maintenance proof read-only
         shell: bash
@@ -136,6 +136,9 @@ jobs:
           grep -Fq 'TOP 3' /tmp/payne-grok-cockpit.html
           curl --fail --silent --show-error --max-time 25 "$base/disarm-audit-status" -o /tmp/payne-disarm-audit.json
           jq -e '.ok==true and .blocksArm==false and .blocksDeployment==false' /tmp/payne-disarm-audit.json >/dev/null
+          curl --fail --silent --show-error --max-time 90 "$base/real-history?view=cycles&page=0&limit=5" -o /tmp/payne-history-live.json
+          jq -e '.ok==true and .schema=="PAYNE_REAL_CYCLES_V1" and (.rows|type)=="array" and (.providerCoverage|type)=="string"' /tmp/payne-history-live.json >/dev/null
+          jq -c '{providerCoverage,providerReadComplete,providerLastReadAt,rows:[.rows[]|{seriesId,attemptId,entryPrice,exitPrice,quantity,entryFeesUsd,exitFeesUsd,realizedPnlUsd,coverage,missingProviderFields}]}' /tmp/payne-history-live.json
           echo 'PRODUCTION_COCKPIT_AND_CONTROL_HTTP_200=PASS'
       - name: Verify new Worker version has all production traffic
         shell: bash
