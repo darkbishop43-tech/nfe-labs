@@ -1,0 +1,22 @@
+name: PAYNE Disarm Ledger Read Only
+on:
+  push:
+    branches: [payne-disarm-accountability-isolated-20261015]
+    paths: [".github/workflows/payne-disarm-ledger-read-only.yml"]
+permissions:
+  contents: read
+jobs:
+  read-only:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Read exact existing ledger by series without mutating production
+        shell: bash
+        run: |
+          set -euo pipefail
+          base='https://market-edge-payne-kalshi-real.darkbishop43.workers.dev'
+          series='c0c78742-2819-49e1-9025-ec0d67013aed'
+          curl --fail --silent --show-error --max-time 25 "$base/real-ledger?limit=1000&seriesId=$series" -o /tmp/payne-series-ledger.json
+          jq -e '.ok==true and .complete==true' /tmp/payne-series-ledger.json >/dev/null
+          jq -c --arg s "$series" '{route:"/real-ledger",seriesId:$s,matched:[.rows[]|select(.type=="PAYNE_ARM_TRANSITION_V1" and .seriesId==$s)|{transitionId,eventTimestamp,seriesId,actor,triggeringFunction,reasonCode,attemptsStarted,attemptTarget,completedAt,failClosedReason}],count,omittedOlderKeys,complete}' /tmp/payne-series-ledger.json
+          curl --fail --silent --show-error --max-time 25 "$base/disarm-audit-status" -o /tmp/payne-audit-status.json
+          jq -c '{verified,incomplete,unknown,auditIncomplete}' /tmp/payne-audit-status.json
