@@ -1,0 +1,24 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {buildAccountFinancialSummary} from '../src/index.js';
+const owner='PAYNE_KALSHI_REAL',sid='a8d38035-ea7b-4b33-884e-214a77c48aec';
+const at='2026-10-16T10:00:00Z';
+const row=(type,attemptId,pnl,extra={})=>({owner,type,seriesId:sid,attemptId:sid+'-intent-'+attemptId,ticker:'KXTEST-'+attemptId,at,realizedPnlUsd:pnl,...extra});
+const own=(a,q=1)=>row('POSITION_OWNERSHIP_ESTABLISHED',a,undefined,{filledCount:q,entryOrderId:'entry-'+a});
+const flat=(a,p)=>row('PROVIDER_RECONCILED_FLAT',a,p,{reason:'MATCHED_TICKER_ZERO'});
+const exit=(a,p,fill=1,extra={})=>row('EXIT_PROVIDER_RESULT',a,p,{result:{state:fill?'FILLED':'NO_FILL',orderId:'exit-'+a+'-'+fill,fillCount:fill,averageFillPrice:fill?'0.52':null,averageFeePaid:fill?'0.01':null},...extra});
+const summary=(ledger,series={seriesId:sid,attemptsStarted:5},nowMs=Date.parse('2026-10-16T12:00:00Z'))=>buildAccountFinancialSummary({ledger,series,nowMs});
+test('four completed positions counted once and NO_FILL snapshots excluded',()=>{
+ let d=[own(1),exit(1,-.6464,0),exit(1,-.1439),flat(1,-.1439),own(3),exit(3,-.0601),flat(3,-.0601),own(4),exit(4,-.0647),flat(4,-.0647),own(5),exit(5,-.1169,0),exit(5,-.1169,0),exit(5,-.0852),flat(5,-.0852)];
+ assert.equal(summary(d).payne.currentRunPnlUsd,-.3539);
+ assert.equal(summary(d).payne.utcDayPnlUsd,-.3539);
+});
+test('duplicate flat and additional exit snapshots cannot double count',()=>{const d=[own(1),exit(1,-.1),flat(1,-.1),flat(1,-.1)];assert.equal(summary(d).payne.currentRunPnlUsd,-.1)});
+test('unclosed partial exit has unknown P/L',()=>{const d=[own(1,2),exit(1,-.1,1)];assert.equal(summary(d).payne.currentRunPnlUsd,null)});
+test('closed partial exit with complete exits counted once',()=>{const d=[own(1,2),exit(1,-.1,1),exit(1,-.2,1,{result:{state:'FILLED',orderId:'exit-1-b',fillCount:1,averageFillPrice:'0.5',averageFeePaid:'0.01'}}),flat(1,-.2)];assert.equal(summary(d).payne.currentRunPnlUsd,-.2)});
+test('missing price or fee remains unknown',()=>{const d=[own(1),exit(1,-.1,1,{result:{state:'FILLED',orderId:'exit-1',fillCount:1,averageFillPrice:null,averageFeePaid:null}}),flat(1,-.1)];assert.equal(summary(d).payne.currentRunPnlUsd,null)});
+test('cross series and owner isolation; ticker alone never matches',()=>{const d=[own(1),exit(1,-.1),flat(1,-.1),{...flat(1,-5),owner:'AUTO_REAL'},{...flat(1,-7),seriesId:'OTHER'}];assert.equal(summary(d).payne.currentRunPnlUsd,-.1)});
+test('unknown lifecycle does not get converted to zero',()=>{assert.equal(summary([own(1)]).payne.currentRunPnlUsd,null)});
+test('empty new series remains zero, completed NO_FILL only remains unknown',()=>{assert.equal(summary([], {seriesId:sid,attemptsStarted:0}).payne.currentRunPnlUsd,0);assert.equal(summary([row('ENTRY_NO_FILL',1,undefined)]).payne.currentRunPnlUsd,null)});
+test('UTC day must not sum duplicate snapshots or non-PAYNE rows',()=>{const d=[own(1),exit(1,-.1),flat(1,-.1),{...flat(1,-50),owner:'FOUNDER_MANUAL'}];assert.equal(summary(d,{seriesId:'different',attemptsStarted:2}).payne.utcDayPnlUsd,-.1)});
+test('provider account financials remain independently labeled',()=>{const d=[own(1),exit(1,-.1),flat(1,-.1)];const x=buildAccountFinancialSummary({ledger:d,series:{seriesId:sid,attemptsStarted:5},balanceBody:{realized_pnl_dollars:42},nowMs:Date.parse(at)});assert.equal(x.account.realizedPnlUsd,42);assert.equal(x.payne.currentRunPnlUsd,-.1)});
