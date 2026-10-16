@@ -22,7 +22,7 @@ export async function collect({get,seriesId='',mode='all'}){
  }
  let p=0,expected=null;
  for(;;){
-  const d=await getJson('/real-history?view=cycles&range=all&page='+p+'&limit=100');
+  const d=await getJson('/real-history?view=cycles&range=current&page='+p+'&limit=100');
   if(!Array.isArray(d.rows)||typeof d.hasMore!=='boolean'||!Number.isInteger(d.rowCount))throw Error('HISTORY_PAGINATION_UNVERIFIED');
   if(expected===null)expected=d.rowCount;else if(expected!==d.rowCount)throw Error('HISTORY_CHANGED_DURING_EXTRACTION');
   for(const row of d.rows){const key=String(row.seriesId||'')+'|'+String(row.attemptId||'');if(seenRows.has(key))throw Error('DUPLICATE_HISTORY_ATTEMPT');seenRows.add(key);if(!selected||row.seriesId===selected)history.push(row);}
