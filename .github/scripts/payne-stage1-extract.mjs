@@ -3,6 +3,11 @@
 import {mkdir,writeFile} from 'node:fs/promises';
 const BASE='https://market-edge-payne-kalshi-real.darkbishop43.workers.dev';
 const PREFIX='payne-kalshi:real-ledger:';
+export function redactSecrets(value){
+ if(Array.isArray(value))return value.map(redactSecrets);
+ if(value&&typeof value==='object')return Object.fromEntries(Object.entries(value).map(([k,v])=>[k,/(authorization|private.?key|api.?key|secret|password|access.?token|auth.?header|signature)/i.test(k)?'[REDACTED]':redactSecrets(v)]));
+ return value;
+}
 export async function collect({get,seriesId='',mode='all'}){
  const ledger=[],history=[],seenKeys=new Set(),seenRows=new Set();
  const getJson=async(path)=>{const data=await get(path);if(!data||data.ok!==true)throw Error('READ_UNAVAILABLE_'+path.split('?')[0]);return data;};
@@ -47,7 +52,7 @@ export async function main(){
    return r.json();
  }});
  await mkdir('payne-stage1-output',{recursive:true});
- await writeFile('payne-stage1-output/reconstruction.json',JSON.stringify(out,null,2));
+ await writeFile('payne-stage1-output/reconstruction.json',JSON.stringify(redactSecrets(out),null,2));
  console.log(JSON.stringify({schema:out.schema,coverage:out.coverage,seriesSelected:out.seriesSelected}));
 }
 if(process.argv[1]?.endsWith('payne-stage1-extract.mjs'))main().catch(e=>{console.error('READ_ONLY_EXTRACTION_INCOMPLETE',String(e.message));process.exitCode=1});
