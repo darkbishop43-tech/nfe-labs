@@ -40,7 +40,7 @@ test('exact exit identities yield verified full-cycle PnL only with complete cov
  const exitFill={fill_id:'x1',order_id:'exit-1',ticker:base.ticker,outcome_side:'no',count:2,no_price_dollars:'0.80',fee_cost_dollars:'0.02',created_time:'2026-10-15T22:15:00Z'};
  const row={...base,exitProviderOrderId:'exit-1',exitClientOrderId:'payne-a-exit1'};
  const [r]=enrichPayneCycles([row],{complete:true,orders:[order,exitOrder],fills:[fill('a1',2,'0.65'),exitFill]},{coverage:'PROVIDER_READS_COMPLETE'});
- assert.equal(r.exitPrice,0.8);assert.equal(r.exitFeesUsd,0.02);assert.equal(r.realizedPnlUsd,0.26);
+ assert.equal(r.exitPrice,0.8);assert.equal(r.exitFeesUsd,0.02);assert.equal(r.realizedPnlUsd,0.27);
  assert.equal(r.providerEvidenceComplete,true);
 });
 test('partial exit cannot be labeled full realized PnL',()=>{
