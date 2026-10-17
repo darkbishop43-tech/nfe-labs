@@ -8,25 +8,24 @@ jobs:
   read-only:
     runs-on: ubuntu-latest
     steps:
-      - name: Pull Oct 16 comparison evidence
+      - name: Pull Oct 16 PAYNE trade evidence only
         run: |
           set -euo pipefail
-          AUTO=https://market-edge-baseline-real.darkbishop43.workers.dev
           PAYNE=https://market-edge-payne-kalshi-real.darkbishop43.workers.dev
+          for i in 1 2 3 4 5; do
+            if curl -fsS --connect-timeout 15 --max-time 180 "$PAYNE/real-ledger?limit=1000" -o payne-ledger.json; then break; fi
+            sleep 3
+          done
+          test -s payne-ledger.json
 
-          echo "=== AUTO STATE ==="
-          curl -fsS --retry 2 --connect-timeout 10 --max-time 90 "$AUTO/execution-test-state" -o auto.json
-          jq -c '{seriesId:.state.seriesId,status:.state.status,attempts:.state.attempts,positions:.state.positions,safety:.safety,funding:.funding}' auto.json
-
-          echo "=== PAYNE OCT16 TYPES ==="
-          curl -fsS --retry 2 --connect-timeout 10 --max-time 90 "$PAYNE/real-ledger?limit=1000" -o payne-ledger.json
+          echo "=== TYPES ==="
           jq -c '[.rows[] | select((((.eventTimestamp//.at//.timestamp//.createdAt//.openedAt//.closedAt//.providerResponseAt//"")|tostring) >= "2026-10-16T04:00:00Z") and (((.eventTimestamp//.at//.timestamp//.createdAt//.openedAt//.closedAt//.providerResponseAt//"")|tostring) < "2026-10-17T04:00:00Z")) | .type] | group_by(.) | map({type:.[0],count:length})' payne-ledger.json
 
-          echo "=== PAYNE OCT16 TRADE RELEVANT ==="
-          jq -c '[.rows[] | select((((.eventTimestamp//.at//.timestamp//.createdAt//.openedAt//.closedAt//.providerResponseAt//"")|tostring) >= "2026-10-16T04:00:00Z") and (((.eventTimestamp//.at//.timestamp//.createdAt//.openedAt//.closedAt//.providerResponseAt//"")|tostring) < "2026-10-17T04:00:00Z")) | select((.type|tostring|test("ATTEMPT|ENTRY|EXIT|FILL|POSITION|RECON|CLOSE|ARM_TRANSITION|FIRE|PROVIDER";"i"))) | del(.observations)]' payne-ledger.json
+          echo "=== TRADE_ROWS ==="
+          jq -c '[.rows[] | select((((.eventTimestamp//.at//.timestamp//.createdAt//.openedAt//.closedAt//.providerResponseAt//"")|tostring) >= "2026-10-16T04:00:00Z") and (((.eventTimestamp//.at//.timestamp//.createdAt//.openedAt//.closedAt//.providerResponseAt//"")|tostring) < "2026-10-17T04:00:00Z")) | select((.type|tostring|test("ATTEMPT|ENTRY|EXIT|FILL|POSITION|RECON|CLOSE|ARM_TRANSITION|FIRE|PROVIDER";"i"))) | {type,recordId,at,eventTimestamp,seriesId,attemptNo,attempt,asset,ticker,marketTicker,side,outcomeSide,score,entryScore,result,terminalStatus,status,providerOrderId,orderId,entryOrderId,exitOrderId,fillCount,filledCount,entryAverageFillPrice,exitAverageFillPrice,entryAverageFeePaid,exitAverageFeePaid,realizedPnlUsd,entryPrice,exitPrice,openedAt,closedAt,reasonCode,reconciliationStatus,reconciliationClassification,reconciliationReason}]' payne-ledger.json
 
-          echo "=== PAYNE SERIES SUMMARY ==="
-          jq -c '[.rows[] | select((((.eventTimestamp//.at//.timestamp//.createdAt//.openedAt//.closedAt//.providerResponseAt//"")|tostring) >= "2026-10-16T04:00:00Z") and (((.eventTimestamp//.at//.timestamp//.createdAt//.openedAt//.closedAt//.providerResponseAt//"")|tostring) < "2026-10-17T04:00:00Z")) | select(.seriesId!=null) | {seriesId,type,at:(.eventTimestamp//.at//.timestamp//.createdAt//.openedAt//.closedAt//.providerResponseAt),attemptNo:(.attemptNo//.attempt//null),asset:(.asset//null),ticker:(.ticker//.marketTicker//null),side:(.side//.outcomeSide//null),score:(.score//.entryScore//null),result:(.result//.terminalStatus//.status//null),providerOrderId:(.providerOrderId//.orderId//null),realizedPnlUsd:(.realizedPnlUsd//null)}] | group_by(.seriesId) | map({seriesId:.[0].seriesId,rows:length,first:(map(.at)|min),last:(map(.at)|max),events:.})' payne-ledger.json
+          echo "=== SERIES ==="
+          jq -c '[.rows[] | select((((.eventTimestamp//.at//.timestamp//.createdAt//.openedAt//.closedAt//.providerResponseAt//"")|tostring) >= "2026-10-16T04:00:00Z") and (((.eventTimestamp//.at//.timestamp//.createdAt//.openedAt//.closedAt//.providerResponseAt//"")|tostring) < "2026-10-17T04:00:00Z")) | select(.seriesId!=null) | .seriesId] | unique' payne-ledger.json
 
           echo "=== SAFETY ==="
           echo '{"providerWrites":0,"ordersSubmittedByThisRead":0,"capitalMovedUsd":0,"armDisarm":"UNCHANGED"}'
