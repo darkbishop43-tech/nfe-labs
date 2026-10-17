@@ -1,0 +1,91 @@
+name: PAYNE HYPE Stage3E Historical Data Readonly
+on:
+  push:
+    branches: [payne-hype-candle-stage3e-isolated-20261017]
+    paths: ['.github/workflows/payne-hype-candle-stage3e-readonly.yml']
+permissions:
+  contents: read
+jobs:
+  proof:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Query public provider APIs and analyze existing candles
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p evidence
+          cat > /tmp/hype.py <<'PY'
+          import json,urllib.request,urllib.error,datetime
+          from urllib.parse import urlencode
+          s=1792134000; e=s+19*60
+          results={}
+          def get(k,url):
+            o={'url':url,'status':None,'error':None,'body':None}
+            try:
+              with urllib.request.urlopen(urllib.request.Request(url,headers={'User-Agent':'PAYNE-read-only-research/1.0'}),timeout=25) as r:
+                o['status']=r.status; o['body']=json.loads(r.read(1500000))
+            except urllib.error.HTTPError as x:
+              o['status']=x.code;o['error']=x.read(500).decode('utf8','replace')
+            except Exception as x:o['error']=str(x)
+            results[k]=o
+            print('PROVIDER',k,'HTTP',o['status'],'ERROR',str(o['error'])[:240],flush=True)
+            return o['body']
+          t='KXHYPE15M-26OCT160330-30'
+          root='https://api.elections.kalshi.com/trade-api/v2/'
+          get('kalshi_cutoff',root+'historical/cutoff')
+          m=get('kalshi_market',root+'markets/'+t)
+          if m is None:get('kalshi_historical_market',root+'historical/markets/'+t)
+          args=urlencode({'start_ts':s,'end_ts':e,'period_interval':1})
+          get('kalshi_candles',root+'markets/'+t+'/candlesticks?'+args)
+          if results['kalshi_candles']['status']!=200:get('kalshi_historical_candles',root+'historical/markets/'+t+'/candlesticks?'+args)
+          pairs=get('kraken_pairs','https://api.kraken.com/0/public/AssetPairs?pair=HYPEUSD')
+          if isinstance(pairs,dict) and pairs.get('result') and not pairs.get('error'):
+            p=next(iter(pairs['result']))
+            get('kraken_ohlc','https://api.kraken.com/0/public/OHLC?'+urlencode({'pair':p,'interval':1,'since':s}))
+          prod=get('coinbase_product','https://api.exchange.coinbase.com/products/HYPE-USD')
+          if isinstance(prod,dict) and prod.get('id')=='HYPE-USD' and prod.get('base_currency')=='HYPE' and prod.get('quote_currency')=='USD':
+            get('coinbase_candles','https://api.exchange.coinbase.com/products/HYPE-USD/candles?'+urlencode({'start':'2026-10-16T07:00:00Z','end':'2026-10-16T07:19:00Z','granularity':60}))
+          rows=[];source=None
+          for label in ('kalshi_candles','kalshi_historical_candles'):
+            body=results.get(label,{}).get('body')
+            if isinstance(body,dict) and isinstance(body.get('candlesticks'),list):
+              source=label
+              for c in body['candlesticks']:
+                ts=c.get('end_period_ts')
+                if isinstance(ts,(int,float)) and s<=ts-60<e:rows.append({'timestamp':ts-60,'raw':c})
+              if rows:break
+          if not rows:
+            body=results.get('coinbase_candles',{}).get('body')
+            if isinstance(body,list):
+              source='coinbase_HYPE-USD_SPOT'
+              for x in body:
+                if isinstance(x,list) and len(x)>=6 and s<=x[0]<e:rows.append(dict(timestamp=x[0],low=x[1],high=x[2],open=x[3],close=x[4],volume=x[5]))
+          if not rows:
+            body=results.get('kraken_ohlc',{}).get('body')
+            if isinstance(body,dict) and isinstance(body.get('result'),dict):
+              for k,v in body['result'].items():
+                if k!='last' and isinstance(v,list):
+                  for x in v:
+                    if len(x)>=7 and s<=int(x[0])<e:
+                      source='kraken_HYPEUSD_SPOT';rows.append(dict(timestamp=int(x[0]),open=x[1],high=x[2],low=x[3],close=x[4],volume=x[6]))
+          rows.sort(key=lambda x:x['timestamp'])
+          missing=[x for x in range(s,e,60) if x not in {r['timestamp'] for r in rows}]
+          pre=[r for r in rows if r['timestamp']+60<=s+16*60+34.460]
+          pattern={'classification':'INSUFFICIENT_EVIDENCE'}
+          if len(pre)>=3 and all('close' in x for x in pre):
+            vals=[float(x['close']) for x in pre[-3:]]
+            pattern={'three_completed_pre_entry_closes':vals,'trend':'UP' if vals[-1]>vals[0] else 'DOWN' if vals[-1]<vals[0] else 'FLAT','classification':'DESCRIPTIVE_NOT_PREDICTIVE'}
+          out={'source':source,'rows':rows,'missing_minute_buckets':missing,'pre_entry_closed_candles':pre,'pattern':pattern,'raw_provider_responses':results}
+          open('evidence/stage3e.json','w').write(json.dumps(out,indent=2))
+          print('RESULT',json.dumps({'source':source,'count':len(rows),'missing':len(missing),'pattern':pattern}),flush=True)
+          PY
+          python /tmp/hype.py
+      - name: Retain source evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: payne-hype-stage3e
+          path: evidence/stage3e.json
+          if-no-files-found: warn
+          retention-days: 7
