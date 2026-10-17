@@ -18,13 +18,13 @@ jobs:
           curl -fsS --retry 2 --connect-timeout 10 --max-time 90 "$AUTO/execution-test-state" -o auto.json
           jq -c '{state:.state,queue:.queue,funding:.funding,safety:.safety}' auto.json
 
-          echo "=== PAYNE HISTORY ==="
-          curl -fsS --retry 2 --connect-timeout 10 --max-time 90 "$PAYNE/real-history" -o payne-history.json
-          jq -c '.' payne-history.json
+          echo "=== PAYNE REAL STATE ==="
+          curl -fsS --retry 2 --connect-timeout 10 --max-time 90 "$PAYNE/real-state" -o payne-state.json
+          jq -c '.' payne-state.json
 
-          echo "=== PAYNE LEDGER ==="
+          echo "=== PAYNE LEDGER OCT16 ==="
           curl -fsS --retry 2 --connect-timeout 10 --max-time 90 "$PAYNE/real-ledger?limit=1000" -o payne-ledger.json
-          jq -c '{count,complete,omittedOlderKeys,rows:[.rows[]|select(((.eventTimestamp//.at//.timestamp//.createdAt//.openedAt//.closedAt//"")|tostring) >= "2026-10-16T04:00:00Z" and ((.eventTimestamp//.at//.timestamp//.createdAt//.openedAt//.closedAt//"")|tostring) < "2026-10-17T04:00:00Z")]}' payne-ledger.json
+          jq -c '{count,complete,omittedOlderKeys,rows:[.rows[]|select(((.eventTimestamp//.at//.timestamp//.createdAt//.openedAt//.closedAt//.providerResponseAt//"")|tostring) >= "2026-10-16T04:00:00Z" and ((.eventTimestamp//.at//.timestamp//.createdAt//.openedAt//.closedAt//.providerResponseAt//"")|tostring) < "2026-10-17T04:00:00Z")]}' payne-ledger.json
 
           echo "=== PROVIDER HISTORICAL ORDERS OCT16 ET ==="
           curl -fsS --retry 2 --connect-timeout 10 --max-time 90 "$AUTO/forensic-historical-orders?min_ts=1792123200&max_ts=1792209600&limit=200" -o provider.json
