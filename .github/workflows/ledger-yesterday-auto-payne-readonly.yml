@@ -1,72 +1,40 @@
 name: Ledger Yesterday AUTO PAYNE Read Only
-
 on:
   push:
-    branches:
-      - kalshi-ledger-lab-v1
-    paths:
-      - .github/workflows/ledger-yesterday-auto-payne-readonly.yml
-
+    branches: [kalshi-ledger-lab-v1]
 permissions:
   contents: read
-
 jobs:
   read-only:
     runs-on: ubuntu-latest
     steps:
-      - name: Pull Oct 16 AUTO and PAYNE evidence
-        shell: bash
+      - name: Pull Oct 16 evidence
         run: |
           set -euo pipefail
-          AUTO="https://market-edge-baseline-real.darkbishop43.workers.dev"
-          PAYNE="https://market-edge-payne-kalshi-real.darkbishop43.workers.dev"
-          MIN_TS=1792123200
-          MAX_TS=1792209600
+          AUTO=https://market-edge-baseline-real.darkbishop43.workers.dev
+          PAYNE=https://market-edge-payne-kalshi-real.darkbishop43.workers.dev
 
-          echo '=== AUTO EXECUTION TEST STATE ==='
-          curl --fail --silent --show-error --retry 2 --retry-all-errors --connect-timeout 10 --max-time 90             "$AUTO/execution-test-state" -o /tmp/auto-state.json
-          jq -c '{state:.state,queue:.queue,funding:.funding,safety:.safety}' /tmp/auto-state.json
+          echo "=== AUTO EXECUTION TEST STATE ==="
+          curl -fsS --retry 2 --connect-timeout 10 --max-time 90 "$AUTO/execution-test-state" -o auto.json
+          jq -c '{state:.state,queue:.queue,funding:.funding,safety:.safety}' auto.json
 
-          echo '=== PAYNE REAL HISTORY ==='
-          curl --fail --silent --show-error --retry 2 --retry-all-errors --connect-timeout 10 --max-time 90             "$PAYNE/real-history" -o /tmp/payne-history.json
-          jq -c '.' /tmp/payne-history.json
+          echo "=== PAYNE HISTORY ==="
+          curl -fsS --retry 2 --connect-timeout 10 --max-time 90 "$PAYNE/real-history" -o payne-history.json
+          jq -c '.' payne-history.json
 
-          echo '=== PAYNE REAL LEDGER OCT16 FILTERABLE SOURCE ==='
-          curl --fail --silent --show-error --retry 2 --retry-all-errors --connect-timeout 10 --max-time 90             "$PAYNE/real-ledger?limit=1000" -o /tmp/payne-ledger.json
-          jq -c '{count,complete,omittedOlderKeys,rows:[.rows[]|select(((.eventTimestamp//.at//.timestamp//.createdAt//.openedAt//.closedAt//"")|tostring) >= "2026-10-16T04:00:00Z" and ((.eventTimestamp//.at//.timestamp//.createdAt//.openedAt//.closedAt//"")|tostring) < "2026-10-17T04:00:00Z")]}' /tmp/payne-ledger.json
+          echo "=== PAYNE LEDGER ==="
+          curl -fsS --retry 2 --connect-timeout 10 --max-time 90 "$PAYNE/real-ledger?limit=1000" -o payne-ledger.json
+          jq -c '{count,complete,omittedOlderKeys,rows:[.rows[]|select(((.eventTimestamp//.at//.timestamp//.createdAt//.openedAt//.closedAt//"")|tostring) >= "2026-10-16T04:00:00Z" and ((.eventTimestamp//.at//.timestamp//.createdAt//.openedAt//.closedAt//"")|tostring) < "2026-10-17T04:00:00Z")]}' payne-ledger.json
 
-          echo '=== PROVIDER HISTORICAL ORDERS OCT16 ET DAY ==='
-          cursor=""
-          page=0
-          : > /tmp/provider-pages.ndjson
-          while :; do
-            page=$((page+1))
-            url="$AUTO/forensic-historical-orders?min_ts=$MIN_TS&max_ts=$MAX_TS&limit=200"
-            if [ -n "$cursor" ]; then
-              enc=$(python - <<'PY' "$cursor"
-import sys,urllib.parse
-print(urllib.parse.quote(sys.argv[1],safe=''))
-PY
-)
-              url="$url&cursor=$enc"
-            fi
-            curl --fail --silent --show-error --retry 2 --retry-all-errors --connect-timeout 10 --max-time 90 "$url" -o /tmp/provider-page.json
-            jq -c --argjson page "$page" '{page:$page,orders:(.orders//[]),cursor:(.cursor//null)}' /tmp/provider-page.json >> /tmp/provider-pages.ndjson
-            cursor=$(jq -r '.cursor // empty' /tmp/provider-page.json)
-            [ -z "$cursor" ] && break
-            [ "$page" -ge 20 ] && { echo 'PAGINATION_LIMIT_REACHED'; exit 2; }
-          done
-          jq -s -c '{pages:length,paginationComplete:true,totalOrders:([.[].orders[]]|length),orders:[.[].orders[]]}' /tmp/provider-pages.ndjson > /tmp/provider-orders.json
-          jq -c '.' /tmp/provider-orders.json
+          echo "=== PROVIDER HISTORICAL ORDERS OCT16 ET ==="
+          curl -fsS --retry 2 --connect-timeout 10 --max-time 90 "$AUTO/forensic-historical-orders?min_ts=1792123200&max_ts=1792209600&limit=200" -o provider.json
+          jq -c '{orderCount:((.orders//[])|length),cursor:(.cursor//null),orders:(.orders//[])}' provider.json
 
-          echo '=== OWNERSHIP PREFIX SUMMARY ==='
+          echo "=== PROVIDER OWNERSHIP PREFIX SUMMARY ==="
           jq -c '{
-            auto:[.orders[]|select(((.client_order_id//.clientOrderId//"")|startswith("nfe-test-")) or ((.client_order_id//.clientOrderId//"")|startswith("baseline-real-")))],
-            payne:[.orders[]|select((.client_order_id//.clientOrderId//"")|startswith("payne-real-"))],
-            unknown:[.orders[]|select((((.client_order_id//.clientOrderId//"")|startswith("nfe-test-")) or ((.client_order_id//.clientOrderId//"")|startswith("baseline-real-")) or ((.client_order_id//.clientOrderId//"")|startswith("payne-real-")))|not)]
-          }' /tmp/provider-orders.json
+            auto:[(.orders//[])[]|select((((.client_order_id//.clientOrderId//"")|tostring)|startswith("nfe-test-")) or ((((.client_order_id//.clientOrderId//"")|tostring)|startswith("baseline-real-"))))],
+            payne:[(.orders//[])[]|select((((.client_order_id//.clientOrderId//"")|tostring)|startswith("payne-real-")))]
+          }' provider.json
 
-          echo '=== SAFETY ==='
+          echo "=== SAFETY ==="
           echo '{"providerWrites":0,"ordersSubmittedByThisRead":0,"capitalMovedUsd":0,"armDisarm":"UNCHANGED"}'
-
-# trigger read-only pull
