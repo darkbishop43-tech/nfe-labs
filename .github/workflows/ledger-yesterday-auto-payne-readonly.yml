@@ -8,7 +8,7 @@ jobs:
   read-only:
     runs-on: ubuntu-latest
     steps:
-      - name: Pull Oct 16 PAYNE trade evidence only
+      - name: Extract PAYNE Oct 16 attempts
         run: |
           set -euo pipefail
           PAYNE=https://market-edge-payne-kalshi-real.darkbishop43.workers.dev
@@ -18,14 +18,19 @@ jobs:
           done
           test -s payne-ledger.json
 
-          echo "=== TYPES ==="
-          jq -c '[.rows[] | select((((.eventTimestamp//.at//.timestamp//.createdAt//.openedAt//.closedAt//.providerResponseAt//"")|tostring) >= "2026-10-16T04:00:00Z") and (((.eventTimestamp//.at//.timestamp//.createdAt//.openedAt//.closedAt//.providerResponseAt//"")|tostring) < "2026-10-17T04:00:00Z")) | .type] | group_by(.) | map({type:.[0],count:length})' payne-ledger.json
+          echo "=== ENTRY_ATTEMPTS ==="
+          jq -c '[.rows[] |
+            select((((.eventTimestamp//.at//.timestamp//.createdAt//.openedAt//.closedAt//"")|tostring) >= "2026-10-16T04:00:00Z") and (((.eventTimestamp//.at//.timestamp//.createdAt//.openedAt//.closedAt//"")|tostring) < "2026-10-17T04:00:00Z")) |
+            select(.type=="ENTRY_PROVIDER_POST_STARTED" or .type=="POSITION_OWNERSHIP_ESTABLISHED" or .type=="ENTRY_NO_FILL" or .type=="ENTRY_PRE_SUBMIT_LATCHED") |
+            {type,at,seriesId,attemptNo:(.attemptNo//.attempt//null),asset:(.asset//null),ticker:(.ticker//.marketTicker//null),side:(.side//.outcomeSide//null),score:(.score//.entryScore//null),entryOrderId:(.entryOrderId//.providerOrderId//.orderId//null),filledCount:(.filledCount//.fillCount//null),result:(.result//null)}
+          ]' payne-ledger.json
 
-          echo "=== TRADE_ROWS ==="
-          jq -c '[.rows[] | select((((.eventTimestamp//.at//.timestamp//.createdAt//.openedAt//.closedAt//.providerResponseAt//"")|tostring) >= "2026-10-16T04:00:00Z") and (((.eventTimestamp//.at//.timestamp//.createdAt//.openedAt//.closedAt//.providerResponseAt//"")|tostring) < "2026-10-17T04:00:00Z")) | select((.type|tostring|test("ATTEMPT|ENTRY|EXIT|FILL|POSITION|RECON|CLOSE|ARM_TRANSITION|FIRE|PROVIDER";"i"))) | {type,recordId,at,eventTimestamp,seriesId,attemptNo,attempt,asset,ticker,marketTicker,side,outcomeSide,score,entryScore,result,terminalStatus,status,providerOrderId,orderId,entryOrderId,exitOrderId,fillCount,filledCount,entryAverageFillPrice,exitAverageFillPrice,entryAverageFeePaid,exitAverageFeePaid,realizedPnlUsd,entryPrice,exitPrice,openedAt,closedAt,reasonCode,reconciliationStatus,reconciliationClassification,reconciliationReason}]' payne-ledger.json
-
-          echo "=== SERIES ==="
-          jq -c '[.rows[] | select((((.eventTimestamp//.at//.timestamp//.createdAt//.openedAt//.closedAt//.providerResponseAt//"")|tostring) >= "2026-10-16T04:00:00Z") and (((.eventTimestamp//.at//.timestamp//.createdAt//.openedAt//.closedAt//.providerResponseAt//"")|tostring) < "2026-10-17T04:00:00Z")) | select(.seriesId!=null) | .seriesId] | unique' payne-ledger.json
+          echo "=== CLOSED_POSITIONS ==="
+          jq -c '[.rows[] |
+            select((((.eventTimestamp//.at//.timestamp//.createdAt//.openedAt//.closedAt//"")|tostring) >= "2026-10-16T04:00:00Z") and (((.eventTimestamp//.at//.timestamp//.createdAt//.openedAt//.closedAt//"")|tostring) < "2026-10-17T04:00:00Z")) |
+            select(.type=="PROVIDER_RECONCILED_FLAT" or .type=="PAYNE_PAPER_BRAIN_EXIT_CLOSED") |
+            {type,at,seriesId,ticker:(.ticker//.marketTicker//null),side:(.side//.outcomeSide//null),realizedPnlUsd:(.realizedPnlUsd//null)}
+          ]' payne-ledger.json
 
           echo "=== SAFETY ==="
           echo '{"providerWrites":0,"ordersSubmittedByThisRead":0,"capitalMovedUsd":0,"armDisarm":"UNCHANGED"}'
