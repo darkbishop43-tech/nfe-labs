@@ -8,33 +8,25 @@ jobs:
   read-only:
     runs-on: ubuntu-latest
     steps:
-      - name: Pull Oct 16 evidence
+      - name: Pull Oct 16 comparison evidence
         run: |
           set -euo pipefail
           AUTO=https://market-edge-baseline-real.darkbishop43.workers.dev
           PAYNE=https://market-edge-payne-kalshi-real.darkbishop43.workers.dev
 
-          echo "=== AUTO EXECUTION TEST STATE ==="
+          echo "=== AUTO STATE ==="
           curl -fsS --retry 2 --connect-timeout 10 --max-time 90 "$AUTO/execution-test-state" -o auto.json
-          jq -c '{state:.state,queue:.queue,funding:.funding,safety:.safety}' auto.json
+          jq -c '{seriesId:.state.seriesId,status:.state.status,attempts:.state.attempts,positions:.state.positions,safety:.safety,funding:.funding}' auto.json
 
-          echo "=== PAYNE REAL STATE ==="
-          curl -fsS --retry 2 --connect-timeout 10 --max-time 90 "$PAYNE/real-state" -o payne-state.json
-          jq -c '.' payne-state.json
-
-          echo "=== PAYNE LEDGER OCT16 ==="
+          echo "=== PAYNE OCT16 TYPES ==="
           curl -fsS --retry 2 --connect-timeout 10 --max-time 90 "$PAYNE/real-ledger?limit=1000" -o payne-ledger.json
-          jq -c '{count,complete,omittedOlderKeys,rows:[.rows[]|select(((.eventTimestamp//.at//.timestamp//.createdAt//.openedAt//.closedAt//.providerResponseAt//"")|tostring) >= "2026-10-16T04:00:00Z" and ((.eventTimestamp//.at//.timestamp//.createdAt//.openedAt//.closedAt//.providerResponseAt//"")|tostring) < "2026-10-17T04:00:00Z")]}' payne-ledger.json
+          jq -c '[.rows[] | select((((.eventTimestamp//.at//.timestamp//.createdAt//.openedAt//.closedAt//.providerResponseAt//"")|tostring) >= "2026-10-16T04:00:00Z") and (((.eventTimestamp//.at//.timestamp//.createdAt//.openedAt//.closedAt//.providerResponseAt//"")|tostring) < "2026-10-17T04:00:00Z")) | .type] | group_by(.) | map({type:.[0],count:length})' payne-ledger.json
 
-          echo "=== PROVIDER HISTORICAL ORDERS OCT16 ET ==="
-          curl -fsS --retry 2 --connect-timeout 10 --max-time 90 "$AUTO/forensic-historical-orders?min_ts=1792123200&max_ts=1792209600&limit=200" -o provider.json
-          jq -c '{orderCount:((.orders//[])|length),cursor:(.cursor//null),orders:(.orders//[])}' provider.json
+          echo "=== PAYNE OCT16 TRADE RELEVANT ==="
+          jq -c '[.rows[] | select((((.eventTimestamp//.at//.timestamp//.createdAt//.openedAt//.closedAt//.providerResponseAt//"")|tostring) >= "2026-10-16T04:00:00Z") and (((.eventTimestamp//.at//.timestamp//.createdAt//.openedAt//.closedAt//.providerResponseAt//"")|tostring) < "2026-10-17T04:00:00Z")) | select((.type|tostring|test("ATTEMPT|ENTRY|EXIT|FILL|POSITION|RECON|CLOSE|ARM_TRANSITION|FIRE|PROVIDER";"i"))) | del(.observations)]' payne-ledger.json
 
-          echo "=== PROVIDER OWNERSHIP PREFIX SUMMARY ==="
-          jq -c '{
-            auto:[(.orders//[])[]|select((((.client_order_id//.clientOrderId//"")|tostring)|startswith("nfe-test-")) or ((((.client_order_id//.clientOrderId//"")|tostring)|startswith("baseline-real-"))))],
-            payne:[(.orders//[])[]|select((((.client_order_id//.clientOrderId//"")|tostring)|startswith("payne-real-")))]
-          }' provider.json
+          echo "=== PAYNE SERIES SUMMARY ==="
+          jq -c '[.rows[] | select((((.eventTimestamp//.at//.timestamp//.createdAt//.openedAt//.closedAt//.providerResponseAt//"")|tostring) >= "2026-10-16T04:00:00Z") and (((.eventTimestamp//.at//.timestamp//.createdAt//.openedAt//.closedAt//.providerResponseAt//"")|tostring) < "2026-10-17T04:00:00Z")) | select(.seriesId!=null) | {seriesId,type,at:(.eventTimestamp//.at//.timestamp//.createdAt//.openedAt//.closedAt//.providerResponseAt),attemptNo:(.attemptNo//.attempt//null),asset:(.asset//null),ticker:(.ticker//.marketTicker//null),side:(.side//.outcomeSide//null),score:(.score//.entryScore//null),result:(.result//.terminalStatus//.status//null),providerOrderId:(.providerOrderId//.orderId//null),realizedPnlUsd:(.realizedPnlUsd//null)}] | group_by(.seriesId) | map({seriesId:.[0].seriesId,rows:length,first:(map(.at)|min),last:(map(.at)|max),events:.})' payne-ledger.json
 
           echo "=== SAFETY ==="
           echo '{"providerWrites":0,"ordersSubmittedByThisRead":0,"capitalMovedUsd":0,"armDisarm":"UNCHANGED"}'
