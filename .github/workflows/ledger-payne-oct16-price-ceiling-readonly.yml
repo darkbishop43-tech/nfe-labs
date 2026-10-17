@@ -1,0 +1,23 @@
+name: Ledger PAYNE Oct16 Price Ceiling Read Only
+on:
+  push:
+    branches: [kalshi-ledger-lab-v1]
+permissions:
+  contents: read
+jobs:
+  read-only:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Extract PAYNE Oct16 raw trade rows
+        run: |
+          set -euo pipefail
+          PAYNE=https://market-edge-payne-kalshi-real.darkbishop43.workers.dev
+          for i in 1 2 3 4 5; do
+            if curl -fsS --connect-timeout 15 --max-time 180 "$PAYNE/real-ledger?limit=1000" -o ledger.json; then break; fi
+            sleep 3
+          done
+          test -s ledger.json
+          echo "=== RAW ==="
+          jq -c '[.rows[] | select(.seriesId=="3ce93c51-eb3e-4107-a086-e36005478319" or .seriesId=="a8d38035-ea7b-4b33-884e-214a77c48aec") | select(.type=="POSITION_OWNERSHIP_ESTABLISHED" or .type=="PROVIDER_RECONCILED_FLAT" or .type=="ENTRY_PRE_SUBMIT_LATCHED" or .type=="ENTRY_NO_FILL" or .type=="EXIT_PROVIDER_RESULT")]' ledger.json
+          echo "=== SAFETY ==="
+          echo '{"providerWrites":0,"ordersSubmittedByThisRead":0,"capitalMovedUsd":0,"armDisarm":"UNCHANGED"}'
