@@ -68,3 +68,5 @@ PY
 
           echo '=== SAFETY ==='
           echo '{"providerWrites":0,"ordersSubmittedByThisRead":0,"capitalMovedUsd":0,"armDisarm":"UNCHANGED"}'
+
+# trigger read-only pull
