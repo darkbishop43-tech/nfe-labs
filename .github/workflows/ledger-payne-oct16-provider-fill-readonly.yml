@@ -1,0 +1,37 @@
+name: Ledger PAYNE Oct16 Provider Fill Read Only
+on:
+  push:
+    branches: [kalshi-ledger-lab-v1]
+permissions:
+  contents: read
+jobs:
+  read-only:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Pull provider fill evidence for PAYNE Oct16 orders
+        run: |
+          set -euo pipefail
+          AUTO=https://market-edge-baseline-real.darkbishop43.workers.dev
+          curl -fsS --retry 3 --connect-timeout 15 --max-time 180 "$AUTO/forensic-provider-history?limit=200" -o history.json
+          echo "=== MATCHES ==="
+          jq -c '[
+            ((.fills//[]) + (.historicalFills//[]))[] |
+            select((.orderId//"") as $id |
+              ["01a1434d-3dd0-728c-beae-661cb0cf4f4c",
+               "01a1437b-6638-7b9b-962b-e299b05d5e51",
+               "01a14391-d850-7bef-a952-54df4239da52",
+               "01a143a3-d5c8-7532-935a-f6b690550204",
+               "01a14403-eb70-7f5e-8490-676688ebb02e",
+               "01a14429-ede8-7ed4-a02d-27a30bfe2d90",
+               "01a14352-fa90-7fed-b871-bdfe81fd7969",
+               "01a1437e-3cc8-7e17-aef4-d9df87be8cb8",
+               "01a14392-6108-7b64-9952-2bf75f34bde8",
+               "01a143a7-6fa8-7660-b678-98c619797714",
+               "01a14407-9108-74a7-8033-f83bce846c40",
+               "01a1442e-04c8-7c57-b531-58133b2b2d6e"] | index($id)
+            )
+          ] | unique_by(.fillId)' history.json
+          echo "=== ENDPOINTS ==="
+          jq -c '.endpointFamilies' history.json
+          echo "=== SAFETY ==="
+          echo '{"providerWrites":0,"ordersSubmittedByThisRead":0,"capitalMovedUsd":0,"armDisarm":"UNCHANGED"}'
