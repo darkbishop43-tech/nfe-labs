@@ -1,0 +1,110 @@
+name: PAYNE Heartbeat Promotion Gate Offline
+on:
+  push:
+    branches: [payne-time-gate-60s-isolated-20261017]
+    paths: ['.github/workflows/payne-heartbeat-gate-offline.yml']
+permissions:
+  contents: read
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Verify only heartbeat age check removed, and Worker scheduled paths remain
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'JS'
+          import fs from 'node:fs';
+          import assert from 'node:assert/strict';
+          const gate=fs.readFileSync('.github/scripts/payne-kv-deployment-safety-maintenance.sh','utf8');
+          const source=fs.readFileSync('market-edge-lab/real/payne-kalshi-real/src/index.js','utf8');
+          assert(!gate.includes('STALE_OR_FUTURE_SCHEDULER_HEARTBEAT'));
+          assert(!gate.includes('age_ms='));
+          for(const s of ['PERSISTED_CONTROL_SAFETY','PERSISTED_SERIES_EXPOSURE_OR_CONFIG','SCANNER_AUTHORITY','FOUNDER_CONTROL_CHANGED','TRADING_SERIES_CHANGED_ACROSS_DEPLOYMENT','CLOUDFLARE_KV_GET_CAUSED_NO_TRADING_PROVIDER_WRITES']) assert(gate.includes(s),s);
+          for(const s of ['async scheduled(controller, env, ctx)','runReadOnlyScan(env,\'SCHEDULED_CRON\')','runPayneRealExecutionCycle(env','reconcileOwnedPaynePosition','payneRealHoldEvidenceDecision','heldMs>=PAYNE_PAPER_RULES.maxHoldMs','closeMs - nowMs > 60 * 1000']) assert(source.includes(s),s);
+          console.log('HEARTBEAT_AGE_ONLY_REMOVAL_AND_SCHEDULER_SOURCE_PASS');
+          JS
+          bash -n .github/scripts/payne-kv-deployment-safety-maintenance.sh
+      - name: Run existing PAYNE regressions
+        working-directory: market-edge-lab/real/payne-kalshi-real
+        run: |
+          set -euo pipefail
+          node --check src/index.js
+          npm test
+      - name: Exercise real promotion gate with synthetic read-only Cloudflare KV fixtures
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/mock-kv /tmp/mockbin
+          cat > /tmp/mockbin/curl <<'MOCK'
+          #!/bin/bash
+          set -euo pipefail
+          out='' url='' codevar=''
+          while (($#)); do
+            case "$1" in
+              --output) out="$2"; shift 2;;
+              --write-out) codevar="$2"; shift 2;;
+              --header|--max-time) shift 2;;
+              --silent|--show-error) shift;;
+              *) url="$1"; shift;;
+            esac
+          done
+          if [[ "$url" == *control* ]]; then cp /tmp/mock-kv/control.json "$out";
+          elif [[ "$url" == *real-series* ]]; then cp /tmp/mock-kv/series.json "$out";
+          elif [[ "$url" == *current* ]]; then cp /tmp/mock-kv/current.json "$out";
+          else printf '404';exit 0;fi
+          printf '200'
+          MOCK
+          chmod +x /tmp/mockbin/curl
+          export PATH="/tmp/mockbin:$PATH"
+          export CLOUDFLARE_API_TOKEN='OFFLINE_TEST_PLACEHOLDER'
+          export CLOUDFLARE_ACCOUNT_ID='OFFLINE_TEST_PLACEHOLDER'
+          cat > /tmp/mock-kv/control.json <<'JSON'
+          {"realControlSchema":"PAYNE_REAL_CONTROL_V2_PAPER_BRAIN","armed":false,"openPositions":0,"requiredExchangeIndex":2,"activeThreshold":0.65,"attemptTarget":5,"maxEntryDebitUsd":1,"scanEnabled":true}
+          JSON
+          cat > /tmp/mock-kv/series.json <<'JSON'
+          {"schema":"PAYNE_REAL_SERIES_V1","owner":"PAYNE_KALSHI_REAL","seriesId":"synthetic-offline-only","requiredExchangeIndex":2,"unresolvedEntry":false,"position":null,"fireLatch":{"state":"NONE"},"currentAttempt":{},"configFrozen":false,"attemptsStarted":0,"executionIntentsStarted":0}
+          JSON
+          cat > /tmp/mock-kv/current.json <<'JSON'
+          {"at":"2020-01-01T00:00:00Z","source":"SCHEDULED_CRON"}
+          JSON
+          gate=".github/scripts/payne-kv-deployment-safety-maintenance.sh"
+          bash "$gate" pre > /tmp/offline-pre.log
+          grep -q 'PREDEPLOY_DISARMED_AND_PERSISTENCE_GATE=PASS' /tmp/offline-pre.log
+          echo 'STALE_HEARTBEAT_DISARMED_ZERO_EXPOSURE_PRE_PASS'
+          bash "$gate" post > /tmp/offline-post.log
+          grep -q 'POSTDEPLOY_DISARMED_AND_CONFIG_CONTINUITY=PASS' /tmp/offline-post.log
+          echo 'STALE_HEARTBEAT_DISARMED_ZERO_EXPOSURE_POST_PASS'
+          jq '.at="2099-01-01T00:00:00Z"' /tmp/mock-kv/current.json > /tmp/mock-kv/current.new && mv /tmp/mock-kv/current.new /tmp/mock-kv/current.json
+          bash "$gate" pre > /tmp/offline-future.log
+          grep -q 'PREDEPLOY_DISARMED_AND_PERSISTENCE_GATE=PASS' /tmp/offline-future.log
+          echo 'FUTURE_HEARTBEAT_DISARMED_ZERO_EXPOSURE_PRE_PASS'
+          jq '.armed=true' /tmp/mock-kv/control.json > /tmp/mock-kv/control.new && mv /tmp/mock-kv/control.new /tmp/mock-kv/control.json
+          if bash "$gate" pre > /tmp/offline-armed.log 2>&1; then echo 'ERROR_ARMED_ALLOWED';exit 1;fi
+          grep -q 'BLOCKED: PERSISTED_CONTROL_SAFETY' /tmp/offline-armed.log
+          echo 'ARMED_BLOCKS_PASS'
+          jq '.armed=false | .openPositions=1' /tmp/mock-kv/control.json > /tmp/mock-kv/control.new && mv /tmp/mock-kv/control.new /tmp/mock-kv/control.json
+          if bash "$gate" pre > /tmp/offline-exposure.log 2>&1; then echo 'ERROR_EXPOSURE_ALLOWED';exit 1;fi
+          grep -q 'BLOCKED: PERSISTED_CONTROL_SAFETY' /tmp/offline-exposure.log
+          echo 'PROVIDER_EXPOSURE_BLOCKS_PASS'
+          jq '.openPositions=0' /tmp/mock-kv/control.json > /tmp/mock-kv/control.new && mv /tmp/mock-kv/control.new /tmp/mock-kv/control.json
+          jq '.unresolvedEntry=true' /tmp/mock-kv/series.json > /tmp/mock-kv/series.new && mv /tmp/mock-kv/series.new /tmp/mock-kv/series.json
+          if bash "$gate" pre > /tmp/offline-unresolved.log 2>&1; then echo 'ERROR_UNRESOLVED_ALLOWED';exit 1;fi
+          grep -q 'BLOCKED:' /tmp/offline-unresolved.log
+          echo 'UNRESOLVED_NONTERMINAL_BLOCKS_PASS'
+          jq '.unresolvedEntry=false' /tmp/mock-kv/series.json > /tmp/mock-kv/series.new && mv /tmp/mock-kv/series.new /tmp/mock-kv/series.json
+          bash "$gate" pre > /tmp/offline-valid.log
+          jq '.activeThreshold=0.70' /tmp/mock-kv/control.json > /tmp/mock-kv/control.new && mv /tmp/mock-kv/control.new /tmp/mock-kv/control.json
+          if bash "$gate" post > /tmp/offline-change.log 2>&1; then echo 'ERROR_CONTROL_CHANGE_ALLOWED';exit 1;fi
+          grep -q 'BLOCKED: FOUNDER_CONTROL_CHANGED' /tmp/offline-change.log
+          echo 'FOUNDER_CONTROL_CONTINUITY_BLOCKS_PASS'
+          jq '.activeThreshold=0.65' /tmp/mock-kv/control.json > /tmp/mock-kv/control.new && mv /tmp/mock-kv/control.new /tmp/mock-kv/control.json
+          jq '.source="MANUAL"' /tmp/mock-kv/current.json > /tmp/mock-kv/current.new && mv /tmp/mock-kv/current.new /tmp/mock-kv/current.json
+          if bash "$gate" pre > /tmp/offline-source.log 2>&1; then echo 'ERROR_SCANNER_AUTHORITY_ALLOWED';exit 1;fi
+          grep -q 'BLOCKED: SCANNER_AUTHORITY' /tmp/offline-source.log
+          echo 'SCANNER_AUTHORITY_PRESERVED_PASS'
