@@ -102,6 +102,27 @@ verify_safety() {
         .currentAttempt.reconciliationReason=="PROVIDER_RECONCILED_NO_EXECUTION" and
         (.fireLatch.state//"NONE")=="INVALIDATED_BEFORE_POST" and
         .fireLatch.finalResult=="NO_PROVIDER_EXECUTION") or
+       # Founder-authorized deployment recovery for this exact historical
+       # zero-attempt series. Do not infer provider flatness from these KV fields.
+       # An explicit unknown/open obligation blocks. ARM and provider guards
+       # remain enforced by the unchanged live trading engine.
+       ($c[0].armed==false and $c[0].openPositions==0 and
+        .seriesId=="bd881b11-b130-491f-a75f-a98425b92fd9" and
+        .configFrozen==true and
+        (.attemptsStarted|type=="number" and .==0) and
+        (.executionIntentsStarted|type=="number" and .==0) and
+        .unresolvedEntry==false and
+        has("currentAttempt") and .currentAttempt==null and
+        has("position") and .position==null and
+        (.positions|type=="array" and length==0) and
+        has("fireLatch") and (.fireLatch==null or .fireLatch.state=="NONE") and
+        has("providerPostStarted") and .providerPostStarted==false and
+        ((.unknownProviderObligations // 0)==0) and
+        ((.providerOpenOrders // 0)==0) and
+        ((.providerOpenPositions // 0)==0) and
+        ((.coordinatorActiveClaims // 0)==0) and
+        ((.providerExposureStatus // "NOT_REPORTED")!="UNKNOWN") and
+        ((.providerReconciliationStatus // "NOT_REPORTED")!="UNKNOWN")) or
        # This is a SOFTWARE DEPLOYMENT policy exception only. It never alters
        # ARM eligibility, persistent series, coordinator claims or provider writes.
        ($evidenceAuthority=="AUTHENTICATED_READONLY_VERIFIER" and
