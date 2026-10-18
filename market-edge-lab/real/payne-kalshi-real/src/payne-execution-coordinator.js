@@ -149,6 +149,29 @@ export class PayneExecutionCoordinator {
 // Read-only coordinator inspection. This handler never enters a storage transaction,
 // writes, claims, releases, or resolves. The Durable Object is reachable only through
 // its Worker binding; caller authentication is enforced by the parent Worker.
+// Parent Worker authenticated GET facade. Never exposes a Durable Object directly.
+export async function inspectPayneCoordinatorSeries(env,seriesId) {
+  if(typeof seriesId!=='string'||!seriesId||seriesId.length>160)
+    return {ok:false,complete:false,status:'UNKNOWN',reason:'INVALID_SERIES_IDENTITY'};
+  const binding=env?.PAYNE_EXECUTION_COORDINATOR;
+  if(!binding?.idFromName||!binding?.get)
+    return {ok:false,complete:false,status:'UNKNOWN',reason:'COORDINATOR_UNBOUND'};
+  try{
+    const id=binding.idFromName(seriesId);
+    const response=await binding.get(id).fetch(
+      'https://payne-coordinator.internal/internal/inspect-series?seriesId='+encodeURIComponent(seriesId),
+      {method:'GET'});
+    const result=await response.json();
+    if(!response.ok||result?.ok!==true||result?.complete!==true||
+       result?.seriesId!==seriesId||!['CLEAR','BLOCKED'].includes(result?.status)||
+       !Array.isArray(result?.claims))
+      return {ok:false,complete:false,status:'UNKNOWN',reason:'SERIES_INSPECTION_INCOMPLETE'};
+    return result;
+  }catch{
+    return {ok:false,complete:false,status:'UNKNOWN',reason:'SERIES_INSPECTION_UNAVAILABLE'};
+  }
+}
+
 export async function inspectPayneCoordinatorClaim(env,seriesId,attemptNo) {
   if (!seriesId || !Number.isSafeInteger(attemptNo) || attemptNo < 1)
     return {ok:false,status:'ERROR',reason:'INVALID_INSPECTION_IDENTITY'};
