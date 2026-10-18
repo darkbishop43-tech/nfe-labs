@@ -10,7 +10,7 @@ assert.ok(match,'actual deployment gate policy jq expression must exist');
 const expr=match[1];
 const control={realControlSchema:'PAYNE_REAL_CONTROL_V2_PAPER_BRAIN',armed:false,openPositions:0,requiredExchangeIndex:2,activeThreshold:0.65,attemptTarget:5,maxEntryDebitUsd:1,scanEnabled:true};
 const series={schema:'PAYNE_REAL_SERIES_V1',owner:'PAYNE_KALSHI_REAL',requiredExchangeIndex:2,seriesId:'bd881b11-b130-491f-a75f-a98425b92fd9',status:'ARMED_FISHING',configFrozen:true,threshold:0.55,attemptTarget:1,maxEntryDebitUsd:1,attemptsStarted:0,executionIntentsStarted:0,unresolvedEntry:false,currentAttempt:null,position:null,positions:[],fireLatch:null,providerPostStarted:false};
-const proof={allowed:true,schema:'PAYNE_EMPTY_SERIES_DEPLOYMENT_EVIDENCE_V1',seriesId:series.seriesId,controlArmed:false,source:'AUTHENTICATED_READ_ONLY',providerOrdersComplete:true,providerPositionsComplete:true,coordinatorClaimsComplete:true,reconciliationComplete:true,providerOpenOrders:0,providerOpenPositions:0,coordinatorActiveClaims:0,unknownProviderObligations:0,observedAt:new Date().toISOString()};
+const proof={allowed:true,schema:'PAYNE_EMPTY_SERIES_DEPLOYMENT_EVIDENCE_V1',seriesId:series.seriesId,controlArmed:false,source:'AUTHENTICATED_READ_ONLY',providerOrdersComplete:true,providerPositionsComplete:true,coordinatorClaimsComplete:true,reconciliationComplete:true,providerOpenOrders:0,providerOpenPositions:0,coordinatorActiveClaims:0,unknownProviderObligations:0,observedAt:new Date().toISOString().replace(/\.\d{3}Z$/,'Z')};
 function evaluate({c={},s={},p={},authority='AUTHENTICATED_READONLY_VERIFIER'}={}){
  const dir=mkdtempSync(join(tmpdir(),'payne-gate-offline-'));
  try{
