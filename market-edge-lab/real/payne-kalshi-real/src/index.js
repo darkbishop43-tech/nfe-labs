@@ -2796,7 +2796,19 @@ function frozenSeriesMatchesControl(series,control) {
 async function reconcileDisarmedSupersededSeries(env,series,control,nowMs=Date.now()) {
   if(control?.armed===true || seriesTerminal(series)) return {series,terminalized:false,reason:'NOT_APPLICABLE'};
   const started=Number(series?.attemptsStarted||0), target=Number(series?.attemptTarget||1);
-  if(!(started>0 && started<target)) return {series,terminalized:false,reason:'NOT_UNFINISHED'};
+  if(!(started>=0 && started<target)) return {series,terminalized:false,reason:'NOT_UNFINISHED'};
+  // Zero-attempt supersession is allowed only for a provably empty disarmed series.
+  // A clean interlock alone does not establish absence of prior provider exposure.
+  if(started===0 && (
+    series?.configFrozen!==true ||
+    Number(series?.executionIntentsStarted||0)!==0 ||
+    series?.unresolvedEntry!==false ||
+    series?.currentAttempt!=null ||
+    series?.fireLatch!=null ||
+    series?.position!=null ||
+    (Array.isArray(series?.positions) && series.positions.length!==0) ||
+    Number(control?.openPositions)!==0
+  )) return {series,terminalized:false,reason:'ZERO_ATTEMPT_EXPOSURE_NOT_PROVEN_EMPTY'};
   const frozen=frozenSeriesConfig(series);
   if(!frozen.ok) return {series,terminalized:false,reason:'SERIES_NOT_FROZEN'};
   const gate=seriesInterlock(series);
