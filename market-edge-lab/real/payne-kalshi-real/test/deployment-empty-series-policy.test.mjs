@@ -56,3 +56,35 @@ const negative=[
 ];
 for(const [name,args] of negative)test('fails closed: '+name,()=>{const r=evaluate(args);assert.equal(r.ok,false,r.stdout)});
 test('normal matching config remains eligible without special proof',()=>{const r=evaluate({s:{threshold:0.65,attemptTarget:5},authority:'UNVERIFIED',p:{allowed:false}});assert.equal(r.ok,true,r.error)});
+
+test('Founder disarmed zero-attempt frozen mismatch permits SOFTWARE recovery without undeployed diagnostics',()=>{
+ const r=evaluate({authority:'UNVERIFIED',p:{allowed:false}});
+ assert.equal(r.ok,true,r.error);
+});
+const founderRecoveryNegative=[
+ ['Founder armed',{c:{armed:true}}],
+ ['active claim marker',{s:{coordinatorActiveClaims:1}}],
+ ['unknown provider exposure',{s:{providerExposureStatus:'UNKNOWN'}}],
+ ['unknown reconciliation',{s:{providerReconciliationStatus:'UNKNOWN'}}],
+ ['unknown obligations',{s:{unknownProviderObligations:1}}],
+ ['open provider orders',{s:{providerOpenOrders:1}}],
+ ['open provider positions',{s:{providerOpenPositions:1}}],
+ ['persisted position',{s:{positions:[{status:'OPEN'}]}}],
+ ['missing positions',{s:{positions:null}}],
+ ['missing attempts',{s:{attemptsStarted:null}}],
+ ['nonzero attempts',{s:{attemptsStarted:1}}],
+ ['nonzero intents',{s:{executionIntentsStarted:1}}],
+ ['unknown current attempt',{s:{currentAttempt:{status:'UNKNOWN'}}}],
+ ['provider submit marker',{s:{providerPostStarted:true}}],
+ ['provider post marker missing',{s:{providerPostStarted:null}}],
+ ['series mismatch',{s:{seriesId:'different'}}],
+ ['active latch',{s:{fireLatch:{state:'LATCHED'}}}],
+ ['unknown latch',{s:{fireLatch:{state:'UNKNOWN'}}}],
+ ['unresolved entry',{s:{unresolvedEntry:true}}],
+ ['control position',{c:{openPositions:1}}]
+];
+for(const [name,values] of founderRecoveryNegative)
+ test('Founder software recovery rejects: '+name,()=>{
+   const r=evaluate({...values,authority:'UNVERIFIED',p:{allowed:false}});
+   assert.equal(r.ok,false,r.stdout);
+ });
