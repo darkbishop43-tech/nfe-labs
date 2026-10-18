@@ -11,10 +11,11 @@ const expr=match[1];
 const control={realControlSchema:'PAYNE_REAL_CONTROL_V2_PAPER_BRAIN',armed:false,openPositions:0,requiredExchangeIndex:2,activeThreshold:0.65,attemptTarget:5,maxEntryDebitUsd:1,scanEnabled:true};
 const series={schema:'PAYNE_REAL_SERIES_V1',owner:'PAYNE_KALSHI_REAL',requiredExchangeIndex:2,seriesId:'bd881b11-b130-491f-a75f-a98425b92fd9',status:'ARMED_FISHING',configFrozen:true,threshold:0.55,attemptTarget:1,maxEntryDebitUsd:1,attemptsStarted:0,executionIntentsStarted:0,unresolvedEntry:false,currentAttempt:null,position:null,positions:[],fireLatch:null,providerPostStarted:false};
 const proof={allowed:true,schema:'PAYNE_EMPTY_SERIES_DEPLOYMENT_EVIDENCE_V1',seriesId:series.seriesId,controlArmed:false,source:'AUTHENTICATED_READ_ONLY',providerOrdersComplete:true,providerPositionsComplete:true,coordinatorClaimsComplete:true,reconciliationComplete:true,providerOpenOrders:0,providerOpenPositions:0,coordinatorActiveClaims:0,unknownProviderObligations:0,observedAt:new Date().toISOString().replace(/\.\d{3}Z$/,'Z')};
-function evaluate({c={},s={},p={},authority='AUTHENTICATED_READONLY_VERIFIER'}={}){
+function evaluate({c={},s={},p={},omitSeriesFields=[],authority='AUTHENTICATED_READONLY_VERIFIER'}={}){
  const dir=mkdtempSync(join(tmpdir(),'payne-gate-offline-'));
  try{
-  for(const [name,v] of Object.entries({control:{...control,...c},series:{...series,...s},proof:{...proof,...p},maintenance:{allowed:false}}))writeFileSync(join(dir,name+'.json'),JSON.stringify(v));
+  const legacySeries={...series,...s};for(const f of omitSeriesFields)delete legacySeries[f];
+  for(const [name,v] of Object.entries({control:{...control,...c},series:legacySeries,proof:{...proof,...p},maintenance:{allowed:false}}))writeFileSync(join(dir,name+'.json'),JSON.stringify(v));
   const out=spawnSync('jq',['-e','--slurpfile','c',join(dir,'control.json'),'--slurpfile','maintenance',join(dir,'maintenance.json'),'--slurpfile','empty',join(dir,'proof.json'),'--arg','evidenceAuthority',authority,expr,join(dir,'series.json')],{encoding:'utf8'});
   return {ok:out.status===0,error:out.stderr,stdout:out.stdout};
  }finally{rmSync(dir,{recursive:true,force:true})}
@@ -88,3 +89,32 @@ for(const [name,values] of founderRecoveryNegative)
    const r=evaluate({...values,authority:'UNVERIFIED',p:{allowed:false}});
    assert.equal(r.ok,false,r.stdout);
  });
+
+test('exact PAYNE_REAL_SERIES_V1 no providerPostStarted: disarmed legacy software recovery passes',()=>{
+ const r=evaluate({authority:'UNVERIFIED',p:{allowed:false},omitSeriesFields:['providerPostStarted']});assert.equal(r.ok,true,r.error);
+});
+for(const [label,args] of [
+ ['armed',{c:{armed:true}}],
+ ['wrong series',{s:{seriesId:'another-series'}}],
+ ['missing attempts',{omitSeriesFields:['attemptsStarted']}],
+ ['nonzero attempts',{s:{attemptsStarted:1}}],
+ ['missing execution intents',{omitSeriesFields:['executionIntentsStarted']}],
+ ['nonzero execution intents',{s:{executionIntentsStarted:1}}],
+ ['current attempt',{s:{currentAttempt:{status:'UNKNOWN'}}}],
+ ['active latch',{s:{fireLatch:{state:'LATCHED'}}}],
+ ['unknown latch',{s:{fireLatch:{state:'UNKNOWN'}}}],
+ ['position',{s:{positions:[{status:'OPEN'}]}}],
+ ['unknown exposure',{s:{providerExposureStatus:'UNKNOWN'}}],
+ ['unknown obligations',{s:{unknownProviderObligations:1}}],
+ ['open orders',{s:{providerOpenOrders:1}}],
+ ['open provider positions',{s:{providerOpenPositions:1}}],
+ ['active coordinator',{s:{coordinatorActiveClaims:1}}],
+ ['explicit post true',{s:{providerPostStarted:true}}],
+ ['explicit post null',{s:{providerPostStarted:null}}],
+ ['missing currentAttempt',{omitSeriesFields:['currentAttempt']}],
+ ['missing fireLatch',{omitSeriesFields:['fireLatch']}],
+ ['missing position',{omitSeriesFields:['position']}]
+])test('exact legacy absent marker rejects: '+label,()=>{
+ const r=evaluate({authority:'UNVERIFIED',p:{allowed:false},c:args.c,s:args.s,omitSeriesFields:['providerPostStarted',...(args.omitSeriesFields||[])]});
+ assert.equal(r.ok,false,r.stdout);
+});
