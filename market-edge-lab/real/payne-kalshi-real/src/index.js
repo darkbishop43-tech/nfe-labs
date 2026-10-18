@@ -380,7 +380,7 @@ export async function listEvents(env) {
 
 export function kalshiCandidateTimeSafe(candidate, nowMs = Date.now()) {
   const closeMs = Date.parse(candidate?.closeTime ?? '');
-  return Number.isFinite(closeMs) && closeMs - nowMs > 6.5 * 60 * 1000;
+  return Number.isFinite(closeMs) && closeMs - nowMs > 60 * 1000;
 }
 
 export function realEligibility(candidate, nowMs = Date.now()) {
