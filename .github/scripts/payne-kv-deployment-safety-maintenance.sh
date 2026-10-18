@@ -102,6 +102,31 @@ verify_safety() {
         .currentAttempt.reconciliationReason=="PROVIDER_RECONCILED_NO_EXECUTION" and
         (.fireLatch.state//"NONE")=="INVALIDATED_BEFORE_POST" and
         .fireLatch.finalResult=="NO_PROVIDER_EXECUTION") or
+       # Founder-authorized deployment recovery for this exact historical
+       # zero-attempt series. Do not infer provider flatness from these KV fields.
+       # Missing provider fields remain UNVERIFIED, not proof of zero. Explicit
+       # unknown/open obligations block SOFTWARE maintenance. ARM/provider guards
+       # remain enforced by the unchanged live trading engine.
+       ($c[0].armed==false and $c[0].openPositions==0 and
+        .seriesId=="bd881b11-b130-491f-a75f-a98425b92fd9" and
+        .configFrozen==true and
+        (.attemptsStarted|type=="number" and .==0) and
+        (.executionIntentsStarted|type=="number" and .==0) and
+        .unresolvedEntry==false and
+        has("currentAttempt") and .currentAttempt==null and
+        has("position") and .position==null and
+        (.positions|type=="array" and length==0) and
+        has("fireLatch") and (.fireLatch==null or .fireLatch.state=="NONE") and
+        # PAYNE_REAL_SERIES_V1 legacy records have no top-level providerPostStarted.
+        # Absence is permitted for SOFTWARE deployment only, never converted to false.
+        # An explicit true, null, or unknown value remains blocking.
+        ((has("providerPostStarted")|not) or .providerPostStarted==false) and
+        ((has("unknownProviderObligations")|not) or .unknownProviderObligations==0) and
+        ((has("providerOpenOrders")|not) or .providerOpenOrders==0) and
+        ((has("providerOpenPositions")|not) or .providerOpenPositions==0) and
+        ((has("coordinatorActiveClaims")|not) or .coordinatorActiveClaims==0) and
+        ((has("providerExposureStatus")|not) or .providerExposureStatus!="UNKNOWN") and
+        ((has("providerReconciliationStatus")|not) or .providerReconciliationStatus!="UNKNOWN")) or
        # This is a SOFTWARE DEPLOYMENT policy exception only. It never alters
        # ARM eligibility, persistent series, coordinator claims or provider writes.
        ($evidenceAuthority=="AUTHENTICATED_READONLY_VERIFIER" and
