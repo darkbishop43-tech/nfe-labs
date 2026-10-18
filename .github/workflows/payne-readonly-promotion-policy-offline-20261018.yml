@@ -27,7 +27,7 @@ jobs:
           git merge-base --is-ancestor "$base" "$assembly"
           git merge-base --is-ancestor "$assembly" HEAD
           git diff --name-only "$assembly" HEAD | sort > /tmp/changed
-          printf '%s\n' ".github/workflows/payne-disarm-accountability-v1-production.yml" ".github/workflows/payne-readonly-promotion-policy-offline-20261018.yml" | sort > /tmp/allowed
+          printf '%s\n' ".github/workflows/payne-disarm-accountability-v1-production.yml" ".github/workflows/payne-readonly-promotion-policy-offline-20261018.yml" ".github/scripts/payne-kv-deployment-safety-maintenance.sh" ".github/scripts/payne-empty-series-readonly-verifier.mjs" "market-edge-lab/real/payne-kalshi-real/test/deployment-empty-series-policy.test.mjs" "market-edge-lab/real/payne-kalshi-real/test/deployment-readonly-verifier.test.mjs" | sort > /tmp/allowed
           cmp /tmp/changed /tmp/allowed
           grep -Fq "ref: $assembly" "$target"
           grep -Fq "path: maintenance-source" "$target"
@@ -47,7 +47,18 @@ jobs:
           ! grep -Fq 'branches: [payne-readonly-promotion-workflow-isolated-20261018]' "$target"
           test "$(git rev-parse "$assembly:market-edge-lab/real/payne-kalshi-real/src/index.js")" = 948f00a6e9053cdcca33d4160508996d472d329d
           grep -Fq 'name = "PAYNE_EXECUTION_COORDINATOR"' market-edge-lab/real/payne-kalshi-real/wrangler.toml
-          git diff --quiet "$assembly" HEAD -- market-edge-lab/real/payne-kalshi-real
+          git diff --quiet "$assembly" HEAD -- market-edge-lab/real/payne-kalshi-real/src market-edge-lab/real/payne-kalshi-real/wrangler.toml
+          test "$(git hash-object .github/scripts/payne-kv-deployment-safety-maintenance.sh)" = bae5d182625bb80be31934aad8585d05007b9c02
+          test "$(git hash-object .github/scripts/payne-empty-series-readonly-verifier.mjs)" = e4c88d4685aa2bd8d60d73e5950f5716eed89fd3
+          grep -Fq 'payne-empty-series-readonly-verifier.mjs' "$target"
+          grep -Fq 'Generate authenticated zero-attempt deployment evidence' "$target"
+          grep -Fq 'UNVERIFIED_EVIDENCE_APPROVAL' "$target"
+          node --check .github/scripts/payne-empty-series-readonly-verifier.mjs
+          verifier_line=$(grep -n -m1 'node maintenance-source/.github/scripts/payne-empty-series-readonly-verifier.mjs' "$target" | cut -d: -f1)
+          gate_line=$(grep -n -m1 'bash maintenance-source/.github/scripts/payne-kv-deployment-safety-maintenance.sh pre' "$target" | cut -d: -f1)
+          test "$verifier_line" -lt "$gate_line"
+          deploy_line=$(grep -n -m1 'npx --yes wrangler@4 deploy |' "$target" | cut -d: -f1)
+          test "$gate_line" -lt "$deploy_line"
           echo ISOLATED_PROMOTION_PIN_AND_ALL_EXISTING_SAFETY_GATES=PASS
       - name: Validate assembled GET-only coordinator and full original regressions
         working-directory: market-edge-lab/real/payne-kalshi-real
@@ -56,4 +67,5 @@ jobs:
           node --check src/index.js
           node --check src/payne-execution-coordinator.js
           node --test test/coordinator-series-inspection.test.mjs test/coordinator-parent-authenticated-read.test.mjs
+          node --test test/deployment-empty-series-policy.test.mjs test/deployment-readonly-verifier.test.mjs
           npm test
