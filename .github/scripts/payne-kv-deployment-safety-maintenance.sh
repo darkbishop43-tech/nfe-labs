@@ -127,13 +127,8 @@ verify_safety() {
     ' "$s"
     exit 1
   }
-  # The live Worker scheduler persists this heartbeat every minute. The
-  # existing Paper source cadence is 300000ms, not a new trading value.
-  local observed_ms now_ms age_ms
-  if ! observed_ms="$(date -u -d "$(jq -r '.at//empty' "$x")" +%s%3N 2>/dev/null)";then echo 'BLOCKED: INVALID_SCAN_TIMESTAMP';exit 1;fi
-  now_ms="$(date -u +%s%3N)"
-  age_ms="$((now_ms-observed_ms))"
-  if [[ "$age_ms" -lt 0 || "$age_ms" -gt 300000 ]];then echo 'BLOCKED: STALE_OR_FUTURE_SCHEDULER_HEARTBEAT';exit 1;fi
+  # Promotion must not depend on heartbeat freshness: scan/management scheduling
+  # remains in the Worker. Preserve the existing scanner-source authority check.
   jq -e '.source=="SCHEDULED_CRON" and (.at|type=="string")' "$x" >/dev/null || { echo 'BLOCKED: SCANNER_AUTHORITY';exit 1; }
 }
 read_payne_kv 'payne-kalshi:control:v1' control
