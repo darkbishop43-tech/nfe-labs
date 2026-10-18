@@ -1,0 +1,28 @@
+name: PAYNE Isolated Zero Attempt Offline Validation
+on:
+  push:
+    branches: [payne-direct-pull-fire-isolated-20261018]
+    paths: [".github/workflows/payne-zero-attempt-offline-validation.yml"]
+permissions:
+  contents: read
+jobs:
+  offline:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: payne-direct-pull-fire-isolated-20261018
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Source and isolated safety tests
+        working-directory: market-edge-lab/real/payne-kalshi-real
+        run: |
+          set -euo pipefail
+          node --check src/index.js
+          node --test test/zero-attempt-supersession-isolated.test.mjs
+      - name: Full offline regression suite
+        working-directory: market-edge-lab/real/payne-kalshi-real
+        run: npm test
