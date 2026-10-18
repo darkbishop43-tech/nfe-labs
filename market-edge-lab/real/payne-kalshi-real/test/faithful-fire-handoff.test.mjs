@@ -11,7 +11,7 @@ const cycle=src.slice(start,end>start?end:undefined);
 const between=(a,b)=>cycle.slice(cycle.indexOf(a),cycle.indexOf(b));
 test('original PAYNE Paper decision remains source for FIRE',()=>{
  assert.match(src,/function fireSpecimenFromSnapshot\(/);
- assert.match(src,/preview\?\.status!=='FIRE_READY'/);
+ assert.match(src,/selected\?\.decision\?\.pull!=='PULL_QUALIFIED'/);
  assert.match(src,/observedScore:selected\?\.payne\?\.score\?\?preview\?\.score/);
  assert.match(src,/function payneDecisionEvidence\(/);
  assert.match(src,/const d=paperDecision\(/);
