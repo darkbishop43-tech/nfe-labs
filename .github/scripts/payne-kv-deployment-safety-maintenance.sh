@@ -118,7 +118,9 @@ verify_safety() {
         $empty[0].providerOpenPositions==0 and
         $empty[0].coordinatorActiveClaims==0 and
         $empty[0].unknownProviderObligations==0 and
-        $empty[0].observedAt!=null and
+        ($empty[0].observedAt|type=="string") and
+        (($empty[0].observedAt|fromdateiso8601?) // 0) >= (now-120) and
+        (($empty[0].observedAt|fromdateiso8601?) // 0) <= (now+10) and
         $c[0].armed==false and
         $c[0].openPositions==0 and
         .configFrozen==true and
@@ -130,7 +132,7 @@ verify_safety() {
         (.positions|type=="array" and length==0) and
         ((.fireLatch//null)==null or
           (.fireLatch|type=="object" and .state=="NONE")) and
-        (.providerPostStarted//false)==false))
+        (.providerPostStarted|type=="boolean" and .==false)))
   ' "$s" >/dev/null || {
     # Existing KV data only: identify the failed invariant without changing state.
     jq -r --slurpfile c "$c" '
