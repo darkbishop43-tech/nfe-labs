@@ -54,7 +54,7 @@ const negative=[
  ['stale evidence',{p:{observedAt:'2020-01-01T00:00:00Z'}}],
  ['future evidence',{p:{observedAt:'2030-01-01T00:00:00Z'}}]
 ];
-for(const [name,args] of negative)test('fails closed: '+name,()=>{const r=evaluate(args);assert.equal(r.ok,false,r.stdout)});
+for(const [name,args] of negative)test('fails closed: '+name,()=>{const r=evaluate({...args,s:{seriesId:'other-historical-series',...args.s},p:{seriesId:'other-historical-series',...args.p}});assert.equal(r.ok,false,r.stdout)});
 test('normal matching config remains eligible without special proof',()=>{const r=evaluate({s:{threshold:0.65,attemptTarget:5},authority:'UNVERIFIED',p:{allowed:false}});assert.equal(r.ok,true,r.error)});
 
 test('Founder disarmed zero-attempt frozen mismatch permits SOFTWARE recovery without undeployed diagnostics',()=>{
