@@ -1,0 +1,46 @@
+name: PAYNE Approved Direct Fire Readonly Assembly Offline
+on:
+  push:
+    branches: [payne-direct-fire-readonly-assembly-20261018]
+    paths: [".github/workflows/payne-direct-fire-readonly-assembly-offline.yml"]
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Verify exact original trading engine and only approved GET additions
+        shell: bash
+        run: |
+          set -euo pipefail
+          base=ad1f88bbdaa79587bc95074689270b7640c65027
+          git cat-file -e "$base^{commit}"
+          git diff --name-only "$base" HEAD > /tmp/payne-assembly-changes
+          cat /tmp/payne-assembly-changes
+          while IFS= read -r file; do
+            case "$file" in
+              market-edge-lab/real/payne-kalshi-real/src/index.js|market-edge-lab/real/payne-kalshi-real/src/payne-execution-coordinator.js|market-edge-lab/real/payne-kalshi-real/test/coordinator-series-inspection.test.mjs|market-edge-lab/real/payne-kalshi-real/test/coordinator-parent-authenticated-read.test.mjs|.github/workflows/payne-direct-fire-readonly-assembly-offline.yml) ;;
+              *) echo "BLOCKED: UNRELATED_CHANGE $file";exit 1;;
+            esac
+          done < /tmp/payne-assembly-changes
+          git diff --unified=0 "$base" HEAD -- market-edge-lab/real/payne-kalshi-real/src/index.js > /tmp/index.diff
+          git diff --unified=0 "$base" HEAD -- market-edge-lab/real/payne-kalshi-real/src/payne-execution-coordinator.js > /tmp/coordinator.diff
+          if grep -E '^-[^-]' /tmp/index.diff /tmp/coordinator.diff; then echo BLOCKED_SOURCE_DELETION;exit 1;fi
+          node --check market-edge-lab/real/payne-kalshi-real/src/index.js
+          node --check market-edge-lab/real/payne-kalshi-real/src/payne-execution-coordinator.js
+          git diff --quiet "$base" HEAD -- market-edge-lab/real/payne-kalshi-real/src/kalshi-real-write.js market-edge-lab/real/payne-kalshi-real/src/payne-paper-brain.js market-edge-lab/real/payne-kalshi-real/src/kalshi-get-only.js
+          echo PINNED_TRADING_BASELINE_WITH_ADDITIVE_READONLY_DIAGNOSTICS=PASS
+      - name: Verify existing read-only coordinator routes
+        working-directory: market-edge-lab/real/payne-kalshi-real
+        run: node --test test/coordinator-series-inspection.test.mjs test/coordinator-parent-authenticated-read.test.mjs
+      - name: Full original PAYNE offline regressions
+        working-directory: market-edge-lab/real/payne-kalshi-real
+        run: npm test
