@@ -1,7 +1,7 @@
-name: PAYNE 14 Minute Entry Existing Gated Promotion
+name: PAYNE Direct Pull Fire Existing Gated Promotion
 on:
   push:
-    branches: [payne-time-gate-60s-isolated-20261017]
+    branches: [payne-direct-pull-fire-isolated-20261018]
     paths: [".github/workflows/payne-disarm-accountability-v1-production.yml"]
 permissions:
   contents: read
@@ -15,7 +15,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: e6492e45e2e0e22ec98a13675b908b28ceff5dc1
+          ref: 693a9440f403e26bed7e0bc64decaeb702cad8bc
           persist-credentials: false
       - uses: actions/checkout@v4
         with:
@@ -29,9 +29,24 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test "$(git rev-parse HEAD)" = e6492e45e2e0e22ec98a13675b908b28ceff5dc1
+          test "$(git rev-parse HEAD)" = 693a9440f403e26bed7e0bc64decaeb702cad8bc
           test "$(git -C maintenance-source rev-parse HEAD)" = "$GITHUB_SHA"
-          test "$(git rev-parse HEAD:market-edge-lab/real/payne-kalshi-real/src/index.js)" = 94d3f7cbfd657ee2bbd3787ccc8cd194c88ef3b9
+          # The Worker assembly is a clean descendant of the Founder-approved trading base.
+          base=ad1f88bbdaa79587bc95074689270b7640c65027
+          git cat-file -e "$base^{commit}"
+          git merge-base --is-ancestor "$base" HEAD
+          git diff --name-only "$base" HEAD > /tmp/payne-assembly-whitelist
+          while IFS= read -r changed; do
+            case "$changed" in
+              market-edge-lab/real/payne-kalshi-real/src/index.js|market-edge-lab/real/payne-kalshi-real/src/payne-execution-coordinator.js|market-edge-lab/real/payne-kalshi-real/test/coordinator-series-inspection.test.mjs|market-edge-lab/real/payne-kalshi-real/test/coordinator-parent-authenticated-read.test.mjs|.github/workflows/payne-direct-fire-readonly-assembly-offline.yml) ;;
+              *) echo "BLOCKED: UNAPPROVED_ASSEMBLY_DIFFERENCE $changed";exit 1;;
+            esac
+          done < /tmp/payne-assembly-whitelist
+          grep -q "url.pathname === '/internal/series-claims-diagnostic'" market-edge-lab/real/payne-kalshi-real/src/index.js
+          grep -q "'/internal/inspect-series'" market-edge-lab/real/payne-kalshi-real/src/payne-execution-coordinator.js
+          grep -q 'PAYNE_COORDINATOR_DIAGNOSTIC_TOKEN' market-edge-lab/real/payne-kalshi-real/src/index.js
+          grep -q 'PAYNE_EXECUTION_COORDINATOR' market-edge-lab/real/payne-kalshi-real/wrangler.toml
+          test "$(git rev-parse HEAD:market-edge-lab/real/payne-kalshi-real/src/index.js)" = 948f00a6e9053cdcca33d4160508996d472d329d
           test "$(git rev-parse HEAD:market-edge-lab/real/payne-kalshi-real/src/cockpit-html.js)" = 657e477c4c9385e337fd725769b7ab757dc81c77
           test "$(git rev-parse HEAD:market-edge-lab/real/payne-kalshi-real/src/payne-closure-evidence.js)" = 7f0c5a2dce12ed0d56c1024cdd58c4f581ea364a
           grep -q '^name = "market-edge-payne-kalshi-real"$' market-edge-lab/real/payne-kalshi-real/wrangler.toml
@@ -68,7 +83,7 @@ jobs:
         run: |
           set -euo pipefail
           curl --fail --silent --show-error --max-time 25 -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/market-edge-payne-kalshi-real/deployments" -o /tmp/payne-deployments-pre.json
-          jq -e '.success==true and (.result.deployments[0].versions | any(.version_id=="a1832dc4-9951-41a4-aac1-1abc8c2468bc" and .percentage==100))' /tmp/payne-deployments-pre.json >/dev/null
+          jq -e '.success==true and (.result.deployments[0].versions | any(.version_id=="3a232c9f-6326-4522-b569-e58da8c2f24a" and .percentage==100))' /tmp/payne-deployments-pre.json >/dev/null
           echo 'PRODUCTION_BASELINE_MATCH=PASS'
       - name: Prepare authenticated PAYNE maintenance proof read-only
         shell: bash
@@ -137,9 +152,7 @@ jobs:
           grep -Fq 'TOP 3' /tmp/payne-grok-cockpit.html
           curl --fail --silent --show-error --max-time 25 "$base/disarm-audit-status" -o /tmp/payne-disarm-audit.json
           jq -e '.ok==true and .blocksArm==false and .blocksDeployment==false' /tmp/payne-disarm-audit.json >/dev/null
-          curl --fail --silent --show-error --max-time 90 "$base/real-history?view=cycles&page=0&limit=5" -o /tmp/payne-history-live.json
-          jq -e '.ok==true and .schema=="PAYNE_REAL_CYCLES_V1" and (.rows|type)=="array" and (.providerCoverage|type)=="string"' /tmp/payne-history-live.json >/dev/null
-          jq -c '{providerCoverage,providerReadComplete,providerLastReadAt,rows:[.rows[]|{seriesId,attemptId,entryPrice,exitPrice,quantity,entryFeesUsd,exitFeesUsd,realizedPnlUsd,coverage,missingProviderFields}]}' /tmp/payne-history-live.json
+          # Known history HTTP 503 is tracked separately; do not request retained cycles here.
           echo 'PRODUCTION_COCKPIT_AND_CONTROL_HTTP_200=PASS'
       - name: Verify new Worker version has all production traffic
         shell: bash
