@@ -104,7 +104,8 @@ verify_safety() {
         .fireLatch.finalResult=="NO_PROVIDER_EXECUTION") or
        # Founder-authorized deployment recovery for this exact historical
        # zero-attempt series. Do not infer provider flatness from these KV fields.
-       # An explicit unknown/open obligation blocks. ARM and provider guards
+       # Missing provider fields remain UNVERIFIED, not proof of zero. Explicit
+       # unknown/open obligations block SOFTWARE maintenance. ARM/provider guards
        # remain enforced by the unchanged live trading engine.
        ($c[0].armed==false and $c[0].openPositions==0 and
         .seriesId=="bd881b11-b130-491f-a75f-a98425b92fd9" and
@@ -117,12 +118,12 @@ verify_safety() {
         (.positions|type=="array" and length==0) and
         has("fireLatch") and (.fireLatch==null or .fireLatch.state=="NONE") and
         has("providerPostStarted") and .providerPostStarted==false and
-        ((.unknownProviderObligations // 0)==0) and
-        ((.providerOpenOrders // 0)==0) and
-        ((.providerOpenPositions // 0)==0) and
-        ((.coordinatorActiveClaims // 0)==0) and
-        ((.providerExposureStatus // "NOT_REPORTED")!="UNKNOWN") and
-        ((.providerReconciliationStatus // "NOT_REPORTED")!="UNKNOWN")) or
+        ((has("unknownProviderObligations")|not) or .unknownProviderObligations==0) and
+        ((has("providerOpenOrders")|not) or .providerOpenOrders==0) and
+        ((has("providerOpenPositions")|not) or .providerOpenPositions==0) and
+        ((has("coordinatorActiveClaims")|not) or .coordinatorActiveClaims==0) and
+        ((has("providerExposureStatus")|not) or .providerExposureStatus!="UNKNOWN") and
+        ((has("providerReconciliationStatus")|not) or .providerReconciliationStatus!="UNKNOWN")) or
        # This is a SOFTWARE DEPLOYMENT policy exception only. It never alters
        # ARM eligibility, persistent series, coordinator claims or provider writes.
        ($evidenceAuthority=="AUTHENTICATED_READONLY_VERIFIER" and
