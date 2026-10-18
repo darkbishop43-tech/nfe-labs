@@ -28,7 +28,7 @@ jobs:
           git merge-base --is-ancestor "$base" "$assembly"
           git merge-base --is-ancestor "$assembly" HEAD
           git diff --name-only "$assembly" HEAD | sort > /tmp/changed
-          printf '%s\n' ".github/workflows/payne-disarm-accountability-v1-production.yml" ".github/workflows/payne-readonly-promotion-policy-offline-20261018.yml" ".github/scripts/payne-kv-deployment-safety-maintenance.sh" ".github/scripts/payne-empty-series-readonly-verifier.mjs" "market-edge-lab/real/payne-kalshi-real/test/deployment-empty-series-policy.test.mjs" "market-edge-lab/real/payne-kalshi-real/test/deployment-readonly-verifier.test.mjs" | sort > /tmp/allowed
+          printf '%s\n' ".github/workflows/payne-disarm-accountability-v1-production.yml" ".github/workflows/payne-readonly-promotion-policy-offline-20261018.yml" ".github/scripts/payne-kv-deployment-safety-maintenance.sh" ".github/workflows/payne-live-readiness-get-only-20261018.yml" ".github/workflows/payne-provider-post-inventory-readonly-20261018.yml" ".github/scripts/payne-empty-series-readonly-verifier.mjs" "market-edge-lab/real/payne-kalshi-real/test/deployment-empty-series-policy.test.mjs" "market-edge-lab/real/payne-kalshi-real/test/deployment-readonly-verifier.test.mjs" | sort > /tmp/allowed
           cmp /tmp/changed /tmp/allowed
           grep -Fq "ref: $assembly" "$target"
           grep -Fq "path: maintenance-source" "$target"
