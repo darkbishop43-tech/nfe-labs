@@ -1,0 +1,38 @@
+name: PAYNE Four Stage Isolated Offline
+on:
+  push:
+    branches: [payne-four-stage-isolated-20261018]
+    paths: ['.github/workflows/payne-four-stage-offline.yml']
+permissions:
+  contents: read
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Full PAYNE regressions and syntax
+        working-directory: market-edge-lab/real/payne-kalshi-real
+        run: |
+          set -euo pipefail
+          node --check src/index.js
+          npm test
+      - name: Verify consolidated qualification and preserved safety source
+        shell: bash
+        run: |
+          node --input-type=module <<'JS'
+          import fs from 'node:fs';
+          import assert from 'node:assert/strict';
+          const s=fs.readFileSync('market-edge-lab/real/payne-kalshi-real/src/index.js','utf8');
+          const scan=s.slice(s.indexOf('export async function runReadOnlyScan'),s.indexOf('export async function runReadOnlyScan')+7000);
+          assert(!scan.includes('synchronizeFireFeatureEpoch(env,series,snapshot,nowMs)'));
+          assert(scan.includes('latchFireReadySpecimen(env,series,snapshot,nowMs,control.maxPositions)'));
+          assert(s.includes('authoritativeLockEvidence='));
+          assert(s.includes("forceRefresh:true"));
+          assert(s.includes("fireFeatureEvidence:data.fireFeatureEvidence||null"));
+          for(const needle of ['kalshiCandidateTimeSafe({closeTime:candidate.closeTime},nowMs)','estimateKalshiFeeSafeSize(ask,cfg.maxEntryDebitUsd)','index2FundingEvidence(balanceBody,sizing.totalDebitUsd)','baselineAutoTickerConflict(env,candidate.ticker)','providerTickerPositionEvidence(env,candidate.ticker)','seriesInterlock(series,control.maxPositions)','reconcileOwnedPaynePosition(env,position)','PAYNE_PAPER_RULES.maxHoldMs'])assert(s.includes(needle),needle);
+          console.log('FOUR_STAGE_SOURCE_AND_FIRE_SAFETY_CHECKS_PASS');
+          JS
