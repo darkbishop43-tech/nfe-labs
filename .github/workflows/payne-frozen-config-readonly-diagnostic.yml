@@ -31,55 +31,5 @@ jobs:
           }
           read_key 'payne-kalshi:control:v1' control
           read_key 'payne-kalshi:real-series:v1' series
-          jq -n --slurpfile c "$tmp/control.json" --slurpfile s "$tmp/series.json" '
-            ($c[0]) as $ctl | ($s[0]) as $ser |
-            {
-              seriesId:$ser.seriesId,
-              seriesStatus:($ser.status // null),
-              configFrozen:$ser.configFrozen,
-              frozenThreshold:$ser.threshold,
-              currentThreshold:$ctl.activeThreshold,
-              frozenAttemptTarget:$ser.attemptTarget,
-              currentAttemptTarget:$ctl.attemptTarget,
-              frozenMaxEntryDebitUsd:$ser.maxEntryDebitUsd,
-              currentMaxEntryDebitUsd:$ctl.maxEntryDebitUsd,
-              armed:$ctl.armed,
-              unresolvedEntry:$ser.unresolvedEntry,
-              openPositions:$ctl.openPositions,
-              persistedPositionStatus:($ser.position.status // null),
-              persistedPositionOwner:($ser.position.owner // null),
-              fireLatchState:($ser.fireLatch.state // "NONE"),
-              providerPostState:($ser.fireLatch.providerPost // "NOT_EXPOSED"),
-              providerPostStarted:($ser.currentAttempt.providerPostStarted // null),
-              currentAttemptStatus:($ser.currentAttempt.status // null),
-              reconciliationReason:($ser.currentAttempt.reconciliationReason // null),
-              exactMismatchFields:(
-                [if $ser.threshold != $ctl.activeThreshold then "THRESHOLD" else empty end,
-                 if $ser.attemptTarget != $ctl.attemptTarget then "ATTEMPT_TARGET" else empty end,
-                 if $ser.maxEntryDebitUsd != $ctl.maxEntryDebitUsd then "MAX_ENTRY_DEBIT" else empty end]
-              ),
-              historicalException1:(
-                $ctl.armed==false and $ser.unresolvedEntry==true and
-                $ser.currentAttempt.status=="NO_PROVIDER_EXECUTION" and
-                $ser.currentAttempt.reconciliationReason=="PROVIDER_RECONCILED_NO_EXECUTION" and
-                $ser.currentAttempt.providerPostStarted!=true and
-                ($ser.fireLatch.state//"NONE")=="PRE_PROVIDER_VALIDATION" and
-                ($ser.fireLatch.providerPost//"NOT_STARTED")=="NOT_STARTED"
-              ),
-              historicalException2:(
-                $ctl.armed==false and $ser.unresolvedEntry==false and
-                ($ser.position//null)==null and
-                $ser.currentAttempt.status=="NO_PROVIDER_EXECUTION" and
-                $ser.currentAttempt.reconciliationReason=="PROVIDER_RECONCILED_NO_EXECUTION" and
-                ($ser.fireLatch.state//"NONE")=="INVALIDATED_BEFORE_POST" and
-                $ser.fireLatch.finalResult=="NO_PROVIDER_EXECUTION"
-              )
-            } |
-            . + {configGateClassification:(
-              if .configFrozen!=true then "NOT_FROZEN"
-              elif (.exactMismatchFields|length)==0 then "MATCH"
-              elif .historicalException1 or .historicalException2 then "FROZEN_MISMATCH_WITH_EXISTING_EXCEPTION"
-              else "FROZEN_FOUNDER_CONFIG_MISMATCH" end
-            )}
-          ' | jq -c .
+          jq -c '{seriesId,attemptsStarted,attemptTarget,status,configFrozen}' "$tmp/series.json"
           echo "READ_ONLY_DIAGNOSTIC_COMPLETE_NO_WRITES"
