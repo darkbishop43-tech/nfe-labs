@@ -1660,6 +1660,7 @@ function compactObservation(data, source, atMs) {
     schema:'PAYNE_KALSHI_PRELIVE_OBSERVATION_V2',
     at:new Date(atMs).toISOString(),
     source,
+    fireFeatureEvidence:data.fireFeatureEvidence||null,
     authentication:data.authentication,
     selected:data.selected?{
       asset:data.selected.asset,
@@ -1922,10 +1923,14 @@ export async function runReadOnlyScan(env, source='SCHEDULED_CRON', nowMs=Date.n
       && snapshot?.pipeline?.sideConsistent===true
       && snapshot?.pipeline?.timeGate6_5m==='PASS';
     if(!seriesTerminal(series) && frozenSeriesMatchesControl(series,control) && prefireMarketPass){
-      const synced=await synchronizeFireFeatureEpoch(env,series,snapshot,nowMs);
-      if(synced.ok){
-        const latched=await latchFireReadySpecimen(env,synced.series,synced.snapshot,nowMs,control.maxPositions);
-        logPayneTiming('FIRE_LATCH_RESULT',payneTimingIdentity(latched?.series||synced.series,latched?.series?.fireLatch||synced.series?.fireLatch),scanStartedMs,Date.now(),latched?.reason||'LATCH_ATTEMPTED');
+      // The LOCK snapshot already passed the one authoritative fresh
+      // paper decision used by PULL. Do not request another strategy vote.
+      const qualified= snapshot?.fireFeatureEvidence?.available===true &&
+        snapshot?.fireFeatureEvidence?.windowMatch===true &&
+        snapshot?.selected?.decision?.pull==='PULL_QUALIFIED';
+      if(qualified){
+        const latched=await latchFireReadySpecimen(env,series,snapshot,nowMs,control.maxPositions);
+        logPayneTiming('FIRE_LATCH_RESULT',payneTimingIdentity(latched?.series||series,latched?.series?.fireLatch||series?.fireLatch),scanStartedMs,Date.now(),latched?.reason||'LATCH_ATTEMPTED');
       }
     }
   }
@@ -2549,6 +2554,33 @@ export async function buildCockpitData(env, nowMs=Date.now()) {
     }
   }
 
+  // LOCK: one authoritative exact-contract feature snapshot. The earlier
+  // candidate ranking is RADAR only; the same refreshed feature is used by PULL.
+  let authoritativeLockEvidence=null;
+  if(selected){
+    const m=freshLock?.ok===true ? freshLock.market : null;
+    const exact=Boolean(m && m.ticker===selected.ticker &&
+      String(m.openTime||'')===String(selected.openTime||'') &&
+      String(m.closeTime||'')===String(selected.closeTime||''));
+    const state=exact
+      ?await readAuthoritativePayneFeatures(env,[m],nowMs,{forceRefresh:true})
+      :{fresh:false,error:'LOCK_EXACT_MARKET_IDENTITY_FAILED',opportunities:[]};
+    const qualified=featureForCandidate(state,selected.ticker,selected.outcomeSide,selected.asset,control.activeThreshold,m);
+    selected.payne=qualified;
+    selected.decision=payneDecisionEvidence(qualified,control.activeThreshold);
+    authoritativeLockEvidence={
+      ...payneFeatureBoundaryEvidence(qualified,control.activeThreshold,null,'LOCK'),
+      windowMatch:exact && String(qualified.baselineOpenTime||'')===String(selected.openTime||'') &&
+        String(qualified.baselineCloseTime||'')===String(selected.closeTime||''),
+      ticker:selected.ticker,outcomeSide:selected.outcomeSide,asset:selected.asset,
+    };
+    if(!authoritativeLockEvidence.windowMatch){
+      selected.payne={...qualified,available:false,reason:'LOCK_WINDOW_MISMATCH'};
+      selected.decision=payneDecisionEvidence(selected.payne,control.activeThreshold);
+      authoritativeLockEvidence.available=false;
+      authoritativeLockEvidence.failureReasons=[...authoritativeLockEvidence.failureReasons,'LOCK_WINDOW_MISMATCH'];
+    }
+  }
   const index2=providerIndex2Evidence(balance.body);
   const financials=buildAccountFinancialSummary({
     balanceBody:balance.body,
@@ -2728,6 +2760,7 @@ export async function buildCockpitData(env, nowMs=Date.now()) {
       providerPostAuthority:control.providerPostAuthority,
       zeroMoneyProviderPost:zeroMoneyPreview?.providerPost||null,
     },
+    fireFeatureEvidence:authoritativeLockEvidence,
     observations:{initial:selected,freshLock,preSubmit},
     clocks,
     comparison,
