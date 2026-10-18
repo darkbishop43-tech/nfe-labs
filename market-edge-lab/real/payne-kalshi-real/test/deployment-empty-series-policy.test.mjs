@@ -115,6 +115,6 @@ for(const [label,args] of [
  ['missing fireLatch',{omitSeriesFields:['fireLatch']}],
  ['missing position',{omitSeriesFields:['position']}]
 ])test('exact legacy absent marker rejects: '+label,()=>{
- const r=evaluate({authority:'UNVERIFIED',p:{allowed:false},c:args.c,s:args.s,omitSeriesFields:['providerPostStarted',...(args.omitSeriesFields||[])]});
+ const r=evaluate({authority:'UNVERIFIED',p:{allowed:false},c:args.c,s:args.s,omitSeriesFields:[...(args.s&&Object.hasOwn(args.s,'providerPostStarted')?[]:['providerPostStarted']),...(args.omitSeriesFields||[])]});
  assert.equal(r.ok,false,r.stdout);
 });
