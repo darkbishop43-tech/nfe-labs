@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import {generateKeyPairSync} from 'node:crypto';
 import {runReadOnlyScan,runPayneRealExecutionCycle,defaultControlState,defaultRealSeriesState,fireSpecimenFingerprint,effectiveLockThreshold,buildPayneAuditView,payneStage,payneFeatureBoundaryEvidence} from '../src/index.js';
 import {paperFeatureMath} from '../src/payne-paper-brain.js';
+import worker from '../src/index.js';
 import {kalshiPayneOrderPost} from '../src/kalshi-real-write.js';
 
 const {privateKey}=generateKeyPairSync('rsa',{modulusLength:2048});
@@ -63,6 +64,7 @@ function createFixture(kind='FILLED',opts={}){
    put:async(k,v)=>{state.set(k,String(v))},
    list:async({prefix})=>({keys:[...state.keys()].filter(k=>k.startsWith(prefix)).map(name=>({name})),list_complete:true})
   }};
+ const scheduled=async()=>{globalThis.fetch=provider;try{return await worker.scheduled({},env,{waitUntil:()=>{}})}finally{globalThis.fetch=prior}};
  const scan=async()=>{globalThis.fetch=provider;try{return await runReadOnlyScan(env,'SCHEDULED_CRON',now)}finally{globalThis.fetch=prior}};
  const execute=async()=>{
   globalThis.fetch=provider;
@@ -70,7 +72,7 @@ function createFixture(kind='FILLED',opts={}){
    return await runPayneRealExecutionCycle(env,{postImpl:(e,k,p,scope)=>kalshiPayneOrderPost(e,k,p,scope,{fetchImpl:provider})});
   }finally{globalThis.fetch=prior}
  };
- return {scan,execute,env,state,requests,latch,get posts(){return posts},get attempt(){return JSON.parse(state.get('payne-kalshi:real-series:v1')).currentAttempt},get series(){return JSON.parse(state.get('payne-kalshi:real-series:v1'))}};
+ return {scan,scheduled,execute,env,state,requests,latch,get posts(){return posts},get attempt(){return JSON.parse(state.get('payne-kalshi:real-series:v1')).currentAttempt},get series(){return JSON.parse(state.get('payne-kalshi:real-series:v1'))}};
 }
 
 test('ACTUAL SCANNER TO FIRE: scanner creates latch, governed controller sends exactly one mock post',{concurrency:false},async()=>{
@@ -112,4 +114,16 @@ test('ACTUAL SCANNER TO FIRE: scanner creates latch, governed controller sends e
    additionalIndependentVotesAfterPull:independentVotesAfterPull,
    screeningAndDisplayEvaluations:'NOT_COUNTED_AS_APPROVALS'
  }));
+});
+
+test('ACTUAL SCHEDULED INVOCATION: scanner latch handed to controller in same tick',{concurrency:false},async()=>{
+ const f=createFixture('FILLED');
+ assert.equal(f.series.fireLatch?.state,undefined);
+ await f.scheduled();
+ const events=[...f.state.entries()].filter(([k])=>k.startsWith('payne-kalshi:real-ledger:')).map(([,v])=>JSON.parse(v));
+ assert.equal(events.filter(x=>x.type==='FIRE_SPECIMEN_LATCHED').length,1);
+ assert.equal(f.posts,1,'same scheduled invocation must post exactly once through mock writer');
+ await f.scheduled();
+ assert.equal(f.posts,1,'repeated tick must not post duplicate');
+ console.log('PAYNE_SAME_CYCLE_MOCK_PASS',JSON.stringify({durableLatches:1,mockPosts:1,duplicatePosts:0,realProviderWrites:0}));
 });
