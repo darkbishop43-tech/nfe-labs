@@ -100,7 +100,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test "$(git -C maintenance-source rev-parse HEAD:.github/scripts/payne-kv-deployment-safety-maintenance.sh)" = 2714ca3ae767087669eaf118d4a0dfb65b2b3a1f
+          test "$(git -C maintenance-source rev-parse HEAD:.github/scripts/payne-kv-deployment-safety-maintenance.sh)" = 5f96fcad366e6152fdca5f5892c681da2cadf9d7
           test "$(git -C maintenance-source rev-parse HEAD:.github/scripts/payne-empty-series-readonly-verifier.mjs)" = e4c88d4685aa2bd8d60d73e5950f5716eed89fd3
           node --check maintenance-source/.github/scripts/payne-empty-series-readonly-verifier.mjs
       - name: Generate authenticated zero-attempt deployment evidence (fail closed)
