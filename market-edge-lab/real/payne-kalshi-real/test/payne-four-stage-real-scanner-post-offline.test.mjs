@@ -74,7 +74,7 @@ function createFixture(kind='FILLED',opts={}){
 
 test('ACTUAL SCANNER TO FIRE: scanner creates latch, governed controller sends exactly one mock post',{concurrency:false},async()=>{
  const f=createFixture('FILLED');
- assert.equal(f.series.fireLatch?.state,'NONE','no fire latch is pre-seeded');
+ assert.equal(f.series.fireLatch?.state,undefined,'no fire latch is pre-seeded');
  const scan=await f.scan();
  const afterScan=f.series;
  const latchRows=[...f.state.entries()].filter(([k])=>k.startsWith('payne-kalshi:real-ledger:')).map(([,v])=>JSON.parse(v)).filter(x=>x.type==='FIRE_SPECIMEN_LATCHED');
