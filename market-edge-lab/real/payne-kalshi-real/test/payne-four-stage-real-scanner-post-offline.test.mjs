@@ -88,7 +88,7 @@ test('ACTUAL SCANNER TO FIRE: scanner creates latch, governed controller sends e
  assert.equal(lockEvidence?.windowMatch,true,'same exact contract window');
  assert.equal(snapshot.selected?.decision?.pull,'PULL_QUALIFIED');
  const approvalDecisions=Number(lockEvidence.available===true && lockEvidence.lock==='PASS' && lockEvidence.pull==='PASS' && lockEvidence.windowMatch===true);
- const independentVotesAfterPull=Number(/synchronizeFireFeatureEpoch\\(|readAuthoritativePayneFeatures\\(|payneStage\\(/.test(
+ const independentVotesAfterPull=Number(/synchronizeFireFeatureEpoch\(|readAuthoritativePayneFeatures\(|payneStage\(/.test(
    scanSource.slice(scanSource.indexOf('if(previewReady && control.armed===true)'),scanSource.indexOf('const persistLatest=true'))
  ));
  assert.equal(approvalDecisions,1,'one authoritative LOCK/PULL approval recorded');
