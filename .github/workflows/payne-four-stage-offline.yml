@@ -2,7 +2,7 @@ name: PAYNE Four Stage Isolated Offline
 on:
   push:
     branches: [payne-four-stage-isolated-20261018]
-    paths: ['.github/workflows/payne-four-stage-offline.yml']
+    paths: ['.github/workflows/payne-four-stage-offline.yml', 'market-edge-lab/real/payne-kalshi-real/src/index.js']
 permissions:
   contents: read
 jobs:
@@ -28,7 +28,7 @@ jobs:
           import assert from 'node:assert/strict';
           const s=fs.readFileSync('market-edge-lab/real/payne-kalshi-real/src/index.js','utf8');
           const scan=s.slice(s.indexOf('export async function runReadOnlyScan'),s.indexOf('export async function runReadOnlyScan')+7000);
-          assert(!scan.includes('synchronizeFireFeatureEpoch(env,series,snapshot,nowMs)'));
+          assert(!s.includes('function synchronizeFireFeatureEpoch('));
           assert(scan.includes('latchFireReadySpecimen(env,series,snapshot,nowMs,control.maxPositions)'));
           assert(s.includes('authoritativeLockEvidence='));
           assert(s.includes("forceRefresh:true"));
