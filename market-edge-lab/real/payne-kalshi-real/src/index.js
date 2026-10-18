@@ -5111,11 +5111,15 @@ export default {
         return;
       }
     }
+    // The scanner returns its own just-persisted FIRE latch identity.
+    // The execution controller independently reloads authoritative series/control
+    // before any provider write; do not add an extra scheduler series GET.
+    let scanHandoff=null;
     if (control.scanEnabled) {
       const scanStartMs=Date.now();
       logPayneTiming('SCAN_START',{seriesId:'',ticker:'',side:'',windowClose:''},schedulerStartedMs);
       try {
-        await runReadOnlyScan(env,'SCHEDULED_CRON');
+        scanHandoff=await runReadOnlyScan(env,'SCHEDULED_CRON');
         logPayneTiming('SCAN_END',{seriesId:'',ticker:'',side:'',windowClose:''},scanStartMs,Date.now(),'SUCCESS');
       } catch(error) {
         logPayneTiming('SCAN_ERROR',{seriesId:'',ticker:'',side:'',windowClose:''},scanStartMs,Date.now(),String(error?.name||'SCAN_ERROR'));
@@ -5123,20 +5127,19 @@ export default {
     }
     const cycleStartMs=Date.now();
     try {
-      const series=await loadRealSeriesState(env);
-      const identity=payneTimingIdentity(series,series?.fireLatch);
-      logPayneTiming('CYCLE_AFTER_SCAN',identity,schedulerStartedMs);
-      const managementPending=unresolvedPaynePositions(series).length>0;
-      const entryReconciliationPending=series?.unresolvedEntry===true;
-      const newLatchedFire=series.fireLatch?.state==='LATCHED' &&
-        series.fireLatch?.specimenId!==initialSeries.fireLatch?.specimenId;
-      // Management ran before the slow scan. A newly persisted FIRE latch may
-      // proceed without re-managing positions or waiting for another cron tick.
-      // An invocation that began UNKNOWN cannot enter again this same tick.
-      const shouldExecute=(!urgent && (control.armed||managementPending||entryReconciliationPending)) ||
-        (urgent&&!initialSeries.unresolvedEntry&&newLatchedFire&&control.armed);
-      if(shouldExecute)await runPayneRealExecutionCycle(env,{skipManagement:urgent});
-      else if(!urgent)await reconcileDisarmedSupersededSeries(env,series,control);
+      const latched=scanHandoff?.fireHandoff?.latched===true;
+      const urgentEligible=urgent && !initialSeries.unresolvedEntry && latched && control.armed;
+      const regularEligible=!urgent && (control.armed ||
+        unresolvedPaynePositions(initialSeries).length>0 || initialSeries?.unresolvedEntry===true);
+      // Never bypass controller-owned state validation. It reloads persisted
+      // state, reconciles ownership and enforces every entry safety interlock.
+      if(regularEligible || urgentEligible)
+        await runPayneRealExecutionCycle(env,{skipManagement:urgent});
+      else if(!urgent){
+        const disarmedSeries=await loadRealSeriesState(env);
+        await reconcileDisarmedSupersededSeries(env,disarmedSeries,control);
+      }
+      logPayneTiming('CYCLE_AFTER_SCAN',payneTimingIdentity(initialSeries,initialSeries?.fireLatch),schedulerStartedMs);
       logPayneTiming('EXECUTION_CYCLE_END',identity,cycleStartMs,Date.now(),'SUCCESS');
     } catch(error) {
       logPayneTiming('EXECUTION_CYCLE_ERROR',{seriesId:'',ticker:'',side:'',windowClose:''},cycleStartMs,Date.now(),String(error?.name||'EXECUTION_ERROR'));
