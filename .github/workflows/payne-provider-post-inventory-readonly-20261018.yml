@@ -1,0 +1,55 @@
+name: PAYNE Provider Post Field Inventory GET Only
+on:
+  push:
+    branches: [payne-readonly-promotion-workflow-isolated-20261018]
+    paths: [".github/workflows/payne-provider-post-inventory-readonly-20261018.yml"]
+permissions:
+  contents: read
+jobs:
+  inventory:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Authenticated KV GET and limited provider-post field inventory
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+          base="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/storage/kv/namespaces/03352b0ccb034f1bb8206f663a04b125/values"
+          key=$(jq -rn --arg v 'payne-kalshi:real-series:v1' '$v|@uri')
+          code=$(curl --silent --show-error --max-time 25 --output /tmp/payne-series-inventory.json --write-out '%{http_code}' -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "$base/$key")
+          test "$code" = 200
+          jq -e '.seriesId=="bd881b11-b130-491f-a75f-a98425b92fd9" and .schema=="PAYNE_REAL_SERIES_V1"' /tmp/payne-series-inventory.json >/dev/null
+          node - <<'NODE'
+          const fs=require('node:fs');
+          const s=JSON.parse(fs.readFileSync('/tmp/payne-series-inventory.json','utf8'));
+          const terms=/provider.*(post|submit|order|execution)|(?:post|submit|execution).*provider|executionintent|currentattempt|firelatch/i;
+          const records=[];
+          const kind=v=>v===null?'EXPLICIT_NULL':Array.isArray(v)?'array':typeof v;
+          const safe=(k,v)=>v===null||typeof v==='boolean'||typeof v==='number'||typeof v==='string'&&v.length<=64&&!/token|secret|key|signature|private|credential|authorization/i.test(k)?v:'[REDACTED_OR_COMPLEX]';
+          function visit(obj,path,depth){
+            if(depth>20||!obj||typeof obj!=='object')return;
+            for(const [k,v] of Object.entries(obj)){
+              const here=path+'['+JSON.stringify(k)+']';
+              if(terms.test(k)){
+                records.push({path:here,exists:true,type:kind(v),value:safe(k,v),parentPath:path,parentKind:kind(obj),parentKeys:Object.keys(obj).filter(x=>!/(secret|token|credential|private|signature|authorization|key)/i.test(x)).slice(0,35)});
+              }
+              visit(v,here,depth+1);
+            }
+          }
+          visit(s,'$',0);
+          for(const field of ['providerPostStarted','providerPostState','executionIntent','providerSubmission','currentAttempt']){
+            records.push({path:'$['+JSON.stringify(field)+']',exists:Object.hasOwn(s,field),type:Object.hasOwn(s,field)?kind(s[field]):'ABSENT',value:Object.hasOwn(s,field)?safe(field,s[field]):'ABSENT',parentPath:'$',parentKind:'object'});
+          }
+          console.log('EXACT_SERIES_ID='+s.seriesId);
+          console.log('PROVIDER_POST_INVENTORY='+JSON.stringify(records));
+          const post=records.filter(r=>r.exists&&/provider.*(post|submit)|(?:post|submit).*provider/i.test(r.path));
+          const noPost=post.filter(r=>r.value===false||r.value==='NOT_EXPOSED'||r.value==='NOT_STARTED');
+          const positive=post.filter(r=>r.value===true||r.value==='STARTED'||r.value==='SUBMITTED'||r.value==='UNKNOWN');
+          console.log('PERSISTED_PROVIDER_POST_VERDICT='+ (positive.length?'NO_OR_UNKNOWN_POST_EVIDENCE':noPost.length?'NEGATIVE_MARKER_PRESENT_SCOPE_NOT_PROVEN':'UNKNOWN_NO_EXPLICIT_MARKER'));
+          console.log('RAW_JSON_NOT_PRINTED=TRUE');
+          NODE
