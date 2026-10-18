@@ -1,4 +1,5 @@
 name: PAYNE Readonly Promotion Workflow Policy Offline
+# Read-only checks of the isolated Founder-approved legacy deployment recovery policy.
 on:
   push:
     branches: [payne-readonly-promotion-workflow-isolated-20261018]
