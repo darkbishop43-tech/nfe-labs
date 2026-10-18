@@ -30,7 +30,7 @@ jobs:
           printf '%s\n' ".github/workflows/payne-disarm-accountability-v1-production.yml" ".github/workflows/payne-readonly-promotion-policy-offline-20261018.yml" | sort > /tmp/allowed
           cmp /tmp/changed /tmp/allowed
           grep -Fq "ref: $assembly" "$target"
-          grep -Fq "ref: ${{ github.sha }}" "$target"
+          grep -Fq "path: maintenance-source" "$target"
           grep -Fq 'test "$(git rev-parse HEAD)" = '$assembly "$target"
           grep -Fq 'test "$(git rev-parse HEAD:market-edge-lab/real/payne-kalshi-real/src/index.js)" = 948f00a6e9053cdcca33d4160508996d472d329d' "$target"
           grep -Fq "base=$base" "$target"
