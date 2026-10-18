@@ -4,6 +4,58 @@
 export class PayneExecutionCoordinator {
   constructor(state) { this.state=state; }
   async fetch(request) {
+    if(request.method==='GET' && new URL(request.url).pathname==='/internal/inspect-series') {
+      // Read-only, series-scoped inspection: this Durable Object is named by seriesId.
+      // Refuse unknown records, unexpected claim states or incomplete enumeration.
+      const seriesId=new URL(request.url).searchParams.get('seriesId');
+      if(typeof seriesId!=='string'||!seriesId||seriesId.length>160)
+        return Response.json({ok:false,complete:false,status:'UNKNOWN',reason:'SERIES_IDENTITY_REQUIRED'},{status:400});
+      try {
+        const inspected=await this.state.storage.transaction(async tx=>{
+          const rows=[];
+          let startAfter='',pages=0;
+          for(;;){
+            if(++pages>100)return {ok:false,complete:false,status:'UNKNOWN',reason:'ENUMERATION_PAGE_LIMIT'};
+            const options={limit:1000};
+            if(startAfter)options.startAfter=startAfter;
+            const batch=await tx.list(options);
+            if(!(batch instanceof Map))return {ok:false,complete:false,status:'UNKNOWN',reason:'ENUMERATION_RESPONSE_INVALID'};
+            if(batch.size===0)break;
+            const entries=[...batch.entries()];
+            for(const [key,claim] of entries)rows.push({key,claim});
+            if(batch.size<1000)break;
+            const nextKey=entries.at(-1)?.[0];
+            if(typeof nextKey!=='string'||!nextKey||nextKey<=startAfter)
+              return {ok:false,complete:false,status:'UNKNOWN',reason:'ENUMERATION_CURSOR_INVALID'};
+            startAfter=nextKey;
+          }
+          const terminal=new Set(['CLOSED','NO_FILL','NO_PROVIDER_EXECUTION']);
+          const active=new Set(['POTENTIALLY_SUBMITTED','OPEN','UNKNOWN']);
+          const claims=[];let unknown=0,activeCount=0;
+          for(const {key,claim} of rows){
+            const kind=key.startsWith('attempt:')?'ENTRY':key.startsWith('exit:')?'EXIT':null;
+            if(!kind||!claim||typeof claim!=='object'||claim.seriesId!==seriesId||
+               typeof claim.claimState!=='string'||!terminal.has(claim.claimState)&&!active.has(claim.claimState)){
+              unknown++;continue;
+            }
+            if(kind==='ENTRY'&&(!/^attempt:[1-9]\\d*$/.test(key)||
+                Number(claim.attemptNo)!==Number(key.slice(8)))){unknown++;continue;}
+            if(kind==='EXIT'&&(!claim.clientOrderId||key!=='exit:'+claim.clientOrderId)){unknown++;continue;}
+            if(active.has(claim.claimState))activeCount++;
+            claims.push({kind,key,state:claim.claimState,seriesId:claim.seriesId,
+              attemptNo:claim.attemptNo??null,clientOrderId:claim.clientOrderId??null});
+          }
+          return {ok:unknown===0,complete:unknown===0,status:unknown?'UNKNOWN':activeCount?'BLOCKED':'CLEAR',
+            seriesId,totalRecords:rows.length,claimCount:claims.length,activeClaims:activeCount,unknownRecords:unknown,
+            pages,claims,reason:unknown?'UNKNOWN_OR_CROSS_SERIES_STORAGE_RECORD':null};
+        });
+        return Response.json(inspected,{status:inspected.ok?200:409,
+          headers:{'cache-control':'no-store'}});
+      }catch{
+        return Response.json({ok:false,complete:false,status:'UNKNOWN',reason:'STORAGE_ENUMERATION_FAILED'},
+          {status:500,headers:{'cache-control':'no-store'}});
+      }
+    }
     if(request.method==='GET' && new URL(request.url).pathname==='/internal/inspect') {
       const attemptNo=Number(new URL(request.url).searchParams.get('attemptNo'));
       if(!Number.isSafeInteger(attemptNo)||attemptNo<1)
