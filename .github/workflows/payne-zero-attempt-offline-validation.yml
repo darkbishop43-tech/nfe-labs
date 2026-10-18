@@ -29,7 +29,7 @@ jobs:
       - name: Authenticated read-only verifier coverage tests
         working-directory: market-edge-lab/real/payne-kalshi-real
         run: node --test test/deployment-readonly-verifier.test.mjs
-      - name: Coordinator complete series inspection offline tests
+      - name: Coordinator complete series claim inspection tests
         working-directory: market-edge-lab/real/payne-kalshi-real
         run: node --test test/coordinator-series-inspection.test.mjs
       - name: Full offline regression suite
