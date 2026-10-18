@@ -48,7 +48,7 @@ jobs:
           test "$(git rev-parse "$assembly:market-edge-lab/real/payne-kalshi-real/src/index.js")" = 948f00a6e9053cdcca33d4160508996d472d329d
           grep -Fq 'name = "PAYNE_EXECUTION_COORDINATOR"' market-edge-lab/real/payne-kalshi-real/wrangler.toml
           git diff --quiet "$assembly" HEAD -- market-edge-lab/real/payne-kalshi-real/src market-edge-lab/real/payne-kalshi-real/wrangler.toml
-          test "$(git hash-object .github/scripts/payne-kv-deployment-safety-maintenance.sh)" = 5f96fcad366e6152fdca5f5892c681da2cadf9d7
+          test "$(git hash-object .github/scripts/payne-kv-deployment-safety-maintenance.sh)" = 9497a5fc26c6aede92858aea8310e419d2ddc162
           test "$(git hash-object .github/scripts/payne-empty-series-readonly-verifier.mjs)" = e4c88d4685aa2bd8d60d73e5950f5716eed89fd3
           grep -Fq 'payne-empty-series-readonly-verifier.mjs' "$target"
           grep -Fq 'Generate authenticated zero-attempt deployment evidence' "$target"
