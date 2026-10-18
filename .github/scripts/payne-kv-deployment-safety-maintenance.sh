@@ -117,7 +117,10 @@ verify_safety() {
         has("position") and .position==null and
         (.positions|type=="array" and length==0) and
         has("fireLatch") and (.fireLatch==null or .fireLatch.state=="NONE") and
-        has("providerPostStarted") and .providerPostStarted==false and
+        # PAYNE_REAL_SERIES_V1 legacy records have no top-level providerPostStarted.
+        # Absence is permitted for SOFTWARE deployment only, never converted to false.
+        # An explicit true, null, or unknown value remains blocking.
+        ((has("providerPostStarted")|not) or .providerPostStarted==false) and
         ((has("unknownProviderObligations")|not) or .unknownProviderObligations==0) and
         ((has("providerOpenOrders")|not) or .providerOpenOrders==0) and
         ((has("providerOpenPositions")|not) or .providerOpenPositions==0) and
