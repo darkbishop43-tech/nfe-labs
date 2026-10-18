@@ -1,0 +1,51 @@
+name: PAYNE Live Readiness Authenticated GET Only
+on:
+  push:
+    branches: [payne-readonly-promotion-workflow-isolated-20261018]
+    paths: [".github/workflows/payne-live-readiness-get-only-20261018.yml"]
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Authenticated Cloudflare deployment and KV GETs, no writes
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+          root="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID"
+          curl --fail --silent --show-error --max-time 25 -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "$root/workers/scripts/market-edge-payne-kalshi-real/deployments" -o /tmp/p-deploy.json
+          jq -e '.success==true and (.result.deployments|type)=="array"' /tmp/p-deploy.json >/dev/null
+          jq -c '{latestDeployment:(.result.deployments[0]|{created_on,versions:[.versions[]?|{version_id,percentage}]})}' /tmp/p-deploy.json
+          kv="$root/storage/kv/namespaces/03352b0ccb034f1bb8206f663a04b125/values"
+          for item in control series current; do
+            case "$item" in
+              control) key='payne-kalshi:control:v1';;
+              series) key='payne-kalshi:real-series:v1';;
+              current) key='payne-kalshi:current:v1';;
+            esac
+            encoded=$(jq -rn --arg v "$key" '$v|@uri')
+            status=$(curl --silent --show-error --max-time 25 --output "/tmp/p-$item.json" --write-out '%{http_code}' -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "$kv/$encoded")
+            test "$status" = 200
+            jq -e 'type=="object"' "/tmp/p-$item.json" >/dev/null
+          done
+          jq -c '{realControlSchema,armed,openPositions,activeThreshold,attemptTarget,maxEntryDebitUsd,scanEnabled,requiredExchangeIndex}' /tmp/p-control.json
+          jq -c '{schema,owner,seriesId,status,configFrozen,threshold,attemptTarget,maxEntryDebitUsd,attemptsStarted,executionIntentsStarted,unresolvedEntry,currentAttempt:(if has("currentAttempt") then (if .currentAttempt==null then null else {status:.currentAttempt.status,providerPostStarted:.currentAttempt.providerPostStarted} end) else "MISSING" end),position:(if has("position") then (if .position==null then null else {status:.position.status,owner:.position.owner} end) else "MISSING" end),positionsCount:(if (.positions|type)=="array" then (.positions|length) else null end),fireLatch,providerPostStarted,providerOpenOrders,providerOpenPositions,unknownProviderObligations,coordinatorActiveClaims,providerExposureStatus,providerReconciliationStatus}' /tmp/p-series.json
+          jq -c '{source,at}' /tmp/p-current.json
+          jq -n --slurpfile c /tmp/p-control.json --slurpfile s /tmp/p-series.json --slurpfile d /tmp/p-deploy.json '
+             {version:(. as $unused|$d[0].result.deployments[0].versions),
+              disarmed:($c[0].armed==false),
+              exactSeries:($s[0].seriesId=="bd881b11-b130-491f-a75f-a98425b92fd9"),
+              recoveredSoftwareConfigCandidate:($c[0].armed==false and $c[0].openPositions==0 and $s[0].seriesId=="bd881b11-b130-491f-a75f-a98425b92fd9" and $s[0].configFrozen==true and $s[0].attemptsStarted==0 and $s[0].executionIntentsStarted==0 and $s[0].unresolvedEntry==false and $s[0].currentAttempt==null and $s[0].position==null and ($s[0].positions|type)=="array" and ($s[0].positions|length)==0 and ($s[0].fireLatch==null or $s[0].fireLatch.state=="NONE") and $s[0].providerPostStarted==false),
+              providerFlatProof:"NOT_OBTAINED_BY_KV_GET",
+              coordinatorCoverage:"NOT_OBTAINED_BY_KV_GET"}'
+          echo 'LIVE_READINESS_GET_ONLY=FINISHED_NO_PRODUCTION_MUTATION'
