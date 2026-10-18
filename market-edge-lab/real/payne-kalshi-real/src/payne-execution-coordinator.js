@@ -38,7 +38,7 @@ export class PayneExecutionCoordinator {
                typeof claim.claimState!=='string'||!terminal.has(claim.claimState)&&!active.has(claim.claimState)){
               unknown++;continue;
             }
-            if(kind==='ENTRY'&&(!/^attempt:[1-9]\\d*$/.test(key)||
+            if(kind==='ENTRY'&&(!/^attempt:[1-9]\d*$/.test(key)||
                 Number(claim.attemptNo)!==Number(key.slice(8)))){unknown++;continue;}
             if(kind==='EXIT'&&(!claim.clientOrderId||key!=='exit:'+claim.clientOrderId)){unknown++;continue;}
             if(active.has(claim.claimState))activeCount++;
