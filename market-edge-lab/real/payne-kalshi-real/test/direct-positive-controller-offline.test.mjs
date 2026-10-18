@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {generateKeyPairSync} from 'node:crypto';
-import {runPayneRealExecutionCycle,defaultControlState,defaultRealSeriesState,fireSpecimenFingerprint,effectiveLockThreshold,buildPayneAuditView} from '../src/index.js';
+import {runPayneRealExecutionCycle,defaultControlState,defaultRealSeriesState,fireSpecimenFingerprint,effectiveLockThreshold,buildPayneAuditView,payneStage,payneFeatureBoundaryEvidence} from '../src/index.js';
 import {kalshiPayneOrderPost} from '../src/kalshi-real-write.js';
 
 const {privateKey}=generateKeyPairSync('rsa',{modulusLength:2048});
@@ -148,4 +148,31 @@ test('OFFLINE END-TO-END: 403 provider handler -> persisted attempt -> existing 
  assert.ok(html.includes('NOT RECORDED'));
  assert.equal(before.filter(k=>k.startsWith('payne-kalshi:real-ledger:')).length,0);
  console.log('OFFLINE_AUDIT_CHAIN_PASS',JSON.stringify({attemptId:card.attemptId,ticker:card.ticker,httpStatus:card.httpStatus,errorCode:card.providerErrorCode,errorMessage:card.providerErrorMessage,terminalClassification:card.terminalClassification}));
+});
+
+test('FOUR-STAGE MOCKED FIRE: one qualified fresh feature, durable seeded specimen, one governed mock post',{concurrency:false},async()=>{
+ const f=createFixture('FILLED');
+ const X=0.73, founderPull=0.60;
+ const feature={available:true,score:X,edge:(X-0.50)/4,move:0.004,fair:0.80};
+ let strategyVotes=0;
+ const gate=payneStage(feature,founderPull);strategyVotes++;
+ const lockEvidence=payneFeatureBoundaryEvidence(feature,founderPull,null,'LOCK');
+ assert.equal(gate.radar,true);
+ assert.equal(lockEvidence.lock,'PASS');
+ assert.equal(lockEvidence.pull,'PASS');
+ assert.equal(strategyVotes,1,'one authoritative combined LOCK/PULL decision');
+ assert.equal(f.series.fireLatch.state,'LATCHED','durable specimen is seeded for actual FIRE controller');
+ assert.equal(f.series.fireLatch.identityFingerprint,fireSpecimenFingerprint(f.series.fireLatch));
+ await f.execute();
+ assert.equal(f.posts,1,'one offline mock provider POST');
+ assert.equal(f.attempt.executionHandoff,'DIRECT_KALSHI_WRITER_V1');
+ await f.execute();
+ assert.equal(f.posts,1,'duplicate replay must not post');
+ assert.equal(strategyVotes,1,'no second vote in controlled test');
+ const events=[...f.state.entries()].filter(([k])=>k.startsWith('payne-kalshi:real-ledger:')).map(([,v])=>JSON.parse(v));
+ assert.equal(events.filter(x=>x.type==='ENTRY_PROVIDER_POST_STARTED').length,1);
+ console.log('FOUR_STAGE_MOCK_CONTROLLER_PASS',JSON.stringify({
+   strategyVotes,seededDurableLatchCount:1,mockedProviderPosts:f.posts,duplicatePosts:0,
+   realProviderWrites:0,source:'OFFLINE_SYNTHETIC_LATCH_NOT_FULL_SCAN_LATCH_INTEGRATION'
+ }));
 });
