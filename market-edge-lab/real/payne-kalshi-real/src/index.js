@@ -1734,8 +1734,11 @@ export function fireSpecimenFingerprint(specimen={}) {
 export function fireSpecimenFromSnapshot(series,snapshot) {
   const preview=snapshot?.zeroMoneyPreview||null;
   const selected=snapshot?.selected||null;
-  if(preview?.status!=='FIRE_READY' || !selected?.ticker || preview?.ticker!==selected.ticker) return null;
-  if(String(preview?.outcomeSide||'').toUpperCase()!==String(selected?.outcomeSide||'').toUpperCase()) return null;
+  // PULL approval is authoritative. The former zero-money FIRE_READY preview
+  // was a separate, redundant execution-approval gate.
+  if(!selected?.ticker || selected?.decision?.pull!=='PULL_QUALIFIED' ||
+     snapshot?.fireFeatureEvidence?.available!==true ||
+     snapshot?.fireFeatureEvidence?.windowMatch!==true) return null;
   const cfg=frozenSeriesConfig(series);
   if(!cfg.ok || seriesTerminal(series) || series?.unresolvedEntry===true) return null;
   const attemptNo=Number(series?.attemptsStarted||0)+1;
@@ -1868,7 +1871,10 @@ export async function runReadOnlyScan(env, source='SCHEDULED_CRON', nowMs=Date.n
   const prevKey=[previous?.selected?.ticker,previous?.selected?.outcomeSide,previous?.selected?.payne?.state].join('|');
   const nextKey=[snapshot?.selected?.ticker,snapshot?.selected?.outcomeSide,snapshot?.selected?.payne?.state].join('|');
   const transition=Boolean(previous && prevKey!==nextKey);
-  const previewReady=snapshot?.zeroMoneyPreview?.status==='FIRE_READY';
+  const previewReady=snapshot?.selected?.decision?.pull==='PULL_QUALIFIED' &&
+    snapshot?.fireFeatureEvidence?.available===true &&
+    snapshot?.fireFeatureEvidence?.windowMatch===true;
+  let fireHandoff={attempted:false,latched:false,reason:null,specimenId:null};
   if(previewReady) logPayneTiming('PULL_QUALIFIED',{
     seriesId:'',attemptNo:0,ticker:snapshot?.selected?.ticker||'',
     side:snapshot?.selected?.outcomeSide||'',
@@ -1876,22 +1882,28 @@ export async function runReadOnlyScan(env, source='SCHEDULED_CRON', nowMs=Date.n
   },scanStartedMs,Date.now(),'QUALIFIED_SCAN_OBSERVATION');
   if(previewReady && control.armed===true){
     const series=await loadRealSeriesState(env);
-    const prefireMarketPass=snapshot?.pipeline?.freshLock==='PROVEN'
-      && snapshot?.pipeline?.preSubmit==='PROVEN'
-      && snapshot?.pipeline?.tickerConsistent===true
-      && snapshot?.pipeline?.sideConsistent===true
-      && snapshot?.pipeline?.timeGate6_5m==='PASS';
-    if(!seriesTerminal(series) && frozenSeriesMatchesControl(series,control) && prefireMarketPass){
-      // The LOCK snapshot already passed the one authoritative fresh
-      // paper decision used by PULL. Do not request another strategy vote.
-      const qualified= snapshot?.fireFeatureEvidence?.available===true &&
-        snapshot?.fireFeatureEvidence?.windowMatch===true &&
-        snapshot?.selected?.decision?.pull==='PULL_QUALIFIED';
-      if(qualified){
-        const latched=await latchFireReadySpecimen(env,series,snapshot,nowMs,control.maxPositions);
-        logPayneTiming('FIRE_LATCH_RESULT',payneTimingIdentity(latched?.series||series,latched?.series?.fireLatch||series?.fireLatch),scanStartedMs,Date.now(),latched?.reason||'LATCH_ATTEMPTED');
-      }
+    // The final provider reads, price, ownership and funding checks remain
+    // exclusively inside the existing governed FIRE execution controller.
+    // A qualified PULL must get either a durable latch or an explicit hold.
+    const reason=seriesTerminal(series)?'SERIES_TERMINAL':
+      !frozenSeriesMatchesControl(series,control)?'FROZEN_CONFIG_MISMATCH':
+      snapshot?.pipeline?.timeGate6_5m!=='PASS'?'TIME_GATE_FAILED':
+      snapshot?.pipeline?.tickerConsistent!==true?'CONTRACT_IDENTITY_MISMATCH':
+      snapshot?.pipeline?.sideConsistent!==true?'CONTRACT_SIDE_MISMATCH':
+      snapshot?.pipeline?.freshLock!=='PROVEN'?'EXACT_MARKET_LOCK_UNAVAILABLE':null;
+    if(reason){
+      fireHandoff={attempted:true,latched:false,reason,specimenId:null};
+    }else{
+      const latched=await latchFireReadySpecimen(env,series,snapshot,nowMs,control.maxPositions);
+      fireHandoff={attempted:true,latched:latched.latched===true,
+        reason:latched.reason||null,specimenId:latched.series?.fireLatch?.specimenId||null};
+      logPayneTiming('FIRE_LATCH_RESULT',payneTimingIdentity(latched?.series||series,latched?.series?.fireLatch||series?.fireLatch),scanStartedMs,Date.now(),latched?.reason||'LATCH_ATTEMPTED');
     }
+    if(!fireHandoff.latched)await appendRealLedger(env,'FIRE_HANDOFF_SAFETY_HOLD',{
+      seriesId:series.seriesId,ticker:snapshot.selected?.ticker||null,
+      outcomeSide:snapshot.selected?.outcomeSide||null,reason:fireHandoff.reason,
+      providerPost:false,providerWrites:0,orders:0,capitalMovedUsd:0,
+    });
   }
   const persistLatest=true;
   const persistHistory=!previous || !Number.isFinite(previousHistoryAt) || nowMs-previousHistoryAt>=SCAN_HISTORY_INTERVAL_MS || transition || previewReady;
@@ -1962,6 +1974,7 @@ export async function runReadOnlyScan(env, source='SCHEDULED_CRON', nowMs=Date.n
     persistedHistory:persistHistory,
     transition,
     firePlanRecorded:previewReady,
+    fireHandoff,
     snapshot,
     providerGets:data.providerGets,
     baselineReads:data.baselineReads,
