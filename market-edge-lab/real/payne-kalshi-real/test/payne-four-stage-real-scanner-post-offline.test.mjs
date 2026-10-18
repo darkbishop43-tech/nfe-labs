@@ -1,4 +1,5 @@
 import test from 'node:test';
+import fs from 'node:fs';
 import assert from 'node:assert/strict';
 import {generateKeyPairSync} from 'node:crypto';
 import {runReadOnlyScan,runPayneRealExecutionCycle,defaultControlState,defaultRealSeriesState,fireSpecimenFingerprint,effectiveLockThreshold,buildPayneAuditView,payneStage,payneFeatureBoundaryEvidence} from '../src/index.js';
@@ -77,8 +78,24 @@ test('ACTUAL SCANNER TO FIRE: scanner creates latch, governed controller sends e
  assert.equal(f.series.fireLatch?.state,undefined,'no fire latch is pre-seeded');
  const scan=await f.scan();
  const afterScan=f.series;
+ const snapshot=JSON.parse(f.state.get('payne-kalshi:current:v1'));
+ const source=fs.readFileSync(new URL('../src/index.js',import.meta.url),'utf8');
+ const scanSource=source.slice(source.indexOf('export async function runReadOnlyScan('),source.indexOf('export async function runReadOnlyScan(')+7000);
+ const lockEvidence=snapshot.fireFeatureEvidence;
+ assert.equal(lockEvidence?.available,true,'authoritative fresh LOCK feature is available');
+ assert.equal(lockEvidence?.lock,'PASS','fresh LOCK passed');
+ assert.equal(lockEvidence?.pull,'PASS','same feature passed Founder PULL');
+ assert.equal(lockEvidence?.windowMatch,true,'same exact contract window');
+ assert.equal(snapshot.selected?.decision?.pull,'PULL_QUALIFIED');
+ const approvalDecisions=Number(lockEvidence.available===true && lockEvidence.lock==='PASS' && lockEvidence.pull==='PASS' && lockEvidence.windowMatch===true);
+ const independentVotesAfterPull=Number(/synchronizeFireFeatureEpoch\\(|readAuthoritativePayneFeatures\\(|payneStage\\(/.test(
+   scanSource.slice(scanSource.indexOf('if(previewReady && control.armed===true)'),scanSource.indexOf('const persistLatest=true'))
+ ));
+ assert.equal(approvalDecisions,1,'one authoritative LOCK/PULL approval recorded');
+ assert.equal(independentVotesAfterPull,0,'no independent strategy vote between approved PULL and latch');
  const latchRows=[...f.state.entries()].filter(([k])=>k.startsWith('payne-kalshi:real-ledger:')).map(([,v])=>JSON.parse(v)).filter(x=>x.type==='FIRE_SPECIMEN_LATCHED');
  assert.equal(latchRows.length,1,'scanner must create one durable latch ledger event');
+ assert.deepEqual(latchRows[0].fireFeatureEvidence,lockEvidence,'durable specimen uses same approved feature without another vote');
  assert.equal(afterScan.fireLatch?.state,'LATCHED','scanner persisted actual fire latch');
  assert.equal(f.posts,0,'scanner must not submit orders');
  await f.execute();
@@ -91,6 +108,8 @@ test('ACTUAL SCANNER TO FIRE: scanner creates latch, governed controller sends e
    mockProviderPosts:f.posts,
    duplicatePosts:0,
    realProviderWrites:0,
-   qualificationVotes:'REQUIRES_INSTRUMENTED_COUNT'
+   authoritativeApprovalDecisions:approvalDecisions,
+   additionalIndependentVotesAfterPull:independentVotesAfterPull,
+   screeningAndDisplayEvaluations:'NOT_COUNTED_AS_APPROVALS'
  }));
 });
