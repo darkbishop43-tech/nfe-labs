@@ -96,6 +96,28 @@ jobs:
           set -euo pipefail
           rm -f /tmp/payne-kv-gate/maintenance-proof.json
           node maintenance-source/.github/scripts/payne-maintenance-decision.mjs
+      - name: Verify exact fail-closed deployment policy and verifier sources
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git -C maintenance-source rev-parse HEAD:.github/scripts/payne-kv-deployment-safety-maintenance.sh)" = bae5d182625bb80be31934aad8585d05007b9c02
+          test "$(git -C maintenance-source rev-parse HEAD:.github/scripts/payne-empty-series-readonly-verifier.mjs)" = e4c88d4685aa2bd8d60d73e5950f5716eed89fd3
+          node --check maintenance-source/.github/scripts/payne-empty-series-readonly-verifier.mjs
+      - name: Generate authenticated zero-attempt deployment evidence (fail closed)
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          PAYNE_COORDINATOR_DIAGNOSTIC_TOKEN: ${{ secrets.PAYNE_COORDINATOR_DIAGNOSTIC_TOKEN }}
+        run: |
+          set -euo pipefail
+          rm -f /tmp/payne-kv-gate/empty-series-evidence.json
+          unset PAYNE_EMPTY_SERIES_EVIDENCE_AUTHORITY
+          node maintenance-source/.github/scripts/payne-empty-series-readonly-verifier.mjs
+          jq -e '.schema=="PAYNE_EMPTY_SERIES_DEPLOYMENT_EVIDENCE_V1" and (.allowed|type)=="boolean"' /tmp/payne-kv-gate/empty-series-evidence.json >/dev/null
+          if jq -e '.allowed==true' /tmp/payne-kv-gate/empty-series-evidence.json >/dev/null; then
+            echo 'BLOCKED: UNVERIFIED_EVIDENCE_APPROVAL'; exit 1
+          fi
       - name: Run existing authoritative PAYNE KV pre-deploy safety gate
         shell: bash
         env:
@@ -137,6 +159,9 @@ jobs:
           set -euo pipefail
           rm -f /tmp/payne-kv-gate/maintenance-proof.json
           node maintenance-source/.github/scripts/payne-maintenance-decision.mjs
+          rm -f /tmp/payne-kv-gate/empty-series-evidence.json
+          unset PAYNE_EMPTY_SERIES_EVIDENCE_AUTHORITY
+          node maintenance-source/.github/scripts/payne-empty-series-readonly-verifier.mjs
           bash maintenance-source/.github/scripts/payne-kv-deployment-safety-maintenance.sh post
       - name: Verify cockpit and existing Founder control read-only
         shell: bash
