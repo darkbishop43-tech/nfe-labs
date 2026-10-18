@@ -1,0 +1,42 @@
+name: PAYNE 60s Entry Gate Isolated Offline
+on:
+  push:
+    branches: [payne-time-gate-60s-isolated-20261017]
+    paths: ['.github/workflows/payne-time-gate-60s-offline.yml']
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Offline source syntax and existing regressions
+        working-directory: market-edge-lab/real/payne-kalshi-real
+        run: |
+          set -euo pipefail
+          node --check src/index.js
+          npm test
+      - name: Founder entry boundary and management compatibility proof
+        working-directory: market-edge-lab/real/payne-kalshi-real
+        run: |
+          node --input-type=module <<'JS'
+          import {kalshiCandidateTimeSafe, payneRealHoldEvidenceDecision} from './src/index.js';
+          import assert from 'node:assert/strict';
+          const now=Date.parse('2026-10-17T12:00:00Z');
+          const cases=[[900,true],[600,true],[390,true],[300,true],[120,true],[61,true],[60,false],[30,false],[0,false]];
+          for(const [seconds,expected] of cases) {
+            const actual=kalshiCandidateTimeSafe({closeTime:new Date(now+seconds*1000).toISOString()},now);
+            assert.equal(actual,expected,'time boundary '+seconds);
+          }
+          console.log('TIME_GATE_9_BOUNDARIES_PASS');
+          const closed=payneRealHoldEvidenceDecision({heldMs:300000,marketPresent:true,marketStatus:'closed',contractCloseTime:new Date(now).toISOString(),nowMs:now,featureAvailable:true,featureFresh:true,decisionLabel:'PULL TRIGGER'});
+          assert.equal(closed.action,'RECONCILE');
+          console.log('POST_CLOSE_RECONCILIATION_PASS');
+          const late=payneRealHoldEvidenceDecision({heldMs:300001,marketPresent:true,marketStatus:'open',contractCloseTime:new Date(now+2000).toISOString(),nowMs:now,featureAvailable:true,featureFresh:true,decisionLabel:'PULL TRIGGER'});
+          console.log('MAX_HOLD_LATE_ENTRY_OBSERVED',JSON.stringify(late));
+          assert.notEqual(late.action,'HOLD','max hold breached while contract still open');
+          JS
