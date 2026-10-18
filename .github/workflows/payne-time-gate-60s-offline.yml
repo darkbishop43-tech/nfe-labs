@@ -38,5 +38,18 @@ jobs:
           console.log('POST_CLOSE_RECONCILIATION_PASS');
           const late=payneRealHoldEvidenceDecision({heldMs:300001,marketPresent:true,marketStatus:'open',contractCloseTime:new Date(now+2000).toISOString(),nowMs:now,featureAvailable:true,featureFresh:true,decisionLabel:'PULL TRIGGER'});
           console.log('MAX_HOLD_LATE_ENTRY_OBSERVED',JSON.stringify(late));
-          assert.notEqual(late.action,'HOLD','max hold breached while contract still open');
+          assert.equal(late.action,'EXIT');
+          assert.equal(late.reason,'max_hold');
+          for(const ms of [299999,300000,300001]){
+            for(const featureAvailable of [true,false]){
+              for(const decisionLabel of ['PULL TRIGGER','EXIT']){
+                const r=payneRealHoldEvidenceDecision({heldMs:ms,marketPresent:true,marketStatus:'open',contractCloseTime:new Date(now+120000).toISOString(),nowMs:now,featureAvailable,featureFresh:featureAvailable,decisionLabel});
+                if(ms>=300000)assert.deepEqual(r,{action:'EXIT',reason:'max_hold'});
+                if(ms===299999&&featureAvailable&&decisionLabel==='PULL TRIGGER')assert.equal(r.action,'HOLD');
+              }
+            }
+          }
+          const unknown=payneRealHoldEvidenceDecision({heldMs:300001,marketPresent:false,marketStatus:'unknown',contractCloseTime:new Date(now+120000).toISOString(),nowMs:now,featureAvailable:true,featureFresh:true,decisionLabel:'PULL TRIGGER'});
+          assert.equal(unknown.action,'RECONCILE');
+          console.log('MAX_HOLD_BOUNDARIES_AND_UNKNOWN_PASS');
           JS
