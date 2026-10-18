@@ -23,6 +23,9 @@ jobs:
           set -euo pipefail
           node --check src/index.js
           node --test test/zero-attempt-supersession-isolated.test.mjs test/zero-attempt-concurrency-diagnostic.test.mjs
+      - name: Deployment-only policy gate tests (offline jq fixtures)
+        working-directory: market-edge-lab/real/payne-kalshi-real
+        run: node --test test/deployment-empty-series-policy.test.mjs
       - name: Full offline regression suite
         working-directory: market-edge-lab/real/payne-kalshi-real
         run: npm test
