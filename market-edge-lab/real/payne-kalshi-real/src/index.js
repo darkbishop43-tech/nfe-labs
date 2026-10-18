@@ -2,7 +2,7 @@ import {rankVerifiedStaircase} from './staircase-top3-v2.js';
 import {firstPullbackShadow} from './first-pullback-shadow.js';
 import {payneHistoryAll,payneHistoryPage,payneExecutionCsv,PAYNE_EXECUTION_EXPORT_FIELDS} from './payne-real-history-view.js';
 import {liveOrderWatchProjection,paynePositionRecords,payneCapacityEvidence,upsertPaynePosition,unresolvedPaynePositions} from './payne-live-order-watch.js';
-import {PayneExecutionCoordinator,claimPayneExecution,releaseProvenNoPost,resolvePayneExecutionClaim,claimPayneExit,inspectPayneCoordinatorClaim} from './payne-execution-coordinator.js';
+import {PayneExecutionCoordinator,claimPayneExecution,releaseProvenNoPost,resolvePayneExecutionClaim,claimPayneExit,inspectPayneCoordinatorClaim,inspectPayneCoordinatorSeries} from './payne-execution-coordinator.js';
 export {PayneExecutionCoordinator};
 import { kalshiReadOnlyProof, kalshiGetOnly } from './kalshi-get-only.js';
 import {readPayneProviderHistory,enrichPayneCycles} from './payne-provider-history-enrichment.js';
@@ -4786,6 +4786,29 @@ export default {
 
     if (request.method !== 'GET') return Response.json({ ok:false, reason:'GET_ONLY_PROVIDER_AUTHORITY / CONTROL_POSTS_LOCAL_ONLY' }, { status:405 });
 
+    if (url.pathname === '/internal/series-claims-diagnostic') {
+      // Authenticated internal-only GET. No control, Kalshi, or KV mutation.
+      const secret=env?.PAYNE_COORDINATOR_DIAGNOSTIC_TOKEN;
+      const supplied=request.headers.get('x-payne-diagnostic-token');
+      if(typeof secret!=='string'||secret.length<32||typeof supplied!=='string'||supplied.length!==secret.length)
+        return Response.json({ok:false,status:'UNAUTHORIZED'},{status:403,headers:{'cache-control':'no-store'}});
+      const [expected,actual]=await Promise.all([
+        crypto.subtle.digest('SHA-256',new TextEncoder().encode(secret)),
+        crypto.subtle.digest('SHA-256',new TextEncoder().encode(supplied))
+      ]);
+      const a=new Uint8Array(expected),b=new Uint8Array(actual);
+      let mismatch=0;for(let i=0;i<a.length;i++)mismatch|=a[i]^b[i];
+      if(mismatch!==0)
+        return Response.json({ok:false,status:'UNAUTHORIZED'},{status:403,headers:{'cache-control':'no-store'}});
+      const requested=url.searchParams.get('seriesId');
+      const persisted=await loadRealSeriesState(env);
+      if(typeof requested!=='string'||!requested||requested!==persisted?.seriesId)
+        return Response.json({ok:false,complete:false,status:'UNKNOWN',reason:'SERIES_IDENTITY_MISMATCH'},
+          {status:409,headers:{'cache-control':'no-store'}});
+      const result=await inspectPayneCoordinatorSeries(env,requested);
+      return Response.json({...result,readOnly:true,providerWrites:0},
+        {status:result.ok===true?200:503,headers:{'cache-control':'no-store'}});
+    }
     if (url.pathname === '/internal/atomic-claim-diagnostic') {
       // Fail closed unless a separate encrypted, non-trading diagnostic secret
       // has explicitly been provisioned. Never reflect or log the supplied token.
