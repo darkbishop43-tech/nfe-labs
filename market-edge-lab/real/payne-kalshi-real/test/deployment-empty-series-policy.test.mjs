@@ -5,7 +5,7 @@ import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {spawnSync} from 'node:child_process';
 const gate=readFileSync(new URL('../../../../.github/scripts/payne-kv-deployment-safety-maintenance.sh',import.meta.url),'utf8');
-const match=gate.match(/jq -e --slurpfile c "\$c" --slurpfile maintenance "\$proof" --slurpfile empty "\$empty" --arg evidenceAuthority "\$evidenceAuthority" '([\s\S]*?)' "\$s"/);
+const match=gate.match(/jq -e --slurpfile c "\$c" --slurpfile maintenance "\$proof" --slurpfile empty "\$emptyProof" --arg evidenceAuthority "\$evidenceAuthority" '([\s\S]*?)' "\$s"/);
 assert.ok(match,'actual deployment gate policy jq expression must exist');
 const expr=match[1];
 const control={realControlSchema:'PAYNE_REAL_CONTROL_V2_PAPER_BRAIN',armed:false,openPositions:0,requiredExchangeIndex:2,activeThreshold:0.65,attemptTarget:5,maxEntryDebitUsd:1,scanEnabled:true};
