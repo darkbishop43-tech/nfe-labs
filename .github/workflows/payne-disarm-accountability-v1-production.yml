@@ -1,7 +1,7 @@
-name: PAYNE 14 Minute Entry Existing Gated Promotion
+name: PAYNE Four Stage Existing Gated Promotion
 on:
   push:
-    branches: [payne-time-gate-60s-isolated-20261017]
+    branches: [payne-four-stage-isolated-20261018]
     paths: [".github/workflows/payne-disarm-accountability-v1-production.yml"]
 permissions:
   contents: read
@@ -15,7 +15,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: e6492e45e2e0e22ec98a13675b908b28ceff5dc1
+          ref: 56965ecde37ec8fb27ea375e52a01d4c824fe4de
           persist-credentials: false
       - uses: actions/checkout@v4
         with:
@@ -29,9 +29,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test "$(git rev-parse HEAD)" = e6492e45e2e0e22ec98a13675b908b28ceff5dc1
+          test "$(git rev-parse HEAD)" = 56965ecde37ec8fb27ea375e52a01d4c824fe4de
           test "$(git -C maintenance-source rev-parse HEAD)" = "$GITHUB_SHA"
-          test "$(git rev-parse HEAD:market-edge-lab/real/payne-kalshi-real/src/index.js)" = 94d3f7cbfd657ee2bbd3787ccc8cd194c88ef3b9
+          test "$(git rev-parse HEAD:market-edge-lab/real/payne-kalshi-real/src/index.js)" = 9744a5aeb1c0901a78c8d4912aa5e4ee6a8fe142
           test "$(git rev-parse HEAD:market-edge-lab/real/payne-kalshi-real/src/cockpit-html.js)" = 657e477c4c9385e337fd725769b7ab757dc81c77
           test "$(git rev-parse HEAD:market-edge-lab/real/payne-kalshi-real/src/payne-closure-evidence.js)" = 7f0c5a2dce12ed0d56c1024cdd58c4f581ea364a
           grep -q '^name = "market-edge-payne-kalshi-real"$' market-edge-lab/real/payne-kalshi-real/wrangler.toml
@@ -68,7 +68,7 @@ jobs:
         run: |
           set -euo pipefail
           curl --fail --silent --show-error --max-time 25 -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/market-edge-payne-kalshi-real/deployments" -o /tmp/payne-deployments-pre.json
-          jq -e '.success==true and (.result.deployments[0].versions | any(.version_id=="a1832dc4-9951-41a4-aac1-1abc8c2468bc" and .percentage==100))' /tmp/payne-deployments-pre.json >/dev/null
+          jq -e '.success==true and (.result.deployments[0].versions | any(.version_id=="d1fa642f-1894-40f2-aeb9-0f1922638065" and .percentage==100))' /tmp/payne-deployments-pre.json >/dev/null
           echo 'PRODUCTION_BASELINE_MATCH=PASS'
       - name: Prepare authenticated PAYNE maintenance proof read-only
         shell: bash
