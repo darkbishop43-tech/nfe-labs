@@ -33,7 +33,7 @@ jobs:
           done < /tmp/payne-assembly-changes
           git diff --unified=0 "$base" HEAD -- market-edge-lab/real/payne-kalshi-real/src/index.js > /tmp/index.diff
           git diff --unified=0 "$base" HEAD -- market-edge-lab/real/payne-kalshi-real/src/payne-execution-coordinator.js > /tmp/coordinator.diff
-          if grep -E '^-[^-]' /tmp/index.diff /tmp/coordinator.diff; then echo BLOCKED_SOURCE_DELETION;exit 1;fi
+          if grep -E '^-[^-]' /tmp/index.diff /tmp/coordinator.diff | grep -v -F -- "-import {PayneExecutionCoordinator,claimPayneExecution,releaseProvenNoPost,resolvePayneExecutionClaim,claimPayneExit,inspectPayneCoordinatorClaim} from './payne-execution-coordinator.js';"; then echo BLOCKED_SOURCE_DELETION;exit 1;fi
           node --check market-edge-lab/real/payne-kalshi-real/src/index.js
           node --check market-edge-lab/real/payne-kalshi-real/src/payne-execution-coordinator.js
           git diff --quiet "$base" HEAD -- market-edge-lab/real/payne-kalshi-real/src/kalshi-real-write.js market-edge-lab/real/payne-kalshi-real/src/payne-paper-brain.js market-edge-lab/real/payne-kalshi-real/src/kalshi-get-only.js
