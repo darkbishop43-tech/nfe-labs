@@ -2800,6 +2800,7 @@ async function reconcileDisarmedSupersededSeries(env,series,control,nowMs=Date.n
   // Zero-attempt supersession is allowed only for a provably empty disarmed series.
   // A clean interlock alone does not establish absence of prior provider exposure.
   if(started===0 && (
+    series?.accountingSemantics!==PROVIDER_ATTEMPT_ACCOUNTING_SEMANTICS ||
     series?.configFrozen!==true ||
     Number(series?.executionIntentsStarted||0)!==0 ||
     series?.unresolvedEntry!==false ||
