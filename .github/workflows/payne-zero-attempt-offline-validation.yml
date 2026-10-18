@@ -26,6 +26,9 @@ jobs:
       - name: Deployment-only gate fail-closed and freshness tests (UTC fixture)
         working-directory: market-edge-lab/real/payne-kalshi-real
         run: node --test test/deployment-empty-series-policy.test.mjs
+      - name: Authenticated read-only verifier coverage tests
+        working-directory: market-edge-lab/real/payne-kalshi-real
+        run: node --test test/deployment-readonly-verifier.test.mjs
       - name: Full offline regression suite
         working-directory: market-edge-lab/real/payne-kalshi-real
         run: npm test
