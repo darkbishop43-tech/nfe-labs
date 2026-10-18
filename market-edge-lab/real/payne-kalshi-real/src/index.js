@@ -1852,47 +1852,6 @@ async function invalidateFireSpecimen(env,series,reason,details={},nowMs=Date.no
 }
 
 
-async function synchronizeFireFeatureEpoch(env,series,snapshot,nowMs=Date.now()) {
-  const cfg=frozenSeriesConfig(series);
-  const selected=snapshot?.selected||null;
-  if(!cfg.ok || !selected?.ticker) return {ok:false,reason:'FIRE_REFRESH_IDENTITY_UNAVAILABLE',series};
-  const featureMarketRead=await exactMarketRead(env,selected.ticker,selected.asset);
-  const exactMarket=featureMarketRead?.market||null;
-  const exactIdentity=Boolean(
-    featureMarketRead?.ok===true &&
-    exactMarket?.ticker===selected.ticker &&
-    String(exactMarket?.openTime||'')===String(selected?.openTime||'') &&
-    String(exactMarket?.closeTime||'')===String(selected?.closeTime||'')
-  );
-  const state=exactIdentity
-    ? await readAuthoritativePayneFeatures(env,[exactMarket],nowMs,{forceRefresh:true})
-    : {fresh:false,source:'KALSHI_AUTHORITATIVE',lastRunAt:featureMarketRead?.readAt||new Date(nowMs).toISOString(),ageMs:0,error:'FIRE_EXACT_MARKET_IDENTITY_FAILED',opportunities:[]};
-  const feature=featureForCandidate(state,selected.ticker,selected.outcomeSide,selected.asset,cfg.threshold,exactMarket);
-  const evidence=payneFeatureBoundaryEvidence(feature,cfg.threshold,cfg.effectiveLockThreshold,'FIRE');
-  const windowMatch=exactIdentity && String(feature?.baselineOpenTime||'')===String(selected?.openTime||'')
-    && String(feature?.baselineCloseTime||'')===String(selected?.closeTime||'');
-  const reasons=[...evidence.failureReasons];
-  if(!windowMatch) reasons.push('FIRE_WINDOW_MISMATCH');
-  const qualified=feature?.available===true && payneStage(feature,cfg.threshold,cfg.effectiveLockThreshold).pullTrigger===true && windowMatch;
-  const fullEvidence={...evidence,failureReasons:[...new Set(reasons)],windowMatch,ticker:selected.ticker,outcomeSide:selected.outcomeSide,asset:selected.asset};
-  if(!qualified){
-    const next={...series,status:'ARMED_FISHING',fireRefreshEvidence:fullEvidence};
-    await appendRealLedger(env,'FIRE_INVALIDATED_FEATURE_REFRESH',{
-      seriesId:series.seriesId,attemptNo:Number(series.attemptsStarted||0)+1,
-      ticker:selected.ticker,asset:selected.asset,outcomeSide:selected.outcomeSide,
-      reason:'FIRE_INVALIDATED_FEATURE_REFRESH',fireFeatureEvidence:fullEvidence,
-      providerPost:false,providerWrites:0,orders:0,capitalMovedUsd:0,
-    });
-    return {ok:false,reason:'FIRE_INVALIDATED_FEATURE_REFRESH',series:await saveRealSeriesState(env,next),feature,evidence:fullEvidence};
-  }
-  const synchronized={
-    ...snapshot,
-    selected:{...selected,payne:feature,decision:payneDecisionEvidence(feature,cfg.threshold)},
-    fireFeatureEvidence:fullEvidence,
-  };
-  return {ok:true,series,feature,evidence:fullEvidence,snapshot:synchronized};
-}
-
 export async function runReadOnlyScan(env, source='SCHEDULED_CRON', nowMs=Date.now()) {
   const control=await loadControl(env);
   if (!control.scanEnabled && source==='SCHEDULED_CRON') {
