@@ -1,0 +1,59 @@
+name: PAYNE Readonly Promotion Workflow Policy Offline
+on:
+  push:
+    branches: [payne-readonly-promotion-workflow-isolated-20261018]
+    paths: [".github/workflows/payne-readonly-promotion-policy-offline-20261018.yml"]
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Validate isolated promotion policy and protected source
+        shell: bash
+        run: |
+          set -euo pipefail
+          assembly=693a9440f403e26bed7e0bc64decaeb702cad8bc
+          base=ad1f88bbdaa79587bc95074689270b7640c65027
+          target=.github/workflows/payne-disarm-accountability-v1-production.yml
+          git merge-base --is-ancestor "$base" "$assembly"
+          git merge-base --is-ancestor "$assembly" HEAD
+          git diff --name-only "$assembly" HEAD | sort > /tmp/changed
+          printf '%s\n' ".github/workflows/payne-disarm-accountability-v1-production.yml" ".github/workflows/payne-readonly-promotion-policy-offline-20261018.yml" | sort > /tmp/allowed
+          cmp /tmp/changed /tmp/allowed
+          grep -Fq "ref: $assembly" "$target"
+          grep -Fq "ref: ${{ github.sha }}" "$target"
+          grep -Fq 'test "$(git rev-parse HEAD)" = '$assembly "$target"
+          grep -Fq 'test "$(git rev-parse HEAD:market-edge-lab/real/payne-kalshi-real/src/index.js)" = 948f00a6e9053cdcca33d4160508996d472d329d' "$target"
+          grep -Fq "base=$base" "$target"
+          grep -Fq 'UNAPPROVED_ASSEMBLY_DIFFERENCE' "$target"
+          grep -Fq 'PAYNE_COORDINATOR_DIAGNOSTIC_TOKEN' "$target"
+          grep -Fq 'PAYNE_EXECUTION_COORDINATOR' "$target"
+          grep -Fq 'payne-maintenance-decision.mjs' "$target"
+          grep -Fq 'payne-kv-deployment-safety-maintenance.sh pre' "$target"
+          grep -Fq 'payne-kv-deployment-safety-maintenance.sh post' "$target"
+          grep -Fq 'Verify Founder still disarmed' "$target"
+          grep -Fq 'Confirm current production baseline' "$target"
+          grep -Fq 'Verify new Worker version has all production traffic' "$target"
+          grep -Fq 'branches: [payne-direct-pull-fire-isolated-20261018]' "$target"
+          ! grep -Fq 'branches: [payne-readonly-promotion-workflow-isolated-20261018]' "$target"
+          test "$(git rev-parse "$assembly:market-edge-lab/real/payne-kalshi-real/src/index.js")" = 948f00a6e9053cdcca33d4160508996d472d329d
+          grep -Fq 'name = "PAYNE_EXECUTION_COORDINATOR"' market-edge-lab/real/payne-kalshi-real/wrangler.toml
+          git diff --quiet "$assembly" HEAD -- market-edge-lab/real/payne-kalshi-real
+          echo ISOLATED_PROMOTION_PIN_AND_ALL_EXISTING_SAFETY_GATES=PASS
+      - name: Validate assembled GET-only coordinator and full original regressions
+        working-directory: market-edge-lab/real/payne-kalshi-real
+        run: |
+          set -euo pipefail
+          node --check src/index.js
+          node --check src/payne-execution-coordinator.js
+          node --test test/coordinator-series-inspection.test.mjs test/coordinator-parent-authenticated-read.test.mjs
+          npm test
