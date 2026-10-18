@@ -2,7 +2,7 @@ name: PAYNE 60s Entry Gate Isolated Offline
 on:
   push:
     branches: [payne-time-gate-60s-isolated-20261017]
-    paths: ['.github/workflows/payne-time-gate-60s-offline.yml']
+    paths: ['.github/workflows/payne-time-gate-60s-offline.yml', 'market-edge-lab/real/payne-kalshi-real/test/payne-missing-feature-hold-offline.test.mjs']
 permissions:
   contents: read
 jobs:
