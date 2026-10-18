@@ -36,7 +36,18 @@ verify_safety() {
     (.maxEntryDebitUsd|type=="number" and .>0) and
     (.scanEnabled==true)
   ' "$c" >/dev/null || { echo 'BLOCKED: PERSISTED_CONTROL_SAFETY';exit 1; }
-  jq -e --slurpfile c "$c" --slurpfile maintenance "$proof" '
+  # Deployment-only exception: these predicates are necessary but NOT sufficient.
+  # Evidence must be created by an authenticated read-only verifier, independent of
+  # the candidate series; this gate deliberately rejects missing/unknown coverage.
+  # The current production workflow has no complete coordinator/provider verifier,
+  # so no valid production proof is presently issued.
+  local emptyProof="${PAYNE_EMPTY_SERIES_EVIDENCE_FILE:-/tmp/payne-kv-gate/empty-series-evidence.json}"
+  if [[ ! -f "$emptyProof" ]];then printf '%s\n' '{"allowed":false}' > "$emptyProof";fi
+  # Never accept a self-attested proof in production. A separate authenticated
+  # verifier must create a sealed evidence document and set the validator marker.
+  # This marker is supplied only by the verifier, never by KV or human notes.
+  local evidenceAuthority="${PAYNE_EMPTY_SERIES_EVIDENCE_AUTHORITY:-UNVERIFIED}"
+  jq -e --slurpfile c "$c" --slurpfile maintenance "$proof" --slurpfile empty "$emptyProof" --arg evidenceAuthority "$evidenceAuthority" '
     .schema=="PAYNE_REAL_SERIES_V1" and
     .owner=="PAYNE_KALSHI_REAL" and
     .requiredExchangeIndex==2 and
@@ -90,7 +101,36 @@ verify_safety() {
         .currentAttempt.status=="NO_PROVIDER_EXECUTION" and
         .currentAttempt.reconciliationReason=="PROVIDER_RECONCILED_NO_EXECUTION" and
         (.fireLatch.state//"NONE")=="INVALIDATED_BEFORE_POST" and
-        .fireLatch.finalResult=="NO_PROVIDER_EXECUTION"))
+        .fireLatch.finalResult=="NO_PROVIDER_EXECUTION") or
+       # This is a SOFTWARE DEPLOYMENT policy exception only. It never alters
+       # ARM eligibility, persistent series, coordinator claims or provider writes.
+       ($evidenceAuthority=="AUTHENTICATED_READONLY_VERIFIER" and
+        $empty[0].allowed==true and
+        $empty[0].schema=="PAYNE_EMPTY_SERIES_DEPLOYMENT_EVIDENCE_V1" and
+        $empty[0].seriesId==.seriesId and
+        $empty[0].controlArmed==false and
+        $empty[0].source=="AUTHENTICATED_READ_ONLY" and
+        $empty[0].providerOrdersComplete==true and
+        $empty[0].providerPositionsComplete==true and
+        $empty[0].coordinatorClaimsComplete==true and
+        $empty[0].reconciliationComplete==true and
+        $empty[0].providerOpenOrders==0 and
+        $empty[0].providerOpenPositions==0 and
+        $empty[0].coordinatorActiveClaims==0 and
+        $empty[0].unknownProviderObligations==0 and
+        $empty[0].observedAt!=null and
+        $c[0].armed==false and
+        $c[0].openPositions==0 and
+        .configFrozen==true and
+        (.attemptsStarted|type=="number" and .==0) and
+        (.executionIntentsStarted|type=="number" and .==0) and
+        .unresolvedEntry==false and
+        (.currentAttempt//null)==null and
+        (.position//null)==null and
+        (.positions|type=="array" and length==0) and
+        ((.fireLatch//null)==null or
+          (.fireLatch|type=="object" and .state=="NONE")) and
+        (.providerPostStarted//false)==false))
   ' "$s" >/dev/null || {
     # Existing KV data only: identify the failed invariant without changing state.
     jq -r --slurpfile c "$c" '
