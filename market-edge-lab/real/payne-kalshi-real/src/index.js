@@ -4099,7 +4099,17 @@ async function managePayneRealPosition(env,control,series,postImpl=kalshiPayneOr
       a?.clientOrderId===position.entryClientOrderId);
     const directWriter=matchingAttempts.length===1 &&
       matchingAttempts[0].executionHandoff==='DIRECT_KALSHI_WRITER_V1';
+    if(position.seriesId!==series.seriesId || !position.attemptId || !position.marketTicker ||
+       !['YES','NO'].includes(position.outcomeSide) || matchingAttempts.length!==1){
+      position.status='RECONCILIATION_UNKNOWN';
+      position.reconciliationReason='CLOSE_IDENTITY_NOT_VERIFIED';
+      series.status='ATOMIC_CLOSE_RECORD_PENDING';
+      await settleSeriesControl(env,series,1,{failClosed:true});
+      return saveRealSeriesState(env,series);
+    }
     if(position.entryFireSpecimenId&&position.marketCloseTime&&!directWriter){
+      // Provider FLAT is re-verified on every management cycle before retry.
+      // Never construct another exit while the exact atomic close is pending.
       const atomicClosed=await resolvePayneExecutionClaim(env,{
         seriesId:position.seriesId,attemptNo:Number(position.attemptNo),
         specimenId:position.entryFireSpecimenId,clientOrderId:position.entryClientOrderId,
@@ -4112,7 +4122,7 @@ async function managePayneRealPosition(env,control,series,postImpl=kalshiPayneOr
         position.status='RECONCILIATION_UNKNOWN';
         position.reconciliationReason='ATOMIC_CLOSE_RECORD_PENDING';
         series.status='ATOMIC_CLOSE_RECORD_PENDING';
-        await settleSeriesControl(env,series,1);
+        await settleSeriesControl(env,series,1,{failClosed:true});
         return saveRealSeriesState(env,series);
       }
     }
