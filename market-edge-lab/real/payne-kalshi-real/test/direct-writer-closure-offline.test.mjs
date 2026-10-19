@@ -50,9 +50,11 @@ function fixture({mode='flat',pages=null,orders=[],direct=true,armed=false,attem
   try{return await runPayneRealExecutionCycle(env,{postImpl:async()=>{throw Error('NO_PROVIDER_POST_ALLOWED')}});}
   finally{globalThis.fetch=original;}
  }
+ const setCoordinator=value=>{env.PAYNE_EXECUTION_COORDINATOR=value};
+ const changePosition=fn=>{const current=JSON.parse(state.get(SERIES));current.position=fn(current.position);current.positions=[current.position];state.set(SERIES,JSON.stringify(current))};
  const read=key=>JSON.parse(state.get(key));
  const ledger=()=>[...state.entries()].filter(([k])=>k.startsWith('payne-kalshi:real-ledger:')).map(([,v])=>JSON.parse(v));
- return {run,read,ledger,requests,position,seriesId,state,ticker};
+ return {run,read,ledger,requests,position,seriesId,state,ticker,setCoordinator,changePosition};
 }
 test('A direct writer: exact provider FLAT and empty orders closes and releases slot',{concurrency:false},async()=>{
  const f=fixture();await f.run();const s=f.read(SERIES),c=f.read(CONTROL);
@@ -99,4 +101,50 @@ test('J no entry submission or attempt replay from closure',{concurrency:false},
  assert.equal(f.requests.filter(r=>r.method!=='GET').length,0);
  assert.equal(f.read(SERIES).attemptsStarted,2);
  assert.equal(f.read(SERIES).position.entryClientOrderId,'offline-client-entry');
+});
+
+test('K closed DOGE: failed atomic close remains owned; next verified cycle retries once and closes without provider POST',{concurrency:false},async()=>{
+ const f=fixture({direct:false,orders:[{ticker:'KXNEAR15M-OFFLINE-CLOSURE',status:'executed',order_id:'offline-provider-filled',client_order_id:'offline-client-entry'}]});
+ let resolveCalls=0;
+ const coordinator={
+   idFromName:id=>id,
+   get:()=>({fetch:async(_url,options)=>{
+     assert.equal(options.method,'POST');
+     const request=JSON.parse(options.body);
+     assert.equal(request.action,'RESOLVE_ENTRY');
+     assert.equal(request.resolution,'CLOSED');
+     assert.equal(request.seriesId,f.seriesId);
+     assert.equal(request.ticker,f.ticker);
+     resolveCalls++;
+     return json({granted:resolveCalls>1,reason:resolveCalls>1?'ENTRY_RESOLUTION_PERSISTED':'SIMULATED_ATOMIC_RECORD_FAILURE'});
+   }})
+ };
+ const envOriginal=f.read(SERIES);
+ // Attach the existing coordinator to the offline fixture without live secrets.
+ f.setCoordinator(coordinator);
+ await f.run();
+ assert.equal(resolveCalls,1);
+ assert.equal(f.read(SERIES).position.status,'RECONCILIATION_UNKNOWN');
+ assert.equal(f.read(SERIES).status,'ATOMIC_CLOSE_RECORD_PENDING');
+ assert.equal(f.read(CONTROL).openPositions,1);
+ assert.equal(f.ledger().filter(x=>x.type==='PROVIDER_RECONCILED_FLAT').length,0);
+ await f.run();
+ assert.equal(resolveCalls,2);
+ assert.equal(f.read(SERIES).position.status,'CLOSED');
+ assert.equal(f.read(CONTROL).openPositions,0);
+ assert.equal(f.ledger().filter(x=>x.type==='PROVIDER_RECONCILED_FLAT').length,1);
+ await f.run();
+ assert.equal(resolveCalls,2);
+ assert.equal(f.ledger().filter(x=>x.type==='PROVIDER_RECONCILED_FLAT').length,1);
+ assert.equal(f.requests.some(x=>x.method!=='GET'),false);
+});
+test('L cross-series position identity does not resolve or release an unrelated owner',{concurrency:false},async()=>{
+ const f=fixture({direct:false});
+ f.changePosition(p=>({...p,seriesId:'DIFFERENT_SERIES'}));
+ await f.run();
+ assert.equal(f.read(SERIES).position.status,'RECONCILIATION_UNKNOWN');
+ assert.equal(f.read(SERIES).position.reconciliationReason,'CLOSE_IDENTITY_NOT_VERIFIED');
+ assert.equal(f.read(CONTROL).openPositions,1);
+ assert.equal(f.ledger().filter(x=>x.type==='PROVIDER_RECONCILED_FLAT').length,0);
+ assert.equal(f.requests.some(x=>x.method!=='GET'),false);
 });
