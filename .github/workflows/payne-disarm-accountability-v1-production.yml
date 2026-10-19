@@ -15,7 +15,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ad1f88bbdaa79587bc95074689270b7640c65027
+          ref: 693a9440f403e26bed7e0bc64decaeb702cad8bc
           persist-credentials: false
       - uses: actions/checkout@v4
         with:
@@ -29,9 +29,24 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test "$(git rev-parse HEAD)" = ad1f88bbdaa79587bc95074689270b7640c65027
+          test "$(git rev-parse HEAD)" = 693a9440f403e26bed7e0bc64decaeb702cad8bc
           test "$(git -C maintenance-source rev-parse HEAD)" = "$GITHUB_SHA"
-          test "$(git rev-parse HEAD:market-edge-lab/real/payne-kalshi-real/src/index.js)" = 32c74040bf1209601495a7b7a36f2699ef300e3f
+          # The Worker assembly is a clean descendant of the Founder-approved trading base.
+          base=ad1f88bbdaa79587bc95074689270b7640c65027
+          git cat-file -e "$base^{commit}"
+          git merge-base --is-ancestor "$base" HEAD
+          git diff --name-only "$base" HEAD > /tmp/payne-assembly-whitelist
+          while IFS= read -r changed; do
+            case "$changed" in
+              market-edge-lab/real/payne-kalshi-real/src/index.js|market-edge-lab/real/payne-kalshi-real/src/payne-execution-coordinator.js|market-edge-lab/real/payne-kalshi-real/test/coordinator-series-inspection.test.mjs|market-edge-lab/real/payne-kalshi-real/test/coordinator-parent-authenticated-read.test.mjs|.github/workflows/payne-direct-fire-readonly-assembly-offline.yml) ;;
+              *) echo "BLOCKED: UNAPPROVED_ASSEMBLY_DIFFERENCE $changed";exit 1;;
+            esac
+          done < /tmp/payne-assembly-whitelist
+          grep -q "url.pathname === '/internal/series-claims-diagnostic'" market-edge-lab/real/payne-kalshi-real/src/index.js
+          grep -q "'/internal/inspect-series'" market-edge-lab/real/payne-kalshi-real/src/payne-execution-coordinator.js
+          grep -q 'PAYNE_COORDINATOR_DIAGNOSTIC_TOKEN' market-edge-lab/real/payne-kalshi-real/src/index.js
+          grep -q 'PAYNE_EXECUTION_COORDINATOR' market-edge-lab/real/payne-kalshi-real/wrangler.toml
+          test "$(git rev-parse HEAD:market-edge-lab/real/payne-kalshi-real/src/index.js)" = 948f00a6e9053cdcca33d4160508996d472d329d
           test "$(git rev-parse HEAD:market-edge-lab/real/payne-kalshi-real/src/cockpit-html.js)" = 657e477c4c9385e337fd725769b7ab757dc81c77
           test "$(git rev-parse HEAD:market-edge-lab/real/payne-kalshi-real/src/payne-closure-evidence.js)" = 7f0c5a2dce12ed0d56c1024cdd58c4f581ea364a
           grep -q '^name = "market-edge-payne-kalshi-real"$' market-edge-lab/real/payne-kalshi-real/wrangler.toml
@@ -81,6 +96,28 @@ jobs:
           set -euo pipefail
           rm -f /tmp/payne-kv-gate/maintenance-proof.json
           node maintenance-source/.github/scripts/payne-maintenance-decision.mjs
+      - name: Verify exact fail-closed deployment policy and verifier sources
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git -C maintenance-source rev-parse HEAD:.github/scripts/payne-kv-deployment-safety-maintenance.sh)" = 9497a5fc26c6aede92858aea8310e419d2ddc162
+          test "$(git -C maintenance-source rev-parse HEAD:.github/scripts/payne-empty-series-readonly-verifier.mjs)" = e4c88d4685aa2bd8d60d73e5950f5716eed89fd3
+          node --check maintenance-source/.github/scripts/payne-empty-series-readonly-verifier.mjs
+      - name: Generate authenticated zero-attempt deployment evidence (fail closed)
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          PAYNE_COORDINATOR_DIAGNOSTIC_TOKEN: ${{ secrets.PAYNE_COORDINATOR_DIAGNOSTIC_TOKEN }}
+        run: |
+          set -euo pipefail
+          rm -f /tmp/payne-kv-gate/empty-series-evidence.json
+          unset PAYNE_EMPTY_SERIES_EVIDENCE_AUTHORITY
+          node maintenance-source/.github/scripts/payne-empty-series-readonly-verifier.mjs
+          jq -e '.schema=="PAYNE_EMPTY_SERIES_DEPLOYMENT_EVIDENCE_V1" and (.allowed|type)=="boolean"' /tmp/payne-kv-gate/empty-series-evidence.json >/dev/null
+          if jq -e '.allowed==true' /tmp/payne-kv-gate/empty-series-evidence.json >/dev/null; then
+            echo 'BLOCKED: UNVERIFIED_EVIDENCE_APPROVAL'; exit 1
+          fi
       - name: Run existing authoritative PAYNE KV pre-deploy safety gate
         shell: bash
         env:
@@ -122,6 +159,9 @@ jobs:
           set -euo pipefail
           rm -f /tmp/payne-kv-gate/maintenance-proof.json
           node maintenance-source/.github/scripts/payne-maintenance-decision.mjs
+          rm -f /tmp/payne-kv-gate/empty-series-evidence.json
+          unset PAYNE_EMPTY_SERIES_EVIDENCE_AUTHORITY
+          node maintenance-source/.github/scripts/payne-empty-series-readonly-verifier.mjs
           bash maintenance-source/.github/scripts/payne-kv-deployment-safety-maintenance.sh post
       - name: Verify cockpit and existing Founder control read-only
         shell: bash
