@@ -34,22 +34,17 @@ async function evidenceFromExistingProduction({fetchImpl,workerUrl,secret,series
  if(!(claims?.status==='CLEAR' && Number(claims?.activeClaims)===0) &&
     !(disarmedUnknown && Number(claims?.activeClaims)===1 && claims?.status==='BLOCKED'))
    throw Error('EXISTING_COORDINATOR_NOT_CLEAR');
- const histUrl=workerUrl+'/real-history?view=cycles&range=current';
- const histRes=await fetchImpl(histUrl,{method:'GET',redirect:'error'});
- if(!histRes.ok) throw Error('EXISTING_PROVIDER_HISTORY_FAILED_HTTP_'+histRes.status);
- const hist=await histRes.json();
- if(hist?.providerReadComplete!==true||hist?.providerCoverage!=='PROVIDER_READS_COMPLETE')
-   throw Error('EXISTING_PROVIDER_READ_INCOMPLETE');
- const positions=Array.isArray(hist?.providerPositions)?hist.providerPositions:
-   (Array.isArray(hist?.positions)?hist.positions:null);
- if(!positions) throw Error('EXISTING_PROVIDER_POSITIONS_SCHEMA_UNKNOWN');
  const ticker=series?.position?.marketTicker;
  if(!ticker) throw Error('SERIES_POSITION_TICKER_MISSING');
- const matches=positions.filter(x=>String(x?.ticker||x?.market_ticker||'')===ticker);
- if(matches.length>1) throw Error('EXISTING_PROVIDER_TICKER_AMBIGUOUS');
- const qty=matches.length===0?0:Number(matches[0]?.position_fp??matches[0]?.position??matches[0]?.quantity);
- if(!Number.isFinite(qty)) throw Error('EXISTING_PROVIDER_QUANTITY_INVALID');
- if(Math.abs(qty)>1e-9) throw Error('EXISTING_PROVIDER_POSITION_NOT_FLAT');
+ const posUrl=workerUrl+'/internal/deployment-position-evidence?ticker='+encodeURIComponent(ticker);
+ const posRes=await fetchImpl(posUrl,{method:'GET',headers,redirect:'error'});
+ if(!posRes.ok) throw Error('DEPLOYMENT_POSITION_EVIDENCE_HTTP_'+posRes.status);
+ const pos=await posRes.json();
+ if(pos?.ok!==true||pos?.complete!==true) throw Error('DEPLOYMENT_POSITION_EVIDENCE_INCOMPLETE');
+ if(pos?.classification!=='FLAT' && pos?.classification!=='ABSENT')
+   throw Error('DEPLOYMENT_POSITION_NOT_FLAT');
+ const qty=Number(pos?.quantity??0);
+ if(!Number.isFinite(qty)||Math.abs(qty)>1e-9) throw Error('DEPLOYMENT_POSITION_QUANTITY_NOT_ZERO');
  return {
    ok:true,complete:true,
    positionIdentity:{
