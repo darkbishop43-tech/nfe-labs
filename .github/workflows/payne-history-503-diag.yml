@@ -1,0 +1,19 @@
+name: PAYNE History 503 Diagnostic
+on:
+  push:
+    branches: [payne-direct-pull-fire-isolated-20261018]
+    paths: [".github/workflows/payne-history-503-diag.yml"]
+permissions:
+  contents: read
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Capture real-history cycles response
+        shell: bash
+        run: |
+          set +e
+          code=$(curl --silent --show-error --max-time 40 --output /tmp/hist.json --write-out '%{http_code}' "https://market-edge-payne-kalshi-real.darkbishop43.workers.dev/real-history?view=cycles&range=current")
+          echo "HTTP=$code"
+          head -c 500 /tmp/hist.json; echo
