@@ -1,4 +1,4 @@
-# isolated diagnostic candidate pin
+# clean diagnostic candidate pin
 name: PAYNE Direct Pull Fire Existing Gated Promotion
 on:
   push:
@@ -16,7 +16,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: eec7cd31b2782b773811efa277a15bbba4740895
+          ref: 4121b6c3ba127ddd9d0448af277acc615c7ee7ae
           fetch-depth: 0
           persist-credentials: false
       - uses: actions/checkout@v4
@@ -31,7 +31,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test "$(git rev-parse HEAD)" = eec7cd31b2782b773811efa277a15bbba4740895
+          test "$(git rev-parse HEAD)" = 4121b6c3ba127ddd9d0448af277acc615c7ee7ae
           test "$(git -C maintenance-source rev-parse HEAD)" = "$GITHUB_SHA"
           # The Worker assembly is a clean descendant of the Founder-approved trading base.
           base=ad1f88bbdaa79587bc95074689270b7640c65027
