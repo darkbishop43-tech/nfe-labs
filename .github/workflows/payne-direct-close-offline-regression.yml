@@ -31,12 +31,12 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test "$(git rev-parse HEAD:market-edge-lab/real/payne-kalshi-real/src/index.js)" = 3f620acb9b371ae05b01864c0f72f9a97da0366660caa9
+          test "$(git rev-parse HEAD:market-edge-lab/real/payne-kalshi-real/src/index.js)" = 3f620acb9b371ae05b01864c0f72f9a97da03666
           node --check market-edge-lab/real/payne-kalshi-real/src/index.js
           node --check market-edge-lab/real/payne-kalshi-real/src/cockpit-html.js
           node --check market-edge-lab/real/payne-kalshi-real/src/payne-real-history-view.js
           echo "TESTED_SOURCE_COMMIT=$GITHUB_SHA"
-          echo "TESTED_SOURCE_BLOB=3f620acb9b371ae05b01864c0f72f9a97da0366660caa9"
+          echo "TESTED_SOURCE_BLOB=3f620acb9b371ae05b01864c0f72f9a97da03666"
       - name: Run existing PAYNE executable offline tests
         working-directory: market-edge-lab/real/payne-kalshi-real
         shell: bash
