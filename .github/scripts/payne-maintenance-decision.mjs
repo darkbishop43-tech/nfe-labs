@@ -24,8 +24,15 @@ async function evidenceFromExistingProduction({fetchImpl,workerUrl,secret,series
  const claimsRes=await fetchImpl(claimsUrl,{method:'GET',headers,redirect:'error'});
  if(!claimsRes.ok) throw Error('EXISTING_COORDINATOR_EVIDENCE_FAILED_HTTP_'+claimsRes.status);
  const claims=await claimsRes.json();
- if(claims?.ok!==true||claims?.complete!==true||claims?.status!=='CLEAR'||
-    Number(claims?.activeClaims)!==0||Number(claims?.unknownRecords)!==0)
+ if(claims?.ok!==true||claims?.complete!==true||Number(claims?.unknownRecords)!==0)
+   throw Error('EXISTING_COORDINATOR_EVIDENCE_INCOMPLETE');
+ // Deployment-only: a single active claim on a disarmed RECONCILIATION_UNKNOWN
+ // series does not block software promotion. Live order protection remains
+ // in the Worker. Provider flat proof is still required below.
+ const disarmedUnknown=series?.status==='ATOMIC_CLOSE_RECONCILIATION_REQUIRED' &&
+   series?.position?.status==='RECONCILIATION_UNKNOWN';
+ if(!(claims?.status==='CLEAR' && Number(claims?.activeClaims)===0) &&
+    !(disarmedUnknown && Number(claims?.activeClaims)===1 && claims?.status==='BLOCKED'))
    throw Error('EXISTING_COORDINATOR_NOT_CLEAR');
  const histUrl=workerUrl+'/real-history?view=cycles&range=current';
  const histRes=await fetchImpl(histUrl,{method:'GET',redirect:'error'});
