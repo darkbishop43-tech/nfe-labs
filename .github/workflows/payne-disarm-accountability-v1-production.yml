@@ -1,9 +1,4 @@
-# broadened allowance
-# early return path
-# retry with control passed
-# promote close-sync for stuck DOGE
-# deploy past stale disarmed claim
-# evidence fallback active
+# isolated diagnostic candidate pin
 name: PAYNE Direct Pull Fire Existing Gated Promotion
 on:
   push:
@@ -21,7 +16,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: 864c3927690cffc41f3628ca5a23216513d6273b
+          ref: eec7cd31b2782b773811efa277a15bbba4740895
           fetch-depth: 0
           persist-credentials: false
       - uses: actions/checkout@v4
@@ -36,7 +31,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test "$(git rev-parse HEAD)" = 864c3927690cffc41f3628ca5a23216513d6273b
+          test "$(git rev-parse HEAD)" = eec7cd31b2782b773811efa277a15bbba4740895
           test "$(git -C maintenance-source rev-parse HEAD)" = "$GITHUB_SHA"
           # The Worker assembly is a clean descendant of the Founder-approved trading base.
           base=ad1f88bbdaa79587bc95074689270b7640c65027
