@@ -4106,9 +4106,13 @@ async function managePayneRealPosition(env,control,series,postImpl=kalshiPayneOr
         ticker:position.marketTicker,side:position.outcomeSide,windowClose:position.marketCloseTime
       },'CLOSED',{providerFlatProven:true,authoritativeReconciliationProven:true});
       if(!atomicClosed.granted){
+        // A failed bookkeeping claim is not provider exposure evidence.
+        // Preserve the owned slot and do not fail-close a healthy series solely
+        // for historical claim recording. Subsequent provider checks still govern.
         position.status='RECONCILIATION_UNKNOWN';
-        series.status='ATOMIC_CLOSE_RECONCILIATION_REQUIRED';
-        await settleSeriesControl(env,series,1,{failClosed:true});
+        position.reconciliationReason='ATOMIC_CLOSE_RECORD_PENDING';
+        series.status='ATOMIC_CLOSE_RECORD_PENDING';
+        await settleSeriesControl(env,series,1);
         return saveRealSeriesState(env,series);
       }
     }
