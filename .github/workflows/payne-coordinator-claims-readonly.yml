@@ -1,0 +1,37 @@
+name: PAYNE Coordinator Claims Read Only
+on:
+  workflow_dispatch:
+  push:
+    branches: [payne-direct-pull-fire-isolated-20261018]
+    paths: [".github/workflows/payne-coordinator-claims-readonly.yml"]
+permissions:
+  contents: read
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Read series claims diagnostic
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          PAYNE_COORDINATOR_DIAGNOSTIC_TOKEN: ${{ secrets.PAYNE_COORDINATOR_DIAGNOSTIC_TOKEN }}
+        run: |
+          set -euo pipefail
+          : "${CLOUDFLARE_API_TOKEN:?MISSING}"
+          : "${CLOUDFLARE_ACCOUNT_ID:?MISSING}"
+          : "${PAYNE_COORDINATOR_DIAGNOSTIC_TOKEN:?MISSING}"
+          tmp="$(mktemp -d)"
+          trap 'rm -rf "$tmp"' EXIT
+          base="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/storage/kv/namespaces/03352b0ccb034f1bb8206f663a04b125/values"
+          code="$(curl --silent --show-error --max-time 25 --output "$tmp/series.json" --write-out '%{http_code}' --header "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "$base/payne-kalshi%3Areal-series%3Av1")"
+          test "$code" = 200
+          seriesId="$(jq -r '.seriesId' "$tmp/series.json")"
+          echo "SERIES_ID=$seriesId"
+          jq -c '{seriesId,status,attemptsStarted,positionTicker:(.position.marketTicker//null),positionStatus:(.position.status//null)}' "$tmp/series.json"
+          url="https://market-edge-payne-kalshi-real.darkbishop43.workers.dev/internal/series-claims-diagnostic?seriesId=$(printf %s "$seriesId" | jq -sRr @uri)"
+          code="$(curl --silent --show-error --max-time 25 --output "$tmp/claims.json" --write-out '%{http_code}' --header "x-payne-diagnostic-token: $PAYNE_COORDINATOR_DIAGNOSTIC_TOKEN" "$url")"
+          echo "CLAIMS_HTTP=$code"
+          jq -c '{ok,complete,status,activeClaims,unknownRecords,reason,claimCount:(.claims//[]|length)}' "$tmp/claims.json" || cat "$tmp/claims.json"
+          echo "READ_ONLY_CLAIMS_DIAGNOSTIC_COMPLETE"
