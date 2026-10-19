@@ -4099,13 +4099,22 @@ async function managePayneRealPosition(env,control,series,postImpl=kalshiPayneOr
       a?.clientOrderId===position.entryClientOrderId);
     const directWriter=matchingAttempts.length===1 &&
       matchingAttempts[0].executionHandoff==='DIRECT_KALSHI_WRITER_V1';
-    if(position.seriesId!==series.seriesId || !position.attemptId || !position.marketTicker ||
-       !['YES','NO'].includes(position.outcomeSide) || matchingAttempts.length!==1){
+    const positionIdentityComplete=position.seriesId===series.seriesId &&
+      position.attemptId && position.entryOrderId && position.entryClientOrderId &&
+      position.marketTicker && ['YES','NO'].includes(position.outcomeSide);
+    if(!positionIdentityComplete){
       position.status='RECONCILIATION_UNKNOWN';
       position.reconciliationReason='CLOSE_IDENTITY_NOT_VERIFIED';
       series.status='ATOMIC_CLOSE_RECORD_PENDING';
       await settleSeriesControl(env,series,1,{failClosed:true});
       return saveRealSeriesState(env,series);
+    }
+    if(matchingAttempts.length!==1){
+      console.error('PAYNE_CLOSE_ATTEMPT_MISMATCH',JSON.stringify({
+        seriesId:position.seriesId,attemptId:position.attemptId,
+        matched:matchingAttempts.length
+      }));
+      position.reconciliationReason='PROVIDER_FLAT_ATTEMPT_MISMATCH';
     }
     if(position.entryFireSpecimenId&&position.marketCloseTime&&!directWriter){
       // Provider FLAT is re-verified on every management cycle before retry.
