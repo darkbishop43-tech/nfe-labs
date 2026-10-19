@@ -18,7 +18,7 @@ export async function verifyPayneMaintenanceChain({control,series,providerRespon
 }
 
 // Fallback: existing production endpoints only. No new Worker, no Kalshi keys in GitHub.
-async function evidenceFromExistingProduction({fetchImpl,workerUrl,secret,series}){
+async function evidenceFromExistingProduction({fetchImpl,workerUrl,secret,series,control}){
  const headers={'x-payne-diagnostic-token':secret};
  const claimsUrl=workerUrl+'/internal/series-claims-diagnostic?seriesId='+encodeURIComponent(series.seriesId);
  const claimsRes=await fetchImpl(claimsUrl,{method:'GET',headers,redirect:'error'});
@@ -109,7 +109,7 @@ export async function getLiveMaintenanceDecision({fetchImpl=fetch,env=process.en
    providerResponse=await response.json();
  }else if(response.status===404){
    // Endpoint absent on current production. Use existing authenticated routes.
-   providerResponse=await evidenceFromExistingProduction({fetchImpl,workerUrl,secret,series});
+   providerResponse=await evidenceFromExistingProduction({fetchImpl,workerUrl,secret,series,control});
  }else{
    throw Error('PROTECTED_PROVIDER_EVIDENCE_FAILED_HTTP_'+response.status);
  }
