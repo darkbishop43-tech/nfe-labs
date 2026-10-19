@@ -4807,6 +4807,32 @@ export default {
 
     if (request.method !== 'GET') return Response.json({ ok:false, reason:'GET_ONLY_PROVIDER_AUTHORITY / CONTROL_POSTS_LOCAL_ONLY' }, { status:405 });
 
+    if (url.pathname === '/internal/deployment-position-evidence') {
+      // Bounded read-only evidence for deployment gates. One ticker, positions only.
+      // No history load, no order pagination, no KV or claim mutation.
+      const deny=(reason,status=503)=>Response.json({ok:false,complete:false,status:'UNKNOWN',reason,readOnly:true,providerWrites:0},{status,headers:{'cache-control':'no-store'}});
+      const secret=env?.PAYNE_COORDINATOR_DIAGNOSTIC_TOKEN;
+      const supplied=request.headers.get('x-payne-diagnostic-token');
+      if(typeof secret!=='string'||secret.length<32||typeof supplied!=='string'||supplied.length!==secret.length)
+        return deny('UNAUTHORIZED',403);
+      const [h1,h2]=await Promise.all([crypto.subtle.digest('SHA-256',new TextEncoder().encode(secret)),crypto.subtle.digest('SHA-256',new TextEncoder().encode(supplied))]);
+      let mismatch=0;const ha=new Uint8Array(h1),hb=new Uint8Array(h2);
+      for(let i=0;i<ha.length;i++)mismatch|=ha[i]^hb[i];
+      if(mismatch)return deny('UNAUTHORIZED',403);
+      const ticker=url.searchParams.get('ticker');
+      if(typeof ticker!=='string'||!ticker||ticker.length>80)
+        return deny('TICKER_REQUIRED',400);
+      try {
+        const evidence=await providerTickerPositionEvidence(env,ticker);
+        if(evidence?.ok!==true||evidence?.paginationComplete!==true)
+          return deny(evidence?.reason||'PROVIDER_POSITION_READ_INCOMPLETE');
+        return Response.json({ok:true,complete:true,readOnly:true,providerWrites:0,
+          ticker,classification:evidence.classification,quantity:evidence.quantity??0,
+          reason:evidence.reason},{headers:{'cache-control':'no-store'}});
+      } catch(error) {
+        return deny(String(error?.message||'POSITION_EVIDENCE_FAILED'));
+      }
+    }
     if (url.pathname === '/internal/closure-maintenance-evidence') {
       // Read-only, bounded diagnostic; never alters control, claims or provider state.
       const deny=(reason,status=503)=>Response.json({ok:false,complete:false,status:'UNKNOWN',reason,readOnly:true,providerWrites:0},{status,headers:{'cache-control':'no-store'}});
