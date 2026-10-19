@@ -2,7 +2,7 @@ name: PAYNE Direct Writer Closure Offline Regression
 on:
   push:
     branches:
-      - payne-evidence-bootstrap-isolated-20261019
+      - payne-close-sync-retry-isolated-20261019
     paths:
       - .github/workflows/payne-direct-close-offline-regression.yml
       - market-edge-lab/real/payne-kalshi-real/test/direct-writer-closure-offline.test.mjs
@@ -32,12 +32,12 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test "$(git rev-parse HEAD:market-edge-lab/real/payne-kalshi-real/src/index.js)" = 53c18f8829d88e99aad7c5c9a5f4d43b0123eb32
+          test "$(git rev-parse HEAD:market-edge-lab/real/payne-kalshi-real/src/index.js)" = 01e4d26bf5cc7fd9091be98fd7448d2d5767e5f8
           node --check market-edge-lab/real/payne-kalshi-real/src/index.js
           node --check market-edge-lab/real/payne-kalshi-real/src/cockpit-html.js
           node --check market-edge-lab/real/payne-kalshi-real/src/payne-real-history-view.js
           echo "TESTED_SOURCE_COMMIT=$GITHUB_SHA"
-          echo "TESTED_SOURCE_BLOB=53c18f8829d88e99aad7c5c9a5f4d43b0123eb32"
+          echo "TESTED_SOURCE_BLOB=01e4d26bf5cc7fd9091be98fd7448d2d5767e5f8"
       - name: Run existing PAYNE executable offline tests
         working-directory: market-edge-lab/real/payne-kalshi-real
         shell: bash
