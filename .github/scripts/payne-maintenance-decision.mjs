@@ -101,8 +101,9 @@ export async function getLiveMaintenanceDecision({fetchImpl=fetch,env=process.en
  };
  const [control,series]=await Promise.all([kv('payne-kalshi:control:v1'),kv('payne-kalshi:real-series:v1')]);
  if(control?.openPositions===0)return {allowed:false,reason:'NORMAL_ZERO_POSITION_GATE',normalGate:true};
- if(control?.armed===false && series?.status==='ATOMIC_CLOSE_RECONCILIATION_REQUIRED' &&
-    series?.position?.status==='RECONCILIATION_UNKNOWN' && series?.position){
+ const pending=series?.position && control?.armed===false &&
+   ['RECONCILIATION_UNKNOWN','ATOMIC_CLOSE_RECORD_PENDING','EXIT_RECONCILIATION_REQUIRED'].includes(series?.position?.status);
+ if(pending){
    return {allowed:true,reason:'EXACT_PROVIDER_FLAT_MAINTENANCE_ONLY',
      sourceBlob:'76c6ff7a2f7f6967def859012b2fcf3b66f7b2f9',
      seriesId:series.seriesId,attemptId:series.position.attemptId,
