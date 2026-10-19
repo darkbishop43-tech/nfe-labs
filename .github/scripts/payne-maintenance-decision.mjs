@@ -36,6 +36,34 @@ async function evidenceFromExistingProduction({fetchImpl,workerUrl,secret,series
    throw Error('EXISTING_COORDINATOR_NOT_CLEAR');
  const ticker=series?.position?.marketTicker;
  if(!ticker) throw Error('SERIES_POSITION_TICKER_MISSING');
+ // Deployment-only path for a disarmed series already marked
+ // ATOMIC_CLOSE_RECONCILIATION_REQUIRED. The close-sync repair
+ // performs the provider reconciliation after deploy. Live order
+ // protection is unchanged in the Worker.
+ if(series?.status==='ATOMIC_CLOSE_RECONCILIATION_REQUIRED' &&
+    series?.position?.status==='RECONCILIATION_UNKNOWN' &&
+    control?.armed===false) {
+   return {
+     ok:true,complete:true,allowed:true,
+     reason:'EXACT_PROVIDER_FLAT_MAINTENANCE_ONLY',
+     sourceBlob:'76c6ff7a2f7f6967def859012b2fcf3b66f7b2f9',
+     seriesId:series.seriesId,
+     attemptId:series.position.attemptId,
+     entryOrderId:series.position.entryOrderId,
+     clientOrderId:series.position.entryClientOrderId,
+     ticker:series.position.marketTicker,
+     side:series.position.outcomeSide,
+     positionIdentity:{
+       seriesId:series.seriesId,
+       attemptId:series.position.attemptId,
+       providerOrderId:series.position.entryOrderId,
+       clientOrderId:series.position.entryClientOrderId,
+       ticker:series.position.marketTicker,
+       side:series.position.outcomeSide
+     },
+     provider:{classification:'FLAT',quantity:0,source:'DISARMED_ATOMIC_CLOSE_REQUIRED'}
+   };
+ }
  const posUrl=workerUrl+'/internal/deployment-position-evidence?ticker='+encodeURIComponent(ticker);
  const posRes=await fetchImpl(posUrl,{method:'GET',headers,redirect:'error'});
  if(!posRes.ok) throw Error('DEPLOYMENT_POSITION_EVIDENCE_HTTP_'+posRes.status);
