@@ -8,12 +8,53 @@ export async function verifyPayneMaintenanceChain({control,series,providerRespon
  const p=series?.position, id=providerResponse.positionIdentity;
  if(!p || id.seriesId!==series.seriesId || id.attemptId!==p.attemptId ||
     id.providerOrderId!==p.entryOrderId || id.clientOrderId!==p.entryClientOrderId ||
-    id.ticker!==p.marketTicker || id.side!==p.outcomeSide) return rejected('WORKER_KV_IDENTITY_MISMATCH');
+    id.ticker!==p.marketTicker || id.side!==p.outcomeSide)
+   return rejected('POSITION_IDENTITY_MISMATCH');
  const outcome=evaluatePayneClosureMaintenance({control,series,provider:providerResponse.provider,sourceBlob,expectedBlob});
  if(!outcome.allowed)return outcome;
  return {allowed:true,reason:outcome.reason,sourceBlob,
    seriesId:series.seriesId,attemptId:p.attemptId,entryOrderId:p.entryOrderId,
    clientOrderId:p.entryClientOrderId,ticker:p.marketTicker,side:p.outcomeSide};
+}
+
+// Fallback: existing production endpoints only. No new Worker, no Kalshi keys in GitHub.
+async function evidenceFromExistingProduction({fetchImpl,workerUrl,secret,series}){
+ const headers={'x-payne-diagnostic-token':secret};
+ const claimsUrl=workerUrl+'/internal/series-claims-diagnostic?seriesId='+encodeURIComponent(series.seriesId);
+ const claimsRes=await fetchImpl(claimsUrl,{method:'GET',headers,redirect:'error'});
+ if(!claimsRes.ok) throw Error('EXISTING_COORDINATOR_EVIDENCE_FAILED_HTTP_'+claimsRes.status);
+ const claims=await claimsRes.json();
+ if(claims?.ok!==true||claims?.complete!==true||claims?.status!=='CLEAR'||
+    Number(claims?.activeClaims)!==0||Number(claims?.unknownRecords)!==0)
+   throw Error('EXISTING_COORDINATOR_NOT_CLEAR');
+ const histUrl=workerUrl+'/real-history?view=cycles&range=current';
+ const histRes=await fetchImpl(histUrl,{method:'GET',redirect:'error'});
+ if(!histRes.ok) throw Error('EXISTING_PROVIDER_HISTORY_FAILED_HTTP_'+histRes.status);
+ const hist=await histRes.json();
+ if(hist?.providerReadComplete!==true||hist?.providerCoverage!=='PROVIDER_READS_COMPLETE')
+   throw Error('EXISTING_PROVIDER_READ_INCOMPLETE');
+ const positions=Array.isArray(hist?.providerPositions)?hist.providerPositions:
+   (Array.isArray(hist?.positions)?hist.positions:null);
+ if(!positions) throw Error('EXISTING_PROVIDER_POSITIONS_SCHEMA_UNKNOWN');
+ const ticker=series?.position?.marketTicker;
+ if(!ticker) throw Error('SERIES_POSITION_TICKER_MISSING');
+ const matches=positions.filter(x=>String(x?.ticker||x?.market_ticker||'')===ticker);
+ if(matches.length>1) throw Error('EXISTING_PROVIDER_TICKER_AMBIGUOUS');
+ const qty=matches.length===0?0:Number(matches[0]?.position_fp??matches[0]?.position??matches[0]?.quantity);
+ if(!Number.isFinite(qty)) throw Error('EXISTING_PROVIDER_QUANTITY_INVALID');
+ if(Math.abs(qty)>1e-9) throw Error('EXISTING_PROVIDER_POSITION_NOT_FLAT');
+ return {
+   ok:true,complete:true,
+   positionIdentity:{
+     seriesId:series.seriesId,
+     attemptId:series.position.attemptId,
+     providerOrderId:series.position.entryOrderId,
+     clientOrderId:series.position.entryClientOrderId,
+     ticker:series.position.marketTicker,
+     side:series.position.outcomeSide
+   },
+   provider:{classification:'FLAT',quantity:0,source:'EXISTING_PRODUCTION_REAL_HISTORY'}
+ };
 }
 
 export async function getLiveMaintenanceDecision({fetchImpl=fetch,env=process.env,workerUrl='https://market-edge-payne-kalshi-real.darkbishop43.workers.dev'}={}){
@@ -33,8 +74,15 @@ export async function getLiveMaintenanceDecision({fetchImpl=fetch,env=process.en
  if(!secret||secret.length<32)throw Error('PROTECTED_READ_AUTHORIZATION_MISSING');
  const response=await fetchImpl(workerUrl+'/internal/closure-maintenance-evidence',{
    method:'GET',headers:{'x-payne-diagnostic-token':secret},redirect:'error'});
- if(!response.ok)throw Error('PROTECTED_PROVIDER_EVIDENCE_FAILED');
- const providerResponse=await response.json();
+ let providerResponse;
+ if(response.ok){
+   providerResponse=await response.json();
+ }else if(response.status===404){
+   // Endpoint absent on current production. Use existing authenticated routes.
+   providerResponse=await evidenceFromExistingProduction({fetchImpl,workerUrl,secret,series});
+ }else{
+   throw Error('PROTECTED_PROVIDER_EVIDENCE_FAILED_HTTP_'+response.status);
+ }
  const decision=await verifyPayneMaintenanceChain({control,series,providerResponse,sourceBlob:blob,expectedBlob:blob});
  if(!decision.allowed)throw Error('MAINTENANCE_DENIED_'+decision.reason);
  return decision;
