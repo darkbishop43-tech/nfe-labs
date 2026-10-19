@@ -4797,6 +4797,73 @@ export default {
 
     if (request.method !== 'GET') return Response.json({ ok:false, reason:'GET_ONLY_PROVIDER_AUTHORITY / CONTROL_POSTS_LOCAL_ONLY' }, { status:405 });
 
+    if (url.pathname === '/internal/closure-maintenance-evidence') {
+      // Read-only, bounded diagnostic; never alters control, claims or provider state.
+      const deny=(reason,status=503)=>Response.json({ok:false,complete:false,status:'UNKNOWN',reason,readOnly:true,providerWrites:0},{status,headers:{'cache-control':'no-store'}});
+      const secret=env?.PAYNE_COORDINATOR_DIAGNOSTIC_TOKEN;
+      const supplied=request.headers.get('x-payne-diagnostic-token');
+      if(typeof secret!=='string'||secret.length<32||typeof supplied!=='string'||supplied.length!==secret.length)
+        return deny('UNAUTHORIZED',403);
+      const [h1,h2]=await Promise.all([crypto.subtle.digest('SHA-256',new TextEncoder().encode(secret)),crypto.subtle.digest('SHA-256',new TextEncoder().encode(supplied))]);
+      let mismatch=0;const ha=new Uint8Array(h1),hb=new Uint8Array(h2);
+      for(let i=0;i<ha.length;i++)mismatch|=ha[i]^hb[i];
+      if(mismatch)return deny('UNAUTHORIZED',403);
+      try {
+        const series=await loadRealSeriesState(env),position=series?.position;
+        const control=await loadControl(env);
+        if(!series?.seriesId||!position||position.seriesId!==series.seriesId||
+           position.owner!==REAL_OWNER||Number(position.exchangeIndex)!==2||
+           !position.attemptId||!position.entryOrderId||!position.entryClientOrderId||
+           !position.marketTicker||!['YES','NO'].includes(position.outcomeSide))
+          return deny('POSITION_IDENTITY_INCOMPLETE');
+        if(control?.armed!==false)return deny('FOUNDER_ARMED');
+        const coordinator=await inspectPayneCoordinatorSeries(env,series.seriesId);
+        if(coordinator?.ok!==true||coordinator?.complete!==true||
+           coordinator?.status!=='CLEAR'||coordinator?.activeClaims!==0||
+           coordinator?.unknownRecords!==0)return deny('COORDINATOR_CLAIM_UNKNOWN_OR_ACTIVE');
+        const evidence=await providerTickerPositionEvidence(env,position.marketTicker);
+        if(evidence.ok!==true||evidence.paginationComplete!==true||
+           evidence.classification!=='FLAT'||evidence.quantity!==0)
+          return deny('PROVIDER_POSITION_NOT_PROVEN_FLAT');
+        const orders=[];let cursor='',pages=0;const seen=new Set();
+        do {
+          if(++pages>100)return deny('PROVIDER_ORDER_PAGINATION_LIMIT');
+          const p='/trade-api/v2/portfolio/orders?limit=200&subaccount=0'+(cursor?'&cursor='+encodeURIComponent(cursor):'');
+          const response=await kalshiGetOnly(env,p);
+          if(!response.ok)return deny('PROVIDER_ORDER_HTTP_'+response.status);
+          const body=await response.json().catch(()=>null);
+          if(!Array.isArray(body?.orders))return deny('PROVIDER_ORDER_SCHEMA_UNKNOWN');
+          for(const order of body.orders){
+            const ticker=String(order?.ticker||order?.market_ticker||'');
+            if(!ticker||!order?.status)return deny('PROVIDER_ORDER_IDENTITY_UNKNOWN');
+            if(ticker===position.marketTicker)orders.push(order);
+          }
+          const next=typeof body.cursor==='string'?body.cursor:'';
+          if(next&&seen.has(next))return deny('PROVIDER_ORDER_CURSOR_REPEATED');
+          if(next)seen.add(next);
+          cursor=next;
+        }while(cursor);
+        const allowed=new Set(['executed','canceled','cancelled','expired','rejected']);
+        if(orders.some(o=>!allowed.has(String(o.status).toLowerCase())))
+          return deny('OPEN_OR_UNKNOWN_ORDER');
+        const matchingEntry=orders.filter(o=>
+          String(o.order_id||o.orderId||'')===position.entryOrderId&&
+          String(o.client_order_id||o.clientOrderId||'')===position.entryClientOrderId);
+        if(matchingEntry.length!==1)return deny('PROVIDER_ENTRY_ORDER_IDENTITY_NOT_PROVEN');
+        const identity={seriesId:series.seriesId,attemptId:position.attemptId,providerOrderId:position.entryOrderId,
+          clientOrderId:position.entryClientOrderId,ticker:position.marketTicker,side:position.outcomeSide};
+        return Response.json({ok:true,complete:true,readOnly:true,evidenceTimestamp:new Date().toISOString(),
+          providerReadStatus:{positionHttp:evidence.httpStatus,ordersHttp:200,ordersComplete:true,pages},
+          coordinator:{status:coordinator.status,complete:true,activeClaims:0},
+          positionIdentity:identity,
+          provider:{authenticated:true,complete:true,ticker:position.marketTicker,side:position.outcomeSide,
+            entryOrderId:position.entryOrderId,entryClientOrderId:position.entryClientOrderId,
+            positionReadOk:true,positionQuantity:0,ordersReadOk:true,ordersComplete:true,
+            orders:orders.map(o=>({ticker:position.marketTicker,status:String(o.status)})),
+            otherUnresolvedExposure:false},
+          providerWrites:0,ordersSubmitted:0},{headers:{'cache-control':'no-store'}});
+      }catch(error){return deny('PROVIDER_EVIDENCE_READ_FAILED');}
+    }
     if (url.pathname === '/internal/series-claims-diagnostic') {
       // Authenticated internal-only GET. No control, Kalshi, or KV mutation.
       const secret=env?.PAYNE_COORDINATOR_DIAGNOSTIC_TOKEN;
