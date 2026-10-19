@@ -1,4 +1,4 @@
-# clean diagnostic candidate pin
+# clean diagnostic candidate pin + updated baseline
 name: PAYNE Direct Pull Fire Existing Gated Promotion
 on:
   push:
@@ -85,7 +85,7 @@ jobs:
         run: |
           set -euo pipefail
           curl --fail --silent --show-error --max-time 25 -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/market-edge-payne-kalshi-real/deployments" -o /tmp/payne-deployments-pre.json
-          jq -e '.success==true and (.result.deployments[0].versions | any(.version_id=="d3567528-5c09-45ff-aa93-784c2e1d3196" and .percentage==100))' /tmp/payne-deployments-pre.json >/dev/null
+          jq -e '.success==true and (.result.deployments[0].versions | any(.version_id=="51c362b8-82b8-454f-8803-f1eb080284ac" and .percentage==100))' /tmp/payne-deployments-pre.json >/dev/null
           echo 'PRODUCTION_BASELINE_MATCH=PASS'
       - name: Prepare authenticated PAYNE maintenance proof read-only
         shell: bash
