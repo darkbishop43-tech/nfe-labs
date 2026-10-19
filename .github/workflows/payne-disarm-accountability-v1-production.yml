@@ -15,7 +15,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: 6df60a0445dd5dbbc50e69f3e339d4f5bf5a6d40
+          ref: a1548d778f863cba0b329bfce74e2371bfa96392
           fetch-depth: 0
           persist-credentials: false
       - uses: actions/checkout@v4
@@ -30,7 +30,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test "$(git rev-parse HEAD)" = 6df60a0445dd5dbbc50e69f3e339d4f5bf5a6d40
+          test "$(git rev-parse HEAD)" = a1548d778f863cba0b329bfce74e2371bfa96392
           test "$(git -C maintenance-source rev-parse HEAD)" = "$GITHUB_SHA"
           # The Worker assembly is a clean descendant of the Founder-approved trading base.
           base=ad1f88bbdaa79587bc95074689270b7640c65027
@@ -39,7 +39,7 @@ jobs:
           git diff --name-only "$base" HEAD > /tmp/payne-assembly-whitelist
           while IFS= read -r changed; do
             case "$changed" in
-              .github/scripts/payne-empty-series-readonly-verifier.mjs|.github/scripts/payne-kv-deployment-safety-maintenance.sh|.github/workflows/payne-direct-close-offline-regression.yml|.github/workflows/payne-disarm-accountability-v1-production.yml|.github/workflows/payne-frozen-config-readonly-diagnostic.yml|.github/workflows/payne-zero-attempt-offline-validation.yml|market-edge-lab/real/payne-kalshi-real/src/index.js|market-edge-lab/real/payne-kalshi-real/src/payne-execution-coordinator.js|market-edge-lab/real/payne-kalshi-real/test/coordinator-parent-authenticated-read.test.mjs|market-edge-lab/real/payne-kalshi-real/test/coordinator-series-inspection.test.mjs|market-edge-lab/real/payne-kalshi-real/test/deployment-empty-series-policy.test.mjs|market-edge-lab/real/payne-kalshi-real/test/deployment-readonly-verifier.test.mjs|market-edge-lab/real/payne-kalshi-real/test/zero-attempt-concurrency-diagnostic.test.mjs|market-edge-lab/real/payne-kalshi-real/test/zero-attempt-supersession-isolated.test.mjs) ;;
+              .github/scripts/payne-empty-series-readonly-verifier.mjs|.github/scripts/payne-kv-deployment-safety-maintenance.sh|.github/workflows/payne-direct-close-offline-regression.yml|.github/workflows/payne-disarm-accountability-v1-production.yml|.github/workflows/payne-frozen-config-readonly-diagnostic.yml|.github/workflows/payne-zero-attempt-offline-validation.yml|market-edge-lab/real/payne-kalshi-real/src/index.js|market-edge-lab/real/payne-kalshi-real/src/payne-execution-coordinator.js|market-edge-lab/real/payne-kalshi-real/test/coordinator-parent-authenticated-read.test.mjs|market-edge-lab/real/payne-kalshi-real/test/coordinator-series-inspection.test.mjs|market-edge-lab/real/payne-kalshi-real/test/deployment-empty-series-policy.test.mjs|market-edge-lab/real/payne-kalshi-real/test/deployment-readonly-verifier.test.mjs|market-edge-lab/real/payne-kalshi-real/test/direct-writer-closure-offline.test.mjs|market-edge-lab/real/payne-kalshi-real/test/zero-attempt-concurrency-diagnostic.test.mjs|market-edge-lab/real/payne-kalshi-real/test/zero-attempt-supersession-isolated.test.mjs) ;;
               *) echo "BLOCKED: UNAPPROVED_ASSEMBLY_DIFFERENCE $changed";exit 1;;
             esac
           done < /tmp/payne-assembly-whitelist
@@ -47,7 +47,7 @@ jobs:
           grep -q "'/internal/inspect-series'" market-edge-lab/real/payne-kalshi-real/src/payne-execution-coordinator.js
           grep -q 'PAYNE_COORDINATOR_DIAGNOSTIC_TOKEN' market-edge-lab/real/payne-kalshi-real/src/index.js
           grep -q 'PAYNE_EXECUTION_COORDINATOR' market-edge-lab/real/payne-kalshi-real/wrangler.toml
-          test "$(git rev-parse HEAD:market-edge-lab/real/payne-kalshi-real/src/index.js)" = 75bce38eaae9543447c04de0b01f84d583d852ca
+          test "$(git rev-parse HEAD:market-edge-lab/real/payne-kalshi-real/src/index.js)" = 01e4d26bf5cc7fd9091be98fd7448d2d5767e5f8
           test "$(git rev-parse HEAD:market-edge-lab/real/payne-kalshi-real/src/cockpit-html.js)" = 657e477c4c9385e337fd725769b7ab757dc81c77
           test "$(git rev-parse HEAD:market-edge-lab/real/payne-kalshi-real/src/payne-closure-evidence.js)" = 7f0c5a2dce12ed0d56c1024cdd58c4f581ea364a
           grep -q '^name = "market-edge-payne-kalshi-real"$' market-edge-lab/real/payne-kalshi-real/wrangler.toml
