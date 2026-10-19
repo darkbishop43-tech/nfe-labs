@@ -20,7 +20,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: a1548d778f863cba0b329bfce74e2371bfa96392
+          ref: ba828a724816109bc6ac56dce0909249cefd6457
           fetch-depth: 0
           persist-credentials: false
       - uses: actions/checkout@v4
@@ -35,7 +35,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test "$(git rev-parse HEAD)" = a1548d778f863cba0b329bfce74e2371bfa96392
+          test "$(git rev-parse HEAD)" = ba828a724816109bc6ac56dce0909249cefd6457
           test "$(git -C maintenance-source rev-parse HEAD)" = "$GITHUB_SHA"
           # The Worker assembly is a clean descendant of the Founder-approved trading base.
           base=ad1f88bbdaa79587bc95074689270b7640c65027
