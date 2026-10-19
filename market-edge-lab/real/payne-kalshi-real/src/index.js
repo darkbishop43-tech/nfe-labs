@@ -4510,7 +4510,14 @@ async function runPayneRealExecutionCycleOwned(env,{postImpl=kalshiPayneOrderPos
   await saveRealSeriesState(env,series);
 
   control=await loadControl(env);
-  if(!control.armed || Number(control.attemptTarget)!==cfg.attemptTarget || Number(control.maxEntryDebitUsd)!==cfg.maxEntryDebitUsd || Number(control.activeThreshold)!==cfg.threshold || Number(control.requiredExchangeIndex)!==2){
+  const authorityFailures=[
+    ...(!control.armed?['control.armed']:[]),
+    ...(Number(control.attemptTarget)!==cfg.attemptTarget?['attemptTarget']:[]),
+    ...(Number(control.maxEntryDebitUsd)!==cfg.maxEntryDebitUsd?['maxEntryDebitUsd']:[]),
+    ...(Number(control.activeThreshold)!==cfg.threshold?['activeThreshold']:[]),
+    ...(Number(control.requiredExchangeIndex)!==2?['requiredExchangeIndex']:[]),
+  ];
+  if(authorityFailures.length){
     const reconciledAt=new Date(nowMs).toISOString();
     series.status='ENTRY_AUTHORITY_REVOKED_AFTER_LATCH';
     series.unresolvedEntry=false;
@@ -4520,7 +4527,10 @@ async function runPayneRealExecutionCycleOwned(env,{postImpl=kalshiPayneOrderPos
     await persistAttempt(env,{runId:seriesId,result:'INVALIDATED_BEFORE_POST',...attempt});
     await appendRealLedger(env,'FIRE_SPECIMEN_INVALIDATED_BEFORE_POST',{
       seriesId,attemptId,intentNo,attemptNo:null,specimenId:series.fireLatch?.specimenId||null,ticker:candidate.ticker,
-      reason:'ENTRY_AUTHORITY_REVOKED_AFTER_LATCH',writerInvoked:false,providerPostStarted:false,providerAttemptCounted:false,providerOrderId:null
+      reason:'ENTRY_AUTHORITY_REVOKED_AFTER_LATCH',failedFields:authorityFailures,
+      actualControl:{armed:control.armed,attemptTarget:control.attemptTarget,maxEntryDebitUsd:control.maxEntryDebitUsd,activeThreshold:control.activeThreshold,requiredExchangeIndex:control.requiredExchangeIndex},
+      expectedControl:{armed:true,attemptTarget:cfg.attemptTarget,maxEntryDebitUsd:cfg.maxEntryDebitUsd,activeThreshold:cfg.threshold,requiredExchangeIndex:2},
+      writerInvoked:false,providerPostStarted:false,providerAttemptCounted:false,providerOrderId:null
     });
     await closeRealSeriesControl(env,started,0,'ENTRY_AUTHORITY_REVOKED_AFTER_LATCH',series);
     return saveRealSeriesState(env,series);
