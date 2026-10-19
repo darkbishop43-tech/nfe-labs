@@ -4213,7 +4213,10 @@ async function managePayneRealPosition(env,control,series,postImpl=kalshiPayneOr
     // Never write this stale copy over the genuine execution owner.
     return loadRealSeriesState(env);
   }
-  await appendRealLedger(env,'EXIT_PRE_SUBMIT_LATCHED',{seriesId:series.seriesId,attemptId:position.attemptId,ticker:position.marketTicker,reason:decision.reason,clientOrderId:exitClientOrderId,payload:{...payload},exchangeIndex:2});
+  // Audit is best effort: provider-authorized reduce-only exit must not wait for a ledger write.
+  // Exit claim remains the duplicate-submit guard; do not release it on audit failure.
+  try { await appendRealLedger(env,'EXIT_PRE_SUBMIT_LATCHED',{seriesId:series.seriesId,attemptId:position.attemptId,ticker:position.marketTicker,reason:decision.reason,clientOrderId:exitClientOrderId,payload:{...payload},exchangeIndex:2}); }
+  catch (error) { console.error('PAYNE_EXIT_PRE_SUBMIT_AUDIT_FAILED',String(error?.message||error)); }
   let response,proof;
   try{
     const out=await postImpl(env,'EXIT',payload,payneRealScope(control,series,'EXIT',position));
@@ -4253,7 +4256,9 @@ async function managePayneRealPosition(env,control,series,postImpl=kalshiPayneOr
     // FILLED needs the normal next provider-flat read, not immediate disarm.
     position.exitFillAwaitingProviderReconciliation=true;
   }
-  await appendRealLedger(env,'EXIT_PROVIDER_RESULT',{seriesId:series.seriesId,attemptId:position.attemptId,ticker:position.marketTicker,result,proof,exitReason:decision.reason,realizedPnlUsd:realizedPnlFromPosition(position)});
+  // Provider result is recorded to the position independently of best-effort ledger history.
+  try { await appendRealLedger(env,'EXIT_PROVIDER_RESULT',{seriesId:series.seriesId,attemptId:position.attemptId,ticker:position.marketTicker,result,proof,exitReason:decision.reason,realizedPnlUsd:realizedPnlFromPosition(position)}); }
+  catch (error) { console.error('PAYNE_EXIT_RESULT_AUDIT_FAILED',String(error?.message||error)); }
   await settleSeriesControl(env,series,1,{failClosed:result.state==='UNKNOWN'});
   return saveRealSeriesState(env,series);
 }
