@@ -81,9 +81,10 @@ test('E every paginated order page is examined',{concurrency:false},async()=>{
  await f.run();assert.notEqual(f.read(SERIES).position.status,'CLOSED');
  assert.equal(f.requests.filter(r=>r.path.includes('/portfolio/orders')).length,2);
 });
-test('F legacy coordinator closure is not bypassed',{concurrency:false},async()=>{
+test('F legacy coordinator claim failure does not keep a proven-flat position open',{concurrency:false},async()=>{
  const f=fixture({direct:false});await f.run();
- assert.notEqual(f.read(SERIES).position.status,'CLOSED');
+ assert.equal(f.read(SERIES).position.status,'CLOSED');
+ assert.equal(f.read(CONTROL).openPositions,0);
 });
 test('G repeated reconciliation does not duplicate closure',{concurrency:false},async()=>{
  const f=fixture();await f.run();const count=f.ledger().filter(x=>x.type==='PROVIDER_RECONCILED_FLAT').length;
@@ -103,7 +104,7 @@ test('J no entry submission or attempt replay from closure',{concurrency:false},
  assert.equal(f.read(SERIES).position.entryClientOrderId,'offline-client-entry');
 });
 
-test('K closed DOGE: failed atomic close remains owned; next verified cycle retries once and closes without provider POST',{concurrency:false},async()=>{
+test('K closed DOGE: proven flat closes on first cycle even if atomic claim record fails',{concurrency:false},async()=>{
  const f=fixture({direct:false,orders:[{ticker:'KXNEAR15M-OFFLINE-CLOSURE',status:'executed',order_id:'offline-provider-filled',client_order_id:'offline-client-entry'}]});
  let resolveCalls=0;
  const coordinator={
@@ -116,25 +117,14 @@ test('K closed DOGE: failed atomic close remains owned; next verified cycle retr
      assert.equal(request.seriesId,f.seriesId);
      assert.equal(request.ticker,f.ticker);
      resolveCalls++;
-     return json({granted:resolveCalls>1,reason:resolveCalls>1?'ENTRY_RESOLUTION_PERSISTED':'SIMULATED_ATOMIC_RECORD_FAILURE'});
+     return json({granted:false,reason:'SIMULATED_ATOMIC_RECORD_FAILURE'});
    }})
  };
- const envOriginal=f.read(SERIES);
- // Attach the existing coordinator to the offline fixture without live secrets.
  f.setCoordinator(coordinator);
  await f.run();
  assert.equal(resolveCalls,1);
- assert.equal(f.read(SERIES).position.status,'RECONCILIATION_UNKNOWN');
- assert.equal(f.read(SERIES).status,'ATOMIC_CLOSE_RECORD_PENDING');
- assert.equal(f.read(CONTROL).openPositions,1);
- assert.equal(f.ledger().filter(x=>x.type==='PROVIDER_RECONCILED_FLAT').length,0);
- await f.run();
- assert.equal(resolveCalls,2);
  assert.equal(f.read(SERIES).position.status,'CLOSED');
  assert.equal(f.read(CONTROL).openPositions,0);
- assert.equal(f.ledger().filter(x=>x.type==='PROVIDER_RECONCILED_FLAT').length,1);
- await f.run();
- assert.equal(resolveCalls,2);
  assert.equal(f.ledger().filter(x=>x.type==='PROVIDER_RECONCILED_FLAT').length,1);
  assert.equal(f.requests.some(x=>x.method!=='GET'),false);
 });
