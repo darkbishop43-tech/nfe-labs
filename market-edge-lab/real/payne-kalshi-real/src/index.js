@@ -4120,8 +4120,9 @@ async function managePayneRealPosition(env,control,series,postImpl=kalshiPayneOr
     position.closedAt=position.closedAt||new Date(nowMs).toISOString();
     if(seriesTerminal(series)){series.status='COMPLETE_FLAT';series.completedAt=series.completedAt||position.closedAt;}
     else {series.status=(await loadControl(env)).armed?'ARMED_FISHING':'SERIES_PAUSED_DISARMED_CLEAN';}
-    await appendRealLedger(env,'PROVIDER_RECONCILED_FLAT',{seriesId:series.seriesId,attemptId:position.attemptId,ticker:position.marketTicker,reason:rec.reason,realizedPnlUsd:realizedPnlFromPosition(position)});
-    await appendRealLedger(env,'PAYNE_PAPER_BRAIN_EXIT_CLOSED',{
+    try { await appendRealLedger(env,'PROVIDER_RECONCILED_FLAT',{seriesId:series.seriesId,attemptId:position.attemptId,ticker:position.marketTicker,reason:rec.reason,realizedPnlUsd:realizedPnlFromPosition(position)}); }
+    catch(error) { console.error('PAYNE_FLAT_AUDIT_FAILED',String(error?.message||error)); }
+    try { await appendRealLedger(env,'PAYNE_PAPER_BRAIN_EXIT_CLOSED',{
       seriesId:series.seriesId,
       attemptId:position.attemptId,
       ticker:position.marketTicker,
@@ -4129,7 +4130,8 @@ async function managePayneRealPosition(env,control,series,postImpl=kalshiPayneOr
       direction:position.direction,
       candidateKey:position.paperCandidateKey||paperCandidateKey(position),
       exitReason:position.exitReason||rec.reason,
-    });
+    }); }
+    catch(error) { console.error('PAYNE_CLOSE_AUDIT_FAILED',String(error?.message||error)); }
     await settleSeriesControl(env,series,0);
     return saveRealSeriesState(env,series);
   }
