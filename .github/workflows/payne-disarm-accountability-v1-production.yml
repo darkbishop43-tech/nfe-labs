@@ -33,6 +33,8 @@ jobs:
           test "$(git -C maintenance-source rev-parse HEAD)" = "$GITHUB_SHA"
           # The Worker assembly is a clean descendant of the Founder-approved trading base.
           base=ad1f88bbdaa79587bc95074689270b7640c65027
+          # Ensure the pinned trading base is present in this shallow checkout.
+          git fetch --depth=1 origin "$base" || git fetch origin "$base"
           git cat-file -e "$base^{commit}"
           git merge-base --is-ancestor "$base" HEAD
           git diff --name-only "$base" HEAD > /tmp/payne-assembly-whitelist
