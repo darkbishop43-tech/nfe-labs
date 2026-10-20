@@ -188,7 +188,12 @@ verify_safety() {
            (.threshold!=$c[0].activeThreshold or
             .maxEntryDebitUsd!=$c[0].maxEntryDebitUsd or
             .attemptTarget!=$c[0].attemptTarget))
-         then "BLOCKED: FROZEN_FOUNDER_CONFIG_MISMATCH"
+         then
+           if ($c[0].armed==false and $c[0].openPositions==0) then
+             "BLOCKED: FROZEN_CONFIG_EXCEPTION_NOT_PROVEN__AUTHENTICATED_PROVIDER_AND_COORDINATOR_COVERAGE_MISSING"
+           else
+             "BLOCKED: FROZEN_FOUNDER_CONFIG_MISMATCH"
+           end
       else "BLOCKED: PERSISTED_SERIES_EXPOSURE_OR_CONFIG"
       end
     ' "$s"
