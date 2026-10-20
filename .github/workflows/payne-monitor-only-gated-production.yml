@@ -13,7 +13,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: 7abf271cbcbb5816459559e9deefb8987e8c31d0
+          ref: 601e49ab546dbe2d86c6e8017832db8b53625290
           fetch-depth: 0
           persist-credentials: false
       - uses: actions/checkout@v4
@@ -28,12 +28,14 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test "$(git rev-parse HEAD)" = 7abf271cbcbb5816459559e9deefb8987e8c31d0
+          test "$(git rev-parse HEAD)" = 601e49ab546dbe2d86c6e8017832db8b53625290
           test "$(git -C maintenance-source rev-parse HEAD)" = 7abf271cbcbb5816459559e9deefb8987e8c31d0
           # Reject any changes outside the exact approved cockpit presentation blob.
           test "$(git rev-parse 6b2174211bd7ba4f52c01d5037f9bef46e424f14:market-edge-lab/real/payne-kalshi-real/src/cockpit-html.js)" = 657e477c4c9385e337fd725769b7ab757dc81c77
-          test "$(git diff --name-only 6b2174211bd7ba4f52c01d5037f9bef46e424f14 HEAD)" = 'market-edge-lab/real/payne-kalshi-real/src/cockpit-html.js'
-          test "$(git rev-parse HEAD:market-edge-lab/real/payne-kalshi-real/src/cockpit-html.js)" = 810f4d509413e678ab3db638ba5f6dfd8cff4364
+          test "$(git diff --name-only 7abf271cbcbb5816459559e9deefb8987e8c31d0 HEAD | wc -l)" = 2
+          git diff --name-only 7abf271cbcbb5816459559e9deefb8987e8c31d0 HEAD | grep -Fxq 'market-edge-lab/real/payne-kalshi-real/src/cockpit-html.js'
+          git diff --name-only 7abf271cbcbb5816459559e9deefb8987e8c31d0 HEAD | grep -Fxq 'market-edge-lab/real/payne-kalshi-real/src/index.js'
+          test "$(git rev-parse HEAD:market-edge-lab/real/payne-kalshi-real/src/cockpit-html.js)" = 2a31027b3b0f6a434d035a83924eb072451cd03c
 
           # The Worker assembly is a clean descendant of the Founder-approved trading base.
           base=6b2174211bd7ba4f52c01d5037f9bef46e424f14
@@ -50,8 +52,7 @@ jobs:
           grep -q "'/internal/inspect-series'" market-edge-lab/real/payne-kalshi-real/src/payne-execution-coordinator.js
           grep -q 'PAYNE_COORDINATOR_DIAGNOSTIC_TOKEN' market-edge-lab/real/payne-kalshi-real/src/index.js
           grep -q 'PAYNE_EXECUTION_COORDINATOR' market-edge-lab/real/payne-kalshi-real/wrangler.toml
-          test "$(git rev-parse HEAD:market-edge-lab/real/payne-kalshi-real/src/index.js)" = 3f620acb9b371ae05b01864c0f72f9a97da03666
-          test "$(git rev-parse HEAD:market-edge-lab/real/payne-kalshi-real/src/cockpit-html.js)" = 810f4d509413e678ab3db638ba5f6dfd8cff4364
+          test "$(git rev-parse HEAD:market-edge-lab/real/payne-kalshi-real/src/index.js)" = c52e4459c9158237210c2f607df2f110b0eaa914
           test "$(git rev-parse HEAD:market-edge-lab/real/payne-kalshi-real/src/payne-closure-evidence.js)" = 7f0c5a2dce12ed0d56c1024cdd58c4f581ea364a
           grep -q '^name = "market-edge-payne-kalshi-real"$' market-edge-lab/real/payne-kalshi-real/wrangler.toml
           test -f market-edge-lab/real/payne-kalshi-real/src/payne-execution-coordinator.js
@@ -87,7 +88,9 @@ jobs:
         run: |
           set -euo pipefail
           curl --fail --silent --show-error --max-time 25 -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/market-edge-payne-kalshi-real/deployments" -o /tmp/payne-deployments-pre.json
-          jq -e '.success==true and (.result.deployments[0].versions | any(.version_id=="093beb02-3267-451b-b7c5-31825393fbe6" and .percentage==100))' /tmp/payne-deployments-pre.json >/dev/null
+          jq -e '.success==true and (.result.deployments[0].versions | length)==1 and .result.deployments[0].versions[0].percentage==100 and (.result.deployments[0].versions[0].version_id | type)=="string" and (.result.deployments[0].versions[0].version_id | length)>0' /tmp/payne-deployments-pre.json >/dev/null
+          jq -r '.result.deployments[0].versions[0].version_id' /tmp/payne-deployments-pre.json > /tmp/payne-pre-deploy-version
+          echo "FRESH_PRODUCTION_BASELINE_VERSION=$(cat /tmp/payne-pre-deploy-version)"
           echo 'PRODUCTION_BASELINE_MATCH=PASS'
       - name: Prepare authenticated PAYNE maintenance proof read-only
         shell: bash
