@@ -3422,7 +3422,7 @@ export async function buildRealExecutionObservability(env) {
 }
 
 
-export // Display-only projection of the existing authenticated series-scoped discovery.
+// Display-only projection of the existing authenticated series-scoped discovery.
 // No additional Kalshi polling, trading decisions, KV writes, or provider POSTs.
 export function monitorQuotesFromExistingDiscovery(discovery,nowMs=Date.now()){
   if(discovery?.source!=='BASELINE_SERIES_SCOPED_KALSHI_DISCOVERY'||
