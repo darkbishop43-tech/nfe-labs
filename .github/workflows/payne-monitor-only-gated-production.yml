@@ -36,7 +36,7 @@ jobs:
           test "$(git rev-parse HEAD:market-edge-lab/real/payne-kalshi-real/src/cockpit-html.js)" = 810f4d509413e678ab3db638ba5f6dfd8cff4364
 
           # The Worker assembly is a clean descendant of the Founder-approved trading base.
-          base=ad1f88bbdaa79587bc95074689270b7640c65027
+          base=6b2174211bd7ba4f52c01d5037f9bef46e424f14
           git cat-file -e "$base^{commit}"
           git merge-base --is-ancestor "$base" HEAD
           git diff --name-only "$base" HEAD > /tmp/payne-assembly-whitelist
