@@ -1,0 +1,197 @@
+name: PAYNE Monitor Only Exact Pinned Gated Promotion
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: deploy-payne-kalshi-real-zero-money
+  cancel-in-progress: false
+jobs:
+  promote:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 7abf271cbcbb5816459559e9deefb8987e8c31d0
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          ref: 7abf271cbcbb5816459559e9deefb8987e8c31d0
+          path: maintenance-source
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Validate exact pinned assembly, source and Worker target
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = 7abf271cbcbb5816459559e9deefb8987e8c31d0
+          test "$(git -C maintenance-source rev-parse HEAD)" = 7abf271cbcbb5816459559e9deefb8987e8c31d0
+          # Reject any changes outside the exact approved cockpit presentation blob.
+          test "$(git rev-parse 6b2174211bd7ba4f52c01d5037f9bef46e424f14:market-edge-lab/real/payne-kalshi-real/src/cockpit-html.js)" = 657e477c4c9385e337fd725769b7ab757dc81c77
+          test "$(git diff --name-only 6b2174211bd7ba4f52c01d5037f9bef46e424f14 HEAD)" = 'market-edge-lab/real/payne-kalshi-real/src/cockpit-html.js'
+          test "$(git rev-parse HEAD:market-edge-lab/real/payne-kalshi-real/src/cockpit-html.js)" = 810f4d509413e678ab3db638ba5f6dfd8cff4364
+
+          # The Worker assembly is a clean descendant of the Founder-approved trading base.
+          base=6b2174211bd7ba4f52c01d5037f9bef46e424f14
+          git cat-file -e "$base^{commit}"
+          git merge-base --is-ancestor "$base" HEAD
+          git diff --name-only "$base" HEAD > /tmp/payne-assembly-whitelist
+          while IFS= read -r changed; do
+            case "$changed" in
+              .github/scripts/payne-empty-series-readonly-verifier.mjs|.github/scripts/payne-kv-deployment-safety-maintenance.sh|.github/workflows/payne-direct-close-offline-regression.yml|.github/workflows/payne-disarm-accountability-v1-production.yml|.github/workflows/payne-frozen-config-readonly-diagnostic.yml|.github/workflows/payne-zero-attempt-offline-validation.yml|market-edge-lab/real/payne-kalshi-real/src/cockpit-html.js|market-edge-lab/real/payne-kalshi-real/src/index.js|market-edge-lab/real/payne-kalshi-real/src/payne-execution-coordinator.js|market-edge-lab/real/payne-kalshi-real/test/coordinator-parent-authenticated-read.test.mjs|market-edge-lab/real/payne-kalshi-real/test/coordinator-series-inspection.test.mjs|market-edge-lab/real/payne-kalshi-real/test/deployment-empty-series-policy.test.mjs|market-edge-lab/real/payne-kalshi-real/test/deployment-readonly-verifier.test.mjs|market-edge-lab/real/payne-kalshi-real/test/direct-writer-closure-offline.test.mjs|market-edge-lab/real/payne-kalshi-real/test/zero-attempt-concurrency-diagnostic.test.mjs|market-edge-lab/real/payne-kalshi-real/test/zero-attempt-supersession-isolated.test.mjs) ;;
+              *) echo "BLOCKED: UNAPPROVED_ASSEMBLY_DIFFERENCE $changed";exit 1;;
+            esac
+          done < /tmp/payne-assembly-whitelist
+          grep -q "url.pathname === '/internal/series-claims-diagnostic'" market-edge-lab/real/payne-kalshi-real/src/index.js
+          grep -q "'/internal/inspect-series'" market-edge-lab/real/payne-kalshi-real/src/payne-execution-coordinator.js
+          grep -q 'PAYNE_COORDINATOR_DIAGNOSTIC_TOKEN' market-edge-lab/real/payne-kalshi-real/src/index.js
+          grep -q 'PAYNE_EXECUTION_COORDINATOR' market-edge-lab/real/payne-kalshi-real/wrangler.toml
+          test "$(git rev-parse HEAD:market-edge-lab/real/payne-kalshi-real/src/index.js)" = 3f620acb9b371ae05b01864c0f72f9a97da03666
+          test "$(git rev-parse HEAD:market-edge-lab/real/payne-kalshi-real/src/cockpit-html.js)" = 810f4d509413e678ab3db638ba5f6dfd8cff4364
+          test "$(git rev-parse HEAD:market-edge-lab/real/payne-kalshi-real/src/payne-closure-evidence.js)" = 7f0c5a2dce12ed0d56c1024cdd58c4f581ea364a
+          grep -q '^name = "market-edge-payne-kalshi-real"$' market-edge-lab/real/payne-kalshi-real/wrangler.toml
+          test -f market-edge-lab/real/payne-kalshi-real/src/payne-execution-coordinator.js
+          test -f market-edge-lab/real/payne-kalshi-real/src/kalshi-real-write.js
+          node --check market-edge-lab/real/payne-kalshi-real/src/index.js
+          node --check market-edge-lab/real/payne-kalshi-real/src/payne-closure-evidence.js
+          grep -q 'PAYNE_ARM_TRANSITION_V1' market-edge-lab/real/payne-kalshi-real/src/index.js
+          grep -q 'recoverPayneDisarmAudits' market-edge-lab/real/payne-kalshi-real/src/index.js
+          echo 'EXACT_ACCOUNTABILITY_ASSEMBLY_AND_PROTECTED_BLOB=PASS'
+      - name: Run exact promotion assembly regressions offline
+        working-directory: market-edge-lab/real/payne-kalshi-real
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check src/index.js
+          node --check src/cockpit-html.js
+          npm test
+          node --test test/disarm-accountability-v1.test.mjs test/disarm-accountability-runtime.test.mjs
+          echo EXACT_ASSEMBLY_REGRESSION=PASS
+      - name: Check existing Cloudflare deploy credentials
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+      - name: Confirm current production baseline before promotion
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error --max-time 25 -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/market-edge-payne-kalshi-real/deployments" -o /tmp/payne-deployments-pre.json
+          jq -e '.success==true and (.result.deployments[0].versions | any(.version_id=="51c362b8-82b8-454f-8803-f1eb080284ac" and .percentage==100))' /tmp/payne-deployments-pre.json >/dev/null
+          echo 'PRODUCTION_BASELINE_MATCH=PASS'
+      - name: Prepare authenticated PAYNE maintenance proof read-only
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          PAYNE_COORDINATOR_DIAGNOSTIC_TOKEN: ${{ secrets.PAYNE_COORDINATOR_DIAGNOSTIC_TOKEN }}
+          PAYNE_APPROVED_CLOSURE_BLOB: 76c6ff7a2f7f6967def859012b2fcf3b66f7b2f9
+        run: |
+          set -euo pipefail
+          rm -f /tmp/payne-kv-gate/maintenance-proof.json
+          node maintenance-source/.github/scripts/payne-maintenance-decision.mjs
+      - name: Verify exact fail-closed deployment policy and verifier sources
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git -C maintenance-source rev-parse HEAD:.github/scripts/payne-kv-deployment-safety-maintenance.sh)" = 9497a5fc26c6aede92858aea8310e419d2ddc162
+          test "$(git -C maintenance-source rev-parse HEAD:.github/scripts/payne-empty-series-readonly-verifier.mjs)" = e4c88d4685aa2bd8d60d73e5950f5716eed89fd3
+          node --check maintenance-source/.github/scripts/payne-empty-series-readonly-verifier.mjs
+      - name: Generate authenticated zero-attempt deployment evidence (fail closed)
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          PAYNE_COORDINATOR_DIAGNOSTIC_TOKEN: ${{ secrets.PAYNE_COORDINATOR_DIAGNOSTIC_TOKEN }}
+        run: |
+          set -euo pipefail
+          rm -f /tmp/payne-kv-gate/empty-series-evidence.json
+          unset PAYNE_EMPTY_SERIES_EVIDENCE_AUTHORITY
+          node maintenance-source/.github/scripts/payne-empty-series-readonly-verifier.mjs
+          jq -e '.schema=="PAYNE_EMPTY_SERIES_DEPLOYMENT_EVIDENCE_V1" and (.allowed|type)=="boolean"' /tmp/payne-kv-gate/empty-series-evidence.json >/dev/null
+          if jq -e '.allowed==true' /tmp/payne-kv-gate/empty-series-evidence.json >/dev/null; then
+            echo 'BLOCKED: UNVERIFIED_EVIDENCE_APPROVAL'; exit 1
+          fi
+      - name: Run existing authoritative PAYNE KV pre-deploy safety gate
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: bash maintenance-source/.github/scripts/payne-kv-deployment-safety-maintenance.sh pre
+      - name: Verify Founder still disarmed immediately before promotion
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error --max-time 20 'https://market-edge-payne-kalshi-real.darkbishop43.workers.dev/control' -o /tmp/payne-promotion-control.json
+          jq -c '{armed:.control.armed,openPositions:.control.openPositions,attemptTarget:.control.attemptTarget}' /tmp/payne-promotion-control.json
+          jq -e '.ok==true and .control.armed==false' /tmp/payne-promotion-control.json >/dev/null || { echo 'BLOCKED: LIVE_FOUNDER_ARMED';exit 1; }
+      - name: Dry-run build exact pinned assembly
+        working-directory: market-edge-lab/real/payne-kalshi-real
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: npx --yes wrangler@4 deploy --dry-run --outdir /tmp/payne-grok-build
+      - name: Deploy exact pinned Grok assembly to existing PAYNE Worker
+        working-directory: market-edge-lab/real/payne-kalshi-real
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          npx --yes wrangler@4 deploy | tee /tmp/payne-grok-deploy.txt
+          grep 'Current Version ID:' /tmp/payne-grok-deploy.txt
+      - name: Existing authoritative PAYNE KV post-deploy safety gate
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          PAYNE_COORDINATOR_DIAGNOSTIC_TOKEN: ${{ secrets.PAYNE_COORDINATOR_DIAGNOSTIC_TOKEN }}
+          PAYNE_APPROVED_CLOSURE_BLOB: 76c6ff7a2f7f6967def859012b2fcf3b66f7b2f9
+        run: |
+          set -euo pipefail
+          rm -f /tmp/payne-kv-gate/maintenance-proof.json
+          node maintenance-source/.github/scripts/payne-maintenance-decision.mjs
+          rm -f /tmp/payne-kv-gate/empty-series-evidence.json
+          unset PAYNE_EMPTY_SERIES_EVIDENCE_AUTHORITY
+          node maintenance-source/.github/scripts/payne-empty-series-readonly-verifier.mjs
+          bash maintenance-source/.github/scripts/payne-kv-deployment-safety-maintenance.sh post
+      - name: Verify cockpit and existing Founder control read-only
+        shell: bash
+        run: |
+          set -euo pipefail
+          base='https://market-edge-payne-kalshi-real.darkbishop43.workers.dev'
+          curl --fail --silent --show-error --max-time 25 "$base/" -o /tmp/payne-grok-cockpit.html
+          curl --fail --silent --show-error --max-time 25 "$base/control" -o /tmp/payne-grok-control.json
+          jq -e '.ok==true' /tmp/payne-grok-control.json >/dev/null
+          jq -c '{armed:.control.armed,openPositions:.control.openPositions,attemptTarget:.control.attemptTarget,maxPositions:.control.maxPositions}' /tmp/payne-grok-control.json
+          grep -Fq 'DYNAMIC STAIRCASE' /tmp/payne-grok-cockpit.html
+          grep -Fq 'stairTop3Cards' /tmp/payne-grok-cockpit.html
+          grep -Fq 'TOP 3' /tmp/payne-grok-cockpit.html
+          curl --fail --silent --show-error --max-time 25 "$base/disarm-audit-status" -o /tmp/payne-disarm-audit.json
+          jq -e '.ok==true and .blocksArm==false and .blocksDeployment==false' /tmp/payne-disarm-audit.json >/dev/null
+          # Known history HTTP 503 is tracked separately; do not request retained cycles here.
+          echo 'PRODUCTION_COCKPIT_AND_CONTROL_HTTP_200=PASS'
+      - name: Verify new Worker version has all production traffic
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          version="$(sed -n 's/.*Current Version ID: //p' /tmp/payne-grok-deploy.txt | tail -1)"
+          test -n "$version"
+          curl --fail --silent --show-error --max-time 25 -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/market-edge-payne-kalshi-real/deployments" -o /tmp/payne-staircase-deployments.json
+          jq -e --arg v "$version" '.success==true and (.result.deployments[0].versions | any(.version_id==$v and .percentage==100))' /tmp/payne-staircase-deployments.json >/dev/null
+          echo "PAYNE_STAIRCASE_NEW_VERSION_100_PERCENT=$version"
