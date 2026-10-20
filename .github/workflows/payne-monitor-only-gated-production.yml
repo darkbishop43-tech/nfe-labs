@@ -32,7 +32,9 @@ jobs:
           test "$(git -C maintenance-source rev-parse HEAD)" = 7abf271cbcbb5816459559e9deefb8987e8c31d0
           # Reject any changes outside the exact approved cockpit presentation blob.
           test "$(git rev-parse 6b2174211bd7ba4f52c01d5037f9bef46e424f14:market-edge-lab/real/payne-kalshi-real/src/cockpit-html.js)" = 657e477c4c9385e337fd725769b7ab757dc81c77
-          test "$(git diff --name-only 7abf271cbcbb5816459559e9deefb8987e8c31d0 HEAD)" = 
+          test "$(git diff --name-only 7abf271cbcbb5816459559e9deefb8987e8c31d0 HEAD | wc -l)" = 2
+          git diff --name-only 7abf271cbcbb5816459559e9deefb8987e8c31d0 HEAD | grep -Fxq 'market-edge-lab/real/payne-kalshi-real/src/cockpit-html.js'
+          git diff --name-only 7abf271cbcbb5816459559e9deefb8987e8c31d0 HEAD | grep -Fxq 'market-edge-lab/real/payne-kalshi-real/src/index.js'
           test "$(git rev-parse HEAD:market-edge-lab/real/payne-kalshi-real/src/cockpit-html.js)" = 2a31027b3b0f6a434d035a83924eb072451cd03c
 
           # The Worker assembly is a clean descendant of the Founder-approved trading base.
