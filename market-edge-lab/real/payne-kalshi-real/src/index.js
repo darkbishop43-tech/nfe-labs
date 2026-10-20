@@ -3422,58 +3422,43 @@ export async function buildRealExecutionObservability(env) {
 }
 
 
-export async function buildDisplayMarketFeed(env,nowMs=Date.now()){
-  const current=await kvGetJson(env,CURRENT_KEY);
-  const series=await loadRealSeriesState(env);
-  const identities=new Map();
-  for(const c of current?.decisions||[]){
-    if(c?.ticker&&c?.contractCloseTime)identities.set(c.ticker,{ticker:c.ticker,asset:c.asset||null,
-      closeTime:c.contractCloseTime,direction:c.direction||null,outcomeSide:c.outcomeSide||null});
-  }
-  for(const p of paynePositionRecords(series)){
-    if(!p?.marketTicker)continue;
-    if(!identities.has(p.marketTicker))identities.set(p.marketTicker,{
-      ticker:p.marketTicker,asset:p.asset||null,closeTime:p.marketCloseTime||p.closeTime||null,
-      direction:p.direction||null,outcomeSide:p.outcomeSide||null});
-  }
-  if(current?.selected?.ticker&&current?.selected?.closeTime&&!identities.has(current.selected.ticker)){
-    const c=current.selected;identities.set(c.ticker,{ticker:c.ticker,asset:c.asset||null,
-      closeTime:c.closeTime,direction:c.direction||null,outcomeSide:c.outcomeSide||null});
-  }
+export // Display-only projection of the existing authenticated series-scoped discovery.
+// No additional Kalshi polling, trading decisions, KV writes, or provider POSTs.
+export function monitorQuotesFromExistingDiscovery(discovery,nowMs=Date.now()){
+  if(discovery?.source!=='BASELINE_SERIES_SCOPED_KALSHI_DISCOVERY'||
+     !Array.isArray(discovery.markets)) return [];
   const quotes=[];
-  // Existing authorised provider GET transport. No strategy scan, no provider POST.
-  for(const c of identities.values()){
-    const end=Date.parse(c.closeTime||'');
-    if(!Number.isFinite(end)||end<=nowMs){quotes.push({...c,status:'STALE',reason:'CONTRACT_WINDOW_ENDED'});continue;}
-    try{
-      const response=await kalshiGetOnly(env,'/trade-api/v2/markets/'+encodeURIComponent(c.ticker));
-      const observedAt=new Date().toISOString();
-      const body=await safeProviderJson(response);
-      const m=body?.market||null;
-      const exact=String(m?.ticker||'')===c.ticker&&
-        String(m?.close_time||m?.closeTime||'')===c.closeTime&&
-        (!m?.series_ticker||c.ticker.startsWith(String(m.series_ticker)+'-'));
-      const providerUpdatedAt=m?.updated_time||m?.updated_at||null;
-      const providerUpdateMs=providerUpdatedAt?Date.parse(providerUpdatedAt):NaN;
-      const providerTimestampValid=!providerUpdatedAt||
-        (Number.isFinite(providerUpdateMs)&&providerUpdateMs<=Date.parse(observedAt)&&
-          Date.parse(observedAt)-providerUpdateMs<=COCKPIT_REFRESH_MS);
-      const yesBid=normalizeProviderProbability(m?.yes_bid_dollars??m?.yes_bid);
-      const yesAsk=normalizeProviderProbability(m?.yes_ask_dollars??m?.yes_ask);
-      const noBid=normalizeProviderProbability(m?.no_bid_dollars??m?.no_bid);
-      const noAsk=normalizeProviderProbability(m?.no_ask_dollars??m?.no_ask);
-      const eligible=exact&&providerTimestampValid&&response.ok&&['open','active'].includes(String(m?.status||'').toLowerCase())&&Date.parse(observedAt)<end;
-      quotes.push({...c,status:eligible?'LIVE':'UNAVAILABLE',observedAt,providerUpdatedAt,
-        reason:eligible?null:!providerTimestampValid?'STALE_PROVIDER_UPDATE':'PROVIDER_TICKER_WINDOW_OR_BOOK_UNAVAILABLE',
-        yesBid:eligible?yesBid:null,yesAsk:eligible?yesAsk:null,
-        noBid:eligible?noBid:null,noAsk:eligible?noAsk:null,
-        selectedBid:eligible?(c.outcomeSide==='NO'?noBid:yesBid):null,
-        selectedAsk:eligible?(c.outcomeSide==='NO'?noAsk:yesAsk):null});
-    }catch{quotes.push({...c,status:'UNAVAILABLE',reason:'PROVIDER_GET_FAILED'});}
+  for(const m of discovery.markets){
+    const closeMs=Date.parse(m?.closeTime||'');
+    const observedMs=Date.parse(m?.providerReadAt||'');
+    // Preserve exact series / contract identity; do not relabel a historical ticker.
+    if(m?.source!=='LIVE_PROVIDER_DATA'||typeof m.ticker!=='string'||
+       typeof m.seriesTicker!=='string'||
+       !m.ticker.startsWith(m.seriesTicker+'-')||
+       !KALSHI_15M_SERIES.some(spec=>spec.asset===m.asset&&spec.seriesTicker===m.seriesTicker)||
+       !['open','active'].includes(String(m.status||'').toLowerCase())||
+       !Number.isFinite(closeMs)||closeMs<=nowMs||
+       !Number.isFinite(observedMs)||observedMs>nowMs+10000)continue;
+    const fresh=nowMs-observedMs<=COCKPIT_REFRESH_MS;
+    quotes.push({ticker:m.ticker,asset:m.asset,closeTime:m.closeTime,
+      direction:null,outcomeSide:null,status:fresh?'LIVE':'STALE',
+      reason:fresh?null:'STALE_AUTHENTICATED_OBSERVATION',
+      observedAt:m.providerReadAt,providerUpdatedAt:null,
+      yesBid:fresh?m.yesBid:null,yesAsk:fresh?m.yesAsk:null,
+      noBid:fresh?m.noBid:null,noAsk:fresh?m.noAsk:null,
+      selectedBid:null,selectedAsk:null,
+      provenance:'LIVE_PROVIDER_DATA'});
   }
+  return quotes;
+}
+async function buildDisplayMarketFeed(env,nowMs=Date.now()){
+  // Reuse the exact live discovery path already authorized for PAYNE's cockpit.
+  // Its market snapshots carry provider prices and authenticated GET read times.
+  const discovery=await discoverCockpitMarkets(env,{nowMs});
+  const quotes=monitorQuotesFromExistingDiscovery(discovery,nowMs);
   return {ok:true,schema:'PAYNE_DISPLAY_MARKET_FEED_V1',
     source:'PAYNE_AUTHENTICATED_KALSHI_GET_ONLY',
-    quotes,providerGets:quotes.filter(x=>x.observedAt).length,
+    quotes,providerGets:discovery.providerGets,
     providerWrites:0,orders:0,capitalMovedUsd:0};
 }
 
