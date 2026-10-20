@@ -1,0 +1,11 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {observe,report,REQUIRED} from './probability-shadow.mjs';
+const good={ticker:'KXBTC15M-SYNTHETIC',side:'YES',observedAt:'2026-10-20T02:00:00Z',settlementAt:'2026-10-20T02:15:00Z',settlementTarget:90000,underlyingPrice:90100,underlyingObservedAt:'2026-10-20T01:59:55Z',quoteObservedAt:'2026-10-20T01:59:55Z',annualizedVolatility:0.65,entryAsk:0.6,entryDepthContracts:3,entryFeesPerContract:0.01,settlementOutcome:'YES',rulesVerified:true,settlementReferenceVerified:true,settlementOperator:'STRICT_ABOVE'};
+test('complete synthetic observation',()=>{const x=observe(good);assert.equal(x.status,'VERIFIED_INPUTS');assert.ok(x.pWin>=0&&x.pWin<=1);assert.equal(x.breakEvenP,0.61);});
+for(const field of REQUIRED)test('missing '+field+' returns UNKNOWN',()=>assert.equal(observe({...good,[field]:null}).status,'UNKNOWN'));
+test('stale and future quotes fail closed',()=>{for(const time of ['2026-10-20T01:58:00Z','2026-10-20T02:00:01Z'])assert.equal(observe({...good,quoteObservedAt:time}).status,'UNKNOWN');});
+test('zero depth fails closed',()=>assert.equal(observe({...good,entryDepthContracts:0}).status,'UNKNOWN'));
+test('unsupported settlement operator fails closed',()=>assert.equal(observe({...good,settlementOperator:'OTHER'}).status,'UNKNOWN'));
+test('outcome must not affect prediction',()=>assert.equal(observe(good).pWin,observe({...good,settlementOutcome:'NO'}).pWin));
+test('incomplete collection cannot fabricate calibration',()=>{const x=report([{ticker:'X'},{ticker:'Y'}]);assert.equal(x.complete,0);assert.equal(x.meanBrier,null);});
