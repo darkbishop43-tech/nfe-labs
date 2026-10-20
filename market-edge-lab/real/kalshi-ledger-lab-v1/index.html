@@ -243,24 +243,26 @@
 
 <section class="panel" style="margin-top:10px" id="latestKalshiActivity">
   <div class="obsHead">
-    <div><div class="obsTitle">LATEST KALSHI ACTIVITY — ALL</div><div class="sub">Provider activity layer from Founder report · Oct 1 → Oct 14, 2026 · kept separate from realized-P/L accounting</div></div>
-    <div><span class="badge g">1,429 ACTIVITY ROWS</span><span class="badge">THROUGH OCT 14</span><span class="badge y">P/L NOT OVERWRITTEN</span></div>
+    <div><div class="obsTitle">LATEST KALSHI ACTIVITY — ALL</div><div class="sub">Master Dataset V3 · activity through Oct 20, 2026 · provider settlements kept separate from realized-P/L accounting</div></div>
+    <div><span class="badge g">1,813 ACTIVITY ROWS</span><span class="badge">THROUGH OCT 20</span><span class="badge y">P/L NOT OVERWRITTEN</span></div>
   </div>
 
   <div class="mgmtGrid">
-    <div class="mgmtBox"><div class="k">Activity rows</div><div class="big">1,429</div><div class="sub">latest Kalshi Activity All report</div></div>
+    <div class="mgmtBox"><div class="k">Activity rows</div><div class="big">1,813</div><div class="sub">Master V3 · 384 new settlement records</div></div>
     <div class="mgmtBox"><div class="k">Orders</div><div class="big">567</div></div>
     <div class="mgmtBox"><div class="k">Trades</div><div class="big">543</div></div>
-    <div class="mgmtBox"><div class="k">Settlements</div><div class="big">316</div></div>
+    <div class="mgmtBox"><div class="k">Settlements</div><div class="big">700</div></div>
     <div class="mgmtBox"><div class="k">Deposits / withdrawals</div><div class="big">2 / 1</div></div>
-    <div class="mgmtBox"><div class="k">Unique market tickers</div><div class="big">379</div></div>
+    <div class="mgmtBox"><div class="k">Unique market tickers</div><div class="big">763</div></div>
     <div class="mgmtBox"><div class="k">Visible trade fees</div><div class="big y">$8.00</div><div class="sub">Activity-All fee field only; not the realized-P/L fee total</div></div>
-    <div class="mgmtBox"><div class="k">Latest provider event</div><div class="big" style="font-size:14px">2026-10-14 14:00:04Z</div></div>
+    <div class="mgmtBox"><div class="k">Latest provider event</div><div class="big" style="font-size:14px">2026-10-20 03:00:06Z</div></div>
   </div>
 
-  <div class="note" style="margin-top:10px"><b>Accounting boundary:</b> the authoritative realized-P/L export still ends Oct 10. This Activity-All file extends provider evidence through Oct 14, but it mixes <b>Orders · Trades · Settlements · Deposits · Withdrawal</b> and does not expose the same realized-P/L schema. It is therefore added as a separate evidence layer and does <b>not</b> overwrite the existing P/L, fee, management, or transaction-cost calculations.</div>
+  <div class="note" style="margin-top:10px"><b>Accounting boundary:</b> the authoritative realized-P/L export still ends Oct 10. Master V3 extends settlement evidence through Oct 20 while keeping the original Activity-All order/trade rows through Oct 14. Combined activity mixes <b>Orders · Trades · Settlements · Deposits · Withdrawal</b> and does not expose the same realized-P/L schema. The 384 newly appended settlements are therefore a separate evidence layer and do <b>not</b> overwrite the existing P/L, fee, management, or transaction-cost calculations.</div>
 
-  <div class="grid two">
+  <div class="mgmtGrid" style="margin-top:10px"><div class="mgmtBox"><div class="k">V3 newly added settlements</div><div class="big g">384</div><div class="sub">700 source settlement rows · 316 already present</div></div><div class="mgmtBox"><div class="k">New settlement payout field</div><div class="big">$87.10</div><div class="sub">NOT realized profit; purchases, exits, fees not reconciled</div></div><div class="mgmtBox"><div class="k">PAYNE current export</div><div class="big">18</div><div class="sub">Observation rows; one observation timestamp</div></div><div class="mgmtBox"><div class="k">PAYNE cycle</div><div class="big" style="font-size:13px">d8db8667…</div><div class="sub">Snapshot: 5 attempts · 5 filled · complete; financial attribution unverified</div></div></div><div class="note"><b>V3 coverage:</b> 1,813 provider events: 567 Orders · 543 Trades · 700 Settlements · 2 Deposits · 1 Withdrawal. Updated settlement evidence through <b>2026-10-20 03:00:06 UTC</b>. The previous realized-P/L cutoff remains <b>Oct 10</b>. <b>Do not interpret $87.10 of new settlement payout fields as net P/L.</b> New settlement ownership is unassigned without exact order joins. The Oct 11–14 tables below are retained as their original historical snapshot.</div>
+
+<div class="grid two">
     <section class="panel">
       <h2>New provider activity after realized-P/L cutoff</h2>
       <div class="scrollx"><table><thead><tr><th>UTC date</th><th>Rows</th><th>Orders</th><th>Trades</th><th>Settlements</th><th>Visible trade fees</th></tr></thead><tbody>
