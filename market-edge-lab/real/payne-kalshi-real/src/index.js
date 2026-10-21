@@ -3195,57 +3195,33 @@ export async function buildPayneAuditView(env, requestedId) {
     eventsSource:'PERSISTED_ATTEMPT_TIMESTAMPS_ONLY',providerWrites:0,ordersSubmittedByThisRead:0};
 }
 
-export async function buildHistoricalSeriesReport(env,seriesId,{cursor=null,limit=20}={}) {
+export async function buildHistoricalSeriesReport(env,seriesId,{cursor=null,limit=20,eventsCursor=null}={}) {
   const id=String(seriesId||'').trim();
   if(!id) throw new Error('PAYNE_HISTORY_SERIES_ID_REQUIRED');
-  const history=await payneHistoryCursor(binding(env),{cursor,limit});
-  const events=await payneLedgerEventsCursor(binding(env),{limit:20});
-  // Do not claim full history or financial aggregates while either cursor remains.
-  const attempts=history.rows.filter(x=>x.seriesId===id);
-  const rows=events.rows.filter(x=>x.seriesId===id);
-  const currentSeries=await loadRealSeriesState(env);
-  const run=await kvGetJson(env,RUN_PREFIX+id);
-  const seriesConfig=run||((String(currentSeries?.seriesId||'')===id)?currentSeries:null);
-  const perAttempt=[];
-  for(const attempt of attempts){
-    perAttempt.push({...attempt,coverage:'PARTIAL_SERIES_HISTORY_CURSOR',providerEvidenceComplete:false});
-  }
-  const filled=perAttempt.filter(x=>x.finalResult==='FILLED').length;
-  const noFill=perAttempt.filter(x=>x.finalResult==='NO_FILL').length;
-  const unknownUnresolved=perAttempt.filter(x=>x.finalResult==='UNKNOWN').length;
-  const knownNet=perAttempt.filter(x=>x.netRealizedPnlUsd!==null);
-  const knownFees=perAttempt.filter(x=>x.totalFeesUsd!==null);
-  const netRealizedPnlUsd=null;
-  const totalFeesUsd=null;
-  const grossRealizedPnlUsd=null;
+  const kv=binding(env);
+  const [history,events]=await Promise.all([
+    payneHistoryCursor(kv,{cursor,limit}),
+    payneLedgerEventsCursor(kv,{cursor:eventsCursor,limit:20}),
+  ]);
+  const attempts=history.rows.filter(row=>row.seriesId===id);
+  const ledgerRows=events.rows.filter(row=>row.seriesId===id);
+  // Independent cursors must both be exhausted before all retained records
+  // for this series can be called complete. Financials remain unknown without
+  // exact provider-corroborated fills, fees and exits.
   return {
-    ok:true,complete:false,coverage:'PARTIAL_BOUNDED_SERIES_HISTORY',nextCursor:history.nextCursor,eventsNextCursor:events.nextCursor,
-    schema:'PAYNE_REAL_SERIES_HISTORY_V1',
-    readOnly:true,
-    seriesId:id,
-    threshold:seriesConfig?.threshold??null,
-    stakeUsd:seriesConfig?.maxEntryDebitUsd??null,
-    attemptTarget:seriesConfig?.attemptTarget??null,
-    accountingSemantics:seriesConfig?.accountingSemantics
-      ?? ((String(currentSeries?.seriesId||'')===id)?currentSeries?.accountingSemantics:null),
-    legacyQuarantined:(String(currentSeries?.seriesId||'')===id)?currentSeries?.legacyQuarantined===true:false,
-    attemptsCompleted:perAttempt.filter(x=>x.finalResult!=='UNKNOWN').length,
-    attempted:perAttempt.length,
-    filled,
-    noFill,
-    unknownUnresolved,
-    grossRealizedPnlUsd,
-    entryFeesUsd:Number(perAttempt.reduce((a,x)=>a+Number(x.entryFeeUsd||0),0).toFixed(4)),
-    exitFeesUsd:Number(perAttempt.reduce((a,x)=>a+Number(x.exitFeeUsd||0),0).toFixed(4)),
-    totalFeesUsd,
-    netRealizedPnlUsd,
-    attempts:perAttempt,
-    providerWrites:0,
-    ordersSubmittedByThisRead:0,
-    capitalMovedUsd:0,
+    ok:true,schema:'PAYNE_REAL_SERIES_HISTORY_V1',readOnly:true,seriesId:id,
+    complete:history.historyScanComplete===true&&events.complete===true,
+    coverage:history.historyScanComplete===true&&events.complete===true?
+      'PERSISTED_HISTORY_SCANNED_PROVIDER_UNVERIFIED':'PARTIAL_BOUNDED_SERIES_HISTORY',
+    nextCursor:history.nextCursor,eventsNextCursor:events.nextCursor,
+    hasMore:history.hasMore||events.hasMore,
+    attempts,ledgerEvents:ledgerRows,attempted:attempts.length,
+    filled:null,noFill:null,unknownUnresolved:null,
+    grossRealizedPnlUsd:null,entryFeesUsd:null,exitFeesUsd:null,
+    totalFeesUsd:null,netRealizedPnlUsd:null,
+    providerEvidenceComplete:false,providerWrites:0,ordersSubmittedByThisRead:0,capitalMovedUsd:0,
   };
 }
-
 
 export function summarizeRealExecutionState({control={},series={},ledger=[],asOf=new Date().toISOString()}={}) {
   const seriesId=series?.seriesId||null;
@@ -5121,7 +5097,7 @@ export default {
     if (url.pathname === '/real-history') {
       try{
         if(url.searchParams.get('view')==='audit')return Response.json(await buildPayneAuditView(env,url.searchParams.get('seriesId')),{headers:{'cache-control':'no-store'}});
-        const report=await buildHistoricalSeriesReport(env,url.searchParams.get('seriesId'),{cursor:url.searchParams.get('cursor'),limit:url.searchParams.get('limit')});
+        const report=await buildHistoricalSeriesReport(env,url.searchParams.get('seriesId'),{cursor:url.searchParams.get('cursor'),limit:url.searchParams.get('limit'),eventsCursor:url.searchParams.get('eventsCursor')});
         return Response.json(report,{headers:{'cache-control':'no-store'}});
       }catch(error){
         return Response.json({ok:false,error:String(error?.message||'PAYNE_HISTORY_FAILED'),providerWrites:0,ordersSubmittedByThisRead:0,capitalMovedUsd:0},{status:400,headers:{'cache-control':'no-store'}});
