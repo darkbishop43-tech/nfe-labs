@@ -103,3 +103,21 @@ export async function payneHistoryCursor(kv,{cursor=null,limit=20,bounds={range:
     nextCursor:page.list_complete?null:page.cursor,hasMore:!page.list_complete,
     requestBudget:{maxKvLists:1,maxKvGets:size*2}};
 }
+
+/** Independent bounded cursor over every retained PAYNE ledger event. */
+export async function payneLedgerEventsCursor(kv,{cursor=null,limit=30}={}){
+ if(typeof kv?.list!=='function'||typeof kv?.get!=='function')throw Error('HISTORY_KV_UNAVAILABLE');
+ const size=Math.max(1,Math.min(30,Math.trunc(Number(limit)||30)));
+ const page=await kv.list({prefix:PREFIX.ledger,limit:size,...(cursor?{cursor}:{})});
+ if(!Array.isArray(page?.keys)||typeof page.list_complete!=='boolean')throw Error('HISTORY_LEDGER_PAGE_INVALID');
+ if(!page.list_complete&&(!page.cursor||page.cursor===cursor))throw Error('HISTORY_LEDGER_CURSOR_INCOMPLETE');
+ const rows=[];
+ for(const item of page.keys){
+  if(!item?.name?.startsWith(PREFIX.ledger))throw Error('HISTORY_LEDGER_KEY_INVALID');
+  const event=await read(kv,item.name);
+  rows.push({...event,sourceLedgerKey:item.name});
+ }
+ return {rows,complete:page.list_complete===true,nextCursor:page.list_complete?null:page.cursor,
+  hasMore:!page.list_complete,coverage:page.list_complete?'LEDGER_CURSOR_END':'LEDGER_CURSOR_PARTIAL',
+  requestBudget:{maxKvLists:1,maxKvGets:size}};
+}
