@@ -112,3 +112,13 @@ test('real PAYNE unresolved NEAR reconciliation resolves once using mocked signe
   assert.equal(closure.length,1);
  }finally{globalThis.fetch=oldFetch;}
 });
+
+test('exact exit evidence endpoint fails closed on unauthorized and wrong series',async()=>{
+ const x=fixture();x.env.PAYNE_COORDINATOR_DIAGNOSTIC_TOKEN='a'.repeat(48);
+ const uri='https://payne.test/internal/exit-claim-provider-evidence?seriesId='+x.series+'&clientOrderId=payne-real-ea08ebab63a3-1-exit1';
+ const unauthorized=await worker.fetch(new Request(uri),x.env);
+ assert.equal(unauthorized.status,403);
+ const wrong=await worker.fetch(new Request(uri.replace(x.series,'wrong-series'),{headers:{'x-payne-diagnostic-token':'a'.repeat(48)}}),x.env);
+ assert.equal(wrong.status,409);
+ assert.equal(x.counts.puts,0);
+});
