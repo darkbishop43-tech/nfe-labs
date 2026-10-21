@@ -4905,6 +4905,36 @@ export default {
         providerWrites:0,readOnly:true
       },{headers:{'cache-control':'no-store'}});
     }
+    if (url.pathname === '/internal/deployment-position-evidence') {
+      // Read-only Kalshi evidence. Existing diagnostic authority; never infer FLAT from a failed read.
+      const secret=env?.PAYNE_COORDINATOR_DIAGNOSTIC_TOKEN;
+      const supplied=request.headers.get('x-payne-diagnostic-token');
+      if(typeof secret!=='string'||secret.length<32||typeof supplied!=='string'||supplied.length!==secret.length)
+        return Response.json({ok:false,complete:false,status:'UNAUTHORIZED'},{status:403,headers:{'cache-control':'no-store'}});
+      const [expectedHash,receivedHash]=await Promise.all([
+        crypto.subtle.digest('SHA-256',new TextEncoder().encode(secret)),
+        crypto.subtle.digest('SHA-256',new TextEncoder().encode(supplied))
+      ]);
+      const a=new Uint8Array(expectedHash),b=new Uint8Array(receivedHash);
+      let mismatch=0;for(let i=0;i<a.length;i++)mismatch|=a[i]^b[i];
+      if(mismatch!==0)
+        return Response.json({ok:false,complete:false,status:'UNAUTHORIZED'},{status:403,headers:{'cache-control':'no-store'}});
+      const series=await loadRealSeriesState(env);
+      const ticker=url.searchParams.get('ticker');
+      if(!ticker||ticker!==series?.position?.marketTicker)
+        return Response.json({ok:false,complete:false,status:'POSITION_TICKER_IDENTITY_MISMATCH'},
+          {status:409,headers:{'cache-control':'no-store'}});
+      const evidence=await providerTickerPositionEvidence(env,ticker);
+      const complete=evidence?.ok===true&&evidence?.paginationComplete===true&&
+        ['FLAT','ABSENT','OPEN'].includes(evidence.classification);
+      return Response.json({ok:complete,complete,
+        classification:complete?evidence.classification:'UNKNOWN',
+        quantity:evidence.classification==='ABSENT'&&complete?0:evidence.quantity??null,
+        ticker,providerSource:'KALSHI_AUTHENTICATED_POSITIONS',reason:evidence.reason,
+        paginationComplete:evidence.paginationComplete===true,providerWrites:0},
+        {status:complete?200:503,headers:{'cache-control':'no-store'}});
+    }
+
     if (url.pathname === '/internal/fire-receipt-diagnostic') {
       // Existing diagnostic authority; exact persisted FIRE receipt only. No writes.
       const secret=env?.PAYNE_COORDINATOR_DIAGNOSTIC_TOKEN;
