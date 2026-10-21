@@ -1,0 +1,39 @@
+name: PAYNE Recovery Only Bundle Proof
+on:
+  push:
+    branches: [payne-ledger-bounded-history-v10-20261021]
+    paths:
+      - "market-edge-lab/real/payne-kalshi-real/src/payne-recovery-only-worker.js"
+      - "market-edge-lab/real/payne-kalshi-real/src/payne-recovery-orchestrator.js"
+      - "market-edge-lab/real/payne-kalshi-real/src/payne-fire-recovery-v1.js"
+      - "market-edge-lab/real/payne-kalshi-real/src/payne-provider-recovery-v1.js"
+      - "market-edge-lab/real/payne-kalshi-real/wrangler.recovery-only.toml"
+      - "market-edge-lab/real/payne-kalshi-real/test/payne-recovery-only-artifact.test.mjs"
+      - ".github/workflows/payne-recovery-only-bundle-proof.yml"
+permissions:
+  contents: read
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Prove isolated entrypoint and source closure
+        working-directory: market-edge-lab/real/payne-kalshi-real
+        run: |
+          set -euo pipefail
+          node --test test/payne-recovery-only-artifact.test.mjs test/payne-provider-recovery-v1.test.mjs test/payne-fire-recovery-v1.test.mjs test/payne-recovery-exit-transition.test.mjs
+      - name: Dry-run actual recovery-only Worker artifact without deploying
+        working-directory: market-edge-lab/real/payne-kalshi-real
+        run: |
+          set -euo pipefail
+          npx --yes wrangler@4 deploy --config wrangler.recovery-only.toml --dry-run --outdir /tmp/payne-recovery-only-build
+          test -f /tmp/payne-recovery-only-build/index.js
+          ! grep -q 'runPayneRealExecutionCycle' /tmp/payne-recovery-only-build/index.js
+          ! grep -q 'kalshiPayneOrderPost' /tmp/payne-recovery-only-build/index.js
+          ! grep -q 'updateFounderControl' /tmp/payne-recovery-only-build/index.js
+          echo "RECOVERY_ONLY_BUNDLE_NO_TRADING_WRITER=PASS"
+          echo "RECOVERY_ONLY_DRY_RUN_NO_DEPLOYMENT=PASS"
