@@ -2445,6 +2445,25 @@ async function buildExportResponse(env, url, nowMs=Date.now()) {
   const bounds=exportRangeBounds(url.searchParams.get('range')||'current',url,nowMs);
   const format=String(url.searchParams.get('format')||'json').toLowerCase();
   if (!['json','csv'].includes(format)) throw new Error('EXPORT_FORMAT_NOT_ALLOWED');
+  if(String(url.searchParams.get('category')||'observations')==='ledger-events'){
+    const page=await payneLedgerEventsCursor(binding(env),{
+      cursor:url.searchParams.get('cursor')||null,limit:url.searchParams.get('limit')||30
+    });
+    const stamp=new Date(nowMs).toISOString().replace(/[:.]/g,'-');
+    const headers={'cache-control':'no-store',
+      'content-disposition':'attachment; filename="payne-ledger-events-page-'+stamp+'.'+format+'"'};
+    if(format==='csv'){
+      // A stable identity/payload CSV; opaque JSON evidence is never silently discarded.
+      const esc=x=>'"'+String(x??'').replace(/"/g,'""')+'"';
+      const csv=['sourceLedgerKey,recordId,at,type,seriesId,attemptId,owner,rawJson',
+        ...page.rows.map(x=>[x.sourceLedgerKey,x.recordId,x.at,x.type,x.seriesId,x.attemptId,x.owner,
+          JSON.stringify(x)].map(esc).join(','))].join('\\n');
+      return new Response(csv,{headers:{...headers,'content-type':'text/csv; charset=utf-8',
+        'x-payne-next-cursor':page.nextCursor||'','x-payne-has-more':String(page.hasMore)}});
+    }
+    return Response.json({schema:'PAYNE_LEDGER_EVENT_EXPORT_V1',...page,readOnly:true},
+      {headers:{...headers,'content-type':'application/json; charset=utf-8'}});
+  }
   if(String(url.searchParams.get('category')||'observations')==='executions'){
     const history=await payneHistoryCursor(binding(env),{
       cursor:url.searchParams.get('cursor')||null,
