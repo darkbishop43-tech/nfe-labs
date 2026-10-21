@@ -44,7 +44,13 @@ export async function verifyProviderTerminalExit(env,{claim,position,get=kalshiG
   o.ticker===ticker&&String(o.side||'').toUpperCase()===claim.side);
  const ids=[...new Set(matched.map(o=>o.order_id))];
  if(ids.length!==1||!ids[0]||matched.some(o=>o.action&&o.action!=='sell'))
-  return unknown('EXACT_EXIT_ORDER_NOT_ESTABLISHED');
+  return {...unknown('EXACT_EXIT_ORDER_NOT_ESTABLISHED'),
+   diagnostic:{liveOrderCount:liveOrders.length,historicalOrderCount:historicalOrders.length,
+    clientTickerMatches:[...liveOrders,...historicalOrders].filter(o=>
+     o.client_order_id===clientId&&o.ticker===ticker).map(o=>({
+      orderId:o.order_id,side:o.side??null,action:o.action??null,status:o.status??null
+     })),
+    exactSideMatchCount:matched.length}};
  const providerOrderId=ids[0];
  if(matched.some(o=>!terminal.has(String(o.status||'').toLowerCase())))
   return unknown('EXIT_ORDER_NOT_PROVIDER_TERMINAL');
