@@ -22,7 +22,7 @@ jobs:
           prefix='payne-kalshi:attempt:5867063c-5a7a-4180-ab22-ea08ebab63a3:'
           encoded="$(jq -nr --arg x "$prefix" '$x|@uri')"
           curl --fail --silent --show-error --max-time 25 -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "$base/keys?prefix=$encoded&limit=1000" -o /tmp/attempt-keys.json
-          jq -e '.success==true and (.result|type)=="array" and .result_info.cursor==null' /tmp/attempt-keys.json >/dev/null
+          jq -e '.success==true and (.result|type)=="array" and (.result_info.cursor==null or .result_info.cursor=="")' /tmp/attempt-keys.json >/dev/null
           jq -r '.result[].name' /tmp/attempt-keys.json | while IFS= read -r key; do
             enc="$(jq -nr --arg x "$key" '$x|@uri')"
             curl --fail --silent --show-error --max-time 25 -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "$base/values/$enc" -o /tmp/one.json
