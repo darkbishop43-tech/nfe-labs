@@ -1,0 +1,31 @@
+name: PAYNE Historical Specimens Read Only
+on:
+  push:
+    branches: [payne-ledger-bounded-history-v10-20261021]
+    paths: [".github/workflows/payne-historical-specimens-readonly.yml"]
+permissions:
+  contents: read
+jobs:
+  specimen:
+    runs-on: ubuntu-latest
+    steps:
+      - name: List bounded existing archived intent identities
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          : "${CLOUDFLARE_API_TOKEN:?MISSING}"; : "${CLOUDFLARE_ACCOUNT_ID:?MISSING}"
+          namespace='03352b0ccb034f1bb8206f663a04b125'
+          base="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/storage/kv/namespaces/$namespace"
+          prefix='payne-kalshi:attempt:5867063c-5a7a-4180-ab22-ea08ebab63a3:'
+          encoded="$(jq -nr --arg x "$prefix" '$x|@uri')"
+          curl --fail --silent --show-error --max-time 25 -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "$base/keys?prefix=$encoded&limit=1000" -o /tmp/attempt-keys.json
+          jq -e '.success==true and (.result|type)=="array" and .result_info.cursor==null' /tmp/attempt-keys.json >/dev/null
+          jq -r '.result[].name' /tmp/attempt-keys.json | while IFS= read -r key; do
+            enc="$(jq -nr --arg x "$key" '$x|@uri')"
+            curl --fail --silent --show-error --max-time 25 -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "$base/values/$enc" -o /tmp/one.json
+            jq -c '{attemptId,intentNo,attemptNo,fireSpecimenId,clientOrderId,providerOrderId,marketTicker,status,providerPostStarted,result}' /tmp/one.json
+          done
+          echo ARCHIVE_EXHAUSTIVE_READ_COMPLETE
