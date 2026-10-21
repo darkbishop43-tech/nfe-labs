@@ -4814,6 +4814,65 @@ export default {
       return Response.json({...result,readOnly:true,providerWrites:0},
         {status:result.ok===true?200:503,headers:{'cache-control':'no-store'}});
     }
+    if(url.pathname==='/internal/exit-claim-provider-evidence'){
+      const denied=()=>Response.json({ok:false,complete:false,status:'UNAUTHORIZED'},{status:403});
+      const secret=env?.PAYNE_COORDINATOR_DIAGNOSTIC_TOKEN;
+      const supplied=request.headers.get('x-payne-diagnostic-token');
+      if(typeof secret!=='string'||secret.length<32||typeof supplied!=='string'||supplied.length!==secret.length)return denied();
+      const [eh,sh]=await Promise.all([crypto.subtle.digest('SHA-256',new TextEncoder().encode(secret)),crypto.subtle.digest('SHA-256',new TextEncoder().encode(supplied))]);
+      let mismatch=0;const a=new Uint8Array(eh),b=new Uint8Array(sh);
+      for(let i=0;i<a.length;i++)mismatch|=a[i]^b[i];
+      if(mismatch)return denied();
+      const series=await loadRealSeriesState(env);
+      const seriesId=url.searchParams.get('seriesId');
+      const clientOrderId=url.searchParams.get('clientOrderId');
+      if(!seriesId||seriesId!==series?.seriesId||!clientOrderId||clientOrderId.length>160)
+        return Response.json({ok:false,complete:false,status:'IDENTITY_MISMATCH'},{status:409});
+      const claims=await inspectPayneCoordinatorSeries(env,seriesId);
+      const claim=Array.isArray(claims?.claims)?claims.claims.find(c=>c.kind==='EXIT'&&c.clientOrderId===clientOrderId):null;
+      if(claims?.ok!==true||claims?.complete!==true||!claim)
+        return Response.json({ok:false,complete:false,status:'UNKNOWN',reason:'EXIT_COORDINATOR_CLAIM_UNVERIFIED'},{status:503});
+      const position=paynePositionRecords(series).find(p=>p?.owner===REAL_OWNER &&
+        p?.seriesId===seriesId && clientOrderId.startsWith('payne-real-') &&
+        Number(claim.attemptNo)===Number(p?.attemptNo));
+      if(!position?.marketTicker||!position?.entryOrderId)
+        return Response.json({ok:false,complete:false,status:'UNKNOWN',reason:'EXIT_POSITION_IDENTITY_UNVERIFIED',coordinatorClaim:claim},{status:503});
+      const ticker=position.marketTicker;
+      const read=async path=>{
+        try{const response=await kalshiGetOnly(env,path);
+          if(!response.ok)return {ok:false,status:response.status};
+          return {ok:true,body:await response.json()};}
+        catch{return {ok:false,status:null};}
+      };
+      const q='?limit=200&subaccount=0&ticker='+encodeURIComponent(ticker);
+      const [orders,fills,historical,settlements,positions]=await Promise.all([
+        read('/trade-api/v2/portfolio/orders'+q),
+        read('/trade-api/v2/portfolio/fills'+q),
+        read('/trade-api/v2/historical/fills'+q),
+        read('/trade-api/v2/portfolio/settlements'+q),
+        read('/trade-api/v2/portfolio/positions?limit=1000&subaccount=0')
+      ]);
+      const reads=[orders,fills,historical,settlements,positions];
+      if(reads.some(r=>!r.ok)||!Array.isArray(orders.body?.orders)||
+        !Array.isArray(fills.body?.fills)||!Array.isArray(historical.body?.fills)||
+        !Array.isArray(settlements.body?.settlements)||!Array.isArray(positions.body?.market_positions))
+        return Response.json({ok:true,complete:false,status:'UNKNOWN',reason:'PROVIDER_READ_INCOMPLETE',coordinatorClaim:claim});
+      const exactOrders=orders.body.orders.filter(o=>o.client_order_id===clientOrderId&&o.ticker===ticker);
+      const ids=new Set(exactOrders.map(o=>o.order_id));
+      const exactFills=[...fills.body.fills,...historical.body.fills].filter(f=>f.ticker===ticker&&
+        (f.client_order_id===clientOrderId||(ids.size>0&&ids.has(f.order_id))));
+      const matchingPositions=positions.body.market_positions.filter(p=>p.ticker===ticker);
+      const exactSettlements=settlements.body.settlements.filter(x=>x.ticker===ticker);
+      const complete=matchingPositions.length<=1;
+      return Response.json({ok:true,complete:false,status:'UNKNOWN',
+        reason:complete?'PROVIDER_PAGINATION_OR_EXIT_SETTLEMENT_ATTRIBUTION_NOT_PROVEN':'AMBIGUOUS_PROVIDER_POSITION',
+        seriesId,clientOrderId,ticker,coordinatorClaim:claim,
+        exitOrders:exactOrders.map(o=>({orderId:o.order_id,status:o.status,fillCount:o.fill_count??null})),
+        exitFills:exactFills.map(f=>({orderId:f.order_id,count:f.count??null})),
+        providerPosition:matchingPositions.length===1?{quantity:matchingPositions[0].position_fp??matchingPositions[0].position??null}:null,
+        settlementsForTicker:exactSettlements.length,
+        providerEvidenceComplete:false,readOnly:true,providerWrites:0},{headers:{'cache-control':'no-store'}});
+    }
     if (url.pathname === '/internal/atomic-claim-diagnostic') {
       // Fail closed unless a separate encrypted, non-trading diagnostic secret
       // has explicitly been provisioned. Never reflect or log the supplied token.
