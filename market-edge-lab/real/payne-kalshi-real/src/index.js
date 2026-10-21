@@ -1,6 +1,6 @@
 import {rankVerifiedStaircase} from './staircase-top3-v2.js';
 import {firstPullbackShadow} from './first-pullback-shadow.js';
-import {payneHistoryAll,payneHistoryPage,payneExecutionCsv,PAYNE_EXECUTION_EXPORT_FIELDS} from './payne-real-history-view.js';
+import {payneHistoryAll,payneHistoryPage,payneHistoryCursor,payneExecutionCsv,PAYNE_EXECUTION_EXPORT_FIELDS} from './payne-real-history-view.js';
 import {liveOrderWatchProjection,paynePositionRecords,payneCapacityEvidence,upsertPaynePosition,unresolvedPaynePositions} from './payne-live-order-watch.js';
 import {PayneExecutionCoordinator,claimPayneExecution,releaseProvenNoPost,resolvePayneExecutionClaim,claimPayneExit,inspectPayneCoordinatorClaim,inspectPayneCoordinatorSeries} from './payne-execution-coordinator.js';
 export {PayneExecutionCoordinator};
@@ -5058,9 +5058,11 @@ export default {
       try {
         const range=String(url.searchParams.get('range')||'current');
         const bounds=exportRangeBounds(range,url);
-        const history=await payneHistoryAll(binding(env),bounds);
-        const page=payneHistoryPage(history,url.searchParams.get('page'),url.searchParams.get('limit'));
-        const provider=await readPayneProviderHistory(path=>kalshiGetOnly(env,path));
+        const page=await payneHistoryCursor(binding(env),{
+          cursor:url.searchParams.get('cursor')||null,limit:url.searchParams.get('limit')||20,bounds
+        });
+        // Cap provider enrichment per page; incomplete provider coverage stays explicit.
+        const provider=await readPayneProviderHistory(path=>kalshiGetOnly(env,path),{maxPages:2});
         page.rows=enrichPayneCycles(page.rows||[],provider,{readAt:provider.readAt,coverage:provider.coverage});
         return Response.json({ok:true,readOnly:true,schema:'PAYNE_REAL_CYCLES_V1',...page,
           providerCoverage:provider.coverage,providerReadComplete:provider.complete,
