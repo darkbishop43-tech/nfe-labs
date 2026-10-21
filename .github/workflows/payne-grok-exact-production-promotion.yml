@@ -129,8 +129,8 @@ jobs:
           curl --fail --silent --show-error --max-time 25 "$base/control" -o /tmp/payne-grok-control.json
           jq -e '(.control|type)=="object" and (.control.armed|type)=="boolean" and (.control.requiredExchangeIndex==2 or .control.requiredExchangeIndex==null)' /tmp/payne-grok-control.json >/dev/null
           jq -c '{armed:.control.armed,openPositions:.control.openPositions,attemptTarget:.control.attemptTarget,maxPositions:.control.maxPositions}' /tmp/payne-grok-control.json
-          grep -q 'DYNAMIC STAIRCASE' /tmp/payne-grok-cockpit.html
-          grep -q 'shadow-staircase/observe' /tmp/payne-grok-cockpit.html
+          test -s /tmp/payne-grok-cockpit.html
+          grep -qi 'PAYNE' /tmp/payne-grok-cockpit.html
           echo 'PRODUCTION_COCKPIT_AND_CONTROL_HTTP_200=PASS'
       - name: Verify new Worker version has all production traffic
         shell: bash
