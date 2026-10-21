@@ -752,10 +752,8 @@ export function payneRealHoldEvidenceDecision({heldMs,marketPresent,marketStatus
     return {action:'RECONCILE',reason:'PROVIDER_CONTRACT_CLOSED'};
   if(!['open','active'].includes(status))
     return {action:'RECONCILE',reason:'PROVIDER_MARKET_STATUS_UNKNOWN'};
-  // Preserve the existing Paper five-minute limit in the real-only adapter.
-  // At expiry, route through the existing governed reduce-only EXIT path.
-  if(heldMs>=PAYNE_PAPER_RULES.maxHoldMs)
-    return {action:'EXIT',reason:'max_hold'};
+  // Founder directive: no elapsed-hold-time exit in PAYNE Real.
+  // Existing contract-close reconciliation and signal-driven exits remain intact.
   if(featureAvailable!==true||featureFresh!==true)
     return {action:'HOLD',reason:featureFresh===false?'FEATURE_STALE':'FEATURE_UNAVAILABLE'};
   if(decisionLabel==='PULL TRIGGER')
