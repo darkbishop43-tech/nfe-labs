@@ -1,0 +1,19 @@
+name = "market-edge-payne-kalshi-real"
+main = "src/payne-recovery-only-worker.js"
+compatibility_date = "2026-09-17"
+workers_dev = true
+
+[[kv_namespaces]]
+binding = "PAYNE_KALSHI_STATE"
+id = "03352b0ccb034f1bb8206f663a04b125"
+
+[[durable_objects.bindings]]
+name = "PAYNE_EXECUTION_COORDINATOR"
+class_name = "PayneExecutionCoordinator"
+
+[[migrations]]
+tag = "payne-execution-ownership-v1"
+new_sqlite_classes = ["PayneExecutionCoordinator"]
+
+[triggers]
+crons = ["* * * * *"]
