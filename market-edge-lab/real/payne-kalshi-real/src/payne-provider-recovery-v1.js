@@ -82,3 +82,67 @@ export async function verifyProviderTerminalExit(env,{claim,position,get=kalshiG
   evidenceId,providerTerminalProven:true,providerExposureFlatProven:true,
   providerFillsVerified:true,providerWrites:0};
 }
+
+export async function verifyProviderTerminalEntry(env,{attempt,latch,get=kalshiGetOnly}={}){
+ const fail=reason=>({ok:false,complete:false,status:'UNKNOWN',reason,providerWrites:0});
+ if(!attempt||!latch||latch.state!=='LATCHED'||!latch.specimenId||
+  attempt.fireSpecimenId!==latch.specimenId||
+  attempt.marketTicker!==latch.ticker||!attempt.attemptId||
+  !attempt.clientOrderId||!attempt.providerOrderId||
+  !['YES','NO'].includes(attempt.outcomeSide)||
+  attempt.marketCloseTime!==latch.marketCloseTime)
+  return fail('FIRE_SPECIMEN_ATTEMPT_IDENTITY_MISMATCH');
+ const ticker=attempt.marketTicker,cid=attempt.clientOrderId,oid=attempt.providerOrderId;
+ const e=encodeURIComponent(ticker);
+ const reads=await Promise.all([
+  readRecoveryPages(env,'/trade-api/v2/portfolio/orders?limit=200&subaccount=0&ticker='+e,'orders',{get}),
+  readRecoveryPages(env,'/trade-api/v2/historical/orders?limit=200&ticker='+e,'orders',{get}),
+  readRecoveryPages(env,'/trade-api/v2/portfolio/fills?limit=200&subaccount=0&ticker='+e,'fills',{get}),
+  readRecoveryPages(env,'/trade-api/v2/historical/fills?limit=200&ticker='+e,'fills',{get}),
+  readRecoveryPages(env,'/trade-api/v2/portfolio/positions?limit=1000&subaccount=0','market_positions',{get}),
+  readRecoveryPages(env,'/trade-api/v2/portfolio/settlements?limit=200&subaccount=0&ticker='+e,'settlements',{get})
+ ]);
+ if(reads.some(x=>!x.ok))return fail('ENTRY_PROVIDER_READ_OR_PAGINATION_INCOMPLETE');
+ const [orders,historicalOrders,fills,historicalFills,positions,settlements]=reads.map(x=>x.rows);
+ const allOrders=[...orders,...historicalOrders];
+ const matched=allOrders.filter(o=>o.order_id===oid&&o.client_order_id===cid&&o.ticker===ticker&&
+  String(o.side||'').toUpperCase()===attempt.outcomeSide&&(!o.action||o.action==='buy'));
+ if(matched.length<1||allOrders.some(o=>o.order_id===oid&&!matched.includes(o)))
+  return fail('ENTRY_PROVIDER_ORDER_IDENTITY_UNVERIFIED');
+ if(matched.some(o=>!terminal.has(String(o.status||'').toLowerCase())))
+  return fail('ENTRY_PROVIDER_ORDER_NOT_TERMINAL');
+ const exactFills=[...fills,...historicalFills].filter(f=>f.order_id===oid);
+ if(exactFills.some(f=>f.ticker!==ticker||String(f.side||'').toUpperCase()!==attempt.outcomeSide||
+   (f.client_order_id&&f.client_order_id!==cid)))
+  return fail('ENTRY_PROVIDER_FILL_IDENTITY_MISMATCH');
+ const ids=new Map();
+ for(const f of exactFills){
+  const id=f.fill_id??f.trade_id;if(!id)return fail('ENTRY_FILL_ID_MISSING');
+  if(ids.has(id)&&JSON.stringify(ids.get(id))!==JSON.stringify(f))return fail('ENTRY_FILL_ID_CONFLICT');
+  ids.set(id,f);
+ }
+ const counts=[...ids.values()].map(f=>Number(f.count_fp??f.count));
+ if(counts.some(n=>!Number.isFinite(n)||n<0))return fail('ENTRY_FILL_COUNT_UNKNOWN');
+ const executed=counts.reduce((a,n)=>a+n,0);
+ const expected=[...new Set(matched.map(o=>Number(o.fill_count_fp??o.fill_count)).filter(Number.isFinite))];
+ if(expected.length!==1||Math.abs(expected[0]-executed)>1e-9)
+  return fail('ENTRY_ORDER_FILLS_UNRECONCILED');
+ const exactPositions=positions.filter(p=>String(p.ticker??p.market_ticker??'')===ticker);
+ if(exactPositions.length>1)return fail('ENTRY_POSITION_AMBIGUOUS');
+ if(exactPositions.length===1){
+  const qty=Number(exactPositions[0].position_fp??exactPositions[0].position??exactPositions[0].quantity);
+  if(!Number.isFinite(qty)||Math.abs(qty)>1e-9)return fail('ENTRY_POSITION_NOT_FLAT');
+ }
+ const settled=settlements.some(x=>String(x.ticker??x.market_ticker??'')===ticker);
+ if(executed>0&&!settled)return fail('ENTRY_FILLED_BUT_SETTLEMENT_UNKNOWN');
+ // A terminal zero-fill order, exhaustive fills and flat position together prove
+ // no exposure from this exact order; NO_FILL as a label alone does not.
+ const resolution=executed>0?'CLOSED':'NO_PROVIDER_EXECUTION';
+ return {ok:true,complete:true,status:'PROVIDER_VERIFIED_TERMINAL',resolution,
+  ticker,side:attempt.outcomeSide,providerOrderId:oid,clientOrderId:cid,
+  fireSpecimenId:latch.specimenId,executedFills:executed,positionQuantity:0,
+  settlementMatched:settled,providerTerminalProven:true,providerExposureFlatProven:true,
+  providerFillsVerified:true,
+  evidenceId:[latch.specimenId,cid,oid,ticker,attempt.outcomeSide,resolution,String(executed)].join('|'),
+  providerWrites:0};
+}
