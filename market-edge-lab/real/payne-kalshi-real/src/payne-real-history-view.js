@@ -74,3 +74,32 @@ export function payneExecutionCsv(rows){
  return [fields.join(','),...rows.map(r=>fields.map(k=>cell(r[k])).join(','))].join('\n');
 }
 export const PAYNE_EXECUTION_EXPORT_FIELDS=fields;
+
+/**
+ * Bounded read of PAYNE attempt records. Cursor is the opaque Cloudflare KV
+ * cursor; callers must pass it back unchanged. Missing ledger events are
+ * expressly NOT represented as authoritative absence of fills or exits.
+ * Every invocation performs at most one KV list and 2*limit KV gets.
+ */
+export async function payneHistoryCursor(kv,{cursor=null,limit=20,bounds={range:'current',fromMs:null,toMs:null}}={}){
+  if(typeof kv?.list!=='function'||typeof kv?.get!=='function')throw Error('HISTORY_KV_UNAVAILABLE');
+  const size=Math.max(1,Math.min(30,Math.trunc(Number(limit)||20)));
+  const page=await kv.list({prefix:PREFIX.attempt,limit:size,...(cursor?{cursor}:{})});
+  if(!Array.isArray(page?.keys)||typeof page.list_complete!=='boolean')throw Error('HISTORY_KV_PAGE_INVALID');
+  if(!page.list_complete&&(!page.cursor||page.cursor===cursor))throw Error('HISTORY_CURSOR_INCOMPLETE');
+  const rows=[];
+  // Sequential bounded reads avoid unbounded Promise.all fanout.
+  for(const entry of page.keys){
+    if(typeof entry?.name!=='string'||!entry.name.startsWith(PREFIX.attempt))continue;
+    const attempt=await read(kv,entry.name);
+    if(!attempt?.attemptId||!attempt?.seriesId)continue;
+    const position=await kv.get(PREFIX.position+attempt.attemptId,'json');
+    const row=project(attempt,[],position);
+    if(filterTime(row,bounds))rows.push({...row,coverage:'PERSISTED_ATTEMPT_POSITION_ONLY_LEDGER_NOT_SCANNED',providerEvidenceComplete:false});
+  }
+  return {rows,attemptCount:rows.length,ledgerEventCount:null,
+    complete:page.list_complete===true,historyScanComplete:page.list_complete===true,
+    evidenceComplete:false,coverage:'PARTIAL_LEDGER_EVENTS_NOT_SCANNED',
+    nextCursor:page.list_complete?null:page.cursor,hasMore:!page.list_complete,
+    requestBudget:{maxKvLists:1,maxKvGets:size*2}};
+}
