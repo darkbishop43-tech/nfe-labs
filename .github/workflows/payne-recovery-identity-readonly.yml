@@ -1,0 +1,29 @@
+name: PAYNE Recovery Identity Read Only
+on:
+  push:
+    branches: [payne-ledger-bounded-history-v10-20261021]
+    paths: [".github/workflows/payne-recovery-identity-readonly.yml"]
+permissions:
+  contents: read
+jobs:
+  identity:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Authenticated exact persisted identity summary only
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          : "${CLOUDFLARE_API_TOKEN:?MISSING}"
+          : "${CLOUDFLARE_ACCOUNT_ID:?MISSING}"
+          url="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/storage/kv/namespaces/03352b0ccb034f1bb8206f663a04b125/values/payne-kalshi%3Areal-series%3Av1"
+          curl --fail --silent --show-error --max-time 25 --header "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "$url" -o /tmp/series.json
+          jq -c '{seriesId,status,
+           attempt:{attemptId:.currentAttempt.attemptId,attemptNo:.currentAttempt.attemptNo,clientOrderId:.currentAttempt.clientOrderId,providerOrderId:.currentAttempt.providerOrderId,marketTicker:.currentAttempt.marketTicker,outcomeSide:.currentAttempt.outcomeSide,fireSpecimenId:.currentAttempt.fireSpecimenId,marketCloseTime:.currentAttempt.marketCloseTime,executionHandoff:.currentAttempt.executionHandoff,status:.currentAttempt.status},
+           latch:{state:.fireLatch.state,attemptNo:.fireLatch.attemptNo,specimenId:.fireLatch.specimenId,ticker:.fireLatch.ticker,marketCloseTime:.fireLatch.marketCloseTime},
+           position:{seriesId:.position.seriesId,attemptId:.position.attemptId,attemptNo:.position.attemptNo,marketTicker:.position.marketTicker,outcomeSide:.position.outcomeSide,owner:.position.owner,status:.position.status,entryOrderId:.position.entryOrderId,exitClientOrderId:.position.exitClientOrderId},
+           positions:[(.positions//[])[]|{seriesId,attemptId,attemptNo,marketTicker,outcomeSide,owner,status,entryOrderId,exitClientOrderId}]}' /tmp/series.json
+          echo 'READ_ONLY_RECOVERY_IDENTITIES_COMPLETE'
