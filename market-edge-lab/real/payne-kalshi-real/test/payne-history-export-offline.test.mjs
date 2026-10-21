@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {payneHistoryAll,payneHistoryPage,payneLedgerEventsCursor,payneExecutionCsv,PAYNE_EXECUTION_EXPORT_FIELDS} from '../src/payne-real-history-view.js';
+import {payneHistoryAll,payneHistoryPage,payneHistoryCursor,payneLedgerEventsCursor,payneExecutionCsv,PAYNE_EXECUTION_EXPORT_FIELDS} from '../src/payne-real-history-view.js';
 function fakeKV(){
  const d=new Map([
  ['payne-kalshi:attempt:old:1',{seriesId:'old',attemptId:'old-1',attemptNo:1,createdAt:'2026-10-13T06:02:21Z',marketTicker:'KXNEAR15M-26OCT130215-15',outcomeSide:'NO',providerOrderId:'01a133da-f108-7df4-9287-3f45cfa348ed',clientOrderId:'payne-real-8bd998c37fa1-2-entry'}],
@@ -59,4 +59,44 @@ test('ledger event cursor retrieves all retained events with no duplicate and bo
 test('ledger cursor refuses incomplete pagination authority',async()=>{
  const kv={async list(){return {keys:[],list_complete:false,cursor:null}},async get(){return null}};
  await assert.rejects(()=>payneLedgerEventsCursor(kv),/HISTORY_LEDGER_CURSOR_INCOMPLETE/);
+});
+
+test('large history recovers all exact event identities within per-page request budgets',async()=>{
+ const store=new Map();
+ for(let i=0;i<205;i++)store.set('payne-kalshi:real-ledger:event:'+String(i).padStart(4,'0'),{recordId:'event-'+i,seriesId:'series-'+i%3,attemptId:'attempt-'+i,at:'2026-10-21T00:00:00Z',type:'ENTRY_PROVIDER_RESULT',owner:'PAYNE_KALSHI_REAL',providerOrderId:'order-'+i});
+ let listCount=0,getCount=0;
+ const kv={
+   async list({prefix,limit,cursor}){listCount++;const names=[...store.keys()].filter(k=>k.startsWith(prefix)).sort();const start=cursor?Number(cursor):0;const items=names.slice(start,start+limit);return {keys:items.map(name=>({name})),list_complete:start+limit>=names.length,cursor:start+limit>=names.length?undefined:String(start+limit)}},
+   async get(key){getCount++;return store.get(key)||null}
+ };
+ let cursor=null,pages=0;const collected=[];
+ do{
+   const beforeList=listCount,beforeGet=getCount;
+   const page=await payneLedgerEventsCursor(kv,{cursor,limit:25});
+   assert.equal(listCount-beforeList,1);
+   assert.ok(getCount-beforeGet<=25);
+   assert.ok(page.rows.length<=25);
+   collected.push(...page.rows);
+   pages++;
+   cursor=page.nextCursor;
+   if(!page.hasMore){assert.equal(page.complete,true);break;}
+   assert.equal(page.complete,false);
+ }while(pages<20);
+ assert.equal(pages,9);
+ assert.equal(collected.length,205);
+ assert.equal(new Set(collected.map(x=>x.sourceLedgerKey)).size,205);
+ assert.equal(new Set(collected.map(x=>x.providerOrderId)).size,205);
+ assert.equal(listCount,9);assert.equal(getCount,205);
+ assert.ok(collected.every(x=>x.owner==='PAYNE_KALSHI_REAL'));
+});
+test('exact identity required to join ledger event with execution, never ticker-only',async()=>{
+ const kv=fakeKV(), events=[];let cursor=null;
+ do{const p=await payneLedgerEventsCursor(kv,{cursor,limit:1});events.push(...p.rows);cursor=p.nextCursor;if(!p.hasMore)break}while(true);
+ const h=await payneHistoryAll(fakeKV());
+ const near=h.rows.find(x=>x.attemptId==='old-1');
+ const match=events.filter(x=>x.seriesId===near.seriesId&&x.attemptId===near.attemptId);
+ assert.equal(match.length,1);
+ assert.equal(match[0].type,'ENTRY_RECONCILED_OWNED');
+ assert.equal(events.filter(x=>x.attemptId==='new-1'&&x.seriesId===near.seriesId).length,0);
+ assert.equal(near.realizedPnlUsd,null);
 });
