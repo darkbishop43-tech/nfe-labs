@@ -1,6 +1,6 @@
 import {rankVerifiedStaircase} from './staircase-top3-v2.js';
 import {firstPullbackShadow} from './first-pullback-shadow.js';
-import {payneHistoryAll,payneHistoryPage,payneHistoryCursor,payneExecutionCsv,PAYNE_EXECUTION_EXPORT_FIELDS} from './payne-real-history-view.js';
+import {payneHistoryAll,payneHistoryPage,payneHistoryCursor,payneLedgerEventsCursor,payneExecutionCsv,PAYNE_EXECUTION_EXPORT_FIELDS} from './payne-real-history-view.js';
 import {liveOrderWatchProjection,paynePositionRecords,payneCapacityEvidence,upsertPaynePosition,unresolvedPaynePositions} from './payne-live-order-watch.js';
 import {PayneExecutionCoordinator,claimPayneExecution,releaseProvenNoPost,resolvePayneExecutionClaim,claimPayneExit,inspectPayneCoordinatorClaim,inspectPayneCoordinatorSeries} from './payne-execution-coordinator.js';
 export {PayneExecutionCoordinator};
@@ -5067,6 +5067,18 @@ export default {
         return Response.json({ok:false,schema:'PAYNE_REAL_LEDGER_EXPORT_V1',readOnly:true,
           complete:false,error:String(error?.message||'PAYNE_LEDGER_READ_INCOMPLETE'),
           providerWrites:0,ordersSubmittedByThisRead:0,capitalMovedUsd:0},
+          {status:503,headers:{'cache-control':'no-store'}});
+      }
+    }
+    if(url.pathname==='/real-history' && url.searchParams.get('view')==='events'){
+      try{
+        const page=await payneLedgerEventsCursor(binding(env),{
+          cursor:url.searchParams.get('cursor')||null,limit:url.searchParams.get('limit')||30
+        });
+        return Response.json({ok:true,readOnly:true,schema:'PAYNE_LEDGER_EVENTS_CURSOR_V1',...page,
+          providerWrites:0,ordersSubmittedByThisRead:0},{headers:{'cache-control':'no-store'}});
+      }catch(e){
+        return Response.json({ok:false,complete:false,error:String(e?.message||'LEDGER_EVENTS_READ_FAILED')},
           {status:503,headers:{'cache-control':'no-store'}});
       }
     }
