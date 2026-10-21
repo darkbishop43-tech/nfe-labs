@@ -14,7 +14,7 @@ function fixture(){
  }
  put(PREFIX+'real-series:v1',{schema:'PAYNE_REAL_SERIES_V1',owner:'PAYNE_KALSHI_REAL',seriesId:series,unresolvedEntry:false,positions:[],attemptsStarted:51});
  const kv={
-  async get(k){counts.gets++;const val=data.get(k);return val===undefined?null:JSON.stringify(val)},
+  async get(k,format){counts.gets++;const val=data.get(k);return val===undefined?null:format==='json'?structuredClone(val):JSON.stringify(val)},
   async put(k,v){counts.puts++;data.set(k,typeof v==='string'?JSON.parse(v):structuredClone(v))},
   async list({prefix='',limit=1000,cursor}){counts.lists++;const keys=[...data.keys()].filter(k=>k.startsWith(prefix)).sort();const n=cursor?Number(cursor):0;const subset=keys.slice(n,n+limit);return {keys:subset.map(name=>({name})),list_complete:n+limit>=keys.length,cursor:n+limit>=keys.length?undefined:String(n+limit)}}
  };
