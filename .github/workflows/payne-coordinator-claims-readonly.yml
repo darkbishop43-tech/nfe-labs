@@ -2,7 +2,7 @@ name: PAYNE Coordinator Claims Read Only
 on:
   workflow_dispatch:
   push:
-    branches: [payne-direct-pull-fire-isolated-20261018]
+    branches: [payne-direct-pull-fire-isolated-20261018, payne-ledger-bounded-history-v10-20261021]
     paths: [".github/workflows/payne-coordinator-claims-readonly.yml"]
 permissions:
   contents: read
@@ -35,3 +35,16 @@ jobs:
           echo "CLAIMS_HTTP=$code"
           jq -c '{ok,complete,status,activeClaims,unknownRecords,reason,claimCount:(.claims//[]|length)}' "$tmp/claims.json" || cat "$tmp/claims.json"
           echo "READ_ONLY_CLAIMS_DIAGNOSTIC_COMPLETE"
+          # Read existing authenticated exact current-attempt claim only; no writes.
+          attemptNo="$(jq -r '.currentAttempt.providerAttemptNoCandidate // .currentAttempt.providerAttemptNo // .currentAttempt.attemptNo // empty' "$tmp/series.json")"
+          echo "CURRENT_ATTEMPT_ID=$(jq -r '.currentAttempt.attemptId // ""' "$tmp/series.json")"
+          echo "CURRENT_ATTEMPT_TICKER=$(jq -r '.currentAttempt.marketTicker // ""' "$tmp/series.json")"
+          echo "CURRENT_ATTEMPT_ORDER=$(jq -r '.currentAttempt.providerOrderId // ""' "$tmp/series.json")"
+          jq -c '{fireLatchState:(.fireLatch.state//null),fireLatchSpecimen:(.fireLatch.specimenId//null),fireLatchAttemptNo:(.fireLatch.attemptNo//null),unresolvedEntry,positionOwner:(.position.owner//null),positionStatus:(.position.status//null),positionOrder:(.position.entryOrderId//null),positionAttempt:(.position.attemptId//null)}' "$tmp/series.json"
+          if [[ -n "$attemptNo" && "$attemptNo" != null ]]; then
+            atomic="https://market-edge-payne-kalshi-real.darkbishop43.workers.dev/internal/atomic-claim-diagnostic?seriesId=$(printf %s "$seriesId" | jq -sRr @uri)&attemptNo=$(printf %s "$attemptNo" | jq -sRr @uri)"
+            atomicCode="$(curl --silent --show-error --max-time 25 --output "$tmp/atomic.json" --write-out '%{http_code}' --header "x-payne-diagnostic-token: $PAYNE_COORDINATOR_DIAGNOSTIC_TOKEN" "$atomic")"
+            echo "ATOMIC_CLAIM_HTTP=$atomicCode"
+            jq -c '{ok,status,reason,exists,claim:(.claim//null)}' "$tmp/atomic.json" || true
+          fi
+          echo 'READ_ONLY_INTENT3_EVIDENCE_COMPLETE'
