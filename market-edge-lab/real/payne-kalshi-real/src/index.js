@@ -4895,6 +4895,7 @@ export default {
       return Response.json({
         ok:evidence.ok===true,complete:evidence.complete===true,
         status:evidence.status||'UNKNOWN',reason:evidence.reason||null,
+        diagnostic:evidence.diagnostic||null,
         seriesId,clientOrderId,ticker:claim.ticker,
         providerOrderId:evidence.providerOrderId||null,
         resolution:evidence.resolution||null,
