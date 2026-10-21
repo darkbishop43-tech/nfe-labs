@@ -33,6 +33,15 @@ export class PayneExecutionCoordinator {
           const active=new Set(['POTENTIALLY_SUBMITTED','OPEN','UNKNOWN']);
           const claims=[];let unknown=0,activeCount=0;
           for(const {key,claim} of rows){
+            if(key.startsWith('fire:')){
+              // Recovery receipts are separate from execution claims; malformed ones fail closed.
+              if(!claim||claim.kind!=='FIRE_RECOVERY'||claim.seriesId!==seriesId||
+                 key!=='fire:'+claim.specimenId||
+                 !['PENDING','APPLIED'].includes(claim.projectionState)||
+                 !['CLOSED','NO_PROVIDER_EXECUTION'].includes(claim.terminalState)||
+                 !claim.evidenceId||!claim.providerOrderId)unknown++;
+              continue;
+            }
             const kind=key.startsWith('attempt:')?'ENTRY':key.startsWith('exit:')?'EXIT':null;
             if(!kind||!claim||typeof claim!=='object'||claim.seriesId!==seriesId||
                typeof claim.claimState!=='string'||!terminal.has(claim.claimState)&&!active.has(claim.claimState)){
@@ -55,6 +64,16 @@ export class PayneExecutionCoordinator {
         return Response.json({ok:false,complete:false,status:'UNKNOWN',reason:'STORAGE_ENUMERATION_FAILED'},
           {status:500,headers:{'cache-control':'no-store'}});
       }
+    }
+    if(request.method==='GET' && new URL(request.url).pathname==='/internal/inspect-fire'){
+      const specimenId=new URL(request.url).searchParams.get('specimenId');
+      if(!specimenId||specimenId.length>220)
+        return Response.json({ok:false,status:'UNKNOWN',reason:'FIRE_SPECIMEN_ID_REQUIRED'},{status:400});
+      try{
+        const claim=await this.state.storage.get('fire:'+specimenId);
+        return Response.json(claim===undefined?{ok:true,status:'NOT_FOUND',claim:null}:
+          {ok:true,status:'FOUND',claim},{headers:{'cache-control':'no-store'}});
+      }catch{return Response.json({ok:false,status:'UNKNOWN',reason:'FIRE_RECEIPT_READ_FAILED'},{status:500});}
     }
     if(request.method==='GET' && new URL(request.url).pathname==='/internal/inspect-exit'){
       const clientOrderId=new URL(request.url).searchParams.get('clientOrderId');
@@ -85,11 +104,12 @@ export class PayneExecutionCoordinator {
     try {input=await request.json();}catch{return Response.json({granted:false,reason:'INVALID_CLAIM'},{status:400});}
     const {seriesId,attemptNo,specimenId,clientOrderId,ticker,side,windowClose}=input||{};
     const action=input?.action||'CLAIM';
-    const exitAction=['CLAIM_EXIT','RELEASE_EXIT_PROVEN_NO_POST','RESOLVE_EXIT_PROVEN_TERMINAL','MARK_EXIT_RECOVERY_PROJECTED'].includes(action);
+    const exitAction=['CLAIM_EXIT','RELEASE_EXIT_PROVEN_NO_POST','RESOLVE_EXIT_PROVEN_TERMINAL','MARK_EXIT_RECOVERY_PROJECTED','COMMIT_FIRE_RECOVERY','MARK_FIRE_RECOVERY_PROJECTED'].includes(action);
     if(!seriesId||!Number.isSafeInteger(attemptNo)||attemptNo<1||!specimenId||!clientOrderId||!ticker||!['YES','NO'].includes(side)||(!exitAction&&!windowClose)){
       return Response.json({granted:false,reason:'INCOMPLETE_EXECUTION_IDENTITY'},{status:400});
     }
-    const key=exitAction?'exit:'+clientOrderId:'attempt:'+attemptNo;
+    const fireAction=['COMMIT_FIRE_RECOVERY','MARK_FIRE_RECOVERY_PROJECTED'].includes(action);
+    const key=fireAction?'fire:'+specimenId:exitAction?'exit:'+clientOrderId:'attempt:'+attemptNo;
     if(!['CLAIM','RELEASE_PROVEN_NO_POST','RESOLVE_ENTRY','CLAIM_EXIT','RELEASE_EXIT_PROVEN_NO_POST','RESOLVE_EXIT_PROVEN_TERMINAL','MARK_EXIT_RECOVERY_PROJECTED'].includes(action))
       return Response.json({granted:false,reason:'INVALID_ACTION'},{status:400});
     const outcome=await this.state.storage.transaction(async tx=>{
@@ -99,6 +119,50 @@ export class PayneExecutionCoordinator {
         await tx.put(key,{seriesId,attemptNo,specimenId,clientOrderId,ticker,side,
           claimState:'POTENTIALLY_SUBMITTED',claimedAt:new Date().toISOString()});
         return {granted:true,reason:'EXCLUSIVE_EXIT_CLAIM_PERSISTED'};
+      }
+      if(action==='COMMIT_FIRE_RECOVERY'||action==='MARK_FIRE_RECOVERY_PROJECTED'){
+        const oid=String(input.providerOrderId||''),evidenceId=String(input.evidenceId||'');
+        const resolution=String(input.resolution||'');
+        if(!oid||!evidenceId||!['CLOSED','NO_PROVIDER_EXECUTION'].includes(resolution))
+          return {granted:false,reason:'FIRE_RECOVERY_IDENTITY_OR_TERMINAL_PROOF_REQUIRED'};
+        if(action==='MARK_FIRE_RECOVERY_PROJECTED'){
+          if(!prior||prior.kind!=='FIRE_RECOVERY'||prior.seriesId!==seriesId||
+            prior.attemptNo!==attemptNo||prior.specimenId!==specimenId||
+            prior.clientOrderId!==clientOrderId||prior.providerOrderId!==oid||
+            prior.ticker!==ticker||prior.side!==side||prior.windowClose!==windowClose||
+            prior.evidenceId!==evidenceId||prior.terminalState!==resolution)
+            return {granted:false,reason:'FIRE_RECOVERY_PROJECTION_IDENTITY_MISMATCH'};
+          if(prior.projectionState==='APPLIED')return {granted:true,reason:'FIRE_PROJECTION_ALREADY_APPLIED'};
+          if(prior.projectionState!=='PENDING')return {granted:false,reason:'FIRE_RECOVERY_STATE_UNKNOWN'};
+          await tx.put(key,{...prior,projectionState:'APPLIED',projectedAt:new Date().toISOString()});
+          return {granted:true,reason:'FIRE_PROJECTION_APPLIED'};
+        }
+        if(input.providerTerminalProven!==true||input.providerExposureFlatProven!==true||
+          input.providerFillsVerified!==true)
+          return {granted:false,reason:'AUTHORITATIVE_FIRE_TERMINAL_PROOF_REQUIRED'};
+        if(prior)return {granted:prior.kind==='FIRE_RECOVERY'&&prior.seriesId===seriesId&&
+          prior.attemptNo===attemptNo&&prior.clientOrderId===clientOrderId&&
+          prior.providerOrderId===oid&&prior.evidenceId===evidenceId&&
+          prior.ticker===ticker&&prior.side===side&&prior.windowClose===windowClose&&
+          prior.terminalState===resolution,reason:'FIRE_RECOVERY_EXISTING_RECEIPT'};
+        const entry=await tx.get('attempt:'+attemptNo);
+        if(entry){
+          if(entry.seriesId!==seriesId||entry.attemptNo!==attemptNo||
+             entry.specimenId!==specimenId||entry.clientOrderId!==clientOrderId||
+             entry.ticker!==ticker||entry.side!==side||entry.windowClose!==windowClose)
+            return {granted:false,reason:'FIRE_ENTRY_CLAIM_IDENTITY_MISMATCH'};
+          if(['CLOSED','NO_FILL','NO_PROVIDER_EXECUTION'].includes(entry.claimState)&&entry.claimState!==resolution)
+            return {granted:false,reason:'FIRE_ENTRY_ALREADY_TERMINAL_DIFFERENT_RESULT'};
+          if(!['CLOSED','NO_PROVIDER_EXECUTION'].includes(entry.claimState))
+            await tx.put('attempt:'+attemptNo,{...entry,claimState:resolution,
+              resolvedAt:new Date().toISOString(),recoveryEvidenceId:evidenceId});
+        }else if(input.directWriterVerified!==true){
+          return {granted:false,reason:'FIRE_ENTRY_CLAIM_MISSING_NOT_DIRECT_WRITER'};
+        }
+        await tx.put(key,{kind:'FIRE_RECOVERY',seriesId,attemptNo,specimenId,
+          clientOrderId,ticker,side,windowClose,providerOrderId:oid,evidenceId,
+          terminalState:resolution,projectionState:'PENDING',createdAt:new Date().toISOString()});
+        return {granted:true,reason:'FIRE_RECOVERY_RECEIPT_DURABLE'};
       }
       if(action==='MARK_EXIT_RECOVERY_PROJECTED'){
         if(!prior||prior.seriesId!==seriesId||prior.attemptNo!==attemptNo||
@@ -315,4 +379,18 @@ export async function resolvePayneExitRecovery(env,identity,proof,{markProjected
   const result=await response.json();
   return response.ok?result:{granted:false,reason:'COORDINATOR_RECOVERY_REJECTED'};
  }catch{return {granted:false,reason:'COORDINATOR_RECOVERY_UNAVAILABLE'};}
+}
+
+export async function resolvePayneFireRecovery(env,identity,proof,{markProjected=false}={}){
+ const binding=env?.PAYNE_EXECUTION_COORDINATOR;
+ if(!binding?.idFromName||!binding?.get)return {granted:false,reason:'COORDINATOR_UNBOUND'};
+ try{
+  const response=await binding.get(binding.idFromName(identity.seriesId)).fetch(
+   'https://payne-coordinator.internal/recover-fire',{
+    method:'POST',headers:{'content-type':'application/json'},
+    body:JSON.stringify({...identity,...proof,action:markProjected?
+      'MARK_FIRE_RECOVERY_PROJECTED':'COMMIT_FIRE_RECOVERY'})
+   });
+  return response.ok?response.json():{granted:false,reason:'FIRE_RECOVERY_REJECTED'};
+ }catch{return {granted:false,reason:'FIRE_RECOVERY_COORDINATOR_UNAVAILABLE'};}
 }
