@@ -146,3 +146,35 @@ test('15 wrong provider order cannot satisfy exact exit proof',async()=>{
  const proof=await verifyProviderTerminalExit({}, {claim:c,position:p,get});
  assert.equal(proof.ok,false);assert.equal(proof.reason,'EXACT_EXIT_ORDER_NOT_ESTABLISHED');
 });
+
+test('16 ZEC NO position exits by exact equivalent BUY YES, not a new NO position',async()=>{
+ const claim={...c,ticker:'KXZEC15M-26OCT210030-30',side:'NO'};
+ const position={...p,marketTicker:claim.ticker,outcomeSide:'NO'};
+ const order={order_id:'01a15cb8-5250-7d03-b3fd-2577e000c60c',client_order_id:claim.clientOrderId,
+  ticker:claim.ticker,side:'yes',action:'buy',status:'executed',fill_count_fp:'1.00'};
+ const fill={fill_id:'zec-fill',order_id:order.order_id,client_order_id:claim.clientOrderId,
+  ticker:claim.ticker,side:'yes',action:'buy',count_fp:'1.00'};
+ const get=async(_env,path)=>{
+  const field=path.includes('orders')?'orders':path.includes('fills')?'fills':path.includes('positions')?'market_positions':'settlements';
+  const rows=field==='orders'?(path.includes('historical')?[]:[order]):
+   field==='fills'?(path.includes('historical')?[]:[fill]):
+   field==='market_positions'?[]:[{ticker:claim.ticker}];
+  return new Response(JSON.stringify({[field]:rows,cursor:''}));
+ };
+ const proof=await verifyProviderTerminalExit({}, {claim,position,get});
+ assert.equal(proof.ok,true);
+ assert.equal(proof.providerOrderId,order.order_id);
+ assert.equal(proof.executedFills,1);
+});
+test('17 unrelated BUY NO cannot masquerade as NO close',async()=>{
+ const claim={...c,side:'NO'};
+ const position={...p,outcomeSide:'NO'};
+ const get=async(_env,path)=>{
+  const field=path.includes('orders')?'orders':path.includes('fills')?'fills':path.includes('positions')?'market_positions':'settlements';
+  const rows=field==='orders'?(path.includes('historical')?[]:[{order_id:'incorrect-buy',client_order_id:claim.clientOrderId,
+   ticker:claim.ticker,side:'no',action:'buy',status:'executed',fill_count:1}]):field==='market_positions'?[]:field==='settlements'?[{ticker:claim.ticker}]:[];
+  return new Response(JSON.stringify({[field]:rows,cursor:''}));
+ };
+ const proof=await verifyProviderTerminalExit({}, {claim,position,get});
+ assert.equal(proof.ok,false);assert.equal(proof.reason,'EXACT_EXIT_ORDER_NOT_ESTABLISHED');
+});
