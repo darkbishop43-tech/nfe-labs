@@ -34,7 +34,7 @@ export async function recoverPayneProviderConfirmedExits(env,{
   // The worker claims an EXIT before its client ID can be saved to KV.
   // Recover that exact pre-persist crash window by reconstructing only the
   // established deterministic PAYNE exit client ID, never an unrelated claim.
-  const exitSuffix=String(claim.clientOrderId||'').match(/-exit([1-9]\\d*)$/);
+  const exitSuffix=String(claim.clientOrderId||'').match(/-exit([1-9][0-9]*)$/);
   const expectedExitId=exitSuffix
    ?('payne-real-'+String(series.seriesId).replace(/[^0-9A-Za-z]/g,'').slice(-12)+
      '-'+String(claim.attemptNo)+'-exit'+exitSuffix[1]).slice(0,64):null;
