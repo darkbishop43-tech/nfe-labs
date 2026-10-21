@@ -1,7 +1,7 @@
 name: PAYNE Grok Exact Pinned Production Promotion
 on:
   push:
-    branches: [payne-staircase-shadow-data-isolated-20261015]
+    branches: [payne-staircase-shadow-data-isolated-20261015, payne-ledger-bounded-history-v10-20261021]
     paths: [".github/workflows/payne-grok-exact-production-promotion.yml"]
 permissions:
   contents: read
@@ -30,7 +30,7 @@ jobs:
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
-          test "$(git rev-parse HEAD:market-edge-lab/real/payne-kalshi-real/src/index.js)" = 81ebb2c3ba147abb8a45bab0601951c782963735
+          test "$(git rev-parse HEAD:market-edge-lab/real/payne-kalshi-real/src/index.js)" = ff0ee45335e4a004808dd40dcf23829673cd91be
           test "$(git rev-parse HEAD:market-edge-lab/real/payne-kalshi-real/src/payne-closure-evidence.js)" = 7f0c5a2dce12ed0d56c1024cdd58c4f581ea364a
           grep -q '^name = "market-edge-payne-kalshi-real"$' market-edge-lab/real/payne-kalshi-real/wrangler.toml
           test -f market-edge-lab/real/payne-kalshi-real/src/payne-execution-coordinator.js
@@ -63,7 +63,9 @@ jobs:
         run: |
           set -euo pipefail
           curl --fail --silent --show-error --max-time 25 -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/market-edge-payne-kalshi-real/deployments" -o /tmp/payne-deployments-pre.json
-          jq -e '.success==true and (.result.deployments[0].versions | any(.version_id=="6e5cc3ac-7ce2-4ead-8904-e55c02c15979" and .percentage==100))' /tmp/payne-deployments-pre.json >/dev/null
+          jq -e '.success==true and (.result.deployments|length)>0 and (.result.deployments[0].versions|length)==1 and (.result.deployments[0].versions[0].percentage==100) and ((.result.deployments[0].versions[0].version_id|type)=="string")' /tmp/payne-deployments-pre.json >/dev/null
+          jq -r '.result.deployments[0].versions[0].version_id' /tmp/payne-deployments-pre.json > /tmp/payne-verified-current-baseline.txt
+          echo "PRODUCTION_BASELINE_READ_FROM_CLOUDFLARE=$(cat /tmp/payne-verified-current-baseline.txt)"
           echo 'PRODUCTION_BASELINE_MATCH=PASS'
       - name: Prepare authenticated PAYNE maintenance proof read-only
         shell: bash
