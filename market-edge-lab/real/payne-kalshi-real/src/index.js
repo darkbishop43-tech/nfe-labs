@@ -2,9 +2,10 @@ import {rankVerifiedStaircase} from './staircase-top3-v2.js';
 import {firstPullbackShadow} from './first-pullback-shadow.js';
 import {payneHistoryAll,payneHistoryPage,payneHistoryCursor,payneLedgerEventsCursor,payneExecutionCsv,PAYNE_EXECUTION_EXPORT_FIELDS} from './payne-real-history-view.js';
 import {liveOrderWatchProjection,paynePositionRecords,payneCapacityEvidence,upsertPaynePosition,unresolvedPaynePositions} from './payne-live-order-watch.js';
-import {PayneExecutionCoordinator,claimPayneExecution,releaseProvenNoPost,resolvePayneExecutionClaim,claimPayneExit,inspectPayneCoordinatorClaim,inspectPayneCoordinatorSeries} from './payne-execution-coordinator.js';
+import {PayneExecutionCoordinator,claimPayneExecution,releaseProvenNoPost,resolvePayneExecutionClaim,claimPayneExit,inspectPayneCoordinatorClaim,inspectPayneCoordinatorSeries,inspectPayneCoordinatorExit} from './payne-execution-coordinator.js';
 export {PayneExecutionCoordinator};
 import { kalshiReadOnlyProof, kalshiGetOnly } from './kalshi-get-only.js';
+import {verifyProviderTerminalExit} from './payne-provider-recovery-v1.js';
 import { recoverPayneProviderConfirmedExits } from './payne-recovery-orchestrator.js';
 import { recoverProviderConfirmedFireLatch } from './payne-fire-recovery-v1.js';
 import {readPayneProviderHistory,enrichPayneCycles} from './payne-provider-history-enrichment.js';
@@ -4871,50 +4872,34 @@ export default {
       const clientOrderId=url.searchParams.get('clientOrderId');
       if(!seriesId||seriesId!==series?.seriesId||!clientOrderId||clientOrderId.length>160)
         return Response.json({ok:false,complete:false,status:'IDENTITY_MISMATCH'},{status:409});
-      const claims=await inspectPayneCoordinatorSeries(env,seriesId);
-      const claim=Array.isArray(claims?.claims)?claims.claims.find(c=>c.kind==='EXIT'&&c.clientOrderId===clientOrderId):null;
-      if(claims?.ok!==true||claims?.complete!==true||!claim)
-        return Response.json({ok:false,complete:false,status:'UNKNOWN',reason:'EXIT_COORDINATOR_CLAIM_UNVERIFIED'},{status:503});
-      const position=paynePositionRecords(series).find(p=>p?.owner===REAL_OWNER &&
-        p?.seriesId===seriesId && clientOrderId.startsWith('payne-real-') &&
-        Number(claim.attemptNo)===Number(p?.attemptNo));
-      if(!position?.marketTicker||!position?.entryOrderId)
-        return Response.json({ok:false,complete:false,status:'UNKNOWN',reason:'EXIT_POSITION_IDENTITY_UNVERIFIED',coordinatorClaim:claim},{status:503});
-      const ticker=position.marketTicker;
-      const read=async path=>{
-        try{const response=await kalshiGetOnly(env,path);
-          if(!response.ok)return {ok:false,status:response.status};
-          return {ok:true,body:await response.json()};}
-        catch{return {ok:false,status:null};}
-      };
-      const q='?limit=200&subaccount=0&ticker='+encodeURIComponent(ticker);
-      const [orders,fills,historical,settlements,positions]=await Promise.all([
-        read('/trade-api/v2/portfolio/orders'+q),
-        read('/trade-api/v2/portfolio/fills'+q),
-        read('/trade-api/v2/historical/fills'+q),
-        read('/trade-api/v2/portfolio/settlements'+q),
-        read('/trade-api/v2/portfolio/positions?limit=1000&subaccount=0')
-      ]);
-      const reads=[orders,fills,historical,settlements,positions];
-      if(reads.some(r=>!r.ok)||!Array.isArray(orders.body?.orders)||
-        !Array.isArray(fills.body?.fills)||!Array.isArray(historical.body?.fills)||
-        !Array.isArray(settlements.body?.settlements)||!Array.isArray(positions.body?.market_positions))
-        return Response.json({ok:true,complete:false,status:'UNKNOWN',reason:'PROVIDER_READ_INCOMPLETE',coordinatorClaim:claim});
-      const exactOrders=orders.body.orders.filter(o=>o.client_order_id===clientOrderId&&o.ticker===ticker);
-      const ids=new Set(exactOrders.map(o=>o.order_id));
-      const exactFills=[...fills.body.fills,...historical.body.fills].filter(f=>f.ticker===ticker&&
-        (f.client_order_id===clientOrderId||(ids.size>0&&ids.has(f.order_id))));
-      const matchingPositions=positions.body.market_positions.filter(p=>p.ticker===ticker);
-      const exactSettlements=settlements.body.settlements.filter(x=>x.ticker===ticker);
-      const complete=matchingPositions.length<=1;
-      return Response.json({ok:true,complete:false,status:'UNKNOWN',
-        reason:complete?'PROVIDER_PAGINATION_OR_EXIT_SETTLEMENT_ATTRIBUTION_NOT_PROVEN':'AMBIGUOUS_PROVIDER_POSITION',
-        seriesId,clientOrderId,ticker,coordinatorClaim:claim,
-        exitOrders:exactOrders.map(o=>({orderId:o.order_id,status:o.status,fillCount:o.fill_count??null})),
-        exitFills:exactFills.map(f=>({orderId:f.order_id,count:f.count??null})),
-        providerPosition:matchingPositions.length===1?{quantity:matchingPositions[0].position_fp??matchingPositions[0].position??null}:null,
-        settlementsForTicker:exactSettlements.length,
-        providerEvidenceComplete:false,readOnly:true,providerWrites:0},{headers:{'cache-control':'no-store'}});
+      const inspection=await inspectPayneCoordinatorExit(env,seriesId,clientOrderId);
+      const claim=inspection?.claim;
+      if(inspection?.ok!==true||inspection?.status!=='FOUND'||!claim||
+        claim.seriesId!==seriesId||claim.clientOrderId!==clientOrderId||claim.kind!=='EXIT')
+        return Response.json({ok:false,complete:false,status:'UNKNOWN',reason:'EXACT_EXIT_CLAIM_UNVERIFIED'},{status:503});
+      const candidates=paynePositionRecords(series).filter(p=>p?.owner===REAL_OWNER&&
+        p?.seriesId===seriesId&&p?.attemptId===claim.specimenId&&
+        Number(p?.attemptNo)===Number(claim.attemptNo)&&
+        p?.marketTicker===claim.ticker&&p?.outcomeSide===claim.side&&
+        (!p.exitClientOrderId||p.exitClientOrderId===clientOrderId));
+      if(candidates.length!==1||!candidates[0].entryOrderId)
+        return Response.json({ok:false,complete:false,status:'UNKNOWN',reason:'EXIT_POSITION_IDENTITY_UNVERIFIED'},{status:503});
+      // Use the existing paginated, fail-closed verifier. Never equate a
+      // one-page executed-order snapshot with settled/flat exposure.
+      const evidence=await verifyProviderTerminalExit(env,{
+        claim,position:{...candidates[0],exitClientOrderId:clientOrderId}
+      });
+      return Response.json({
+        ok:evidence.ok===true,complete:evidence.complete===true,
+        status:evidence.status||'UNKNOWN',reason:evidence.reason||null,
+        seriesId,clientOrderId,ticker:claim.ticker,
+        providerOrderId:evidence.providerOrderId||null,
+        resolution:evidence.resolution||null,
+        executedFills:evidence.executedFills??null,
+        settlementMatched:evidence.settlementMatched===true,
+        providerEvidenceComplete:evidence.complete===true,
+        providerWrites:0,readOnly:true
+      },{headers:{'cache-control':'no-store'}});
     }
     if (url.pathname === '/internal/atomic-claim-diagnostic') {
       // Fail closed unless a separate encrypted, non-trading diagnostic secret
