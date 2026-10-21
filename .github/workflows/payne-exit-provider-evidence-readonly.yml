@@ -22,3 +22,5 @@ jobs:
           jq -c '{ok,complete,status,reason,seriesId,clientOrderId,ticker,coordinatorClaim:(.coordinatorClaim|{kind,seriesId,specimenId,attemptNo,ticker,side,clientOrderId,state}),exitOrders,exitFills,providerPosition,settlementsForTicker,providerEvidenceComplete,providerWrites}' /tmp/result.json
           test "$code" = 200
           echo READ_ONLY_EXIT_PROVIDER_QUERY_COMPLETE
+
+# Post-promotion read: deployed strict provider evidence verifier d5c4f386.
