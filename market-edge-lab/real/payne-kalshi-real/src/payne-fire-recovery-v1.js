@@ -4,7 +4,7 @@ import {paynePositionRecords} from './payne-live-order-watch.js';
 
 // One exact persisted FIRE specimen per tick. Never substitute coordinator EXIT or other positions.
 export async function recoverProviderConfirmedFireLatch(env,{
- loadControl,loadSeries,saveSeries,recordRecoveryLedger,
+ loadControl,loadSeries,saveSeries,recordRecoveryLedger,loadHistoricalAttempt,
  verifyProvider=verifyProviderTerminalEntry,resolveFire=resolvePayneFireRecovery
 }={}){
  const fail=reason=>({ok:false,classification:'UNKNOWN',reason,providerWrites:0,orders:0});
@@ -12,12 +12,16 @@ export async function recoverProviderConfirmedFireLatch(env,{
   return fail('FIRE_RECOVERY_ADAPTER_INCOMPLETE');
  const control=await loadControl(env);
  if(control?.armed!==false)return fail('FIRE_RECOVERY_REQUIRES_DISARMED');
- const series=await loadSeries(env),latch=series?.fireLatch,attempt=series?.currentAttempt;
+ const series=await loadSeries(env),latch=series?.fireLatch;
  if(latch?.state!=='LATCHED')return {ok:true,classification:'CLEAN',providerWrites:0,orders:0};
  const attemptNo=Number(latch.attemptNo);
  if(!series?.seriesId||!Number.isSafeInteger(attemptNo)||attemptNo<1||
-   attempt?.attemptId!==series.seriesId+'-intent-'+attemptNo)
-  return fail('FIRE_ATTEMPT_IDENTITY_UNKNOWN');
+   typeof loadHistoricalAttempt!=='function')return fail('FIRE_ATTEMPT_IDENTITY_UNKNOWN');
+ const attempt=await loadHistoricalAttempt(env,series.seriesId,attemptNo);
+ if(!attempt||attempt.attemptId!==series.seriesId+'-intent-'+attemptNo||
+    attempt.fireSpecimenId!==latch.specimenId||attempt.marketTicker!==latch.ticker||
+    attempt.marketCloseTime!==latch.marketCloseTime)
+  return fail('HISTORICAL_FIRE_ATTEMPT_IDENTITY_UNKNOWN');
  const proof=await verifyProvider(env,{attempt,latch});
  if(proof?.ok!==true||proof?.complete!==true)return fail(proof?.reason||'FIRE_PROVIDER_EXPOSURE_UNKNOWN');
  const identity={seriesId:series.seriesId,attemptNo,specimenId:latch.specimenId,
@@ -30,7 +34,8 @@ export async function recoverProviderConfirmedFireLatch(env,{
  const committed=await resolveFire(env,identity,payload);
  if(committed?.granted!==true)return fail('FIRE_COORDINATOR_RECEIPT_REJECTED');
  const freshControl=await loadControl(env),fresh=await loadSeries(env);
- const freshLatch=fresh?.fireLatch,freshAttempt=fresh?.currentAttempt;
+ const freshLatch=fresh?.fireLatch;
+ const freshAttempt=await loadHistoricalAttempt(env,series.seriesId,attemptNo);
  if(freshControl?.armed!==false||fresh?.seriesId!==series.seriesId||
     freshLatch?.state!=='LATCHED'||freshLatch?.specimenId!==latch.specimenId||
     freshLatch?.attemptNo!==latch.attemptNo||
@@ -50,10 +55,8 @@ export async function recoverProviderConfirmedFireLatch(env,{
  const updated=matching.length===1?{...matching[0],status:'CLOSED',reconciliationState:'FLAT',
    reconciliationReason:'PROVIDER_CONFIRMED_TERMINAL_FIRE',providerClosureEvidenceId:proof.evidenceId,
    closedAt:matching[0].closedAt||at}:null;
- const next={...fresh,unresolvedEntry:false,
-  fireLatch:{...freshLatch,state:'PROVIDER_TERMINAL_RECONCILED',reconciliationEvidenceId:proof.evidenceId},
-  currentAttempt:{...freshAttempt,reconciliationResult:proof.resolution==='CLOSED'?'SETTLED_FLAT':'NO_PROVIDER_EXECUTION',
-    reconciliationReason:'PROVIDER_CONFIRMED_TERMINAL_FIRE',reconciledAt:freshAttempt.reconciledAt||at}};
+ const next={...fresh,
+  fireLatch:{...freshLatch,state:'PROVIDER_TERMINAL_RECONCILED',reconciliationEvidenceId:proof.evidenceId}};
  if(updated){
   next.positions=paynePositionRecords(fresh).map(p=>p.attemptId===updated.attemptId?updated:p);
   if(fresh.position?.attemptId===updated.attemptId)next.position=updated;
