@@ -5,6 +5,7 @@ import {liveOrderWatchProjection,paynePositionRecords,payneCapacityEvidence,upse
 import {PayneExecutionCoordinator,claimPayneExecution,releaseProvenNoPost,resolvePayneExecutionClaim,claimPayneExit,inspectPayneCoordinatorClaim,inspectPayneCoordinatorSeries} from './payne-execution-coordinator.js';
 export {PayneExecutionCoordinator};
 import { kalshiReadOnlyProof, kalshiGetOnly } from './kalshi-get-only.js';
+import { recoverPayneProviderConfirmedExits } from './payne-recovery-orchestrator.js';
 import {readPayneProviderHistory,enrichPayneCycles} from './payne-provider-history-enrichment.js';
 import { kalshiPayneOrderPost, PAYNE_WRITE_CONTRACT } from './kalshi-real-write.js';
 import { cockpitHtml } from './cockpit-html.js';
@@ -2971,6 +2972,35 @@ export async function appendRealLedger(env,type,payload={}) {
   return row;
 }
 
+// Deterministic recovery event key: replay cannot create duplicate financial ledger rows.
+// No inferred P&L, prices or fees are recorded.
+async function recordVerifiedRecoveryLedger(env,evidence){
+ const text=[evidence.seriesId,evidence.attemptNo,evidence.clientOrderId,
+  evidence.providerOrderId,evidence.evidenceId].join('|');
+ const hash=new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(text)));
+ const id=[...hash].map(x=>x.toString(16).padStart(2,'0')).join('');
+ const key=REAL_LEDGER_PREFIX+'recovery-v1:'+id;
+ const prior=await kvGetJson(env,key);
+ if(prior){
+  const equal=prior.schema==='PAYNE_REAL_LEDGER_V1'&&prior.type==='PROVIDER_CONFIRMED_RECOVERY_V1'&&
+   prior.evidenceId===evidence.evidenceId&&prior.clientOrderId===evidence.clientOrderId&&
+   prior.providerOrderId===evidence.providerOrderId&&prior.seriesId===evidence.seriesId;
+  if(!equal)throw new Error('RECOVERY_LEDGER_IDENTITY_CONFLICT');
+  return prior;
+ }
+ const row={schema:'PAYNE_REAL_LEDGER_V1',type:'PROVIDER_CONFIRMED_RECOVERY_V1',
+  recordId:id,at:new Date().toISOString(),owner:REAL_OWNER,...evidence};
+ await kvPutJson(env,key,row);
+ return row;
+}
+
+export async function recoverPayneProviderConfirmedExitsTick(env){
+ return recoverPayneProviderConfirmedExits(env,{
+  loadControl,loadSeries:loadRealSeriesState,saveSeries:saveRealSeriesState,
+  recordRecoveryLedger:recordVerifiedRecoveryLedger
+ });
+}
+
 // Scan the existing ledger namespace to the final KV cursor before selecting
 // the newest rows. An incomplete scan is an error, never a complete alert window.
 export async function listRealLedgerWithEvidence(env,limit=200) {
@@ -5205,6 +5235,14 @@ export default {
     catch(e){console.error('PAYNE_DISARM_AUDIT_RECOVERY_SCHEDULE_FAILED',String(e?.message||e));}
     const schedulerStartedMs=Date.now();
     await initializeDisarmed(env);
+    // Provider-only reconciliation: no orders, no ARM/DISARM and no claim release.
+    // UNKNOWN results preserve coordinator, KV position and fire-latch authority.
+    try{
+      const recovery=await recoverPayneProviderConfirmedExitsTick(env);
+      if(recovery?.ok!==true)console.warn('PAYNE_RECOVERY_REMAINS_UNKNOWN',String(recovery?.reason||'UNKNOWN'));
+    }catch(error){
+      console.warn('PAYNE_RECOVERY_RETRY_PENDING',String(error?.message||error));
+    }
     const control=await loadControl(env);
     // Pending management, reconciliation, and already-durable FIRE latches
     // must not wait for another full scan.
