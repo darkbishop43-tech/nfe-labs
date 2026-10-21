@@ -98,7 +98,7 @@ export async function payneHistoryCursor(kv,{cursor=null,limit=20,bounds={range:
     if(filterTime(row,bounds))rows.push({...row,coverage:'PERSISTED_ATTEMPT_POSITION_ONLY_LEDGER_NOT_SCANNED',providerEvidenceComplete:false});
   }
   return {rows,attemptCount:rows.length,ledgerEventCount:null,
-    complete:page.list_complete===true,historyScanComplete:page.list_complete===true,
+    complete:false,historyScanComplete:page.list_complete===true,
     evidenceComplete:false,coverage:'PARTIAL_LEDGER_EVENTS_NOT_SCANNED',
     nextCursor:page.list_complete?null:page.cursor,hasMore:!page.list_complete,
     requestBudget:{maxKvLists:1,maxKvGets:size*2}};
