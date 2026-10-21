@@ -3751,6 +3751,17 @@ export async function reconcileUnresolvedEntryFromProvider(env,nowMs=Date.now())
     attempt={...attempt,attemptNo,providerAttemptNo:attemptNo,providerAttemptCounted:true,providerOrderId:orderId,providerResponseState:'FILLED'};
     series.currentAttempt=attempt;
     const providerResult={state:'FILLED',reason:'PROVIDER_RECONCILED_SETTLED_FLAT',orderId,clientOrderId,fillCount:ownedFillCount||null,remainingCount:0};
+    // Provider identity was checked above; preserve the matching retained record.
+    // Final authority is still gated by reconcileAtomicEntryAuthority below.
+    const matchingPosition=paynePositionRecords(series).find(p=>
+      p.owner===REAL_OWNER && p.attemptId===attempt.attemptId &&
+      p.marketTicker===ticker && p.entryOrderId===orderId &&
+      p.entryClientOrderId===clientOrderId);
+    if(matchingPosition && matchingPosition.status!=='CLOSED'){
+      series.positions=paynePositionRecords(series).map(p=>p===matchingPosition?
+        {...p,status:'CLOSED',reconciliationState:'FLAT',
+          closedAt:p.closedAt||reconciledAt,exitReason:p.exitReason||'PROVIDER_RECONCILED_SETTLED_FLAT'}:p);
+    }
     series.unresolvedEntry=false; series.position=null;
     series.currentAttempt={...attempt,status:'FILLED',providerResult,reconciledAt,terminalClassification:'FILLED',reconciliationResult:'SETTLED_FLAT',reconciliationReason:'PROVIDER_RECONCILED_SETTLED_FLAT'};
     if(seriesTerminal(series)){series.status='COMPLETE_FLAT';series.completedAt=reconciledAt;}
