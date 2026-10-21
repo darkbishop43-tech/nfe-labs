@@ -3751,17 +3751,6 @@ export async function reconcileUnresolvedEntryFromProvider(env,nowMs=Date.now())
     attempt={...attempt,attemptNo,providerAttemptNo:attemptNo,providerAttemptCounted:true,providerOrderId:orderId,providerResponseState:'FILLED'};
     series.currentAttempt=attempt;
     const providerResult={state:'FILLED',reason:'PROVIDER_RECONCILED_SETTLED_FLAT',orderId,clientOrderId,fillCount:ownedFillCount||null,remainingCount:0};
-    // Provider identity was checked above; preserve the matching retained record.
-    // Final authority is still gated by reconcileAtomicEntryAuthority below.
-    const matchingPosition=paynePositionRecords(series).find(p=>
-      p.owner===REAL_OWNER && p.attemptId===attempt.attemptId &&
-      p.marketTicker===ticker && p.entryOrderId===orderId &&
-      p.entryClientOrderId===clientOrderId);
-    if(matchingPosition && matchingPosition.status!=='CLOSED'){
-      series.positions=paynePositionRecords(series).map(p=>p===matchingPosition?
-        {...p,status:'CLOSED',reconciliationState:'FLAT',
-          closedAt:p.closedAt||reconciledAt,exitReason:p.exitReason||'PROVIDER_RECONCILED_SETTLED_FLAT'}:p);
-    }
     series.unresolvedEntry=false; series.position=null;
     series.currentAttempt={...attempt,status:'FILLED',providerResult,reconciledAt,terminalClassification:'FILLED',reconciliationResult:'SETTLED_FLAT',reconciliationReason:'PROVIDER_RECONCILED_SETTLED_FLAT'};
     if(seriesTerminal(series)){series.status='COMPLETE_FLAT';series.completedAt=reconciledAt;}
@@ -3788,6 +3777,19 @@ export async function reconcileUnresolvedEntryFromProvider(env,nowMs=Date.now())
       await saveRealSeriesState(env,series);
       return {ok:false,classification:'UNKNOWN',reason:atomicAuthority.reason||'ATOMIC_RECONCILIATION_FAILED',
         series,control:await loadControl(env),providerWrites:0,orders:0,capitalMovedUsd:0};
+    }
+    // Persist retained closure only after provider AND coordinator authority succeeds.
+    const verified=await loadRealSeriesState(env);
+    const matchingPosition=paynePositionRecords(verified).find(p=>
+      p.owner===REAL_OWNER && p.attemptId===attempt.attemptId &&
+      p.marketTicker===ticker && p.entryOrderId===orderId &&
+      p.entryClientOrderId===clientOrderId);
+    if(matchingPosition && (matchingPosition.status!=='CLOSED'||matchingPosition.reconciliationState!=='FLAT')){
+      verified.positions=paynePositionRecords(verified).map(p=>
+        p.attemptId===matchingPosition.attemptId ? {...p,status:'CLOSED',
+          reconciliationState:'FLAT',closedAt:p.closedAt||reconciledAt,
+          exitReason:p.exitReason||'PROVIDER_RECONCILED_SETTLED_FLAT'} : p);
+      await saveRealSeriesState(env,verified);
     }
     return {ok:true,classification:'FLAT',reason:'PROVIDER_RECONCILED_SETTLED_FLAT',ticker,clientOrderId,orderId,exactOrderCount:exactOrders.length,exactFillCount:exactFills.length,exactSettlementCount:exactSettlements.length,providerPositionClassification:positionEvidence.classification,series:await loadRealSeriesState(env),control:await loadControl(env),providerWrites:0,orders:0,capitalMovedUsd:0};
   }
