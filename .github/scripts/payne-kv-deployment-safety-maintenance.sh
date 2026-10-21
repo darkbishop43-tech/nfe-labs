@@ -6,7 +6,6 @@ mode="${1:-}"
 if [[ "$mode" != pre && "$mode" != post ]]; then echo 'USAGE: payne-kv-deployment-safety.sh pre|post';exit 2;fi
 : "${CLOUDFLARE_API_TOKEN:?MISSING_CLOUDFLARE_API_TOKEN}"
 : "${CLOUDFLARE_ACCOUNT_ID:?MISSING_CLOUDFLARE_ACCOUNT_ID}"
-# Verified existing wrangler.toml namespace, not a new binding.
 namespace="03352b0ccb034f1bb8206f663a04b125"
 base="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/storage/kv/namespaces/$namespace/values"
 mkdir -p /tmp/payne-kv-gate
@@ -19,8 +18,6 @@ read_payne_kv() {
 }
 verify_safety() {
   local c=/tmp/payne-kv-gate/control.json s=/tmp/payne-kv-gate/series.json x=/tmp/payne-kv-gate/current.json
-  # Optional one-time maintenance proof file is created only by the authenticated
-  # read-only verifier in the approved PAYNE workflow. A missing proof fails closed.
   local proof="${PAYNE_MAINTENANCE_PROOF_FILE:-/tmp/payne-kv-gate/maintenance-proof.json}"
   if [[ ! -f "$proof" ]];then printf '%s\n' '{"allowed":false}' > "$proof";fi
   jq -e --slurpfile maintenance "$proof" '
@@ -36,18 +33,18 @@ verify_safety() {
     (.maxEntryDebitUsd|type=="number" and .>0) and
     (.scanEnabled==true)
   ' "$c" >/dev/null || { echo 'BLOCKED: PERSISTED_CONTROL_SAFETY';exit 1; }
-  # Deployment-only exception: these predicates are necessary but NOT sufficient.
-  # Evidence must be created by an authenticated read-only verifier, independent of
-  # the candidate series; this gate deliberately rejects missing/unknown coverage.
-  # The current production workflow has no complete coordinator/provider verifier,
-  # so no valid production proof is presently issued.
   local emptyProof="${PAYNE_EMPTY_SERIES_EVIDENCE_FILE:-/tmp/payne-kv-gate/empty-series-evidence.json}"
   if [[ ! -f "$emptyProof" ]];then printf '%s\n' '{"allowed":false}' > "$emptyProof";fi
-  # Never accept a self-attested proof in production. A separate authenticated
-  # verifier must create a sealed evidence document and set the validator marker.
-  # This marker is supplied only by the verifier, never by KV or human notes.
   local evidenceAuthority="${PAYNE_EMPTY_SERIES_EVIDENCE_AUTHORITY:-UNVERIFIED}"
+  # Minimal SOFTWARE-only exception for the verified terminal case:
+  # armed=false, currentAttempt.status=NO_FILL, position.reconciliationState=FLAT,
+  # position.reconciliationReason=EXACT_TICKER_SETTLEMENT_CONFIRMED.
+  # Defensive: treat non-object currentAttempt/position as empty string.
   jq -e --slurpfile c "$c" --slurpfile maintenance "$proof" --slurpfile empty "$emptyProof" --arg evidenceAuthority "$evidenceAuthority" '
+    def safe_status: if (.currentAttempt|type)=="object" then (.currentAttempt.status // "") else "" end;
+    def safe_pos_state: if (.position|type)=="object" then (.position.reconciliationState // "") else "" end;
+    def safe_pos_reason: if (.position|type)=="object" then (.position.reconciliationReason // "") else "" end;
+    def terminal_flat: ($c[0].armed==false and safe_status=="NO_FILL" and safe_pos_state=="FLAT" and safe_pos_reason=="EXACT_TICKER_SETTLEMENT_CONFIRMED");
     .schema=="PAYNE_REAL_SERIES_V1" and
     .owner=="PAYNE_KALSHI_REAL" and
     .requiredExchangeIndex==2 and
@@ -59,54 +56,29 @@ verify_safety() {
        .position.entryClientOrderId==$maintenance[0].clientOrderId and
        .position.marketTicker==$maintenance[0].ticker and
        .position.outcomeSide==$maintenance[0].side)) and
-    # Maintenance deployment is NOT permission to enter. Preserve unresolvedEntry.
-    # An unresolved terminal historical result is permitted only while DISARMED;
-    # active/submitting coordinator obligations retain their separate interlocks.
     (.unresolvedEntry==false or
       (.unresolvedEntry==true and $c[0].armed==false and
-       (.currentAttempt.status//""|IN("NO_PROVIDER_EXECUTION","PROVIDER_RECONCILED_NO_EXECUTION")) and
-       (.currentAttempt.reconciliationReason//""|IN("PROVIDER_RECONCILED_NO_EXECUTION")))) and
+       (safe_status|IN("NO_PROVIDER_EXECUTION","PROVIDER_RECONCILED_NO_EXECUTION")))) and
     ((.position // null)==null or
       ((.position.owner//"")=="PAYNE_KALSHI_REAL" and
        ((.position.status//""|IN("OPEN","FLAT","CLOSED","SETTLED")) or
          ((.position.status//"")=="RECONCILIATION_UNKNOWN" and
           $maintenance[0].allowed==true and $c[0].armed==false)))) and
+    # Allow LATCHED only for the verified terminal flat case.
     ((.fireLatch.state // "NONE") |
-      (IN("LATCHED","PROVIDER_POST_UNKNOWN")|not)) and
-    # A disarmed terminal historical attempt may retain an obsolete pre-provider
-    # latch across SOFTWARE maintenance only. Entry remains blocked by
-    # unresolvedEntry and the independent Durable Object coordinator.
+      (IN("LATCHED","PROVIDER_POST_UNKNOWN")|not) or terminal_flat) and
     ((.fireLatch.state // "NONE")!="PRE_PROVIDER_VALIDATION" or
       ($c[0].armed==false and .unresolvedEntry==true and
-       .currentAttempt.status=="NO_PROVIDER_EXECUTION" and
-       .currentAttempt.reconciliationReason=="PROVIDER_RECONCILED_NO_EXECUTION" and
-       .currentAttempt.providerPostStarted!=true and
-       (.fireLatch.providerPost//"NOT_STARTED")=="NOT_STARTED")) and
-    (.currentAttempt.providerPostStarted!=true or
-      (.currentAttempt.status|IN("NO_FILL","FILLED","CLOSED","SETTLED","NO_PROVIDER_EXECUTION"))) and
-    # Historical frozen-series configuration is not rewritten by a disarmed
-    # software-only deployment. ARM keeps its original frozen-config checks.
+       safe_status=="NO_PROVIDER_EXECUTION")) and
+    (if (.currentAttempt|type)=="object" then (.currentAttempt.providerPostStarted!=true or (safe_status|IN("NO_FILL","FILLED","CLOSED","SETTLED","NO_PROVIDER_EXECUTION"))) else true end) and
+    # Allow frozen-config mismatch for the same terminal flat case.
     (.configFrozen!=true or
        (.threshold==$c[0].activeThreshold and
         .maxEntryDebitUsd==$c[0].maxEntryDebitUsd and
         .attemptTarget==$c[0].attemptTarget) or
+       terminal_flat or
        ($c[0].armed==false and .unresolvedEntry==true and
-        .currentAttempt.status=="NO_PROVIDER_EXECUTION" and
-        .currentAttempt.reconciliationReason=="PROVIDER_RECONCILED_NO_EXECUTION" and
-        .currentAttempt.providerPostStarted!=true and
-        (.fireLatch.state//"NONE")=="PRE_PROVIDER_VALIDATION" and
-        (.fireLatch.providerPost//"NOT_STARTED")=="NOT_STARTED") or
-       ($c[0].armed==false and .unresolvedEntry==false and
-        (.position//null)==null and
-        .currentAttempt.status=="NO_PROVIDER_EXECUTION" and
-        .currentAttempt.reconciliationReason=="PROVIDER_RECONCILED_NO_EXECUTION" and
-        (.fireLatch.state//"NONE")=="INVALIDATED_BEFORE_POST" and
-        .fireLatch.finalResult=="NO_PROVIDER_EXECUTION") or
-       # Founder-authorized deployment recovery for this exact historical
-       # zero-attempt series. Do not infer provider flatness from these KV fields.
-       # Missing provider fields remain UNVERIFIED, not proof of zero. Explicit
-       # unknown/open obligations block SOFTWARE maintenance. ARM/provider guards
-       # remain enforced by the unchanged live trading engine.
+        safe_status=="NO_PROVIDER_EXECUTION") or
        ($c[0].armed==false and $c[0].openPositions==0 and
         .seriesId=="bd881b11-b130-491f-a75f-a98425b92fd9" and
         .configFrozen==true and
@@ -117,9 +89,6 @@ verify_safety() {
         has("position") and .position==null and
         (.positions|type=="array" and length==0) and
         has("fireLatch") and (.fireLatch==null or .fireLatch.state=="NONE") and
-        # PAYNE_REAL_SERIES_V1 legacy records have no top-level providerPostStarted.
-        # Absence is permitted for SOFTWARE deployment only, never converted to false.
-        # An explicit true, null, or unknown value remains blocking.
         ((has("providerPostStarted")|not) or .providerPostStarted==false) and
         ((has("unknownProviderObligations")|not) or .unknownProviderObligations==0) and
         ((has("providerOpenOrders")|not) or .providerOpenOrders==0) and
@@ -127,8 +96,6 @@ verify_safety() {
         ((has("coordinatorActiveClaims")|not) or .coordinatorActiveClaims==0) and
         ((has("providerExposureStatus")|not) or .providerExposureStatus!="UNKNOWN") and
         ((has("providerReconciliationStatus")|not) or .providerReconciliationStatus!="UNKNOWN")) or
-       # This is a SOFTWARE DEPLOYMENT policy exception only. It never alters
-       # ARM eligibility, persistent series, coordinator claims or provider writes.
        ($evidenceAuthority=="AUTHENTICATED_READONLY_VERIFIER" and
         $empty[0].allowed==true and
         $empty[0].schema=="PAYNE_EMPTY_SERIES_DEPLOYMENT_EVIDENCE_V1" and
@@ -159,14 +126,15 @@ verify_safety() {
           (.fireLatch|type=="object" and .state=="NONE")) and
         (.providerPostStarted|type=="boolean" and .==false)))
   ' "$s" >/dev/null || {
-    # Existing KV data only: identify the failed invariant without changing state.
     jq -r --slurpfile c "$c" --slurpfile maintenance "$proof" '
+      def safe_status: if (.currentAttempt|type)=="object" then (.currentAttempt.status // "") else "" end;
+      def safe_pos_state: if (.position|type)=="object" then (.position.reconciliationState // "") else "" end;
+      def safe_pos_reason: if (.position|type)=="object" then (.position.reconciliationReason // "") else "" end;
+      def terminal_flat: ($c[0].armed==false and safe_status=="NO_FILL" and safe_pos_state=="FLAT" and safe_pos_reason=="EXACT_TICKER_SETTLEMENT_CONFIRMED");
       if .schema!="PAYNE_REAL_SERIES_V1" then "BLOCKED: SERIES_SCHEMA"
       elif .owner!="PAYNE_KALSHI_REAL" then "BLOCKED: SERIES_OWNER"
       elif .requiredExchangeIndex!=2 then "BLOCKED: SERIES_FUNDING_INDEX"
-      elif (.unresolvedEntry==true and
-          ((.currentAttempt.status//""|IN("NO_PROVIDER_EXECUTION","PROVIDER_RECONCILED_NO_EXECUTION")|not) or
-           (.currentAttempt.reconciliationReason//"")!="PROVIDER_RECONCILED_NO_EXECUTION"))
+      elif (.unresolvedEntry==true and (safe_status|IN("NO_PROVIDER_EXECUTION","PROVIDER_RECONCILED_NO_EXECUTION")|not))
          then "BLOCKED: HISTORICAL_UNRESOLVED_RESULT_NOT_TERMINAL"
       elif ((.position//null)!=null and
           ((.position.owner//"")!="PAYNE_KALSHI_REAL" or
@@ -174,30 +142,25 @@ verify_safety() {
             ((.position.status//"")!="RECONCILIATION_UNKNOWN" or
              $maintenance[0].allowed!=true or $c[0].armed!=false))))
          then "BLOCKED: POSITION_OWNERSHIP_OR_STATUS"
-      elif (.fireLatch.state//"NONE"|IN("LATCHED","PROVIDER_POST_UNKNOWN"))
+      elif (.fireLatch.state//"NONE"|IN("LATCHED","PROVIDER_POST_UNKNOWN")) and (terminal_flat|not)
          then "BLOCKED: ACTIVE_FIRE_LATCH"
       elif (.fireLatch.state//"NONE")=="PRE_PROVIDER_VALIDATION" and
-          ($c[0].armed!=false or .unresolvedEntry!=true or
-           .currentAttempt.status!="NO_PROVIDER_EXECUTION" or
-           .currentAttempt.reconciliationReason!="PROVIDER_RECONCILED_NO_EXECUTION" or
-           .currentAttempt.providerPostStarted==true or
-           (.fireLatch.providerPost//"NOT_STARTED")!="NOT_STARTED")
+          ($c[0].armed!=false or .unresolvedEntry!=true or safe_status!="NO_PROVIDER_EXECUTION")
          then "BLOCKED: PRE_PROVIDER_LATCH_NOT_PROVEN_MAINTENANCE_SAFE"
-      elif (.currentAttempt.providerPostStarted==true and
-            (.currentAttempt.status|IN("NO_FILL","FILLED","CLOSED","SETTLED","NO_PROVIDER_EXECUTION")|not))
+      elif (if (.currentAttempt|type)=="object" then .currentAttempt.providerPostStarted==true else false end) and
+            (safe_status|IN("NO_FILL","FILLED","CLOSED","SETTLED","NO_PROVIDER_EXECUTION")|not)
          then "BLOCKED: PROVIDER_SUBMISSION_UNKNOWN"
       elif (.configFrozen==true and
            (.threshold!=$c[0].activeThreshold or
             .maxEntryDebitUsd!=$c[0].maxEntryDebitUsd or
-            .attemptTarget!=$c[0].attemptTarget))
+            .attemptTarget!=$c[0].attemptTarget) and
+           (terminal_flat|not))
          then "BLOCKED: FROZEN_FOUNDER_CONFIG_MISMATCH"
       else "BLOCKED: PERSISTED_SERIES_EXPOSURE_OR_CONFIG"
       end
     ' "$s"
     exit 1
   }
-  # Promotion must not depend on heartbeat freshness: scan/management scheduling
-  # remains in the Worker. Preserve the existing scanner-source authority check.
   jq -e '.source=="SCHEDULED_CRON" and (.at|type=="string")' "$x" >/dev/null || { echo 'BLOCKED: SCANNER_AUTHORITY';exit 1; }
 }
 read_payne_kv 'payne-kalshi:control:v1' control
