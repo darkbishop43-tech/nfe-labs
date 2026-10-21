@@ -38,6 +38,8 @@ export async function verifyProviderTerminalExit(env,{claim,position,get=kalshiG
  const reads=await Promise.all(feeds.map(([path,field])=>readRecoveryPages(env,path,field,{get})));
  if(reads.some(x=>!x.ok))return unknown('PROVIDER_READS_OR_PAGINATION_INCOMPLETE');
  const [liveOrders,historicalOrders,liveFills,historicalFills,positions,settlements]=reads.map(x=>x.rows);
+ if(liveOrders.some(o=>o.ticker===ticker&&!terminal.has(String(o.status||'').toLowerCase())))
+  return unknown('OPEN_OR_UNKNOWN_SAME_CONTRACT_ORDER');
  const matched=[...liveOrders,...historicalOrders].filter(o=>o.client_order_id===clientId&&
   o.ticker===ticker&&String(o.side||'').toUpperCase()===claim.side);
  const ids=[...new Set(matched.map(o=>o.order_id))];
@@ -87,6 +89,7 @@ export async function verifyProviderTerminalEntry(env,{attempt,latch,get=kalshiG
  const fail=reason=>({ok:false,complete:false,status:'UNKNOWN',reason,providerWrites:0});
  if(!attempt||!latch||latch.state!=='LATCHED'||!latch.specimenId||
   attempt.fireSpecimenId!==latch.specimenId||
+  (latch.outcomeSide&&latch.outcomeSide!==attempt.outcomeSide)||
   attempt.marketTicker!==latch.ticker||!attempt.attemptId||
   !attempt.clientOrderId||!attempt.providerOrderId||
   !['YES','NO'].includes(attempt.outcomeSide)||
@@ -105,6 +108,8 @@ export async function verifyProviderTerminalEntry(env,{attempt,latch,get=kalshiG
  if(reads.some(x=>!x.ok))return fail('ENTRY_PROVIDER_READ_OR_PAGINATION_INCOMPLETE');
  const [orders,historicalOrders,fills,historicalFills,positions,settlements]=reads.map(x=>x.rows);
  const allOrders=[...orders,...historicalOrders];
+ if(orders.some(o=>o.ticker===ticker&&!terminal.has(String(o.status||'').toLowerCase())))
+  return fail('ENTRY_OPEN_OR_UNKNOWN_SAME_CONTRACT_ORDER');
  const matched=allOrders.filter(o=>o.order_id===oid&&o.client_order_id===cid&&o.ticker===ticker&&
   String(o.side||'').toUpperCase()===attempt.outcomeSide&&(!o.action||o.action==='buy'));
  if(matched.length<1||allOrders.some(o=>o.order_id===oid&&!matched.includes(o)))
