@@ -71,8 +71,15 @@ verify_safety() {
        ((.position.status//""|IN("OPEN","FLAT","CLOSED","SETTLED")) or
          ((.position.status//"")=="RECONCILIATION_UNKNOWN" and
           $maintenance[0].allowed==true and $c[0].armed==false)))) and
+    # Narrow SOFTWARE-only exception for a terminal NO_FILL fire latch whose
+    # associated position is already settlement-confirmed FLAT. Does not authorize
+    # ARM, entry, or management of a live open position.
     ((.fireLatch.state // "NONE") |
-      (IN("LATCHED","PROVIDER_POST_UNKNOWN")|not)) and
+      (IN("LATCHED","PROVIDER_POST_UNKNOWN")|not) or
+      ($c[0].armed==false and
+       (.currentAttempt.status//"")=="NO_FILL" and
+       (.position.reconciliationState//"")=="FLAT" and
+       (.position.reconciliationReason//"")=="EXACT_TICKER_SETTLEMENT_CONFIRMED")) and
     # A disarmed terminal historical attempt may retain an obsolete pre-provider
     # latch across SOFTWARE maintenance only. Entry remains blocked by
     # unresolvedEntry and the independent Durable Object coordinator.
@@ -174,7 +181,11 @@ verify_safety() {
             ((.position.status//"")!="RECONCILIATION_UNKNOWN" or
              $maintenance[0].allowed!=true or $c[0].armed!=false))))
          then "BLOCKED: POSITION_OWNERSHIP_OR_STATUS"
-      elif (.fireLatch.state//"NONE"|IN("LATCHED","PROVIDER_POST_UNKNOWN"))
+      elif (.fireLatch.state//"NONE"|IN("LATCHED","PROVIDER_POST_UNKNOWN")) and
+          ($c[0].armed!=false or
+           (.currentAttempt.status//"")!="NO_FILL" or
+           (.position.reconciliationState//"")!="FLAT" or
+           (.position.reconciliationReason//"")!="EXACT_TICKER_SETTLEMENT_CONFIRMED")
          then "BLOCKED: ACTIVE_FIRE_LATCH"
       elif (.fireLatch.state//"NONE")=="PRE_PROVIDER_VALIDATION" and
           ($c[0].armed!=false or .unresolvedEntry!=true or
