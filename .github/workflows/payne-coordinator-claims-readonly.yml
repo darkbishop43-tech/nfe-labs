@@ -33,10 +33,12 @@ jobs:
           url="https://market-edge-payne-kalshi-real.darkbishop43.workers.dev/internal/series-claims-diagnostic?seriesId=$(printf %s "$seriesId" | jq -sRr @uri)"
           code="$(curl --silent --show-error --max-time 25 --output "$tmp/claims.json" --write-out '%{http_code}' --header "x-payne-diagnostic-token: $PAYNE_COORDINATOR_DIAGNOSTIC_TOKEN" "$url")"
           echo "CLAIMS_HTTP=$code"
+          jq -c '{claims:[(.claims//[])[]|{kind,key,state,seriesId,attemptNo,clientOrderId}],activeClaims,unknownRecords}' "$tmp/claims.json"
           jq -c '{ok,complete,status,activeClaims,unknownRecords,reason,claimCount:(.claims//[]|length)}' "$tmp/claims.json" || cat "$tmp/claims.json"
           echo "READ_ONLY_CLAIMS_DIAGNOSTIC_COMPLETE"
           # Read existing authenticated exact current-attempt claim only; no writes.
           attemptNo="$(jq -r '.currentAttempt.providerAttemptNoCandidate // .currentAttempt.providerAttemptNo // .currentAttempt.attemptNo // empty' "$tmp/series.json")"
+          echo "CLAIM_LOOKUP_ATTEMPT_NO=$attemptNo"
           echo "CURRENT_ATTEMPT_ID=$(jq -r '.currentAttempt.attemptId // ""' "$tmp/series.json")"
           echo "CURRENT_ATTEMPT_TICKER=$(jq -r '.currentAttempt.marketTicker // ""' "$tmp/series.json")"
           echo "CURRENT_ATTEMPT_ORDER=$(jq -r '.currentAttempt.providerOrderId // ""' "$tmp/series.json")"
