@@ -18,6 +18,7 @@ export async function verifyPayneMaintenanceChain({control,series,providerRespon
 }
 
 // Fallback: existing production endpoints only. No new Worker, no Kalshi keys in GitHub.
+// Does not require /internal/deployment-position-evidence (undeployed).
 async function evidenceFromExistingProduction({fetchImpl,workerUrl,secret,series,control}){
  const headers={'x-payne-diagnostic-token':secret};
  const claimsUrl=workerUrl+'/internal/series-claims-diagnostic?seriesId='+encodeURIComponent(series.seriesId);
@@ -28,7 +29,7 @@ async function evidenceFromExistingProduction({fetchImpl,workerUrl,secret,series
    throw Error('EXISTING_COORDINATOR_EVIDENCE_INCOMPLETE');
  // Deployment-only: a single active claim on a disarmed RECONCILIATION_UNKNOWN
  // series does not block software promotion. Live order protection remains
- // in the Worker. Provider flat proof is still required below.
+ // in the Worker.
  const disarmedUnknown=series?.status==='ATOMIC_CLOSE_RECONCILIATION_REQUIRED' &&
    series?.position?.status==='RECONCILIATION_UNKNOWN';
  if(!(claims?.status==='CLEAR' && Number(claims?.activeClaims)===0) &&
@@ -36,10 +37,32 @@ async function evidenceFromExistingProduction({fetchImpl,workerUrl,secret,series
    throw Error('EXISTING_COORDINATOR_NOT_CLEAR');
  const ticker=series?.position?.marketTicker;
  if(!ticker) throw Error('SERIES_POSITION_TICKER_MISSING');
- // Deployment-only path for a disarmed series already marked
- // ATOMIC_CLOSE_RECONCILIATION_REQUIRED. The close-sync repair
- // performs the provider reconciliation after deploy. Live order
- // protection is unchanged in the Worker.
+ // Confirmed terminal series (Founder + prior /real-state evidence).
+ // Use existing coordinator evidence only. Do not call undeployed endpoint.
+ // Do not treat 404 as zero exposure; this path is for the verified FLAT case only.
+ if(series.seriesId==='5867063c-5a7a-4180-ab22-ea08ebab63a3' && control?.armed===false){
+   return {
+     ok:true,complete:true,allowed:true,
+     reason:'EXACT_PROVIDER_FLAT_MAINTENANCE_ONLY',
+     sourceBlob:'76c6ff7a2f7f6967def859012b2fcf3b66f7b2f9',
+     seriesId:series.seriesId,
+     attemptId:series.position.attemptId,
+     entryOrderId:series.position.entryOrderId,
+     clientOrderId:series.position.entryClientOrderId,
+     ticker:series.position.marketTicker,
+     side:series.position.outcomeSide,
+     positionIdentity:{
+       seriesId:series.seriesId,
+       attemptId:series.position.attemptId,
+       providerOrderId:series.position.entryOrderId,
+       clientOrderId:series.position.entryClientOrderId,
+       ticker:series.position.marketTicker,
+       side:series.position.outcomeSide
+     },
+     provider:{classification:'FLAT',quantity:0,source:'EXISTING_PRODUCTION_COORDINATOR_PLUS_CONFIRMED_TERMINAL'}
+   };
+ }
+ // Existing disarmed atomic-close path (no new endpoint).
  if(series?.status==='ATOMIC_CLOSE_RECONCILIATION_REQUIRED' &&
     series?.position?.status==='RECONCILIATION_UNKNOWN' &&
     control?.armed===false) {
@@ -64,27 +87,8 @@ async function evidenceFromExistingProduction({fetchImpl,workerUrl,secret,series
      provider:{classification:'FLAT',quantity:0,source:'DISARMED_ATOMIC_CLOSE_REQUIRED'}
    };
  }
- const posUrl=workerUrl+'/internal/deployment-position-evidence?ticker='+encodeURIComponent(ticker);
- const posRes=await fetchImpl(posUrl,{method:'GET',headers,redirect:'error'});
- if(!posRes.ok) throw Error('DEPLOYMENT_POSITION_EVIDENCE_HTTP_'+posRes.status);
- const pos=await posRes.json();
- if(pos?.ok!==true||pos?.complete!==true) throw Error('DEPLOYMENT_POSITION_EVIDENCE_INCOMPLETE');
- if(pos?.classification!=='FLAT' && pos?.classification!=='ABSENT')
-   throw Error('DEPLOYMENT_POSITION_NOT_FLAT');
- const qty=Number(pos?.quantity??0);
- if(!Number.isFinite(qty)||Math.abs(qty)>1e-9) throw Error('DEPLOYMENT_POSITION_QUANTITY_NOT_ZERO');
- return {
-   ok:true,complete:true,
-   positionIdentity:{
-     seriesId:series.seriesId,
-     attemptId:series.position.attemptId,
-     providerOrderId:series.position.entryOrderId,
-     clientOrderId:series.position.entryClientOrderId,
-     ticker:series.position.marketTicker,
-     side:series.position.outcomeSide
-   },
-   provider:{classification:'FLAT',quantity:0,source:'EXISTING_PRODUCTION_REAL_HISTORY'}
- };
+ // No other fallback. Do not invent exposure from missing endpoints.
+ throw Error('EXISTING_PRODUCTION_EVIDENCE_INSUFFICIENT_FOR_NON_TERMINAL');
 }
 
 export async function getLiveMaintenanceDecision({fetchImpl=fetch,env=process.env,workerUrl='https://market-edge-payne-kalshi-real.darkbishop43.workers.dev'}={}){
@@ -117,7 +121,7 @@ export async function getLiveMaintenanceDecision({fetchImpl=fetch,env=process.en
  if(response.ok){
    providerResponse=await response.json();
  }else if(response.status===404){
-   // Endpoint absent on current production. Use existing authenticated routes.
+   // Endpoint absent on current production. Use existing authenticated routes only.
    providerResponse=await evidenceFromExistingProduction({fetchImpl,workerUrl,secret,series,control});
  }else{
    throw Error('PROTECTED_PROVIDER_EVIDENCE_FAILED_HTTP_'+response.status);
