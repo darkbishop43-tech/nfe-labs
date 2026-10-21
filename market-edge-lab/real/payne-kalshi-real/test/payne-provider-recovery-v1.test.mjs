@@ -102,3 +102,47 @@ test('11 pre-KV crash retains exact deterministic exit ownership without stored 
  assert.equal(result.ok,true);
  assert.equal(f.stats().stored.positions[0].status,'CLOSED');
 });
+
+test('12 ZEC-like exact executed exit survives paginated orders and deduplicated fills',async()=>{
+ const ticker='KXZEC15M-26OCT210030-30',clientId='payne-real-ea08ebab63a3-1-exit1';
+ const claim={...c,seriesId:'zec-series',specimenId:'zec-series-intent-2',ticker,clientOrderId:clientId,side:'NO'};
+ const pos={...p,seriesId:'zec-series',attemptId:claim.specimenId,ticker,marketTicker:ticker,outcomeSide:'NO',exitClientOrderId:clientId};
+ const order={order_id:'01a15cb8-5250-7d03-b3fd-2577e000c60c',client_order_id:clientId,ticker,side:'no',action:'sell',status:'executed',fill_count:1};
+ const fill={fill_id:'zec-fill-1',order_id:order.order_id,client_order_id:clientId,ticker,side:'no',count:1};
+ const get=async (_env,path)=>{
+  let field,rows=[],cursor='';
+  if(path.includes('/portfolio/orders')){field='orders';if(!path.includes('&cursor='))cursor='next';else rows=[order];}
+  else if(path.includes('/historical/orders')){field='orders';rows=[order];}
+  else if(path.includes('/portfolio/fills')){field='fills';rows=[fill];}
+  else if(path.includes('/historical/fills')){field='fills';rows=[fill];}
+  else if(path.includes('/portfolio/positions')){field='market_positions';rows=[];}
+  else if(path.includes('/portfolio/settlements')){field='settlements';rows=[{ticker}];}
+  return new Response(JSON.stringify({[field]:rows,cursor}),{status:200});
+ };
+ const proof=await verifyProviderTerminalExit({}, {claim,position:pos,get});
+ assert.equal(proof.ok,true);assert.equal(proof.providerOrderId,order.order_id);
+ assert.equal(proof.executedFills,1);assert.equal(proof.settlementMatched,true);
+});
+test('13 incomplete provider cursor fails closed',async()=>{
+ const get=async()=>new Response(JSON.stringify({orders:[],cursor:'still-more'}),{status:200});
+ const r=await readRecoveryPages({},'/trade-api/v2/portfolio/orders','orders',{get,maxPages:2});
+ assert.equal(r.ok,false);assert.equal(r.reason,'PROVIDER_PAGE_LIMIT');
+});
+test('14 conflicting duplicate fill IDs fail closed',async()=>{
+ const get=async (_env,path)=>{
+  const field=path.includes('orders')?'orders':path.includes('fills')?'fills':path.includes('positions')?'market_positions':'settlements';
+  const rows=field==='orders'?(path.includes('historical')?[]:[{order_id:'exit-order-1',client_order_id:c.clientOrderId,ticker:c.ticker,side:'yes',action:'sell',status:'executed',fill_count:1}]):field==='fills'?[{fill_id:'reused',order_id:'exit-order-1',ticker:c.ticker,side:'yes',count:path.includes('historical')?2:1}]:field==='market_positions'?[{ticker:c.ticker,position:0}]:[{ticker:c.ticker}];
+  return new Response(JSON.stringify({[field]:rows,cursor:''}),{status:200});
+ };
+ const proof=await verifyProviderTerminalExit({}, {claim:c,position:p,get});
+ assert.equal(proof.status,'UNKNOWN');assert.equal(proof.reason,'FILL_DUPLICATE_ID_CONFLICT');
+});
+test('15 wrong provider order cannot satisfy exact exit proof',async()=>{
+ const get=async (_env,path)=>{
+  const field=path.includes('orders')?'orders':path.includes('fills')?'fills':path.includes('positions')?'market_positions':'settlements';
+  const rows=field==='orders'?(path.includes('historical')?[]:[{order_id:'other-order',client_order_id:'other-client',ticker:c.ticker,side:'yes',status:'executed',fill_count:1}]):field==='market_positions'?[]:field==='settlements'?[{ticker:c.ticker}]:[];
+  return new Response(JSON.stringify({[field]:rows,cursor:''}),{status:200});
+ };
+ const proof=await verifyProviderTerminalExit({}, {claim:c,position:p,get});
+ assert.equal(proof.ok,false);assert.equal(proof.reason,'EXACT_EXIT_ORDER_NOT_ESTABLISHED');
+});
