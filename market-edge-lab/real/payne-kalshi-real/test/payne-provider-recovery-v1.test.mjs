@@ -126,7 +126,7 @@ test('12 ZEC-like exact executed exit survives paginated orders and deduplicated
 test('13 incomplete provider cursor fails closed',async()=>{
  const get=async()=>new Response(JSON.stringify({orders:[],cursor:'still-more'}),{status:200});
  const r=await readRecoveryPages({},'/trade-api/v2/portfolio/orders','orders',{get,maxPages:2});
- assert.equal(r.ok,false);assert.equal(r.reason,'PROVIDER_PAGE_LIMIT');
+ assert.equal(r.ok,false);assert.equal(r.reason,'PROVIDER_CURSOR_REPEATED');
 });
 test('14 conflicting duplicate fill IDs fail closed',async()=>{
  const get=async (_env,path)=>{
