@@ -3195,32 +3195,31 @@ export async function buildPayneAuditView(env, requestedId) {
     eventsSource:'PERSISTED_ATTEMPT_TIMESTAMPS_ONLY',providerWrites:0,ordersSubmittedByThisRead:0};
 }
 
-export async function buildHistoricalSeriesReport(env,seriesId) {
+export async function buildHistoricalSeriesReport(env,seriesId,{cursor=null,limit=20}={}) {
   const id=String(seriesId||'').trim();
   if(!id) throw new Error('PAYNE_HISTORY_SERIES_ID_REQUIRED');
-  const [ledger,attempts,currentSeries,run]=await Promise.all([
-    listRealLedger(env,1000),
-    listRealAttemptsForSeries(env,id),
-    loadRealSeriesState(env),
-    kvGetJson(env,RUN_PREFIX+id),
-  ]);
-  const rows=ledger.filter(x=>String(x?.seriesId||'')===id);
+  const history=await payneHistoryCursor(binding(env),{cursor,limit});
+  const events=await payneLedgerEventsCursor(binding(env),{limit:20});
+  // Do not claim full history or financial aggregates while either cursor remains.
+  const attempts=history.rows.filter(x=>x.seriesId===id);
+  const rows=events.rows.filter(x=>x.seriesId===id);
+  const currentSeries=await loadRealSeriesState(env);
+  const run=await kvGetJson(env,RUN_PREFIX+id);
   const seriesConfig=run||((String(currentSeries?.seriesId||'')===id)?currentSeries:null);
   const perAttempt=[];
   for(const attempt of attempts){
-    const position=await kvGetJson(env,POSITION_PREFIX+String(attempt?.attemptId||''));
-    perAttempt.push(summarizeHistoricalAttempt({attempt,ledgerRows:rows,position,seriesConfig}));
+    perAttempt.push({...attempt,coverage:'PARTIAL_SERIES_HISTORY_CURSOR',providerEvidenceComplete:false});
   }
   const filled=perAttempt.filter(x=>x.finalResult==='FILLED').length;
   const noFill=perAttempt.filter(x=>x.finalResult==='NO_FILL').length;
   const unknownUnresolved=perAttempt.filter(x=>x.finalResult==='UNKNOWN').length;
   const knownNet=perAttempt.filter(x=>x.netRealizedPnlUsd!==null);
   const knownFees=perAttempt.filter(x=>x.totalFeesUsd!==null);
-  const netRealizedPnlUsd=knownNet.length?Number(knownNet.reduce((a,x)=>a+Number(x.netRealizedPnlUsd||0),0).toFixed(4)):0;
-  const totalFeesUsd=knownFees.length?Number(knownFees.reduce((a,x)=>a+Number(x.totalFeesUsd||0),0).toFixed(4)):0;
-  const grossRealizedPnlUsd=Number((netRealizedPnlUsd+totalFeesUsd).toFixed(4));
+  const netRealizedPnlUsd=null;
+  const totalFeesUsd=null;
+  const grossRealizedPnlUsd=null;
   return {
-    ok:true,
+    ok:true,complete:false,coverage:'PARTIAL_BOUNDED_SERIES_HISTORY',nextCursor:history.nextCursor,eventsNextCursor:events.nextCursor,
     schema:'PAYNE_REAL_SERIES_HISTORY_V1',
     readOnly:true,
     seriesId:id,
@@ -5122,7 +5121,7 @@ export default {
     if (url.pathname === '/real-history') {
       try{
         if(url.searchParams.get('view')==='audit')return Response.json(await buildPayneAuditView(env,url.searchParams.get('seriesId')),{headers:{'cache-control':'no-store'}});
-        const report=await buildHistoricalSeriesReport(env,url.searchParams.get('seriesId'));
+        const report=await buildHistoricalSeriesReport(env,url.searchParams.get('seriesId'),{cursor:url.searchParams.get('cursor'),limit:url.searchParams.get('limit')});
         return Response.json(report,{headers:{'cache-control':'no-store'}});
       }catch(error){
         return Response.json({ok:false,error:String(error?.message||'PAYNE_HISTORY_FAILED'),providerWrites:0,ordersSubmittedByThisRead:0,capitalMovedUsd:0},{status:400,headers:{'cache-control':'no-store'}});
