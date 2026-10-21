@@ -146,3 +146,4 @@ jobs:
           echo "PAYNE_STAIRCASE_NEW_VERSION_100_PERCENT=$version"
 
 # PAYNE ledger promotion: rerun existing authoritative pre/post deployment gates.
+# Trigger after narrow terminal NO_FILL + settlement-confirmed FLAT latch exception.
