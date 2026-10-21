@@ -1,0 +1,57 @@
+name: PAYNE ZEC Exact Kalshi GET
+on:
+  push:
+    branches: [payne-ledger-bounded-history-v10-20261021]
+    paths: [".github/workflows/payne-zec-exact-kalshi-get.yml"]
+permissions:
+  contents: read
+jobs:
+  exact-provider:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      KALSHI_EXECUTION_KEY_ID: ${{ secrets.KALSHI_EXECUTION_KEY_ID }}
+      KALSHI_EXECUTION_PRIVATE_KEY: ${{ secrets.KALSHI_EXECUTION_PRIVATE_KEY }}
+      KALSHI_KEY_ID: ${{ secrets.KALSHI_KEY_ID }}
+      KALSHI_PRIVATE_KEY: ${{ secrets.KALSHI_PRIVATE_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Bounded authenticated Kalshi GET for exact ZEC order and exposure
+        working-directory: market-edge-lab/real/payne-kalshi-real
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'NODE'
+          import {kalshiGetOnly} from './src/kalshi-get-only.js';
+          const env={
+            KALSHI_EXECUTION_KEY_ID:process.env.KALSHI_EXECUTION_KEY_ID||process.env.KALSHI_KEY_ID,
+            KALSHI_EXECUTION_PRIVATE_KEY:process.env.KALSHI_EXECUTION_PRIVATE_KEY||process.env.KALSHI_PRIVATE_KEY
+          };
+          if(!env.KALSHI_EXECUTION_KEY_ID||!env.KALSHI_EXECUTION_PRIVATE_KEY){
+            console.log('KALSHI_GITHUB_SECRET_PAIR_UNAVAILABLE; NO_PROVIDER_FLAT_CLAIM');
+            process.exitCode=2;
+          }else{
+            const ticker='KXZEC15M-26OCT210030-30';
+            const order='01a15cb6-6238-71dd-80eb-479a74efdb04';
+            const routes=[
+              ['order','/trade-api/v2/portfolio/orders/'+encodeURIComponent(order)],
+              ['position','/trade-api/v2/portfolio/positions?ticker='+encodeURIComponent(ticker)+'&limit=1000&subaccount=0'],
+              ['fills','/trade-api/v2/portfolio/fills?ticker='+encodeURIComponent(ticker)+'&order_id='+encodeURIComponent(order)+'&limit=200&subaccount=0'],
+              ['settlements','/trade-api/v2/portfolio/settlements?ticker='+encodeURIComponent(ticker)+'&limit=200&subaccount=0']
+            ];
+            for(const [name,path] of routes){
+              try{
+                const response=await kalshiGetOnly(env,path);
+                const data=await response.json();
+                const rows=name==='position'?data.market_positions:name==='fills'?data.fills:name==='settlements'?data.settlements:null;
+                const safe=name==='order'?{order_id:data.order?.order_id,client_order_id:data.order?.client_order_id,ticker:data.order?.ticker,side:data.order?.side,action:data.order?.action,status:data.order?.status,fill_count:data.order?.fill_count,fill_count_fp:data.order?.fill_count_fp}:
+                {cursor:data.cursor??null,rows:Array.isArray(rows)?rows.filter(x=>name==='position'?x.ticker===ticker:name==='fills'?x.order_id===order:x.ticker===ticker).map(x=>({ticker:x.ticker,order_id:x.order_id,position:x.position,position_fp:x.position_fp,quantity:x.quantity,count:x.count,count_fp:x.count_fp,side:x.side,result:x.result,yes_count:x.yes_count,no_count:x.no_count,fill_id:x.fill_id,trade_id:x.trade_id})):null};
+                console.log(JSON.stringify({read:name,http:response.status,ok:response.ok,...safe}));
+              }catch(e){console.log(JSON.stringify({read:name,ok:false,errorClass:e.name}));}
+            }
+            console.log('GET_ONLY_PROVIDER_CHECK_COMPLETE; PROVIDER_WRITES=0');
+          }
+          NODE
