@@ -19,6 +19,18 @@ export async function readRecoveryPages(env,path,field,{get=kalshiGetOnly,maxPag
 
 const unknown=(reason)=>({ok:false,complete:false,status:'UNKNOWN',reason,providerWrites:0});
 const terminal=new Set(['executed','canceled','cancelled','expired','rejected']);
+function closesClaimedSide(row,positionSide){
+ const side=String(row?.side||'').toUpperCase(),action=String(row?.action||'').toLowerCase();
+ return (side===positionSide&&action==='sell')||
+  (side===(positionSide==='NO'?'YES':'NO')&&action==='buy');
+}
+function matchesClosingFill(row,positionSide){
+ const side=String(row?.side||'').toUpperCase();
+ const action=row?.action==null?null:String(row.action).toLowerCase();
+ return (side===positionSide&&(action===null||action==='sell'))||
+  (side===(positionSide==='NO'?'YES':'NO')&&(action===null||action==='buy'));
+}
+
 export async function verifyProviderTerminalExit(env,{claim,position,get=kalshiGetOnly}={}){
  if(!claim||!position||claim.seriesId!==position.seriesId||
   claim.kind&&claim.kind!=='EXIT'||claim.clientOrderId!==position.exitClientOrderId||
@@ -41,9 +53,9 @@ export async function verifyProviderTerminalExit(env,{claim,position,get=kalshiG
  if(liveOrders.some(o=>o.ticker===ticker&&!terminal.has(String(o.status||'').toLowerCase())))
   return unknown('OPEN_OR_UNKNOWN_SAME_CONTRACT_ORDER');
  const matched=[...liveOrders,...historicalOrders].filter(o=>o.client_order_id===clientId&&
-  o.ticker===ticker&&String(o.side||'').toUpperCase()===claim.side);
+  o.ticker===ticker&&closesClaimedSide(o,claim.side));
  const ids=[...new Set(matched.map(o=>o.order_id))];
- if(ids.length!==1||!ids[0]||matched.some(o=>o.action&&o.action!=='sell'))
+ if(ids.length!==1||!ids[0])
   return {...unknown('EXACT_EXIT_ORDER_NOT_ESTABLISHED'),
    diagnostic:{liveOrderCount:liveOrders.length,historicalOrderCount:historicalOrders.length,
     clientTickerMatches:[...liveOrders,...historicalOrders].filter(o=>
@@ -55,7 +67,7 @@ export async function verifyProviderTerminalExit(env,{claim,position,get=kalshiG
  if(matched.some(o=>!terminal.has(String(o.status||'').toLowerCase())))
   return unknown('EXIT_ORDER_NOT_PROVIDER_TERMINAL');
  const allFills=[...liveFills,...historicalFills].filter(f=>f.order_id===providerOrderId);
- if(allFills.some(f=>f.ticker!==ticker||String(f.side||'').toUpperCase()!==claim.side||
+ if(allFills.some(f=>f.ticker!==ticker||!matchesClosingFill(f,claim.side)||
     (f.client_order_id&&f.client_order_id!==clientId)))
   return unknown('EXIT_FILL_IDENTITY_MISMATCH');
  const fills=new Map();
