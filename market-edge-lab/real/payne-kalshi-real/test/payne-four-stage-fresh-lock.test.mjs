@@ -25,9 +25,9 @@ test('last 60 seconds blocked and 61 seconds allowed',()=>{
   assert.equal(kalshiCandidateTimeSafe({closeTime:new Date(now+61000).toISOString()},now),true);
   assert.equal(kalshiCandidateTimeSafe({closeTime:new Date(now+60000).toISOString()},now),false);
 });
-test('five-minute max hold supersedes continuing qualified signal',()=>{
+test('elapsed five-minute hold does not override a qualified signal',()=>{
   const now=Date.parse('2026-10-18T07:00:00Z');
   const p={heldMs:300000,marketPresent:true,marketStatus:'active',contractCloseTime:new Date(now+120000).toISOString(),nowMs:now,featureAvailable:true,featureFresh:true,decisionLabel:'PULL TRIGGER'};
-  assert.deepEqual(payneRealHoldEvidenceDecision(p),{action:'EXIT',reason:'max_hold'});
+  assert.deepEqual(payneRealHoldEvidenceDecision(p),{action:'HOLD',reason:'PULL_TRIGGER_REMAINS_QUALIFIED'});
   assert.equal(payneRealHoldEvidenceDecision({...p,marketStatus:'closed'}).action,'RECONCILE');
 });
