@@ -1,0 +1,24 @@
+name: PAYNE Exit Provider Evidence Read Only
+on:
+  push:
+    branches: [payne-ledger-bounded-history-v10-20261021]
+    paths: [".github/workflows/payne-exit-provider-evidence-readonly.yml"]
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Exact existing authenticated Worker exit-claim Kalshi GET
+        shell: bash
+        env:
+          PAYNE_COORDINATOR_DIAGNOSTIC_TOKEN: ${{ secrets.PAYNE_COORDINATOR_DIAGNOSTIC_TOKEN }}
+        run: |
+          set -euo pipefail
+          : "${PAYNE_COORDINATOR_DIAGNOSTIC_TOKEN:?MISSING}"
+          url="https://market-edge-payne-kalshi-real.darkbishop43.workers.dev/internal/exit-claim-provider-evidence?seriesId=5867063c-5a7a-4180-ab22-ea08ebab63a3&clientOrderId=payne-real-ea08ebab63a3-1-exit1"
+          code="$(curl --silent --show-error --max-time 45 --write-out '%{http_code}' -o /tmp/result.json -H "x-payne-diagnostic-token: $PAYNE_COORDINATOR_DIAGNOSTIC_TOKEN" "$url")"
+          echo "EXIT_PROVIDER_EVIDENCE_HTTP=$code"
+          jq -c '{ok,complete,status,reason,seriesId,clientOrderId,ticker,exitOrders,exitFills,providerPosition,settlementsForTicker,providerEvidenceComplete,providerWrites}' /tmp/result.json
+          test "$code" = 200
+          echo READ_ONLY_EXIT_PROVIDER_QUERY_COMPLETE
