@@ -1,0 +1,44 @@
+name: PAYNE ZEC Provider Exposure Read Only
+on:
+  push:
+    branches: [payne-ledger-bounded-history-v10-20261021]
+    paths: [".github/workflows/payne-zec-provider-exposure-readonly.yml"]
+permissions:
+  contents: read
+jobs:
+  provider:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Exact ZEC existing Worker provider GETs without writes
+        shell: bash
+        run: |
+          set -euo pipefail
+          root='https://market-edge-payne-kalshi-real.darkbishop43.workers.dev'
+          tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' EXIT
+          for item in proof real-state real-history; do
+            if [[ "$item" == real-history ]]; then
+              url="$root/real-history?view=cycles&range=current&limit=100"
+            else
+              url="$root/$item"
+            fi
+            code="$(curl -L --silent --show-error --max-time 55 --write-out '%{http_code}' -o "$tmp/$item.json" "$url")"
+            echo "GET_$item=$code"
+            if [[ "$code" != 200 ]]; then
+              jq -c '{ok,error,reason}' "$tmp/$item.json" 2>/dev/null || true
+              continue
+            fi
+            if [[ "$item" == proof ]]; then
+              jq -c '{kalshi:(.kalshi//{}),serviceLive}' "$tmp/$item.json"
+            elif [[ "$item" == real-state ]]; then
+              jq -c '{seriesId:.series.seriesId,seriesStatus:.series.status,
+                retainedPosition:(.series.position|{attemptId,seriesId,entryOrderId,entryClientOrderId,marketTicker,outcomeSide,status,reconciliationState,filledCount,entryCostUsd}),
+                positions:[(.series.positions//[])[]|select(.marketTicker=="KXZEC15M-26OCT210030-30")|{attemptId,seriesId,entryOrderId,entryClientOrderId,marketTicker,outcomeSide,status,reconciliationState,filledCount}],
+                fireLatch:{state:.series.fireLatch.state,specimenId:.series.fireLatch.specimenId},
+                armed:.control.armed}' "$tmp/$item.json"
+            else
+              jq -c '{providerCoverage,providerReadComplete,providerLastReadAt,complete,hasMore,
+                rows:[(.rows//[])[]|select((tostring|contains("KXZEC15M-26OCT210030-30")) or (tostring|contains("01a15cb6-6238-71dd-80eb-479a74efdb04")))]}' "$tmp/$item.json"
+            fi
+          done
+          echo "GET_ONLY_KALSHI_EXPOSURE_DIAGNOSTIC_COMPLETE"
