@@ -145,6 +145,4 @@ jobs:
           jq -e --arg v "$version" '.success==true and (.result.deployments[0].versions | any(.version_id==$v and .percentage==100))' /tmp/payne-staircase-deployments.json >/dev/null
           echo "PAYNE_STAIRCASE_NEW_VERSION_100_PERCENT=$version"
 
-# PAYNE ledger promotion: terminal series 5867063c exception applied (disarmed, Founder-confirmed FLAT).
-
-# Founder-authorized: validated ZEC equivalent close verifier promotion 2026-10-21.
+# PAYNE ledger promotion: bootstrap corrected to use existing production evidence only (no undeployed endpoint).
