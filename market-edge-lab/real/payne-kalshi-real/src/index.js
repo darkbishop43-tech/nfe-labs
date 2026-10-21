@@ -4905,6 +4905,53 @@ export default {
         providerWrites:0,readOnly:true
       },{headers:{'cache-control':'no-store'}});
     }
+    if (url.pathname === '/internal/fire-receipt-diagnostic') {
+      // Existing diagnostic authority; exact persisted FIRE receipt only. No writes.
+      const secret=env?.PAYNE_COORDINATOR_DIAGNOSTIC_TOKEN;
+      const supplied=request.headers.get('x-payne-diagnostic-token');
+      if(typeof secret!=='string'||secret.length<32||typeof supplied!=='string'||supplied.length!==secret.length)
+        return Response.json({ok:false,status:'UNAUTHORIZED'},{status:403,headers:{'cache-control':'no-store'}});
+      const [expectedHash,receivedHash]=await Promise.all([
+        crypto.subtle.digest('SHA-256',new TextEncoder().encode(secret)),
+        crypto.subtle.digest('SHA-256',new TextEncoder().encode(supplied))
+      ]);
+      const expectedBytes=new Uint8Array(expectedHash),receivedBytes=new Uint8Array(receivedHash);
+      let difference=0;
+      for(let i=0;i<expectedBytes.length;i++)difference|=expectedBytes[i]^receivedBytes[i];
+      if(difference!==0)
+        return Response.json({ok:false,status:'UNAUTHORIZED'},{status:403,headers:{'cache-control':'no-store'}});
+      const series=await loadRealSeriesState(env);
+      const seriesId=url.searchParams.get('seriesId');
+      const specimenId=url.searchParams.get('specimenId');
+      const latch=series?.fireLatch;
+      if(!seriesId||series?.seriesId!==seriesId||!specimenId||
+         specimenId.length>220||latch?.specimenId!==specimenId)
+        return Response.json({ok:false,status:'IDENTITY_MISMATCH'},{status:409,headers:{'cache-control':'no-store'}});
+      const binding=env?.PAYNE_EXECUTION_COORDINATOR;
+      if(!binding?.idFromName||!binding?.get)
+        return Response.json({ok:false,status:'COORDINATOR_UNBOUND'},{status:503,headers:{'cache-control':'no-store'}});
+      try{
+        const response=await binding.get(binding.idFromName(seriesId)).fetch(
+          'https://payne-coordinator.internal/internal/inspect-fire?specimenId='+encodeURIComponent(specimenId),
+          {method:'GET'});
+        const receipt=await response.json();
+        if(!response.ok||receipt?.ok!==true||!['FOUND','NOT_FOUND'].includes(receipt.status))
+          return Response.json({ok:false,status:'UNKNOWN',reason:'FIRE_RECEIPT_INSPECTION_FAILED'},
+            {status:503,headers:{'cache-control':'no-store'}});
+        if(receipt.status==='FOUND'&&(
+          receipt.claim?.kind!=='FIRE_RECOVERY'||
+          receipt.claim?.seriesId!==seriesId||
+          receipt.claim?.specimenId!==specimenId))
+          return Response.json({ok:false,status:'UNKNOWN',reason:'FIRE_RECEIPT_IDENTITY_MISMATCH'},
+            {status:409,headers:{'cache-control':'no-store'}});
+        return Response.json({ok:true,status:receipt.status,seriesId,specimenId,
+          claim:receipt.claim||null,readOnly:true,providerWrites:0},
+          {headers:{'cache-control':'no-store'}});
+      }catch{
+        return Response.json({ok:false,status:'UNKNOWN',reason:'FIRE_RECEIPT_UNAVAILABLE'},
+          {status:503,headers:{'cache-control':'no-store'}});
+      }
+    }
     if (url.pathname === '/internal/atomic-claim-diagnostic') {
       // Fail closed unless a separate encrypted, non-trading diagnostic secret
       // has explicitly been provisioned. Never reflect or log the supplied token.
