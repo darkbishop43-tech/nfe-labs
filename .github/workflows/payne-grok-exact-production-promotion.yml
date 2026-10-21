@@ -146,3 +146,5 @@ jobs:
           echo "PAYNE_STAIRCASE_NEW_VERSION_100_PERCENT=$version"
 
 # PAYNE ledger promotion: terminal series 5867063c exception applied (disarmed, Founder-confirmed FLAT).
+
+# Founder-authorized: validated ZEC equivalent close verifier promotion 2026-10-21.
