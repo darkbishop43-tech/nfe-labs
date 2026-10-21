@@ -105,7 +105,7 @@ export class PayneExecutionCoordinator {
     const {seriesId,attemptNo,specimenId,clientOrderId,ticker,side,windowClose}=input||{};
     const action=input?.action||'CLAIM';
     const exitAction=['CLAIM_EXIT','RELEASE_EXIT_PROVEN_NO_POST','RESOLVE_EXIT_PROVEN_TERMINAL','MARK_EXIT_RECOVERY_PROJECTED','COMMIT_FIRE_RECOVERY','MARK_FIRE_RECOVERY_PROJECTED'].includes(action);
-    if(!seriesId||!Number.isSafeInteger(attemptNo)||attemptNo<1||!specimenId||!clientOrderId||!ticker||!['YES','NO'].includes(side)||(!exitAction&&!windowClose)){
+    if(!seriesId||!Number.isSafeInteger(attemptNo)||attemptNo<1||!specimenId||!clientOrderId||!ticker||!['YES','NO'].includes(side)||((!exitAction||['COMMIT_FIRE_RECOVERY','MARK_FIRE_RECOVERY_PROJECTED'].includes(action))&&!windowClose)){
       return Response.json({granted:false,reason:'INCOMPLETE_EXECUTION_IDENTITY'},{status:400});
     }
     const fireAction=['COMMIT_FIRE_RECOVERY','MARK_FIRE_RECOVERY_PROJECTED'].includes(action);
@@ -151,7 +151,7 @@ export class PayneExecutionCoordinator {
              entry.specimenId!==specimenId||entry.clientOrderId!==clientOrderId||
              entry.ticker!==ticker||entry.side!==side||entry.windowClose!==windowClose)
             return {granted:false,reason:'FIRE_ENTRY_CLAIM_IDENTITY_MISMATCH'};
-          if(['CLOSED','NO_FILL','NO_PROVIDER_EXECUTION'].includes(entry.claimState)&&entry.claimState!==resolution)
+          if(['CLOSED','NO_PROVIDER_EXECUTION'].includes(entry.claimState)&&entry.claimState!==resolution)
             return {granted:false,reason:'FIRE_ENTRY_ALREADY_TERMINAL_DIFFERENT_RESULT'};
           if(!['CLOSED','NO_PROVIDER_EXECUTION'].includes(entry.claimState))
             await tx.put('attempt:'+attemptNo,{...entry,claimState:resolution,
