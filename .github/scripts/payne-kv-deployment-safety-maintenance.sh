@@ -170,7 +170,9 @@ verify_safety() {
          then "BLOCKED: HISTORICAL_UNRESOLVED_RESULT_NOT_TERMINAL"
       elif ((.position//null)!=null and
           ((.position.owner//"")!="PAYNE_KALSHI_REAL" or
-           (.position.status//""|IN("OPEN","FLAT","CLOSED","SETTLED")|not)))
+           ((.position.status//""|IN("OPEN","FLAT","CLOSED","SETTLED")|not) and
+            ((.position.status//"")!="RECONCILIATION_UNKNOWN" or
+             $maintenance[0].allowed!=true or $c[0].armed!=false))))
          then "BLOCKED: POSITION_OWNERSHIP_OR_STATUS"
       elif (.fireLatch.state//"NONE"|IN("LATCHED","PROVIDER_POST_UNKNOWN"))
          then "BLOCKED: ACTIVE_FIRE_LATCH"
