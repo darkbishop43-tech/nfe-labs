@@ -75,12 +75,12 @@ export class PayneExecutionCoordinator {
     try {input=await request.json();}catch{return Response.json({granted:false,reason:'INVALID_CLAIM'},{status:400});}
     const {seriesId,attemptNo,specimenId,clientOrderId,ticker,side,windowClose}=input||{};
     const action=input?.action||'CLAIM';
-    const exitAction=['CLAIM_EXIT','RELEASE_EXIT_PROVEN_NO_POST'].includes(action);
+    const exitAction=['CLAIM_EXIT','RELEASE_EXIT_PROVEN_NO_POST','RESOLVE_EXIT_PROVEN_TERMINAL'].includes(action);
     if(!seriesId||!Number.isSafeInteger(attemptNo)||attemptNo<1||!specimenId||!clientOrderId||!ticker||!['YES','NO'].includes(side)||(!exitAction&&!windowClose)){
       return Response.json({granted:false,reason:'INCOMPLETE_EXECUTION_IDENTITY'},{status:400});
     }
     const key=exitAction?'exit:'+clientOrderId:'attempt:'+attemptNo;
-    if(!['CLAIM','RELEASE_PROVEN_NO_POST','RESOLVE_ENTRY','CLAIM_EXIT','RELEASE_EXIT_PROVEN_NO_POST'].includes(action))
+    if(!['CLAIM','RELEASE_PROVEN_NO_POST','RESOLVE_ENTRY','CLAIM_EXIT','RELEASE_EXIT_PROVEN_NO_POST','RESOLVE_EXIT_PROVEN_TERMINAL'].includes(action))
       return Response.json({granted:false,reason:'INVALID_ACTION'},{status:400});
     const outcome=await this.state.storage.transaction(async tx=>{
       const prior=await tx.get(key);
@@ -89,6 +89,28 @@ export class PayneExecutionCoordinator {
         await tx.put(key,{seriesId,attemptNo,specimenId,clientOrderId,ticker,side,
           claimState:'POTENTIALLY_SUBMITTED',claimedAt:new Date().toISOString()});
         return {granted:true,reason:'EXCLUSIVE_EXIT_CLAIM_PERSISTED'};
+      }
+      if(action==='RESOLVE_EXIT_PROVEN_TERMINAL'){
+        // Provider proof is verified by the Worker before calling this internal DO operation.
+        // Match every existing claim identity; never resolve on a missing order or NO_FILL alone.
+        if(!prior||prior.seriesId!==seriesId||prior.attemptNo!==attemptNo||
+          prior.specimenId!==specimenId||prior.clientOrderId!==clientOrderId||
+          prior.ticker!==ticker||prior.side!==side)
+          return {granted:false,reason:'EXIT_CLAIM_IDENTITY_MISMATCH'};
+        const orderId=String(input.providerOrderId||'');
+        const evidenceId=String(input.evidenceId||'');
+        if(!orderId||!evidenceId||!['CLOSED','NO_PROVIDER_EXECUTION'].includes(input.resolution)||
+          input.providerTerminalProven!==true||input.providerExposureFlatProven!==true||
+          input.providerFillsVerified!==true)
+          return {granted:false,reason:'AUTHORITATIVE_EXIT_TERMINAL_PROOF_REQUIRED'};
+        if(prior.claimState==='CLOSED'||prior.claimState==='NO_PROVIDER_EXECUTION')
+          return {granted:prior.claimState===input.resolution&&prior.providerOrderId===orderId&&prior.evidenceId===evidenceId,
+            reason:'TERMINAL_EXIT_IMMUTABLE_OR_REPLAY'};
+        if(!['POTENTIALLY_SUBMITTED','OPEN','UNKNOWN'].includes(prior.claimState))
+          return {granted:false,reason:'EXIT_STATE_NOT_RECOVERABLE'};
+        await tx.put(key,{...prior,claimState:input.resolution,providerOrderId:orderId,
+          evidenceId,resolvedAt:new Date().toISOString()});
+        return {granted:true,reason:'PROVIDER_TERMINAL_EXIT_PERSISTED'};
       }
       if(action==='RELEASE_EXIT_PROVEN_NO_POST'){
         if(!prior||prior.seriesId!==seriesId||prior.specimenId!==specimenId||
