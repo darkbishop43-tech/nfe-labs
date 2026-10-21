@@ -2998,6 +2998,13 @@ async function recordVerifiedRecoveryLedger(env,evidence){
 export async function recoverPayneProviderConfirmedFireTick(env){
  return recoverProviderConfirmedFireLatch(env,{
   loadControl,loadSeries:loadRealSeriesState,saveSeries:saveRealSeriesState,
+  loadHistoricalAttempt:async (_env,seriesId,attemptNo)=>{
+   if(!Number.isSafeInteger(attemptNo)||attemptNo<1)return null;
+   const rows=await listRealAttemptsForSeries(_env,seriesId);
+   const matched=rows.filter(a=>a?.attemptId===seriesId+'-intent-'+attemptNo&&
+     Number(a?.intentNo)===attemptNo);
+   return matched.length===1?matched[0]:null;
+  },
   recordRecoveryLedger:recordVerifiedRecoveryLedger
  });
 }
