@@ -160,7 +160,7 @@ verify_safety() {
         (.providerPostStarted|type=="boolean" and .==false)))
   ' "$s" >/dev/null || {
     # Existing KV data only: identify the failed invariant without changing state.
-    jq -r --slurpfile c "$c" '
+    jq -r --slurpfile c "$c" --slurpfile maintenance "$proof" '
       if .schema!="PAYNE_REAL_SERIES_V1" then "BLOCKED: SERIES_SCHEMA"
       elif .owner!="PAYNE_KALSHI_REAL" then "BLOCKED: SERIES_OWNER"
       elif .requiredExchangeIndex!=2 then "BLOCKED: SERIES_FUNDING_INDEX"
