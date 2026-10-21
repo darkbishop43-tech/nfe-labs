@@ -130,3 +130,34 @@ test('unknown NEAR exposure does not release capacity or invent closure',async()
  assert.equal(payneCapacityEvidence(series,3).available,false);
  assert.equal(liveOrderWatchProjection(series).active.length,1);
 });
+
+test('series-specific historical report uses two bounded cursors and refuses invented P/L',async()=>{
+ const {readFile}=await import('node:fs/promises');
+ const source=await readFile(new URL('../src/index.js',import.meta.url),'utf8');
+ const start=source.indexOf('async function buildHistoricalSeriesReport(');
+ const end=source.indexOf('export function summarizeRealExecutionState',start);
+ assert.ok(start>=0&&end>start);
+ const view=source.slice(start,end);
+ assert.match(view,/payneHistoryCursor\(kv,/);
+ assert.match(view,/payneLedgerEventsCursor\(kv,/);
+ assert.match(view,/eventsCursor/);
+ assert.match(view,/grossRealizedPnlUsd:null/);
+ assert.match(view,/netRealizedPnlUsd:null/);
+ assert.doesNotMatch(view,/listRealLedger\(env,1000\)/);
+ assert.doesNotMatch(view,/listRealAttemptsForSeries\(env,id\)/);
+});
+test('retained NEAR closure requires exact order and successful atomic claim before persistence',async()=>{
+ const {readFile}=await import('node:fs/promises');
+ const source=await readFile(new URL('../src/index.js',import.meta.url),'utf8');
+ const start=source.indexOf('if(exactSettlements.length>0 && exactIdentityEvidence)');
+ const end=source.indexOf("if((positionEvidence.classification==='ABSENT'",start);
+ assert.ok(start>0&&end>start);
+ const settled=source.slice(start,end);
+ const authority=settled.indexOf("reconcileAtomicEntryAuthority(env,series,attempt,'CLOSED'");
+ const closure=settled.indexOf("const matchingPosition=paynePositionRecords(verified)");
+ assert.ok(authority>=0&&closure>authority);
+ for(const field of ['p.owner===REAL_OWNER','p.attemptId===attempt.attemptId','p.marketTicker===ticker','p.entryOrderId===orderId','p.entryClientOrderId===clientOrderId'])assert.ok(settled.includes(field),field);
+ assert.match(settled,/matchingPosition.status!=='CLOSED'/);
+ assert.match(settled,/reconciliationState:'FLAT'/);
+ assert.match(settled,/exitReason:p.exitReason\|\|/);
+});
