@@ -14,8 +14,8 @@ test('unavailable features do not masquerade as strategy failure',()=>{
 test('stale features do not masquerade as strategy failure',()=>{
  assert.deepEqual(decide({...base,featureAvailable:false,featureFresh:false,decisionLabel:'MISSING'}),{action:'HOLD',reason:'FEATURE_STALE'});
 });
-test('five minutes triggers max hold exit even if features unavailable',()=>{
- assert.deepEqual(decide({...base,heldMs:300_000,featureAvailable:false,decisionLabel:'MISSING'}),{action:'EXIT',reason:'max_hold'});
+test('five-minute elapsed hold does not force exit when features unavailable',()=>{
+ assert.deepEqual(decide({...base,heldMs:300_000,featureAvailable:false,decisionLabel:'MISSING'}),{action:'HOLD',reason:'FEATURE_UNAVAILABLE'});
 });
 test('provider market unknown takes existing market_missing path',()=>{
  assert.deepEqual(decide({...base,marketPresent:false,featureAvailable:false,decisionLabel:'MISSING'}),{action:'RECONCILE',reason:'PROVIDER_MARKET_UNKNOWN'});
@@ -24,9 +24,9 @@ test('unknown holding clock cannot create unbounded hold',()=>{
  assert.deepEqual(decide({...base,heldMs:NaN,featureAvailable:false}),{action:'RECONCILE',reason:'HOLD_CLOCK_UNKNOWN'});
 });
 
-test('two minute hold is eligible but seven and twelve minutes exceed max hold',()=>{
+test('two seven and twelve minute holds follow signals without forced timer exit',()=>{
  for(const minutes of [2,7,12]) {
-  assert.deepEqual(decide({...base,heldMs:minutes*60_000,decisionLabel:'PULL TRIGGER'}),minutes<5?{action:'HOLD',reason:'PULL_TRIGGER_REMAINS_QUALIFIED'}:{action:'EXIT',reason:'max_hold'});
+  assert.deepEqual(decide({...base,heldMs:minutes*60_000,decisionLabel:'PULL TRIGGER'}),{action:'HOLD',reason:'PULL_TRIGGER_REMAINS_QUALIFIED'});
  }
 });
 test('contract closure is reconciliation not synthetic provider exit',()=>{
