@@ -47,7 +47,7 @@ function provider({missing=false,open=false,position=0,incomplete=false}={}){
  };
 }
 function orchestratorFixture({crashOnce=false,wrongAttempt=false}={}){
- let stored={seriesId,fireLatch:{...latch},currentAttempt:wrongAttempt?{...attempt,attemptId:'wrong-intent-3'}:{...attempt},
+ let stored={seriesId,fireLatch:{...latch},currentAttempt:{...attempt,attemptId:seriesId+'-intent-2',clientOrderId:'entry-2',providerOrderId:'other-order-2'},
   position:{owner:'PAYNE_KALSHI_REAL',seriesId,attemptId:'old-ZEC',marketTicker:'KXZEC15M-TEST',
    status:'RECONCILIATION_UNKNOWN',exchangeIndex:2},
   positions:[{owner:'PAYNE_KALSHI_REAL',seriesId,attemptId:'old-ZEC',marketTicker:'KXZEC15M-TEST',
@@ -56,6 +56,7 @@ function orchestratorFixture({crashOnce=false,wrongAttempt=false}={}){
  const deps={
   loadControl:async()=>({armed:false}),
   loadSeries:async()=>structuredClone(stored),
+  loadHistoricalAttempt:async()=>wrongAttempt?{...attempt,providerOrderId:'wrong-provider-id',attemptId:'wrong-intent-3'}:{...attempt},
   saveSeries:async(_env,s)=>{if(crashOnce&&!crashed){crashed=true;throw Error('INTERRUPTED');}stored=structuredClone(s);},
   recordRecoveryLedger:async()=>{records++},
   verifyProvider:async()=>({ok:true,complete:true,resolution:'NO_PROVIDER_EXECUTION',
@@ -106,10 +107,36 @@ test('9 interruption between DO and KV recovers without clearing unrelated ZEC',
  const result=await recoverProviderConfirmedFireLatch({},f.deps);
  assert.equal(result.ok,true);assert.equal(f.stats().stored.fireLatch.state,'PROVIDER_TERMINAL_RECONCILED');
  assert.equal(f.stats().stored.positions[0].status,'RECONCILIATION_UNKNOWN');
+ assert.equal(f.stats().stored.currentAttempt.attemptId,seriesId+'-intent-2');
+ assert.equal(f.stats().stored.currentAttempt.providerOrderId,'other-order-2');
 });
 test('10 wrong intent identity prevents coordinator and KV mutations',async()=>{
  const f=orchestratorFixture({wrongAttempt:true});
  const result=await recoverProviderConfirmedFireLatch({},f.deps);
  assert.equal(result.ok,false);assert.equal(f.stats().commits,0);
  assert.equal(f.stats().stored.fireLatch.state,'LATCHED');
+});
+
+test('11 historical intent-3 resolved while current intent-2 remains untouched',async()=>{
+ const f=orchestratorFixture();const r=await recoverProviderConfirmedFireLatch({},f.deps);
+ assert.equal(r.ok,true);assert.equal(f.stats().stored.fireLatch.state,'PROVIDER_TERMINAL_RECONCILED');
+ assert.equal(f.stats().stored.currentAttempt.attemptId,seriesId+'-intent-2');
+ assert.equal(f.stats().stored.currentAttempt.providerOrderId,'other-order-2');
+ assert.equal(f.stats().stored.position.status,'RECONCILIATION_UNKNOWN');
+});
+test('12 unknown provider result leaves historical latch unchanged',async()=>{
+ const f=orchestratorFixture();f.deps.verifyProvider=async()=>({ok:false,complete:false,reason:'PROVIDER_UNKNOWN'});
+ const r=await recoverProviderConfirmedFireLatch({},f.deps);
+ assert.equal(r.ok,false);assert.equal(f.stats().stored.fireLatch.state,'LATCHED');
+ assert.equal(f.stats().commits,0);
+});
+test('13 repeated recovery does not create new ledger event',async()=>{
+ const f=orchestratorFixture();assert.equal((await recoverProviderConfirmedFireLatch({},f.deps)).ok,true);
+ assert.equal((await recoverProviderConfirmedFireLatch({},f.deps)).classification,'CLEAN');
+ assert.equal(f.stats().records,1);
+});
+test('14 different archived contract is rejected before provider read',async()=>{
+ const f=orchestratorFixture();f.deps.loadHistoricalAttempt=async()=>({...attempt,marketTicker:'WRONG'});
+ const r=await recoverProviderConfirmedFireLatch({},f.deps);
+ assert.equal(r.reason,'HISTORICAL_FIRE_ATTEMPT_IDENTITY_UNKNOWN');assert.equal(f.stats().commits,0);
 });
