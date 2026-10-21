@@ -58,3 +58,57 @@ test('actual PAYNE source clean reconciliation is idempotent and preserves persi
  assert.equal(payneCapacityEvidence(series,3).occupied,0);
  assert.equal(liveOrderWatchProjection(series).active.length,0);
 });
+
+test('real PAYNE unresolved NEAR reconciliation resolves once using mocked signed GET and coordinator',async()=>{
+ const {generateKeyPairSync}=await import('node:crypto');
+ const {privateKey}=generateKeyPairSync('rsa',{modulusLength:2048});
+ const pem=privateKey.export({type:'pkcs8',format:'pem'});
+ const x=fixture();const kv=x.env.PAYNE_KALSHI_STATE;
+ const ticker='KXNEAR15M-26OCT202300-00',orderId='01a15c5e-b4e8-7739-a8b6-af44870e873e',client='payne-near-1';
+ const attempt={owner:'PAYNE_KALSHI_REAL',seriesId:x.series,attemptId:'near-attempt',attemptNo:1,providerAttemptNo:1,providerAttemptCounted:true,
+ marketTicker:ticker,outcomeSide:'YES',clientOrderId:client,providerOrderId:orderId,status:'FILLED',fireSpecimenId:'near-fire',marketCloseTime:'2026-10-20T23:15:00Z'};
+ const retained={owner:'PAYNE_KALSHI_REAL',seriesId:x.series,attemptId:'near-attempt',marketTicker:ticker,entryOrderId:orderId,entryClientOrderId:client,
+ status:'RECONCILIATION_UNKNOWN',reconciliationState:'UNKNOWN',entryAverageFeePaid:0.02,realizedPnlUsd:null};
+ await kv.put(PREFIX+'real-series:v1',JSON.stringify({schema:'PAYNE_REAL_SERIES_V1',owner:'PAYNE_KALSHI_REAL',seriesId:x.series,
+ unresolvedEntry:true,currentAttempt:attempt,positions:[retained],position:retained,attemptsStarted:1,attemptTarget:10}));
+ const calls={coordinator:0,posts:0,gets:0};
+ x.env.KALSHI_EXECUTION_KEY_ID='OFFLINE_TEST_KEY';
+ x.env.KALSHI_EXECUTION_PRIVATE_KEY=pem;
+ x.env.PAYNE_EXECUTION_COORDINATOR={idFromName:name=>name,get:name=>({fetch:async(url,opts)=>{
+  calls.coordinator++;const request=JSON.parse(opts.body);
+  assert.equal(request.seriesId,x.series);assert.equal(request.ticker,ticker);
+  assert.equal(request.clientOrderId,client);assert.equal(request.resolution,'CLOSED');
+  assert.equal(request.providerFlatProven,true);
+  assert.equal(request.specimenId,'near-fire');
+  return Response.json({granted:true,reason:'EXACT_CLAIM_CLOSED'});
+ }})};
+ const oldFetch=globalThis.fetch;
+ globalThis.fetch=async(input,opts)=>{
+  calls.gets++;assert.equal((opts?.method||'GET').toUpperCase(),'GET');
+  const url=String(input);
+  if(url.includes('/portfolio/positions'))return Response.json({market_positions:[{ticker,position_fp:'0'}]});
+  if(url.includes('/portfolio/orders'))return Response.json({orders:[{ticker,order_id:orderId,client_order_id:client,status:'executed',fill_count:1}]});
+  if(url.includes('/portfolio/fills'))return Response.json({fills:[{ticker,order_id:orderId,client_order_id:client,count:1}]});
+  if(url.includes('/historical/fills'))return Response.json({fills:[]});
+  if(url.includes('/portfolio/settlements'))return Response.json({settlements:[{ticker}]});
+  throw Error('UNEXPECTED_PROVIDER_READ:'+url);
+ };
+ try{
+  const first=await reconcileUnresolvedEntryFromProvider(x.env,Date.parse('2026-10-21T00:10:00Z'));
+  assert.equal(first.ok,true);assert.equal(first.classification,'FLAT');
+  const stored=JSON.parse(await kv.get(PREFIX+'real-series:v1'));
+  assert.equal(stored.unresolvedEntry,false);
+  const closed=stored.positions.find(p=>p.attemptId==='near-attempt');
+  assert.equal(closed.status,'CLOSED');assert.equal(closed.reconciliationState,'FLAT');
+  assert.equal(closed.entryAverageFeePaid,0.02);assert.equal(closed.realizedPnlUsd,null);
+  assert.equal(payneCapacityEvidence(stored,3).occupied,0);
+  const prior=x.counts.puts;
+  const second=await reconcileUnresolvedEntryFromProvider(x.env,Date.parse('2026-10-21T00:11:00Z'));
+  assert.equal(second.reason,'NO_UNRESOLVED_ENTRY');assert.equal(x.counts.puts,prior);
+  assert.equal(calls.coordinator,1);
+  const list=await kv.list({prefix:PREFIX+'real-ledger:',limit:1000});
+  const closure=[];
+  for(const key of list.keys){const v=JSON.parse(await kv.get(key.name));if(v.attemptId==='near-attempt'&&v.type==='ENTRY_RECONCILED_SETTLED_FLAT')closure.push(v);}
+  assert.equal(closure.length,1);
+ }finally{globalThis.fetch=oldFetch;}
+});
