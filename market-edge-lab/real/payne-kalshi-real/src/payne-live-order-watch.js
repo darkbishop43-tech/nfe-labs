@@ -42,7 +42,11 @@ export function liveOrderWatchProjection(series,attempts=[],ledger=[],limit=12){
     const id=a.attemptId||a.clientOrderId;if(!id)continue;
     if(rows.has(id))continue;
     const raw=String(a.status||'UNKNOWN').toUpperCase();
-    const state=raw.includes('NO_PROVIDER_EXECUTION')||raw.includes('PROVIDER_RECONCILED_NO_EXECUTION')?'NO_PROVIDER_EXECUTION':
+    const settledFlat=a.reconciliationResult==='SETTLED_FLAT' &&
+      a.reconciliationReason==='PROVIDER_RECONCILED_SETTLED_FLAT' &&
+      a.providerOrderId && a.reconciledAt;
+    const state=settledFlat?'CLOSED':
+      raw.includes('NO_PROVIDER_EXECUTION')||raw.includes('PROVIDER_RECONCILED_NO_EXECUTION')?'NO_PROVIDER_EXECUTION':
       raw.includes('NO_FILL')?'NO_FILL':raw.includes('FILL')?'OPEN':
       raw.includes('UNKNOWN')?'UNKNOWN':raw.includes('SUBMIT')?'SUBMITTING':
       raw.includes('INVALIDATED')?'CLOSED':'LOCKED';
@@ -52,7 +56,7 @@ export function liveOrderWatchProjection(series,attempts=[],ledger=[],limit=12){
       currentBid:null,currentAsk:null,currentValue:null,unrealizedPnl:null,realizedPnl:null,
       openedAt:a.observedAt||null,closeTime:a.closeTime||null,
       exitReason:null,exitResult:a.terminalClassification||null,
-      orderId:a.providerOrderId||null,reconciliation:a.providerResponseState||'UNKNOWN',
+      orderId:a.providerOrderId||null,reconciliation:settledFlat?'FLAT':(a.providerResponseState||'UNKNOWN'),
       closedAt:a.reconciledAt||null});
   }
   const ordered=[...rows.values()].sort((a,b)=>String(b.closedAt||b.openedAt||'').localeCompare(String(a.closedAt||a.openedAt||'')));
