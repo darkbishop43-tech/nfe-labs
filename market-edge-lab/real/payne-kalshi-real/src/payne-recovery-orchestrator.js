@@ -31,12 +31,21 @@ export async function recoverPayneProviderConfirmedExits(env,{
     claim.seriesId!==series.seriesId||claim.clientOrderId!==summary.clientOrderId||
     claim.attemptNo!==summary.attemptNo)
    return fail('EXACT_EXIT_CLAIM_UNKNOWN');
+  // The worker claims an EXIT before its client ID can be saved to KV.
+  // Recover that exact pre-persist crash window by reconstructing only the
+  // established deterministic PAYNE exit client ID, never an unrelated claim.
+  const exitSuffix=String(claim.clientOrderId||'').match(/-exit([1-9]\\d*)$/);
+  const expectedExitId=exitSuffix
+   ?('payne-real-'+String(series.seriesId).replace(/[^0-9A-Za-z]/g,'').slice(-12)+
+     '-'+String(claim.attemptNo)+'-exit'+exitSuffix[1]).slice(0,64):null;
+  if(!expectedExitId||expectedExitId!==claim.clientOrderId)
+   return fail('EXIT_CLIENT_ID_NOT_PAYNE_DETERMINISTIC_IDENTITY');
   const matches=paynePositionRecords(series).filter(p=>p.seriesId===series.seriesId&&
    p.attemptId===claim.specimenId&&p.attemptNo===claim.attemptNo&&
    p.marketTicker===claim.ticker&&p.outcomeSide===claim.side&&
-   p.exitClientOrderId===claim.clientOrderId&&p.owner==='PAYNE_KALSHI_REAL');
+   (!p.exitClientOrderId||p.exitClientOrderId===claim.clientOrderId||expectedExitId===claim.clientOrderId)&&p.owner==='PAYNE_KALSHI_REAL');
   if(matches.length!==1)return fail('RETAINED_POSITION_IDENTITY_UNKNOWN');
-  const evidence=await verifyProvider(env,{claim,position:matches[0]});
+  const evidence=await verifyProvider(env,{claim,position:{...matches[0],exitClientOrderId:claim.clientOrderId}});
   if(evidence?.ok!==true||evidence?.complete!==true)return fail(evidence?.reason||'PROVIDER_EXPOSURE_UNKNOWN');
   const identity={seriesId:claim.seriesId,attemptNo:claim.attemptNo,
    specimenId:claim.specimenId,clientOrderId:claim.clientOrderId,
@@ -52,7 +61,7 @@ export async function recoverPayneProviderConfirmedExits(env,{
   const freshMatches=paynePositionRecords(fresh).filter(p=>p.seriesId===claim.seriesId&&
    p.attemptId===claim.specimenId&&p.attemptNo===claim.attemptNo&&
    p.marketTicker===claim.ticker&&p.outcomeSide===claim.side&&
-   p.exitClientOrderId===claim.clientOrderId&&p.owner==='PAYNE_KALSHI_REAL');
+   (!p.exitClientOrderId||p.exitClientOrderId===claim.clientOrderId||expectedExitId===claim.clientOrderId)&&p.owner==='PAYNE_KALSHI_REAL');
   if(freshMatches.length!==1)return fail('RECOVERY_PROJECTION_POSITION_CHANGED');
   const p=freshMatches[0],at=new Date().toISOString();
   if(p.status!=='CLOSED'||p.reconciliationState!=='FLAT'){
