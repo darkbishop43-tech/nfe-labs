@@ -110,7 +110,7 @@ export class PayneExecutionCoordinator {
     }
     const fireAction=['COMMIT_FIRE_RECOVERY','MARK_FIRE_RECOVERY_PROJECTED'].includes(action);
     const key=fireAction?'fire:'+specimenId:exitAction?'exit:'+clientOrderId:'attempt:'+attemptNo;
-    if(!['CLAIM','RELEASE_PROVEN_NO_POST','RESOLVE_ENTRY','CLAIM_EXIT','RELEASE_EXIT_PROVEN_NO_POST','RESOLVE_EXIT_PROVEN_TERMINAL','MARK_EXIT_RECOVERY_PROJECTED'].includes(action))
+    if(!['CLAIM','RELEASE_PROVEN_NO_POST','RESOLVE_ENTRY','CLAIM_EXIT','RELEASE_EXIT_PROVEN_NO_POST','RESOLVE_EXIT_PROVEN_TERMINAL','MARK_EXIT_RECOVERY_PROJECTED','COMMIT_FIRE_RECOVERY','MARK_FIRE_RECOVERY_PROJECTED'].includes(action))
       return Response.json({granted:false,reason:'INVALID_ACTION'},{status:400});
     const outcome=await this.state.storage.transaction(async tx=>{
       const prior=await tx.get(key);
