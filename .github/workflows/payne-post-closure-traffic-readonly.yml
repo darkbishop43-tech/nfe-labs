@@ -1,0 +1,27 @@
+name: PAYNE Post Closure Traffic Read Only
+on:
+  push:
+    branches: [payne-ledger-bounded-history-v10-20261021]
+    paths: [".github/workflows/payne-post-closure-traffic-readonly.yml"]
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Cloudflare deployment and live cockpit only
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          : "${CLOUDFLARE_API_TOKEN:?MISSING}"
+          : "${CLOUDFLARE_ACCOUNT_ID:?MISSING}"
+          curl --fail --silent --show-error --max-time 25 -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/market-edge-payne-kalshi-real/deployments" -o /tmp/deployments.json
+          jq -e '.success==true and (.result.deployments[0].versions|length)==1 and .result.deployments[0].versions[0].percentage==100' /tmp/deployments.json >/dev/null
+          jq -c '{currentWorkerVersion:.result.deployments[0].versions[0].version_id,trafficPercentage:.result.deployments[0].versions[0].percentage}' /tmp/deployments.json
+          curl --fail --silent --show-error --max-time 25 'https://market-edge-payne-kalshi-real.darkbishop43.workers.dev/control' -o /tmp/control.json
+          jq -e '.control.armed==false' /tmp/control.json >/dev/null
+          jq -c '{armed:.control.armed,openPositions:.control.openPositions,attemptTarget:.control.attemptTarget}' /tmp/control.json
+          echo PRODUCTION_DEPLOYMENT_READ_ONLY_VERIFIED
