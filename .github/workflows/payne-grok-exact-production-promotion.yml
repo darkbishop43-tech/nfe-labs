@@ -30,7 +30,7 @@ jobs:
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
-          test "$(git rev-parse HEAD:market-edge-lab/real/payne-kalshi-real/src/index.js)" = a46ba00b7a803cb1bd06d660e1256f29bcd1bb1e
+          test "$(git rev-parse HEAD:market-edge-lab/real/payne-kalshi-real/src/index.js)" = 7cd977a31f0e55691bd4145c51393301fba438e1
           test "$(git rev-parse HEAD:market-edge-lab/real/payne-kalshi-real/src/payne-closure-evidence.js)" = 7f0c5a2dce12ed0d56c1024cdd58c4f581ea364a
           grep -q '^name = "market-edge-payne-kalshi-real"$' market-edge-lab/real/payne-kalshi-real/wrangler.toml
           test -f market-edge-lab/real/payne-kalshi-real/src/payne-execution-coordinator.js
