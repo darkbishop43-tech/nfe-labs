@@ -1,0 +1,28 @@
+name: PAYNE Historical Intent-3 Read Only
+on:
+  push:
+    branches: [payne-ledger-bounded-history-v10-20261021]
+    paths: [".github/workflows/payne-historical-intent3-readonly.yml"]
+permissions:
+  contents: read
+jobs:
+  history:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Read exact archived attempt, no writes
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          : "${CLOUDFLARE_API_TOKEN:?MISSING}"
+          : "${CLOUDFLARE_ACCOUNT_ID:?MISSING}"
+          base="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/storage/kv/namespaces/03352b0ccb034f1bb8206f663a04b125/values"
+          key='payne-kalshi:attempt:5867063c-5a7a-4180-ab22-ea08ebab63a3:intent:3'
+          encoded="$(jq -nr --arg x "$key" '$x|@uri')"
+          code="$(curl --silent --show-error --max-time 25 --write-out '%{http_code}' -o /tmp/intent3.json -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "$base/$encoded")"
+          echo "ARCHIVED_INTENT3_HTTP=$code"
+          if [ "$code" != 200 ];then echo ARCHIVED_INTENT3_MISSING;exit 1;fi
+          jq -c '{runId,attemptId,intentNo,attemptNo,fireSpecimenId,clientOrderId,providerOrderId,marketTicker,outcomeSide,marketCloseTime,executionHandoff,status,result}' /tmp/intent3.json
+          echo 'READ_ONLY_INTENT3_COMPLETE'
