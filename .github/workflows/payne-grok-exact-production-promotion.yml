@@ -127,7 +127,7 @@ jobs:
           base='https://market-edge-payne-kalshi-real.darkbishop43.workers.dev'
           curl --fail --silent --show-error --max-time 25 "$base/" -o /tmp/payne-grok-cockpit.html
           curl --fail --silent --show-error --max-time 25 "$base/control" -o /tmp/payne-grok-control.json
-          jq -e '.ok==true' /tmp/payne-grok-control.json >/dev/null
+          jq -e '(.control|type)=="object" and (.control.armed|type)=="boolean" and (.control.requiredExchangeIndex==2 or .control.requiredExchangeIndex==null)' /tmp/payne-grok-control.json >/dev/null
           jq -c '{armed:.control.armed,openPositions:.control.openPositions,attemptTarget:.control.attemptTarget,maxPositions:.control.maxPositions}' /tmp/payne-grok-control.json
           grep -q 'DYNAMIC STAIRCASE' /tmp/payne-grok-cockpit.html
           grep -q 'shadow-staircase/observe' /tmp/payne-grok-cockpit.html
