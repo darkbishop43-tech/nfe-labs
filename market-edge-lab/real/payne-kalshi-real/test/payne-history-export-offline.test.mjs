@@ -100,3 +100,33 @@ test('exact identity required to join ledger event with execution, never ticker-
  assert.equal(events.filter(x=>x.attemptId==='new-1'&&x.seriesId===near.seriesId).length,0);
  assert.equal(near.realizedPnlUsd,null);
 });
+
+test('exact NEAR settled-flat attempt projects CLOSED, FLAT and preserves provider identity',async()=>{
+ const {liveOrderWatchProjection,payneCapacityEvidence}=await import('../src/payne-live-order-watch.js');
+ const order='01a15c5e-b4e8-7739-a8b6-af44870e873e';
+ const attempt={owner:'PAYNE_KALSHI_REAL',attemptId:'near-1',seriesId:'5867063c-5a7a-4180-ab22-ea08ebab63a3',marketTicker:'KXNEAR15M-26OCT202300-00',
+ status:'FILLED',providerOrderId:order,reconciledAt:'2026-10-21T00:00:00Z',reconciliationResult:'SETTLED_FLAT',reconciliationReason:'PROVIDER_RECONCILED_SETTLED_FLAT'};
+ const closed={owner:'PAYNE_KALSHI_REAL',attemptId:'near-1',marketTicker:attempt.marketTicker,
+ entryOrderId:order,status:'CLOSED',reconciliationState:'FLAT',entryAverageFeePaid:.02,realizedPnlUsd:null};
+ const series={unresolvedEntry:false,positions:[closed],currentAttempt:attempt};
+ const watch=liveOrderWatchProjection(series);
+ assert.equal(watch.active.length,0);assert.equal(watch.closed.length,1);
+ assert.equal(watch.closed[0].state,'CLOSED');
+ assert.equal(watch.closed[0].reconciliation,'FLAT');
+ assert.equal(watch.closed[0].orderId,order);
+ assert.equal(payneCapacityEvidence(series,3).occupied,0);
+ assert.equal(payneCapacityEvidence(series,3).available,true);
+ assert.equal(watch.closed[0].realizedPnl,null);
+ const second=liveOrderWatchProjection(series);
+ assert.deepEqual(second,watch);
+ assert.equal(series.positions.length,1);
+ assert.equal(series.positions[0].entryAverageFeePaid,.02);
+});
+test('unknown NEAR exposure does not release capacity or invent closure',async()=>{
+ const {liveOrderWatchProjection,payneCapacityEvidence}=await import('../src/payne-live-order-watch.js');
+ const series={unresolvedEntry:true,positions:[{owner:'PAYNE_KALSHI_REAL',attemptId:'near-1',
+ marketTicker:'KXNEAR15M-26OCT202300-00',status:'RECONCILIATION_UNKNOWN',reconciliationState:'UNKNOWN'}]};
+ assert.equal(payneCapacityEvidence(series,3).occupied,1);
+ assert.equal(payneCapacityEvidence(series,3).available,false);
+ assert.equal(liveOrderWatchProjection(series).active.length,1);
+});
