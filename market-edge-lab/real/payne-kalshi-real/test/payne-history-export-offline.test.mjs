@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {payneHistoryAll,payneHistoryPage,payneExecutionCsv,PAYNE_EXECUTION_EXPORT_FIELDS} from '../src/payne-real-history-view.js';
+import {payneHistoryAll,payneHistoryPage,payneLedgerEventsCursor,payneExecutionCsv,PAYNE_EXECUTION_EXPORT_FIELDS} from '../src/payne-real-history-view.js';
 function fakeKV(){
  const d=new Map([
  ['payne-kalshi:attempt:old:1',{seriesId:'old',attemptId:'old-1',attemptNo:1,createdAt:'2026-10-13T06:02:21Z',marketTicker:'KXNEAR15M-26OCT130215-15',outcomeSide:'NO',providerOrderId:'01a133da-f108-7df4-9287-3f45cfa348ed',clientOrderId:'payne-real-8bd998c37fa1-2-entry'}],
@@ -37,4 +37,26 @@ test('bounded date range filters persisted attempt times',async()=>{
 test('missing ledger data is not silently reported complete',async()=>{
  const kv=fakeKV();kv.get=async k=>k.startsWith('payne-kalshi:real-ledger')?null:({seriesId:'x',attemptId:'x'});
  await assert.rejects(()=>payneHistoryAll(kv),/HISTORY_RECORD_UNREADABLE/);
+});
+
+test('ledger event cursor retrieves all retained events with no duplicate and bounded reads',async()=>{
+ const kv=fakeKV();let lists=0,gets=0;
+ const bounded={async list(opts){lists++;return kv.list(opts)},async get(key,fmt){gets++;return kv.get(key,fmt)}};
+ const all=[];let cursor=null;
+ for(let i=0;i<8;i++){
+  const page=await payneLedgerEventsCursor(bounded,{cursor,limit:1});
+  assert.equal(page.rows.length,1);
+  assert.equal(page.requestBudget.maxKvLists,1);
+  all.push(page.rows[0].sourceLedgerKey);
+  if(!page.hasMore){assert.equal(page.complete,true);break;}
+  cursor=page.nextCursor;
+ }
+ assert.equal(lists,2);
+ assert.equal(gets,2);
+ assert.equal(new Set(all).size,2);
+ assert.equal(all.length,2);
+});
+test('ledger cursor refuses incomplete pagination authority',async()=>{
+ const kv={async list(){return {keys:[],list_complete:false,cursor:null}},async get(){return null}};
+ await assert.rejects(()=>payneLedgerEventsCursor(kv),/HISTORY_LEDGER_CURSOR_INCOMPLETE/);
 });
