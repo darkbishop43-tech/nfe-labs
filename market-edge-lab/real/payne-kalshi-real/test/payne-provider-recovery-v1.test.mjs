@@ -4,7 +4,7 @@ import {verifyProviderTerminalExit,readRecoveryPages} from '../src/payne-provide
 import {recoverPayneProviderConfirmedExits} from '../src/payne-recovery-orchestrator.js';
 
 const c={kind:'EXIT',seriesId:'s1',attemptNo:1,specimenId:'s1-intent-1',
- clientOrderId:'payne-exit-1',ticker:'KXNEAR15M-TEST',side:'YES',claimState:'POTENTIALLY_SUBMITTED'};
+ clientOrderId:'payne-real-s1-1-exit1',ticker:'KXNEAR15M-TEST',side:'YES',claimState:'POTENTIALLY_SUBMITTED'};
 const p={owner:'PAYNE_KALSHI_REAL',seriesId:'s1',attemptNo:1,attemptId:'s1-intent-1',
  exitClientOrderId:c.clientOrderId,marketTicker:c.ticker,outcomeSide:c.side,status:'RECONCILIATION_UNKNOWN',
  reconciliationState:'UNKNOWN',entryOrderId:'entry-1'};
@@ -87,4 +87,18 @@ test('9 interrupted KV projection can retry without requiring new provider order
 test('10 mismatched retained position blocks DO commit',async()=>{
  const f=recoveryFixture({wrongPosition:true}),res=await recoverPayneProviderConfirmedExits({},f.deps);
  assert.equal(res.ok,false);assert.equal(f.stats().commits,0);
+});
+
+test('11 pre-KV crash retains exact deterministic exit ownership without stored exit client ID',async()=>{
+ const f=recoveryFixture();
+ const original=f.deps.loadSeries;
+ f.deps.loadSeries=async env=>{
+  const state=await original(env);
+  delete state.position.exitClientOrderId;
+  delete state.positions[0].exitClientOrderId;
+  return state;
+ };
+ const result=await recoverPayneProviderConfirmedExits({},f.deps);
+ assert.equal(result.ok,true);
+ assert.equal(f.stats().stored.positions[0].status,'CLOSED');
 });
