@@ -56,6 +56,16 @@ export class PayneExecutionCoordinator {
           {status:500,headers:{'cache-control':'no-store'}});
       }
     }
+    if(request.method==='GET' && new URL(request.url).pathname==='/internal/inspect-exit'){
+      const clientOrderId=new URL(request.url).searchParams.get('clientOrderId');
+      if(!clientOrderId||clientOrderId.length>160)
+        return Response.json({ok:false,status:'UNKNOWN',reason:'EXIT_CLIENT_ORDER_ID_REQUIRED'},{status:400});
+      try{
+        const prior=await this.state.storage.get('exit:'+clientOrderId);
+        return Response.json(prior===undefined?{ok:true,status:'NOT_FOUND',exists:false,claim:null}:
+          {ok:true,status:'FOUND',exists:true,claim:prior},{headers:{'cache-control':'no-store'}});
+      }catch{return Response.json({ok:false,status:'UNKNOWN',reason:'EXIT_STORAGE_READ_FAILED'},{status:500});}
+    }
     if(request.method==='GET' && new URL(request.url).pathname==='/internal/inspect') {
       const attemptNo=Number(new URL(request.url).searchParams.get('attemptNo'));
       if(!Number.isSafeInteger(attemptNo)||attemptNo<1)
@@ -75,12 +85,12 @@ export class PayneExecutionCoordinator {
     try {input=await request.json();}catch{return Response.json({granted:false,reason:'INVALID_CLAIM'},{status:400});}
     const {seriesId,attemptNo,specimenId,clientOrderId,ticker,side,windowClose}=input||{};
     const action=input?.action||'CLAIM';
-    const exitAction=['CLAIM_EXIT','RELEASE_EXIT_PROVEN_NO_POST','RESOLVE_EXIT_PROVEN_TERMINAL'].includes(action);
+    const exitAction=['CLAIM_EXIT','RELEASE_EXIT_PROVEN_NO_POST','RESOLVE_EXIT_PROVEN_TERMINAL','MARK_EXIT_RECOVERY_PROJECTED'].includes(action);
     if(!seriesId||!Number.isSafeInteger(attemptNo)||attemptNo<1||!specimenId||!clientOrderId||!ticker||!['YES','NO'].includes(side)||(!exitAction&&!windowClose)){
       return Response.json({granted:false,reason:'INCOMPLETE_EXECUTION_IDENTITY'},{status:400});
     }
     const key=exitAction?'exit:'+clientOrderId:'attempt:'+attemptNo;
-    if(!['CLAIM','RELEASE_PROVEN_NO_POST','RESOLVE_ENTRY','CLAIM_EXIT','RELEASE_EXIT_PROVEN_NO_POST','RESOLVE_EXIT_PROVEN_TERMINAL'].includes(action))
+    if(!['CLAIM','RELEASE_PROVEN_NO_POST','RESOLVE_ENTRY','CLAIM_EXIT','RELEASE_EXIT_PROVEN_NO_POST','RESOLVE_EXIT_PROVEN_TERMINAL','MARK_EXIT_RECOVERY_PROJECTED'].includes(action))
       return Response.json({granted:false,reason:'INVALID_ACTION'},{status:400});
     const outcome=await this.state.storage.transaction(async tx=>{
       const prior=await tx.get(key);
@@ -89,6 +99,20 @@ export class PayneExecutionCoordinator {
         await tx.put(key,{seriesId,attemptNo,specimenId,clientOrderId,ticker,side,
           claimState:'POTENTIALLY_SUBMITTED',claimedAt:new Date().toISOString()});
         return {granted:true,reason:'EXCLUSIVE_EXIT_CLAIM_PERSISTED'};
+      }
+      if(action==='MARK_EXIT_RECOVERY_PROJECTED'){
+        if(!prior||prior.seriesId!==seriesId||prior.attemptNo!==attemptNo||
+          prior.specimenId!==specimenId||prior.clientOrderId!==clientOrderId||
+          prior.ticker!==ticker||prior.side!==side||
+          prior.providerOrderId!==input.providerOrderId||
+          prior.evidenceId!==input.evidenceId||
+          !['CLOSED','NO_PROVIDER_EXECUTION'].includes(prior.claimState)||
+          !prior.recovery)
+          return {granted:false,reason:'RECOVERY_PROJECTION_IDENTITY_MISMATCH'};
+        if(prior.recovery.state==='APPLIED')return {granted:true,reason:'RECOVERY_PROJECTION_ALREADY_APPLIED'};
+        if(prior.recovery.state!=='PENDING')return {granted:false,reason:'RECOVERY_PROJECTION_STATE_UNKNOWN'};
+        await tx.put(key,{...prior,recovery:{...prior.recovery,state:'APPLIED',projectedAt:new Date().toISOString()}});
+        return {granted:true,reason:'RECOVERY_PROJECTION_APPLIED'};
       }
       if(action==='RESOLVE_EXIT_PROVEN_TERMINAL'){
         // Provider proof is verified by the Worker before calling this internal DO operation.
@@ -109,7 +133,7 @@ export class PayneExecutionCoordinator {
         if(!['POTENTIALLY_SUBMITTED','OPEN','UNKNOWN'].includes(prior.claimState))
           return {granted:false,reason:'EXIT_STATE_NOT_RECOVERABLE'};
         await tx.put(key,{...prior,claimState:input.resolution,providerOrderId:orderId,
-          evidenceId,resolvedAt:new Date().toISOString()});
+          evidenceId,recovery:{state:'PENDING',evidenceId,providerOrderId:orderId},resolvedAt:new Date().toISOString()});
         return {granted:true,reason:'PROVIDER_TERMINAL_EXIT_PERSISTED'};
       }
       if(action==='RELEASE_EXIT_PROVEN_NO_POST'){
@@ -266,4 +290,29 @@ export async function claimPayneExit(env,identity,{provenNoProviderPost=false,re
     return body?.granted===true?{granted:true,reason:body.reason||'EXIT_CLAIM_OK'}:
       {granted:false,reason:body?.reason||'EXIT_CLAIM_DENIED'};
   }catch{return {granted:false,reason:'EXIT_COORDINATOR_UNAVAILABLE'};}
+}
+
+export async function inspectPayneCoordinatorExit(env,seriesId,clientOrderId){
+ if(!seriesId||!clientOrderId)return {ok:false,status:'UNKNOWN',reason:'EXIT_IDENTITY_REQUIRED'};
+ const binding=env?.PAYNE_EXECUTION_COORDINATOR;
+ if(!binding?.idFromName||!binding?.get)return {ok:false,status:'UNKNOWN',reason:'COORDINATOR_UNBOUND'};
+ try{
+  const response=await binding.get(binding.idFromName(seriesId)).fetch(
+   'https://payne-coordinator.internal/internal/inspect-exit?clientOrderId='+encodeURIComponent(clientOrderId),{method:'GET'});
+  const body=await response.json();
+  return response.ok&&body?.ok===true?body:{ok:false,status:'UNKNOWN',reason:'EXIT_INSPECTION_FAILED'};
+ }catch{return {ok:false,status:'UNKNOWN',reason:'EXIT_INSPECTION_UNAVAILABLE'};}
+}
+export async function resolvePayneExitRecovery(env,identity,proof,{markProjected=false}={}){
+ const binding=env?.PAYNE_EXECUTION_COORDINATOR;
+ if(!binding?.idFromName||!binding?.get)return {granted:false,reason:'COORDINATOR_UNBOUND'};
+ const action=markProjected?'MARK_EXIT_RECOVERY_PROJECTED':'RESOLVE_EXIT_PROVEN_TERMINAL';
+ try{
+  const response=await binding.get(binding.idFromName(identity.seriesId)).fetch('https://payne-coordinator.internal/recover',{
+   method:'POST',headers:{'content-type':'application/json'},
+   body:JSON.stringify({...identity,...proof,action})
+  });
+  const result=await response.json();
+  return response.ok?result:{granted:false,reason:'COORDINATOR_RECOVERY_REJECTED'};
+ }catch{return {granted:false,reason:'COORDINATOR_RECOVERY_UNAVAILABLE'};}
 }
