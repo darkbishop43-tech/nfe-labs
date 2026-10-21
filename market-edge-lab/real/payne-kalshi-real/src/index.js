@@ -4875,7 +4875,10 @@ export default {
       const inspection=await inspectPayneCoordinatorExit(env,seriesId,clientOrderId);
       const claim=inspection?.claim;
       if(inspection?.ok!==true||inspection?.status!=='FOUND'||!claim||
-        claim.seriesId!==seriesId||claim.clientOrderId!==clientOrderId||claim.kind!=='EXIT')
+        claim.seriesId!==seriesId||claim.clientOrderId!==clientOrderId||
+        (claim.kind!==undefined&&claim.kind!=='EXIT')||!claim.specimenId||
+        !Number.isSafeInteger(Number(claim.attemptNo))||Number(claim.attemptNo)<1||
+        !claim.ticker||!['YES','NO'].includes(claim.side))
         return Response.json({ok:false,complete:false,status:'UNKNOWN',reason:'EXACT_EXIT_CLAIM_UNVERIFIED'},{status:503});
       const candidates=paynePositionRecords(series).filter(p=>p?.owner===REAL_OWNER&&
         p?.seriesId===seriesId&&p?.attemptId===claim.specimenId&&
