@@ -2446,13 +2446,16 @@ async function buildExportResponse(env, url, nowMs=Date.now()) {
   const format=String(url.searchParams.get('format')||'json').toLowerCase();
   if (!['json','csv'].includes(format)) throw new Error('EXPORT_FORMAT_NOT_ALLOWED');
   if(String(url.searchParams.get('category')||'observations')==='executions'){
-    const history=await payneHistoryAll(binding(env),bounds);
+    const history=await payneHistoryCursor(binding(env),{
+      cursor:url.searchParams.get('cursor')||null,
+      limit:url.searchParams.get('limit')||20,bounds
+    });
     const rows=history.rows;
     const stamp=new Date(nowMs).toISOString().replace(/[:.]/g,'-');
     const headers={'cache-control':'no-store','content-disposition':'attachment; filename="payne-real-executions-'+bounds.range+'-'+stamp+'.'+format+'"'};
     if(format==='csv')
       return new Response(payneExecutionCsv(rows),{headers:{...headers,'content-type':'text/csv; charset=utf-8'}});
-    return new Response(JSON.stringify({schema:'PAYNE_REAL_EXECUTION_EXPORT_V1',range:bounds.range,from:bounds.fromMs===null?null:new Date(bounds.fromMs).toISOString(),to:bounds.toMs===null?null:new Date(bounds.toMs).toISOString(),complete:history.complete,coverage:history.coverage,rowCount:rows.length,fields:PAYNE_EXECUTION_EXPORT_FIELDS,rows},null,2),{headers:{...headers,'content-type':'application/json; charset=utf-8'}});
+    return new Response(JSON.stringify({schema:'PAYNE_REAL_EXECUTION_EXPORT_V1',range:bounds.range,from:bounds.fromMs===null?null:new Date(bounds.fromMs).toISOString(),to:bounds.toMs===null?null:new Date(bounds.toMs).toISOString(),complete:history.complete,coverage:history.coverage,rowCount:rows.length,nextCursor:history.nextCursor,hasMore:history.hasMore,fields:PAYNE_EXECUTION_EXPORT_FIELDS,rows},null,2),{headers:{...headers,'content-type':'application/json; charset=utf-8'}});
   }
   const snapshots=await listExportSnapshots(env,bounds);
   const currentRealExecution=await buildRealExecutionObservability(env);
