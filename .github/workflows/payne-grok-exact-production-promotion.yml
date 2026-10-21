@@ -144,3 +144,5 @@ jobs:
           curl --fail --silent --show-error --max-time 25 -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/market-edge-payne-kalshi-real/deployments" -o /tmp/payne-staircase-deployments.json
           jq -e --arg v "$version" '.success==true and (.result.deployments[0].versions | any(.version_id==$v and .percentage==100))' /tmp/payne-staircase-deployments.json >/dev/null
           echo "PAYNE_STAIRCASE_NEW_VERSION_100_PERCENT=$version"
+
+# PAYNE ledger promotion: rerun existing authoritative pre/post deployment gates.
