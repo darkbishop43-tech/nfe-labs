@@ -6,6 +6,7 @@ import {PayneExecutionCoordinator,claimPayneExecution,releaseProvenNoPost,resolv
 export {PayneExecutionCoordinator};
 import { kalshiReadOnlyProof, kalshiGetOnly } from './kalshi-get-only.js';
 import { recoverPayneProviderConfirmedExits } from './payne-recovery-orchestrator.js';
+import { recoverProviderConfirmedFireLatch } from './payne-fire-recovery-v1.js';
 import {readPayneProviderHistory,enrichPayneCycles} from './payne-provider-history-enrichment.js';
 import { kalshiPayneOrderPost, PAYNE_WRITE_CONTRACT } from './kalshi-real-write.js';
 import { cockpitHtml } from './cockpit-html.js';
@@ -2994,6 +2995,13 @@ async function recordVerifiedRecoveryLedger(env,evidence){
  return row;
 }
 
+export async function recoverPayneProviderConfirmedFireTick(env){
+ return recoverProviderConfirmedFireLatch(env,{
+  loadControl,loadSeries:loadRealSeriesState,saveSeries:saveRealSeriesState,
+  recordRecoveryLedger:recordVerifiedRecoveryLedger
+ });
+}
+
 export async function recoverPayneProviderConfirmedExitsTick(env){
  return recoverPayneProviderConfirmedExits(env,{
   loadControl,loadSeries:loadRealSeriesState,saveSeries:saveRealSeriesState,
@@ -5240,6 +5248,10 @@ export default {
     try{
       const recovery=await recoverPayneProviderConfirmedExitsTick(env);
       if(recovery?.ok!==true)console.warn('PAYNE_RECOVERY_REMAINS_UNKNOWN',String(recovery?.reason||'UNKNOWN'));
+      // A FIRE receipt is separate from EXIT claims; never clear unrelated authority.
+      const fireRecovery=await recoverPayneProviderConfirmedFireTick(env);
+      if(fireRecovery?.ok!==true)console.warn('PAYNE_FIRE_RECOVERY_REMAINS_UNKNOWN',
+        String(fireRecovery?.reason||'UNKNOWN'));
     }catch(error){
       console.warn('PAYNE_RECOVERY_RETRY_PENDING',String(error?.message||error));
     }
