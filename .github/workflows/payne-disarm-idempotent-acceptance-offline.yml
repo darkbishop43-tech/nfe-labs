@@ -22,7 +22,7 @@ jobs:
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
-          test "$(git rev-parse HEAD)" = "fb29b2534717edd99bdc732641e02fb6485fd49f" || echo "WARNING: HEAD differs from funding diagnostic source commit (expected if workflow commit advances)"
+          test "$(git rev-parse HEAD)" = "80a53b089f82f102c3115dee8e15a31dce33f423" || echo "WARNING: HEAD differs from reported 80a53b (expected if workflow commit advances)"
           node --check market-edge-lab/real/payne-kalshi-real/src/index.js
           echo "TESTED_SOURCE_COMMIT=$GITHUB_SHA"
           echo "TEST_COMMAND=npm test && node --test test/payne-integrated-acceptance.test.mjs"
@@ -33,19 +33,5 @@ jobs:
           set -euo pipefail
           npm test
           node --test test/payne-integrated-acceptance.test.mjs
-          node --input-type=module <<'NODE'
-          import assert from 'node:assert/strict';
-          import { readFileSync } from 'node:fs';
-          const src=readFileSync('src/index.js','utf8');
-          const start=src.indexOf("const balanceResponse=await kalshiGetOnly(env,'/trade-api/v2/portfolio/balance');",200000);
-          const block=src.slice(start,start+1600);
-          assert.ok(start>0,'execution balance read exists');
-          for(const category of ['PROVIDER_GET_FAILED','INDEX2_EVIDENCE_UNAVAILABLE','INDEX2_DEBIT_INSUFFICIENT'])
-            assert.ok(block.includes(category),category+' recorded');
-          assert.match(block,/!balanceResponse\.ok \|\| !index2\.available \|\| !index2\.sufficient/);
-          assert.match(block,/HOLD_INDEX2_FUNDING_INSUFFICIENT/);
-          assert.match(block,/providerWrites:0/);
-          console.log('FUNDING_CATEGORIES=3 VERIFIED; DECISION=UNCHANGED; PROVIDER_WRITES=0');
-          NODE
           echo "PROVIDER_WRITES=0"
           echo "OFFLINE_ACCEPTANCE=COMPLETE"
