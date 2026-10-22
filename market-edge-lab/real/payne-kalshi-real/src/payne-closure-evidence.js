@@ -5,7 +5,7 @@ export async function payneClosureEvidence(env,control,series,{get=kalshiGetOnly
   const reject=reason=>({ok:false,complete:false,reason,providerWrites:0});
   const p=series?.position,a=series?.currentAttempt;
   if(control?.armed!==false||control?.openPositions!==1)return reject('CONTROL_NOT_MAINTENANCE_DISARMED');
-  if(!p||p.seriesId!==series?.seriesId||p.owner!=='PAYNE_KALSHI_REAL'||!['OPEN','RECONCILIATION_UNKNOWN'].includes(p.status)||!p.attemptId||
+  if(!p||p.seriesId!==series?.seriesId||p.owner!=='PAYNE_KALSHI_REAL'||!['OPEN','RECONCILIATION_UNKNOWN','CLOSED'].includes(p.status)||!p.attemptId||
     !p.entryOrderId||!p.entryClientOrderId||!p.marketTicker||!['YES','NO'].includes(p.outcomeSide))
     return reject('POSITION_IDENTITY_INCOMPLETE');
   if(a?.executionHandoff!=='DIRECT_KALSHI_WRITER_V1'||a.attemptId!==p.attemptId||
@@ -80,7 +80,12 @@ export async function payneClosureEvidence(env,control,series,{get=kalshiGetOnly
       (o.ticker===p.marketTicker&&!terminal.has(String(o.status).toLowerCase()))))
       return reject('OPEN_OR_UNKNOWN_OWNED_ORDER');
     const collection=Array.isArray(series.positions)?series.positions:[];
-    if(collection.filter(x=>x&&x.status!=='CLOSED').length!==1)
+    if(p.status==='CLOSED'
+  ? collection.some(x=>x && x.status!=='CLOSED') ||
+    !collection.some(x=>x && x.status==='CLOSED' &&
+      x.attemptId===p.attemptId &&
+      x.entryOrderId===p.entryOrderId)
+  : collection.filter(x=>x && x.status!=='CLOSED').length!==1)
       return reject('OTHER_UNRESOLVED_PAYNE_POSITION');
     return {ok:true,complete:true,reason:'EXACT_PROVIDER_FLAT_VERIFIED',
       provider:{authenticated:true,complete:true,ticker:p.marketTicker,side:p.outcomeSide,
