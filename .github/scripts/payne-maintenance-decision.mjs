@@ -127,7 +127,16 @@ export async function getLiveMaintenanceDecision({fetchImpl=fetch,env=process.en
    throw Error('PROTECTED_PROVIDER_EVIDENCE_FAILED_HTTP_'+response.status);
  }
  const decision=await verifyPayneMaintenanceChain({control,series,providerResponse,sourceBlob:blob,expectedBlob:blob});
- if(!decision.allowed)throw Error('MAINTENANCE_DENIED_'+decision.reason);
+ if(!decision.allowed){
+   if(decision.reason==='POSITION_IDENTITY_STATUS'){
+     const actual=series?.position?.status;
+     const safeStatus=typeof actual==='string' && /^[A-Z][A-Z0-9_]{0,63}$/.test(actual)
+       ? actual : (actual===undefined?'MISSING':'INVALID_OR_UNSAFE');
+     console.error('POSITION_STATUS_DIAGNOSTIC actual='+safeStatus+
+       ' expected=OPEN|RECONCILIATION_UNKNOWN|PROVIDER_VERIFIED_CLOSED');
+   }
+   throw Error('MAINTENANCE_DENIED_'+decision.reason);
+ }
  return decision;
 }
 
