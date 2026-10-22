@@ -69,17 +69,6 @@ jobs:
           jq -r '.result.deployments[0].versions[0].version_id' /tmp/payne-deployments-pre.json > /tmp/payne-verified-current-baseline.txt
           echo "PRODUCTION_BASELINE_READ_FROM_CLOUDFLARE=$(cat /tmp/payne-verified-current-baseline.txt)"
           echo 'PRODUCTION_BASELINE_MATCH=PASS'
-      - name: Prepare authenticated PAYNE maintenance proof read-only
-        shell: bash
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          PAYNE_COORDINATOR_DIAGNOSTIC_TOKEN: ${{ secrets.PAYNE_COORDINATOR_DIAGNOSTIC_TOKEN }}
-          PAYNE_APPROVED_CLOSURE_BLOB: 76c6ff7a2f7f6967def859012b2fcf3b66f7b2f9
-        run: |
-          set -euo pipefail
-          rm -f /tmp/payne-kv-gate/maintenance-proof.json
-          node maintenance-source/.github/scripts/payne-maintenance-decision.mjs
       - name: Run existing authoritative PAYNE KV pre-deploy safety gate
         shell: bash
         env:
