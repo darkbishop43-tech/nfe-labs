@@ -14,7 +14,7 @@ export function evaluatePayneClosureMaintenance({control,series,provider,sourceB
   const positionChecks=[
     ['PRESENT',Boolean(p)],
     ['OWNER',p?.owner==='PAYNE_KALSHI_REAL'],
-    ['STATUS',['OPEN','RECONCILIATION_UNKNOWN'].includes(p?.status)],
+    ['STATUS',['OPEN','RECONCILIATION_UNKNOWN'].includes(p?.status) || (p?.status==='CLOSED' && provider?.authenticated===true && provider?.complete===true && provider?.positionReadOk===true && provider?.positionQuantity===0 && provider?.ordersReadOk===true && provider?.ordersComplete===true && provider?.otherUnresolvedExposure===false)],
     ['EXCHANGE_INDEX',p?.exchangeIndex===2],
     ['SERIES_ID',Boolean(p?.seriesId)&&p.seriesId===series.seriesId],
     ['ATTEMPT_ID',Boolean(p?.attemptId)],
