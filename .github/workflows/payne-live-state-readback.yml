@@ -22,10 +22,13 @@ jobs:
             -o /tmp/payne-deployments.json
           jq -e '.success==true' /tmp/payne-deployments.json >/dev/null
           echo "=== CURRENT PRODUCTION DEPLOYMENTS (top) ==="
-          jq -c '[.result.deployments[]? | {id,created_on,versions:[.versions[]?|{version_id,percentage}]}] | .[:2]' /tmp/payne-deployments.json
+          jq -c '[.result.deployments[]? | {id,created_on,versions:[.versions[]?|{version_id,percentage}]}] | .[:1]' /tmp/payne-deployments.json
           echo "=== LIVE CONTROL ==="
           curl --fail --silent --show-error --max-time 20 \
             'https://market-edge-payne-kalshi-real.darkbishop43.workers.dev/control' \
             -o /tmp/payne-control.json
           jq -c '{armed:.control.armed,openPositions:.control.openPositions,attemptTarget:.control.attemptTarget,maxPositions:.control.maxPositions,requiredExchangeIndex:.control.requiredExchangeIndex,fireLatch:.control.fireLatch}' /tmp/payne-control.json || jq -c '.' /tmp/payne-control.json
+          echo "=== SERIES VIA REAL-STATE ==="
+          curl --silent --show-error --max-time 20 'https://market-edge-payne-kalshi-real.darkbishop43.workers.dev/real-state' -o /tmp/series.json || true
+          jq -c '{seriesId,status,unresolvedEntry,fireLatch,positionStatus:(.position.status//null),completedAt}' /tmp/series.json 2>/dev/null || echo "real-state unavailable"
           echo "READBACK_COMPLETE"
