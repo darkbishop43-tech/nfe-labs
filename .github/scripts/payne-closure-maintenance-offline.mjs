@@ -45,7 +45,13 @@ export function evaluatePayneClosureMaintenance({control,series,provider,sourceB
       (a.clientOrderId||a.entryClientOrderId)!==p.entryClientOrderId) return block('ENTRY_CLAIM_NOT_MATCHED');
   const records=Array.isArray(series.positions)?series.positions:[];
   const active=records.filter(x=>x && x.status!=='CLOSED');
-  if (active.length!==1 || active[0].attemptId!==p.attemptId ||
+  if (p.status==='CLOSED') {
+    // Historical closed record: no active retained positions may remain.
+    // Require the exact closed record to exist; provider evidence is checked below.
+    if (active.length!==0 || !records.some(x=>x && x.status==='CLOSED' &&
+        x.attemptId===p.attemptId && x.entryOrderId===p.entryOrderId))
+      return block('OTHER_UNRESOLVED_POSITION');
+  } else if (active.length!==1 || active[0].attemptId!==p.attemptId ||
       active[0].entryOrderId!==p.entryOrderId) return block('OTHER_UNRESOLVED_POSITION');
   if (provider.authenticated!==true||provider.complete!==true||
       provider.ticker!==p.marketTicker||provider.side!==p.outcomeSide||
