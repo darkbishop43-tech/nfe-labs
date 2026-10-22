@@ -5,6 +5,7 @@ import {liveOrderWatchProjection,paynePositionRecords,payneCapacityEvidence,upse
 import {PayneExecutionCoordinator,claimPayneExecution,releaseProvenNoPost,resolvePayneExecutionClaim,claimPayneExit,inspectPayneCoordinatorClaim,inspectPayneCoordinatorSeries,inspectPayneCoordinatorExit} from './payne-execution-coordinator.js';
 export {PayneExecutionCoordinator};
 import { kalshiReadOnlyProof, kalshiGetOnly } from './kalshi-get-only.js';
+import { payneClosureEvidence } from './payne-closure-evidence.js';
 import {verifyProviderTerminalExit} from './payne-provider-recovery-v1.js';
 import { recoverPayneProviderConfirmedExits } from './payne-recovery-orchestrator.js';
 import { recoverProviderConfirmedFireLatch } from './payne-fire-recovery-v1.js';
@@ -4934,7 +4935,55 @@ export default {
         paginationComplete:evidence.paginationComplete===true,providerWrites:0},
         {status:complete?200:503,headers:{'cache-control':'no-store'}});
     }
+    if (url.pathname === '/internal/closure-maintenance-evidence') {
+      // Read-only historical closure evidence. No state or provider writes.
+      const secret = env?.PAYNE_COORDINATOR_DIAGNOSTIC_TOKEN;
+      const supplied = request.headers.get('x-payne-diagnostic-token');
 
+      if (
+        typeof secret !== 'string' ||
+        secret.length < 32 ||
+        typeof supplied !== 'string' ||
+        supplied.length !== secret.length
+      ) {
+        return Response.json(
+          { ok: false, complete: false, status: 'UNAUTHORIZED' },
+          { status: 403, headers: { 'cache-control': 'no-store' } }
+        );
+      }
+
+      const [expectedHash, receivedHash] = await Promise.all([
+        crypto.subtle.digest('SHA-256', new TextEncoder().encode(secret)),
+        crypto.subtle.digest('SHA-256', new TextEncoder().encode(supplied))
+      ]);
+
+      const expectedBytes = new Uint8Array(expectedHash);
+      const receivedBytes = new Uint8Array(receivedHash);
+      let mismatch = 0;
+
+      for (let i = 0; i < expectedBytes.length; i++) {
+        mismatch |= expectedBytes[i] ^ receivedBytes[i];
+      }
+
+      if (mismatch !== 0) {
+        return Response.json(
+          { ok: false, complete: false, status: 'UNAUTHORIZED' },
+          { status: 403, headers: { 'cache-control': 'no-store' } }
+        );
+      }
+
+      const [control, series] = await Promise.all([
+        loadControl(env),
+        loadRealSeriesState(env)
+      ]);
+
+      const evidence = await payneClosureEvidence(env, control, series);
+
+      return Response.json(evidence, {
+        status: evidence.ok === true && evidence.complete === true ? 200 : 503,
+        headers: { 'cache-control': 'no-store' }
+      });
+    }
     if (url.pathname === '/internal/fire-receipt-diagnostic') {
       // Existing diagnostic authority; exact persisted FIRE receipt only. No writes.
       const secret=env?.PAYNE_COORDINATOR_DIAGNOSTIC_TOKEN;
