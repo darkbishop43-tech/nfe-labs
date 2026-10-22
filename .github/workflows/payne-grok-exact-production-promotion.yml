@@ -1,5 +1,5 @@
 name: PAYNE Grok Exact Pinned Production Promotion
-# Revalidate committed position-identity diagnostics against authenticated maintenance proof.
+# Validate committed historical CLOSED-status repair using existing authenticated maintenance checks.
 on:
   push:
     branches: [payne-staircase-shadow-data-isolated-20261015, payne-ledger-bounded-history-v10-20261021]
