@@ -1,0 +1,31 @@
+name: PAYNE Live State Readback
+on:
+  push:
+    branches: [payne-disarm-idempotent-finalization-20261022]
+    paths: [".github/workflows/payne-live-state-readback.yml"]
+permissions:
+  contents: read
+jobs:
+  readback:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Read current production deployments and control
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error --max-time 25 \
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/market-edge-payne-kalshi-real/deployments" \
+            -o /tmp/payne-deployments.json
+          jq -e '.success==true' /tmp/payne-deployments.json >/dev/null
+          echo "=== CURRENT PRODUCTION DEPLOYMENTS (top) ==="
+          jq -c '[.result.deployments[]? | {id,created_on,versions:[.versions[]?|{version_id,percentage}]}] | .[:2]' /tmp/payne-deployments.json
+          echo "=== LIVE CONTROL ==="
+          curl --fail --silent --show-error --max-time 20 \
+            'https://market-edge-payne-kalshi-real.darkbishop43.workers.dev/control' \
+            -o /tmp/payne-control.json
+          jq -c '{armed:.control.armed,openPositions:.control.openPositions,attemptTarget:.control.attemptTarget,maxPositions:.control.maxPositions,requiredExchangeIndex:.control.requiredExchangeIndex,fireLatch:.control.fireLatch}' /tmp/payne-control.json || jq -c '.' /tmp/payne-control.json
+          echo "READBACK_COMPLETE"
