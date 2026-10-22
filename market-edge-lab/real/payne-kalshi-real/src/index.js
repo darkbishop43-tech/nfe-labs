@@ -266,9 +266,23 @@ export async function updateFounderControl(env, action, rawValue = null) {
     next.armed=false;
     next.attempts=0;
     // Keep the Founder-selected target configuration; idle display is 0/0.
-    if(before.armed===true){
+    {
       const series=await loadRealSeriesState(env);
       if(series?.seriesId && !series.completedAt){
+        // A second Founder DISARM must be able to finish an already-disarmed
+        // historical session. Preserve the existing ARM reconciliation checks:
+        // never finalize an unresolved entry, provider order, or position.
+        if(before.armed===false){
+          if(series.unresolvedEntry===true ||
+             Number(before.openPositions)!==0 ||
+             (series.position && SERIES_BLOCKING_POSITION_STATUSES.includes(String(series.position.status||''))) ||
+             paynePositionRecords(series).some(p=>String(p.status||'').toUpperCase()!=='CLOSED') ||
+             ['SUBMITTING','WRITE_ERROR_UNKNOWN','PROVIDER_REJECTED_OR_UNKNOWN','UNKNOWN'].includes(
+               String(series.currentAttempt?.status||'').toUpperCase()) ||
+             !seriesInterlock(series).clear){
+            throw new Error('PAYNE_REAL_DISARM_FINALIZATION_REQUIRES_RECONCILIATION');
+          }
+        }
         const closedAt=new Date().toISOString();
         const closed={
           ...series,status:'TERMINAL_FOUNDER_DISARMED',completedAt:closedAt,
