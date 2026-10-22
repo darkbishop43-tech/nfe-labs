@@ -10,8 +10,22 @@ export function evaluatePayneClosureMaintenance({control,series,provider,sourceB
   if (series.schema!=='PAYNE_REAL_SERIES_V1'||series.owner!=='PAYNE_KALSHI_REAL') return block('SERIES_IDENTITY');
   if (series.unresolvedEntry!==false) return block('UNRESOLVED_ENTRY');
   const p=series.position;
-  if (!p || p.owner!=='PAYNE_KALSHI_REAL'||!['OPEN','RECONCILIATION_UNKNOWN'].includes(p.status)||p.exchangeIndex!==2) return block('POSITION_IDENTITY');
-  if (!p.seriesId||p.seriesId!==series.seriesId||!p.attemptId||!Number.isInteger(p.attemptNo)||!p.entryOrderId||!p.entryClientOrderId||!p.marketTicker||!['YES','NO'].includes(p.outcomeSide)) return block('POSITION_IDENTITY');
+  // Preserve every original predicate; identify the exact failed field without logging financial identifiers.
+  const positionChecks=[
+    ['PRESENT',Boolean(p)],
+    ['OWNER',p?.owner==='PAYNE_KALSHI_REAL'],
+    ['STATUS',['OPEN','RECONCILIATION_UNKNOWN'].includes(p?.status)],
+    ['EXCHANGE_INDEX',p?.exchangeIndex===2],
+    ['SERIES_ID',Boolean(p?.seriesId)&&p.seriesId===series.seriesId],
+    ['ATTEMPT_ID',Boolean(p?.attemptId)],
+    ['ATTEMPT_NO',Number.isInteger(p?.attemptNo)],
+    ['ENTRY_ORDER_ID',Boolean(p?.entryOrderId)],
+    ['ENTRY_CLIENT_ORDER_ID',Boolean(p?.entryClientOrderId)],
+    ['MARKET_TICKER',Boolean(p?.marketTicker)],
+    ['OUTCOME_SIDE',['YES','NO'].includes(p?.outcomeSide)]
+  ];
+  const failedPositionCheck=positionChecks.find(([,passed])=>!passed);
+  if(failedPositionCheck) return block('POSITION_IDENTITY_'+failedPositionCheck[0]);
   const a=series.currentAttempt;
   if (!a || a.executionHandoff!=='DIRECT_KALSHI_WRITER_V1'||
       a.attemptId!==p.attemptId||a.attemptNo!==p.attemptNo||
