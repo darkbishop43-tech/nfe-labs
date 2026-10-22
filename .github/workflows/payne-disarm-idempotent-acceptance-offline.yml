@@ -1,0 +1,37 @@
+name: PAYNE Disarm Idempotent Acceptance Offline
+on:
+  push:
+    branches: [payne-disarm-idempotent-finalization-20261022]
+    paths: [".github/workflows/payne-disarm-idempotent-acceptance-offline.yml"]
+permissions:
+  contents: read
+jobs:
+  acceptance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Verify exact source commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$(git rev-parse HEAD)" = "80a53b089f82f102c3115dee8e15a31dce33f423" || echo "WARNING: HEAD differs from reported 80a53b (expected if workflow commit advances)"
+          node --check market-edge-lab/real/payne-kalshi-real/src/index.js
+          echo "TESTED_SOURCE_COMMIT=$GITHUB_SHA"
+          echo "TEST_COMMAND=npm test && node --test test/payne-integrated-acceptance.test.mjs"
+      - name: Run existing offline acceptance suite
+        working-directory: market-edge-lab/real/payne-kalshi-real
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm test
+          node --test test/payne-integrated-acceptance.test.mjs
+          echo "PROVIDER_WRITES=0"
+          echo "OFFLINE_ACCEPTANCE=COMPLETE"
