@@ -4513,6 +4513,19 @@ async function runPayneRealExecutionCycleOwned(env,{postImpl=kalshiPayneOrderPos
   const balanceBody=await balanceResponse.json().catch(()=>({}));
   const index2=index2FundingEvidence(balanceBody,sizing.totalDebitUsd);
   if(!balanceResponse.ok || !index2.available || !index2.sufficient){
+    // Preserve the existing fail-closed funding decision. Record only the
+    // execution-time GET result and parsed Index 2 evidence (never credentials).
+    await appendEvent(env,'PAYNE_INDEX2_FUNDING_REJECTION_EVIDENCE',{
+      seriesId:series.seriesId||null,
+      providerHttpStatus:balanceResponse.status,
+      providerHttpOk:balanceResponse.ok,
+      index2Evidence:index2.evidence,
+      index2Available:index2.available,
+      index2BalanceUsd:index2.balanceUsd,
+      requiredDebitUsd:sizing.totalDebitUsd,
+      failureClass:!balanceResponse.ok?'PROVIDER_GET_FAILED':!index2.available?'INDEX2_EVIDENCE_UNAVAILABLE':'INDEX2_DEBIT_INSUFFICIENT',
+      providerWrites:0,
+    });
     return invalidateFireSpecimen(env,series,'HOLD_INDEX2_FUNDING_INSUFFICIENT',{identityMatch:'PASS',freshLock:'PASS',preSubmit:'PASS'},nowMs);
   }
 
