@@ -1843,6 +1843,7 @@ async function invalidateFireSpecimen(env,series,reason,details={},nowMs=Date.no
     finalFeatureEvidence:details.finalFeatureEvidence??latch?.finalFeatureEvidence??null,
     freshLockBookEvidence:details.freshLockBookEvidence??latch?.freshLockBookEvidence??null,
     preSubmitBookEvidence:details.preSubmitBookEvidence??latch?.preSubmitBookEvidence??null,
+    ...(details.fundingEvidence?{fundingEvidence:details.fundingEvidence}:{}),
     providerPost:'NO',
     providerOrderId:null,
     finalResult:'INVALIDATED_BEFORE_POST',
@@ -1861,6 +1862,7 @@ async function invalidateFireSpecimen(env,series,reason,details={},nowMs=Date.no
     finalFeatureEvidence:invalidated.finalFeatureEvidence,
     freshLockBookEvidence:invalidated.freshLockBookEvidence,
     preSubmitBookEvidence:invalidated.preSubmitBookEvidence,
+    ...(invalidated.fundingEvidence?{fundingEvidence:invalidated.fundingEvidence}:{}),
     providerPost:false,
     providerOrderId:null,
     providerWrites:0,
@@ -4513,7 +4515,18 @@ async function runPayneRealExecutionCycleOwned(env,{postImpl=kalshiPayneOrderPos
   const balanceBody=await balanceResponse.json().catch(()=>({}));
   const index2=index2FundingEvidence(balanceBody,sizing.totalDebitUsd);
   if(!balanceResponse.ok || !index2.available || !index2.sufficient){
-    return invalidateFireSpecimen(env,series,'HOLD_INDEX2_FUNDING_INSUFFICIENT',{identityMatch:'PASS',freshLock:'PASS',preSubmit:'PASS'},nowMs);
+    // Evidence only: preserve the original funding decision and fail-closed behavior.
+    const fundingEvidence={
+      httpStatus:balanceResponse.status,
+      httpOk:balanceResponse.ok,
+      requiredDebitUsd:sizing.totalDebitUsd,
+      index2Available:index2.available,
+      index2BalanceUsd:index2.balanceUsd,
+      index2Sufficient:index2.sufficient,
+      index2Evidence:index2.evidence,
+      failureClass:!balanceResponse.ok?'PROVIDER_HTTP_FAILURE':!index2.available?'INDEX2_EVIDENCE_UNAVAILABLE':'INDEX2_BALANCE_INSUFFICIENT',
+    };
+    return invalidateFireSpecimen(env,series,'HOLD_INDEX2_FUNDING_INSUFFICIENT',{identityMatch:'PASS',freshLock:'PASS',preSubmit:'PASS',fundingEvidence},nowMs);
   }
 
   const providerAttemptNoCandidate=started+1;
