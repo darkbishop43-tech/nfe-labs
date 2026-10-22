@@ -11,6 +11,18 @@ export function evaluatePayneClosureMaintenance({control,series,provider,sourceB
   if (series.unresolvedEntry!==false) return block('UNRESOLVED_ENTRY');
   const p=series.position;
   // Preserve every original predicate; identify the exact failed field without logging financial identifiers.
+  // A CLOSED ledger status is historical bookkeeping, not proof of current
+  // provider exposure. Reject incomplete provider evidence explicitly instead
+  // of reporting a misleading position-status mismatch.
+  if(p?.status==='CLOSED' && !(
+    provider?.authenticated===true &&
+    provider?.complete===true &&
+    provider?.positionReadOk===true &&
+    provider?.positionQuantity===0 &&
+    provider?.ordersReadOk===true &&
+    provider?.ordersComplete===true &&
+    provider?.otherUnresolvedExposure===false
+  )) return block('CLOSED_PROVIDER_FLAT_EVIDENCE_INCOMPLETE');
   const positionChecks=[
     ['PRESENT',Boolean(p)],
     ['OWNER',p?.owner==='PAYNE_KALSHI_REAL'],
