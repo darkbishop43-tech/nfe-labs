@@ -1,4 +1,5 @@
 name: PAYNE Grok Exact Pinned Production Promotion
+# Run authenticated retained-position status diagnostic.
 # Validate committed historical CLOSED-status repair using existing authenticated maintenance checks.
 on:
   push:
