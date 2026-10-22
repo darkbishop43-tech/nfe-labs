@@ -1,0 +1,31 @@
+name: PAYNE Disarm Finalization Trigger
+on:
+  push:
+    branches: [payne-disarm-idempotent-finalization-20261022]
+    paths: [".github/workflows/payne-disarm-finalization-trigger.yml"]
+permissions:
+  contents: read
+jobs:
+  finalize:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger existing DISARM finalization and verify
+        shell: bash
+        run: |
+          set -euo pipefail
+          base='https://market-edge-payne-kalshi-real.darkbishop43.workers.dev'
+          echo "=== CONTROL BEFORE ==="
+          curl --fail --silent --show-error --max-time 20 "$base/control" -o /tmp/control-before.json
+          jq -c '{armed:.control.armed,openPositions:.control.openPositions,attemptTarget:.control.attemptTarget}' /tmp/control-before.json
+          echo "=== SERIES BEFORE (via real-state if available) ==="
+          curl --silent --show-error --max-time 20 "$base/real-state" -o /tmp/series-before.json || true
+          jq -c '{seriesId,status,unresolvedEntry,fireLatch,openPositions:.openPositions,positionStatus:(.position.status//null)}' /tmp/series-before.json 2>/dev/null || echo "real-state unavailable"
+          echo "=== TRIGGER DISARM ==="
+          curl --fail --silent --show-error --max-time 25 -X POST "$base/control" \
+            -H 'content-type: application/json' \
+            -d '{"action":"DISARM"}' -o /tmp/disarm-result.json
+          jq -c '.' /tmp/disarm-result.json
+          echo "=== CONTROL AFTER ==="
+          curl --fail --silent --show-error --max-time 20 "$base/control" -o /tmp/control-after.json
+          jq -c '{armed:.control.armed,openPositions:.control.openPositions}' /tmp/control-after.json
+          echo "FINALIZATION_TRIGGER_COMPLETE"
