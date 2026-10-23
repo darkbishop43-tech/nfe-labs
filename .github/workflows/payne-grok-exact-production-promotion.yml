@@ -3,7 +3,7 @@ name: PAYNE Grok Exact Pinned Production Promotion
 # Validate committed historical CLOSED-status repair using existing authenticated maintenance checks.
 on:
   push:
-    branches: [payne-staircase-shadow-data-isolated-20261015, payne-ledger-bounded-history-v10-20261021, payne-disarm-idempotent-finalization-20261022]
+    branches: [payne-staircase-shadow-data-isolated-20261015, payne-ledger-bounded-history-v10-20261021, payne-disarm-idempotent-finalization-20261022, payne-probability-monitor-series-identity-20261023]
     paths: [".github/workflows/payne-grok-exact-production-promotion.yml"]
 permissions:
   contents: read
@@ -32,7 +32,7 @@ jobs:
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
-          test "$(git rev-parse HEAD:market-edge-lab/real/payne-kalshi-real/src/index.js)" = 2f23b47e6630b91ce887de0a14ca384b883c3c7e
+          test "$(git rev-parse HEAD:market-edge-lab/real/payne-kalshi-real/src/index.js)" = cb719dc9cf97b1b684bb611a1cbef5b77acf1f4d
           test "$(git rev-parse HEAD:market-edge-lab/real/payne-kalshi-real/src/payne-closure-evidence.js)" = 1b9f44a7a14e1f16c9a7d3df15ee3c9531c932ca
           grep -q '^name = "market-edge-payne-kalshi-real"$' market-edge-lab/real/payne-kalshi-real/wrangler.toml
           test -f market-edge-lab/real/payne-kalshi-real/src/payne-execution-coordinator.js
