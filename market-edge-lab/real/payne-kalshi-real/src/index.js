@@ -878,8 +878,14 @@ export async function discoverCockpitMarkets(env, { nowMs=Date.now() } = {}) {
       if (!response.ok) {
         return {asset:spec.asset,seriesTicker:spec.seriesTicker,path,httpStatus:response.status,ok:false,markets:[],error:'MARKETS_READ_FAILED_'+response.status};
       }
-      const markets=rows.map(raw=>providerMarketSnapshot(raw,nowMs,spec.asset,readAt))
-        .filter(m=>{
+      const markets=rows.map(raw=>{
+        const snapshot=providerMarketSnapshot(raw,nowMs,spec.asset,readAt);
+        // The series-scoped provider GET supplies authoritative series identity
+        // when a market row omits its optional series_ticker field.
+        return !snapshot.seriesTicker && snapshot.ticker.startsWith(spec.seriesTicker+'-')
+          ? {...snapshot,seriesTicker:spec.seriesTicker}
+          : snapshot;
+      }).filter(m=>{
           const closeMs=Date.parse(m.closeTime||'');
           const freshnessMs=Number.isFinite(closeMs)?closeMs-nowMs:NaN;
           return Boolean(
