@@ -1,0 +1,36 @@
+name: PAYNE Probability Monitor Offline Acceptance
+on:
+  push:
+    branches: [payne-probability-monitor-series-identity-20261023]
+    paths: [".github/workflows/payne-probability-monitor-offline-20261023.yml"]
+permissions:
+  contents: read
+jobs:
+  offline-acceptance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout exact approved repair source
+        uses: actions/checkout@v4
+        with:
+          ref: c69d8805518c67a097b7859d3a4c3fad63954da2
+          persist-credentials: false
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Verify exact repair commit and syntax
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "c69d8805518c67a097b7859d3a4c3fad63954da2"
+          node --check market-edge-lab/real/payne-kalshi-real/src/index.js
+          echo "TESTED_SOURCE_COMMIT=$(git rev-parse HEAD)"
+      - name: Run existing PAYNE offline tests only
+        working-directory: market-edge-lab/real/payne-kalshi-real
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm test
+          node --test test/payne-integrated-acceptance.test.mjs
+          echo "OFFLINE_ACCEPTANCE=COMPLETE"
